@@ -71,3 +71,14 @@ Docs are published to GitLab Pages from the same pipeline.
 ## License
 
 MIT © Jorge Cardona
+
+## Trademarks
+
+Modelica® is a registered trademark of the [Modelica Association](https://modelica.org/),
+as are FMI and SSP. They are used here in their descriptive sense — to identify the
+language this software parses and the standards it implements.
+
+**This project is not affiliated with, sponsored by, or endorsed by the Modelica
+Association.** It is an independent open-source implementation. For the language itself,
+the specification and the Modelica Standard Library, go to
+[modelica.org](https://modelica.org/).

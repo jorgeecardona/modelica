@@ -14,8 +14,13 @@ The package is layered, and each layer is usable without the ones above it:
 
 ``import modelica`` pulls in no third-party dependency; numerics live behind the ``sim``
 extra so that tooling which only reads model *structure* stays cheap to install.
+
+Modelica(R) is a registered trademark of the Modelica Association, as are FMI and SSP;
+they are used here descriptively, to name the language this package parses and the
+standards it implements. This is an independent open-source implementation, not
+affiliated with or endorsed by the Modelica Association.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 __all__ = ["__version__"]

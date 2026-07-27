@@ -29,3 +29,14 @@ Start with [Architecture](architecture.md) for the data model and the build orde
 * **Modelica Language Specification 3.x**
 * **FMI 3.0** — [fmi-standard.org](https://fmi-standard.org/)
 * **SSP 2.0** — [ssp-standard.org](https://ssp-standard.org/)
+
+## Trademarks
+
+Modelica® is a registered trademark of the [Modelica Association](https://modelica.org/),
+as are FMI and SSP. They are used here descriptively, to identify the language this
+software parses and the standards it implements.
+
+This project is **not affiliated with, sponsored by, or endorsed by the Modelica
+Association** — it is an independent open-source implementation. The language itself, its
+specification and the Modelica Standard Library live at
+[modelica.org](https://modelica.org/).

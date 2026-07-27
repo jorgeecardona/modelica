@@ -4,7 +4,13 @@ All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org/); the version in `pyproject.toml` is the single
 source of truth and is bumped automatically when shipped source changes.
 
-## 0.0.1 — unreleased
+## 0.0.2
+
+- Trademark notice: Modelica® / FMI / SSP belong to the Modelica Association; this is an
+  independent implementation, not affiliated or endorsed. Stated in the README (so it is
+  on the PyPI page), the docs, and the package docstring.
+
+## 0.0.1
 
 Project restart. The 2010 Python 2 / pyparsing prototype is retired (it remains in git
 history); nothing from it is carried forward.
