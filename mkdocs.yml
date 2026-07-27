@@ -1,0 +1,49 @@
+site_name: modelica
+site_description: Pure-Python Modelica toolchain — parse, flatten, simulate, and exchange via FMI 3.0 and SSP 2.0.
+site_url: https://jorgeecardona.gitlab.io/pymodelica/
+repo_url: https://gitlab.com/jorgeecardona/pymodelica
+repo_name: jorgeecardona/pymodelica
+copyright: MIT &copy; Jorge Cardona
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path: [".", "docs"]
+      check_paths: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Changelog: changelog.md

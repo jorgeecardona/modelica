@@ -1,0 +1,123 @@
+[project]
+# modelica — a pure-Python Modelica/FMI/SSP toolchain: parse Modelica, flatten it to a
+# DAE, simulate it, and interoperate with the two Modelica Association exchange standards
+# (FMI 3.0 for single components, SSP 2.0 for systems of them).
+#
+# The distribution name is `modelica`, not `pymodelica`: PyPI's `pymodelica` is held by an
+# abandoned Modelon/JModelica.org upload (version "trunk"). The git repo keeps the
+# historical name; the import package matches the distribution.
+name = "modelica"
+version = "0.0.1"
+description = "Pure-Python Modelica toolchain: parse, flatten, simulate, and exchange via FMI 3.0 and SSP 2.0"
+readme = "README.md"
+# 3.11+, no compatibility shims: this is a full rewrite of a 2010 Python 2 codebase, and
+# the modelling layer leans on 3.11 features (Self, StrEnum, exception groups for
+# multi-error diagnostics, and the tomllib/typing niceties) rather than back-porting them.
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jorge Cardona", email = "jorgeecardona@gmail.com" }]
+keywords = [
+    "modelica",
+    "fmi",
+    "fmu",
+    "ssp",
+    "simulation",
+    "dae",
+    "co-simulation",
+    "digital-twin",
+    "system-modeling",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+]
+# Deliberately dependency-free at the core. The parser is hand-written (no pyparsing —
+# that was the 2010 design and it could not carry error positions), the FMI/SSP layers
+# read XML from the stdlib, and numeric backends arrive as extras so `import modelica`
+# stays cheap for tooling that only reads model structure.
+dependencies = []
+
+[project.optional-dependencies]
+# Numerics for the simulation layer. scipy covers ODE + the algebraic solves; the SUNDIALS
+# IDA binding for real (index-1) DAEs is a separate extra because it needs a compiled
+# SUNDIALS and must not be a hard requirement of `pip install modelica`.
+sim = ["numpy>=2.0", "scipy>=1.13"]
+sundials = ["scikit-sundae>=1.0"]
+# docs are an *extra* (not a uv dependency-group) so external services can install them via pip
+docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
+
+[project.urls]
+Homepage = "https://gitlab.com/jorgeecardona/pymodelica"
+Repository = "https://gitlab.com/jorgeecardona/pymodelica"
+Changelog = "https://gitlab.com/jorgeecardona/pymodelica/-/blob/main/CHANGELOG.md"
+Documentation = "https://jorgeecardona.gitlab.io/pymodelica/"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/modelica"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "pyright>=1.1.390",
+    "pytest>=8",
+    "pytest-cov>=6",
+    "numpy>=2.0",
+    "scipy>=1.13",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Strict: everything on, each opt-out justified.
+select = ["ALL"]
+ignore = [
+    "E501",    # line length is the formatter's job (line-length = 100)
+    "COM812",  # trailing commas conflict with `ruff format` (ruff's own recommendation)
+    "D1",      # not every helper owes a docstring; the ones that exist explain *why*
+    "D401",    # docstrings here are narrative rationale, not imperative summaries
+    "TRY003", "EM101", "EM102",  # inline exception messages; msg-variable style adds noise
+    "CPY001",  # per-file copyright headers; LICENSE covers the repo
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "S101",    # asserts are the point of tests
+    "PLR2004", # literal expectations in asserts are clearer than named constants
+    "ARG",     # pytest fixture signatures are fixed; params can go unused
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.isort]
+known-first-party = ["modelica"]
+
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["src"]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"

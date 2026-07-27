@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout 15 ssh -o StrictHostKeyChecking=accept-new -T git@gitlab.com)",
+      "Bash(timeout 20 git ls-remote git@gitlab.com:jorgeecardona/pymodelica.git)",
+      "Read(//home/jcardona/**)",
+      "Bash(env)",
+      "Bash(cd /home/jcardona/stuff/personal/self/projects/pymodelica; sed -n '1,60p' ~/.pypirc | sed -E 's/\\(pypi-[A-Za-z0-9_-]{8}\\).*/\\\\1<redacted>/')",
+      "Bash(uv run *)",
+      "Bash(make check *)",
+      "Bash(moon run *)"
+    ]
+  }
+}
