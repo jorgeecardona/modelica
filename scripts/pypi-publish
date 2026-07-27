@@ -13,10 +13,33 @@ fi
 
 # Exchange the OIDC id_token for a one-shot PyPI token. Done in Python via `uv run`
 # (the base image may lack a system python3); the token is captured, never echoed.
-pypi_token="$(uv run python -c 'import json, os, urllib.request;
-req = urllib.request.Request("https://pypi.org/_/oidc/mint-token",
-data=json.dumps({"token": os.environ["PYPI_ID_TOKEN"]}).encode(),
-headers={"Content-Type": "application/json"});
-print(json.load(urllib.request.urlopen(req))["token"])')"
+# On failure PyPI puts the *reason* in the response body -- a 422 means no trusted
+# publisher matches this pipeline's claims -- so print the body rather than a traceback.
+pypi_token="$(uv run python -c '
+import json, os, sys, urllib.error, urllib.request
+
+req = urllib.request.Request(
+    "https://pypi.org/_/oidc/mint-token",
+    data=json.dumps({"token": os.environ["PYPI_ID_TOKEN"]}).encode(),
+    headers={"Content-Type": "application/json"},
+)
+try:
+    print(json.load(urllib.request.urlopen(req))["token"])
+except urllib.error.HTTPError as exc:
+    body = exc.read().decode("utf-8", "replace")
+    print(f"pypi-publish: mint-token failed: HTTP {exc.code}\n{body}", file=sys.stderr)
+    if exc.code == 422:
+        print(
+            "pypi-publish: PyPI has no trusted publisher matching this pipeline.\n"
+            "  Add a pending publisher at https://pypi.org/manage/account/publishing/\n"
+            "    PyPI project name: modelica\n"
+            "    Namespace:         jorgeecardona\n"
+            "    Project:           pymodelica\n"
+            "    Pipeline file:     .gitlab-ci.yml\n"
+            "    Environment:       pypi",
+            file=sys.stderr,
+        )
+    sys.exit(1)
+')"
 
 uv publish --token "$pypi_token"
