@@ -24,6 +24,7 @@ import importlib.util
 import re
 import sys
 import tomllib
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -271,14 +272,7 @@ def test_selects_the_specified_states(model: Path) -> None:
         assert len(system.states) == spec["state_count"]
 
 
-UNSIMULATED = {
-    "Pendulum": (
-        "dummy-derivative selection is still fixed: y and vy are chosen as the states and x "
-        "is solved from the constraint, so the generated code divides by x -- which passes "
-        "through zero at the bottom of the swing (t = 0.592). Integrating a full swing needs "
-        "dynamic state selection, switching to x and vx while |x| is small."
-    ),
-}
+UNSIMULATED: dict[str, str] = {}
 """Models whose *simulation* is a known gap, and precisely which gap."""
 
 
@@ -383,3 +377,50 @@ def test_simulates_as_specified(model: Path) -> None:
     _check_points(spec, result, np)
     _check_events(spec, result)
     _check_invariants(spec, result, np)
+
+
+def test_the_pendulum_changes_its_mind_about_what_to_integrate() -> None:
+    """A full swing needs both state sets, so the run has to move between them.
+
+    ``(y, vy)`` cannot get through the bottom and ``(x, vx)`` cannot get through the sides,
+    which the spec already proves indirectly: the invariants in ``Pendulum.toml`` hold over
+    two seconds, and no single set stays regular that long. What it does not show is the
+    mechanism, and the mechanism is what breaks quietly -- a switch that never fires leaves
+    a run that only happens to survive, and one that fires both ways at once chatters.
+
+    So this asks for the crossings by name. Two ordered pairs, each with no latch, because a
+    switch is not a question the model keeps asking; alternating in time, because leaving a
+    set and immediately returning to it is the failure the hysteresis margin exists to
+    prevent; and spread out, rather than bunched at one instant.
+    """
+    parse = _require("modelica.lang", "parse")
+    flatten = _require("modelica.sim", "flatten")
+    causalize = _require("modelica.sim", "causalize")
+    emit = _require("modelica.sim", "emit")
+    simulate = _require("modelica.sim", "simulate")
+
+    model = MODELS / "Pendulum.mo"
+    spec = _spec(model)["simulate"]
+    system = causalize(flatten(_sources(model, parse), model.stem))
+
+    code = emit(system)
+    assert code.switching is not None, "a model with a choice has to record which way it went"
+    switches = [trigger for trigger in code.events if trigger.switch is not None]
+    assert [str(trigger) for trigger in switches] == [
+        "switch to (x, vx)",
+        "switch to (y, vy)",
+    ]
+    assert all(trigger.latch is None for trigger in switches)
+
+    result = simulate(system, stop=spec["stop"], tolerance=spec.get("tolerance", 1e-6))
+    causes = [event.cause for event in result.events]
+    assert causes[:2] == ["switch to (x, vx)", "switch to (y, vy)"], (
+        f"the pendulum never left its first state set: {causes}"
+    )
+    assert all(a != b for a, b in pairwise(causes)), (
+        f"a state set was left and re-entered without the other in between: {causes}"
+    )
+    times = [event.time for event in result.events]
+    assert all(b - a > 0.1 for a, b in pairwise(times)), (
+        f"switches this close are chatter, not a swing: {times}"
+    )

@@ -41,6 +41,14 @@ drains to a level of minus one machine epsilon and then oscillates about zero fo
 each such relation gets a workspace slot holding ``1.0`` or ``0.0``, ``latch`` writes them
 at the initial point, ``indicators`` watches the relation for a crossing in either
 direction, and ``transition`` flips the slot when one happens.
+
+A model with more than one admissible state set gets one slot more, holding which set is
+in use, and ``rhs``, ``observe``, ``indicators`` and ``transition`` are each written once
+per set with a one-line dispatcher in front. That keeps the calling convention above this
+line exactly as it was -- the mode is discrete state, so it belongs in ``w`` beside the
+latches rather than in a signature SciPy has no room for. Switching is an event like any
+other: :func:`_better` watches one state set's conditioning overtake another's, and the
+transition re-reads the state vector in the new set's variables.
 """
 
 from __future__ import annotations
@@ -51,7 +59,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
 from modelica.ir import nodes as ir
-from modelica.ir.derive import ZERO, d_dx, simplify, sub
+from modelica.ir.derive import ZERO, d_dx, mul, simplify, sub
 from modelica.ir.rewrite import contains, names, residual, substitute
 from modelica.lang.unparse import unparse_expr
 
@@ -59,7 +67,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping, Sequence
 
     from modelica.ir.flat import FlatVariable
-    from modelica.ir.system import Block, System
+    from modelica.ir.system import Block, Mode, System
 
 __all__ = ["HELD", "Code", "EmitError", "Trigger", "emit"]
 
@@ -273,7 +281,18 @@ class Trigger:
     :mod:`modelica.verify` builds the model checker's state out of exactly these slots.
     """
 
+    switch: int | None = None
+    """The state set this crossing moves the run into, for a mode switch.
+
+    Deliberately not a latch. A latch is a question the model keeps asking and this is not
+    one: nothing has to be re-decided after a switch, and the event iteration that chases
+    stale latches has nothing to chase here, which is why it skips anything whose
+    :attr:`latch` is ``None``.
+    """
+
     def __str__(self) -> str:
+        if self.switch is not None:
+            return f"switch to {self.condition}"
         return f"when {self.condition}" if self.direction else f"{self.condition} changed"
 
 
@@ -289,10 +308,68 @@ class _Event:
     body: tuple[ir.Statement, ...] = ()
     """The ``when`` branch's statements, if it is one."""
 
+    origin: int | None = None
+    """The state set whose ``indicators`` this crossing is live in, for a mode switch.
+
+    It reads ``-1`` in every other one: a set the run is not currently using is not a set it
+    can leave, and a crossing that fires from nowhere would corrupt the state vector. ``None``
+    means the crossing is about the model rather than about the arrangement, so it is watched
+    the same way whatever the run is integrating.
+    """
+
     @property
     def latch(self) -> int | None:
         """The workspace slot to flip, for a relation inside an equation."""
         return self.trigger.latch
+
+
+_HYSTERESIS: Final = 1.2
+"""How much better conditioned an alternative state set has to be before the run moves.
+
+Not a knob to tune, a condition for the switch to terminate. Without a margin the two
+crossings of a pair sit at the same point facing opposite ways, so leaving a set is
+immediately grounds for going back to it and the run chatters where it should pass through.
+Applied to the squared pivots, so 1.2 is about five percent on the pivots themselves.
+"""
+
+
+def _better(destination: Mode, origin: Mode) -> ir.Expr:
+    """Positive once ``destination`` is the better conditioned of the two.
+
+    The squares, for two reasons. A pivot's sign says nothing about how near singular it is,
+    and squaring keeps the comparison smooth exactly where a root finder has to work -- at a
+    pivot passing through zero, which is the event this exists to catch.
+    """
+    if destination.pivot is None or origin.pivot is None:  # pragma: no cover - defensive
+        message = "a state set was offered as an alternative without a pivot to compare"
+        raise EmitError(message)
+    ahead = mul(destination.pivot, destination.pivot)
+    behind = mul(origin.pivot, origin.pivot)
+    return simplify(sub(ahead, mul(ir.RealLiteral(_HYSTERESIS), behind)))
+
+
+def _jacobian(block: Block) -> list[list[ir.Expr]]:
+    """``d residual / d unknown``, one row per equation."""
+    return [
+        [simplify(d_dx(residual(equation), unknown)) for unknown in block.unknowns]
+        for equation in block.equations
+    ]
+
+
+def _iterated(block: Block) -> bool:
+    """True when the block's Jacobian moves with its unknowns, so Newton is the only way.
+
+    Asked here rather than left inside the code that writes the loop because the answer is
+    needed twice: once to choose between a linear solve and an iteration, and once to know
+    which unknowns carry a starting guess in the workspace and therefore need one put there
+    before a mode that iterates on them is entered.
+    """
+    return block.assignment is None and any(
+        contains(entry, unknown)
+        for row in _jacobian(block)
+        for entry in row
+        for unknown in block.unknowns
+    )
 
 
 def _indicator(condition: ir.Expr) -> ir.Expr:
@@ -338,14 +415,21 @@ def _relations(node: ir.Expr) -> Iterator[ir.Binary]:
 
 
 def _rendered(system: System) -> Iterator[ir.Expr]:
-    """The expressions that end up in the generated code, and only those."""
-    for block in system.blocks:
-        if block.assignment is not None:
-            yield block.assignment
-        else:
-            for equation in block.equations:
-                yield equation.lhs
-                yield equation.rhs
+    """The expressions that end up in the generated code, and only those.
+
+    Every mode's blocks, not just the chosen one's. The latch slots have to mean the same
+    thing on both sides of a switch, and they would not if each mode counted its own
+    relations: the run would come out of the switch reading a latch that was written for a
+    relation it no longer has.
+    """
+    for mode in system.modes:
+        for block in mode.blocks:
+            if block.assignment is not None:
+                yield block.assignment
+            else:
+                for equation in block.equations:
+                    yield equation.lhs
+                    yield equation.rhs
     yield from system.aliases.values()
 
 
@@ -407,7 +491,12 @@ class Code:
     """What each zero-crossing function watches, in indicator order."""
 
     workspace: int
-    """How long ``w`` has to be: one slot per observed variable, then the latches."""
+    """How long ``w`` has to be: one slot per observed variable, then the latches, then
+    the mode if there is one to keep."""
+
+    switching: int | None = None
+    """The workspace slot holding which state set is in use, or ``None`` for a model with
+    only one -- which is most of them, and for those the generated source is unchanged."""
 
     def __str__(self) -> str:
         return self.source
@@ -429,6 +518,9 @@ class _Emitter:
     held: dict[ir.Expr, ir.Expr] = field(default_factory=dict[ir.Expr, ir.Expr])
     """Each watched relation, mapped to the test on its latch slot that replaces it."""
 
+    switching: int | None = None
+    """The workspace slot holding which state set is in use, when there is a choice."""
+
     def __post_init__(self) -> None:
         self.observed = (
             *(variable.name for variable in self.system.variables),
@@ -443,6 +535,8 @@ class _Emitter:
             held = f"$relation{position}"  # `$` keeps it out of reach of Modelica names
             self.symbols[held] = f"w[{self.holding(position)}]"
             self.held[relation] = ir.Binary(">", ir.Ref((held,)), ir.RealLiteral(0.5))
+        if len(self.system.modes) > 1:
+            self.switching = len(self.observed) + len(self.watched)
 
     def holding(self, position: int) -> int:
         """The workspace slot holding the ``position``-th watched relation."""
@@ -453,11 +547,11 @@ class _Emitter:
     def expr(self, node: ir.Expr) -> str:
         return emit_expr(_latched(node, self.held), self.symbols)
 
-    def live(self) -> list[str]:
+    def live(self, mode: Mode) -> list[str]:
         """The blocks with every relation read directly, for setting the latches."""
         held, self.held = self.held, {}
         try:
-            return [*self.unpack(), *self.blocks()]
+            return [*self.unpack(mode), *self.blocks(mode)]
         finally:
             self.held = held
 
@@ -486,14 +580,14 @@ class _Emitter:
             visit(name)
         return order
 
-    def unpack(self) -> list[str]:
-        """Read the parameter and state vectors into locals."""
+    def unpack(self, mode: Mode) -> list[str]:
+        """Read the parameter and state vectors into locals, in ``mode``'s variables."""
         return [
             *(
                 f"{self.symbols[variable.name]} = p[{slot}]"
                 for slot, variable in enumerate(self.system.parameters)
             ),
-            *(f"{self.symbols[name]} = y[{slot}]" for slot, name in enumerate(self.system.states)),
+            *(f"{self.symbols[name]} = y[{slot}]" for slot, name in enumerate(mode.states)),
         ]
 
     def solve(self, block: Block) -> list[str]:
@@ -501,14 +595,10 @@ class _Emitter:
         if block.assignment is not None:
             return [f"{self.symbols[block.unknowns[0]]} = {self.expr(block.assignment)}"]
         residuals = [residual(equation) for equation in block.equations]
-        jacobian = [[simplify(d_dx(r, u)) for u in block.unknowns] for r in residuals]
-        linear = not any(
-            contains(entry, unknown)
-            for row in jacobian
-            for entry in row
-            for unknown in block.unknowns
-        )
-        return self.linear(block, residuals, jacobian) if linear else self.newton(block, jacobian)
+        jacobian = _jacobian(block)
+        if _iterated(block):
+            return self.newton(block, jacobian)
+        return self.linear(block, residuals, jacobian)
 
     def system_lines(
         self,
@@ -574,13 +664,56 @@ class _Emitter:
         lines.append("        break")
         return lines
 
-    def blocks(self) -> list[str]:
+    def blocks(self, mode: Mode) -> list[str]:
         lines: list[str] = []
-        for block in self.system.blocks:
+        for block in mode.blocks:
             lines.extend(self.solve(block))
         return lines
 
+    def rebase(self, mode: Mode) -> list[str]:
+        """Write the state vector in ``mode``'s variables, indented for a transition.
+
+        Nothing is solved here, and nothing moves. Every state of every mode is an unknown
+        of the model, so at this point it has either been read out of ``y`` or computed by
+        the blocks the transition just ran: the trajectory stays exactly where it is and
+        only the description of it changes, which is why a switch costs no accuracy and
+        never leaves the constraint it took index reduction to impose.
+
+        The guesses matter as much as the states. A variable the destination iterates on is
+        one the *origin* had no reason to touch, so its workspace slot still holds whatever
+        ``initial`` put there -- and for the pendulum that is ``y = 0``, which is exactly
+        the value the destination's Newton would divide by. The same argument that makes
+        the states free makes the guesses exact: they are in hand, so they are written down.
+        """
+        lines = [f"    out[{slot}] = {self.symbols[name]}" for slot, name in enumerate(mode.states)]
+        lines.extend(
+            f"    w[{self.slots[unknown]}] = {self.symbols[unknown]}"
+            for block in mode.blocks
+            if _iterated(block)
+            for unknown in block.unknowns
+        )
+        return lines
+
     # -- functions ---------------------------------------------------------------------
+
+    def dispatch(self, name: str, arguments: str, bodies: Sequence[list[str]]) -> str:
+        """One function per state set, and the picker that reads the mode slot.
+
+        With a single set -- which is every model that did not need index reduction -- this
+        writes exactly the one function the emitter has always written, so nothing pays for
+        a choice it does not have. The picker compares against ``k + 0.5`` rather than
+        converting the slot to an integer: ``w`` is a float array, and a chain of float
+        comparisons is something Numba compiles without a thought.
+        """
+        if len(bodies) == 1:
+            return _function(name, arguments, bodies[0])
+        parts = [_function(f"{name}_{k}", arguments, body) for k, body in enumerate(bodies)]
+        picker: list[str] = []
+        for k in range(len(bodies) - 1):
+            picker.append(f"if w[{self.switching}] < {k + 0.5}:")
+            picker.append(f"    return {name}_{k}({arguments})")
+        picker.append(f"return {name}_{len(bodies) - 1}({arguments})")
+        return "\n\n\n".join([*parts, _function(name, arguments, picker)])
 
     def parameters(self) -> str:
         body = [f"{self.symbols[v.name]} = {self.value(v)}" for v in self.ordered()]
@@ -608,6 +741,8 @@ class _Emitter:
             )
             for name in self.observed
         )
+        if self.switching is not None:
+            body.append(f"w[{self.switching}] = 0.0")
         return _function("initial", "p, y, w", [*body, "return y"])
 
     def latches(self) -> str:
@@ -617,23 +752,23 @@ class _Emitter:
         there is no previous event to inherit a value from, so the live answer *is* the
         latched one.
         """
-        body = self.live() if self.watched else []
+        body = self.live(self.system.mode) if self.watched else []
         body.extend(
             f"w[{self.holding(position)}] = 1.0 if {emit_expr(relation, self.symbols)} else 0.0"
             for position, relation in enumerate(self.watched)
         )
         return _function("latch", "t, y, p, w", [*body, "return w"])
 
-    def rhs(self) -> str:
-        body = [*self.unpack(), *self.blocks()]
+    def rhs(self, mode: Mode) -> list[str]:
+        body = [*self.unpack(mode), *self.blocks(mode)]
         body.extend(
-            f"dy[{slot}] = {self.symbols[self.system.derivative[state]]}"
-            for slot, state in enumerate(self.system.states)
+            f"dy[{slot}] = {self.symbols[mode.derivative[state]]}"
+            for slot, state in enumerate(mode.states)
         )
-        return _function("rhs", "t, y, p, w, dy", [*body, "return dy"])
+        return [*body, "return dy"]
 
-    def observe(self) -> str:
-        body = [*self.unpack(), *self.blocks()]
+    def observe(self, mode: Mode) -> list[str]:
+        body = [*self.unpack(mode), *self.blocks(mode)]
         body.extend(
             f"{self.symbols[name]} = {self.expr(node)}"
             for name, node in self.system.aliases.items()
@@ -641,10 +776,10 @@ class _Emitter:
         body.extend(
             f"out[{slot}] = {self.symbols[name]}" for slot, name in enumerate(self.observed)
         )
-        return _function("observe", "t, y, p, w, out", [*body, "return out"])
+        return [*body, "return out"]
 
     def events(self) -> tuple[_Event, ...]:
-        """Every crossing to watch: the ``when`` branches first, then the relations."""
+        """Every crossing to watch: ``when`` branches, then relations, then the switches."""
         branches = [
             _Event(
                 indicator=_indicator(branch.condition),
@@ -661,12 +796,38 @@ class _Emitter:
             )
             for position, relation in enumerate(self.watched)
         ]
-        return (*branches, *crossings)
+        return (*branches, *crossings, *self.switches())
 
-    def indicators(self, events: tuple[_Event, ...]) -> str:
-        body = [*self.unpack(), *(self.blocks() if events else [])]
-        body.extend(f"z[{k}] = {self.expr(event.indicator)}" for k, event in enumerate(events))
-        return _function("indicators", "t, y, p, w, z", [*body, "return z"])
+    def switches(self) -> list[_Event]:
+        """One crossing per ordered pair of state sets: leave this one for that one.
+
+        Pairwise rather than one crossing per set watching the best of the others, because
+        a pair compares with a single smooth expression and a maximum does not -- and
+        because the set being moved *into* has to be named when the crossing is written,
+        not worked out when it fires.
+        """
+        modes = self.system.modes
+        found: list[_Event] = []
+        for origin, leaving in enumerate(modes):
+            for destination, entering in enumerate(modes):
+                if destination == origin:
+                    continue
+                named = f"({', '.join(entering.states)})"
+                found.append(
+                    _Event(
+                        indicator=_better(entering, leaving),
+                        trigger=Trigger(named, 1.0, switch=destination),
+                        origin=origin,
+                    )
+                )
+        return found
+
+    def indicators(self, position: int, mode: Mode, events: tuple[_Event, ...]) -> list[str]:
+        body = [*self.unpack(mode), *(self.blocks(mode) if events else [])]
+        for k, event in enumerate(events):
+            live = event.origin in (None, position)
+            body.append(f"z[{k}] = {self.expr(event.indicator) if live else '-1.0'}")
+        return [*body, "return z"]
 
     def statement(self, statement: ir.Statement, states: Mapping[str, int]) -> str:
         match statement:
@@ -677,29 +838,41 @@ class _Emitter:
             case _:
                 raise EmitError(f"no translation for {statement!r} inside a when-clause")
 
-    def transition(self, events: tuple[_Event, ...]) -> str:
-        """What one event does: the branch's statements, or a latch flipping over."""
-        states = {name: slot for slot, name in enumerate(self.system.states)}
-        body = [*self.unpack(), *(self.blocks() if events else []), "out[:] = y"]
-        for position, event in enumerate(events):
+    def transition(self, position: int, mode: Mode, events: tuple[_Event, ...]) -> list[str]:
+        """What one event does: a branch's statements, a latch flipping, or a switch."""
+        states = {name: slot for slot, name in enumerate(mode.states)}
+        body = [*self.unpack(mode), *(self.blocks(mode) if events else []), "out[:] = y"]
+        for k, event in enumerate(events):
             lines = [self.statement(s, states) for s in event.body]
             if event.latch is not None:
                 lines.append(f"    w[{event.latch}] = 1.0 - w[{event.latch}]")
-            body.append(f"if event == {position}:")
+            if (moving := event.trigger.switch) is not None and event.origin == position:
+                lines.extend(self.rebase(self.system.modes[moving]))
+                lines.append(f"    w[{self.switching}] = {float(moving)}")
+            body.append(f"if event == {k}:")
             body.extend(lines or ["    pass"])
-        return _function("transition", "event, t, y, p, w, out", [*body, "return out"])
+        return [*body, "return out"]
 
     def code(self) -> Code:
         events = self.events()
+        modes = self.system.modes
         parts = [
             "import numpy as np",
             self.parameters(),
             self.initial(),
             self.latches(),
-            self.rhs(),
-            self.observe(),
-            self.indicators(events),
-            self.transition(events),
+            self.dispatch("rhs", "t, y, p, w, dy", [self.rhs(m) for m in modes]),
+            self.dispatch("observe", "t, y, p, w, out", [self.observe(m) for m in modes]),
+            self.dispatch(
+                "indicators",
+                "t, y, p, w, z",
+                [self.indicators(k, m, events) for k, m in enumerate(modes)],
+            ),
+            self.dispatch(
+                "transition",
+                "event, t, y, p, w, out",
+                [self.transition(k, m, events) for k, m in enumerate(modes)],
+            ),
         ]
         return Code(
             name=self.system.name,
@@ -708,7 +881,8 @@ class _Emitter:
             parameters=tuple(v.name for v in self.system.parameters),
             observed=self.observed,
             events=tuple(event.trigger for event in events),
-            workspace=len(self.observed) + len(self.watched),
+            workspace=len(self.observed) + len(self.watched) + (0 if self.switching is None else 1),
+            switching=self.switching,
         )
 
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
+from types import FunctionType
 from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
@@ -122,7 +123,7 @@ def build(model: System | Code, *, jit: bool = False) -> Kernel:
     namespace: dict[str, Any] = {"np": np}
     exec(compile(code.source, f"<modelica:{code.name}>", "exec"), namespace)  # noqa: S102
     if jit:
-        namespace = _accelerate(namespace)
+        _accelerate(namespace)
     return Kernel(
         code=code,
         parameters=namespace["parameters"],
@@ -135,13 +136,22 @@ def build(model: System | Code, *, jit: bool = False) -> Kernel:
     )
 
 
-def _accelerate(namespace: dict[str, Any]) -> dict[str, Any]:
-    """The same functions, compiled.
+def _accelerate(namespace: dict[str, Any]) -> None:
+    """Compile every function the generated module defines, in place.
 
-    By name rather than ``from numba import njit`` because numba is genuinely optional:
-    it is in no dependency group, so it is absent from the environment the type checker
-    reads, and a real import would have to be suppressed there. Asking for it by string
-    says the same thing without pretending the module is known to exist.
+    Every one, not the seven the kernel holds. A model with more than one state set writes
+    ``rhs_0``, ``rhs_1`` and a ``rhs`` that picks between them, and compiling only the
+    picker would leave it calling into the interpreter -- which numba would either refuse
+    or fall back on, and either way the point of asking would be gone.
+
+    In place, and not into a copy, because the namespace *is* the functions' ``__globals__``:
+    the picker resolves ``rhs_0`` by looking there, so the compiled one has to be what it
+    finds. Numba compiles lazily, at the first call, so the order of replacement does not
+    matter -- every name is already the compiled one by the time any of them runs.
+
+    Numba is asked for by name rather than ``from numba import njit`` because it is
+    genuinely optional: it is in no dependency group, so it is absent from the environment
+    the type checker reads, and a real import would have to be suppressed there.
     """
     try:
         numba = importlib.import_module("numba")
@@ -149,5 +159,6 @@ def _accelerate(namespace: dict[str, Any]) -> dict[str, Any]:
         message = "jit=True needs numba: pip install numba"
         raise ImportError(message) from error
     njit: Any = numba.njit
-    functions = ("parameters", "initial", "latch", "rhs", "observe", "indicators", "transition")
-    return namespace | {name: njit(cache=False)(namespace[name]) for name in functions}
+    for name, value in list(namespace.items()):
+        if isinstance(value, FunctionType):
+            namespace[name] = njit(cache=False)(value)
