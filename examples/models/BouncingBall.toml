@@ -1,0 +1,58 @@
+summary = "A ball bouncing on the floor: the canonical hybrid model, one state event per bounce."
+teaches = ["when", "reinit", "pre", "repeated state events", "Zeno behaviour"]
+requires = []
+
+[parse]
+classes = ["BouncingBall"]
+
+[flatten]
+model = "BouncingBall"
+states = ["h", "v"]
+index = 1
+balanced = true
+
+# Free fall from h0 = 1 m: first impact at sqrt(2*h0/g) = 0.451523640986 s at
+# -sqrt(2*g*h0) m/s. Each bounce keeps a fraction e of the speed, so bounce n+1 comes
+# 2*e^n*sqrt(2*g*h0)/g later. The times accumulate at
+#   t_inf = sqrt(2*h0/g) * (1 + 2e/(1-e)) = 4.06371276887 s
+# and a solver that does not detect that will grind to a halt just short of it -- which
+# is why `stop` sits below it.
+[simulate]
+stop = 3.0
+tolerance = 1e-10
+
+[simulate.events]
+times = [
+  0.451523640986,
+  1.17396146656,
+  1.75191172702,
+  2.21427193539,
+  2.58416010209,
+  2.88007063545,
+]
+atol = 1e-6
+
+# Between bounces this is exactly free fall.
+[[simulate.point]]
+t = 0.2
+values = { h = 0.80380, v = -1.9620 }
+rtol = 1e-6
+source = "analytic"
+
+# The floor is a floor.
+# The floor, to within the ulps the root finder locates the bounce with: the ball is
+# falling at several metres a second when it arrives, so a few ulps in the time of the
+# bounce is a few times 1e-16 in the height.
+[[simulate.invariant]]
+expr = "h"
+min = 0.0
+max = 1.0
+atol = 1e-12
+
+# Energy only ever decreases, and only at bounces -- give or take the last bit of the
+# mantissa, which is all a sum of two floats can promise about a conserved quantity.
+[[simulate.invariant]]
+expr = "0.5 * v ^ 2 + 9.81 * h"
+min = 0.0
+max = 9.81
+atol = 1e-12

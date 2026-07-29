@@ -1,0 +1,50 @@
+summary = "Two thermal masses equilibrating through a conductor; total energy is conserved exactly."
+teaches = ["connectors in a second domain", "a conservation law as an invariant"]
+requires = ["Thermal"]
+
+[parse]
+classes = ["TwoBodyHeat"]
+
+[flatten]
+model = "TwoBodyHeat"
+states = ["hot.T", "cold.T"]
+index = 1
+balanced = true
+
+# Rate = G*(1/C_hot + 1/C_cold) = 5*(1/100 + 1/200) = 0.075 1/s.
+# Equilibrium = (100*400 + 200*300)/300 = 1000/3 K.
+# hot.T  = 1000/3 + (200/3)*exp(-0.075t)
+# cold.T = 1000/3 - (100/3)*exp(-0.075t)
+[simulate]
+stop = 60.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 10.0
+values = { "hot.T" = 364.824436849, "cold.T" = 317.587781575 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 30.0
+values = { "hot.T" = 340.359948304, "cold.T" = 329.820025848 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 60.0
+values = { "hot.T" = 334.073933103, "cold.T" = 332.963033449 }
+rtol = 1e-8
+source = "analytic"
+
+# Energy: C_hot*T_hot + C_cold*T_cold is constant. This is the point of the example.
+[[simulate.invariant]]
+expr = "100 * hot.T + 200 * cold.T"
+value = 100000.0
+rtol = 1e-8
+
+# Heat flows from hot to cold, never the other way.
+[[simulate.invariant]]
+expr = "hot.T - cold.T"
+min = 0.0
+max = 100.0

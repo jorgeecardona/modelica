@@ -1,0 +1,302 @@
+"""The intermediate representation: what a Modelica model *is*, as plain data.
+
+This module is the hinge of the project. Everything upstream produces these values and
+everything downstream consumes them, so it deliberately contains no logic beyond the
+dataclasses themselves -- no parsing, no evaluation, no formatting. The passes that *do*
+things to these values (flattening, differentiation, causalization) live beside it in
+the :mod:`modelica.ir` package.
+
+Two front-ends build the same values:
+
+* :mod:`modelica.lang` parses ``.mo`` source into them;
+* :mod:`modelica.build` lets you write them directly in Python.
+
+Neither is privileged. A model written either way is the same model, and the test suite
+enforces that by comparing the values with ``==``.
+
+Expression nodes are hashable (frozen, slotted, no containers but tuples) so that later
+stages can use them as dictionary keys for common-subexpression elimination and for
+caching symbolic derivatives. Declaration nodes hold dictionaries and are therefore
+compared but not hashed.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Literal
+
+__all__ = [
+    "EMPTY",
+    "Assign",
+    "Binary",
+    "BinaryOp",
+    "BoolLiteral",
+    "Call",
+    "Causality",
+    "Class",
+    "Component",
+    "Connect",
+    "ConnectorKind",
+    "Equal",
+    "Equation",
+    "Expr",
+    "Extends",
+    "IfBranch",
+    "IfEquation",
+    "IfExpr",
+    "IntLiteral",
+    "Modification",
+    "Program",
+    "RealLiteral",
+    "Ref",
+    "Reinit",
+    "Restriction",
+    "Statement",
+    "StringLiteral",
+    "Unary",
+    "UnaryOp",
+    "Variability",
+    "When",
+    "WhenBranch",
+]
+
+
+# --------------------------------------------------------------------------------------
+# Expressions
+# --------------------------------------------------------------------------------------
+
+type BinaryOp = Literal["+", "-", "*", "/", "^", "==", "<>", "<", "<=", ">", ">=", "and", "or"]
+type UnaryOp = Literal["+", "-", "not"]
+
+
+@dataclass(frozen=True, slots=True)
+class Ref:
+    """A reference to a variable, possibly qualified: ``c.v`` is ``Ref(("c", "v"))``."""
+
+    parts: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.parts:
+            raise ValueError("a reference needs at least one name part")
+
+    @property
+    def name(self) -> str:
+        return ".".join(self.parts)
+
+
+@dataclass(frozen=True, slots=True)
+class RealLiteral:
+    value: float
+
+
+@dataclass(frozen=True, slots=True)
+class IntLiteral:
+    value: int
+
+
+@dataclass(frozen=True, slots=True)
+class BoolLiteral:
+    value: bool
+
+
+@dataclass(frozen=True, slots=True)
+class StringLiteral:
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class Binary:
+    op: BinaryOp
+    lhs: Expr
+    rhs: Expr
+
+
+@dataclass(frozen=True, slots=True)
+class Unary:
+    op: UnaryOp
+    operand: Expr
+
+
+@dataclass(frozen=True, slots=True)
+class Call:
+    """A function application. ``der``, ``pre``, ``sqrt`` and friends are all calls here.
+
+    Keeping the built-in operators as ordinary calls means later stages match on one node
+    type instead of a dozen, and a user-defined ``function`` needs no new IR.
+    """
+
+    name: str
+    args: tuple[Expr, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class IfExpr:
+    condition: Expr
+    then: Expr
+    otherwise: Expr
+
+
+type Expr = (
+    Ref | RealLiteral | IntLiteral | BoolLiteral | StringLiteral | Binary | Unary | Call | IfExpr
+)
+
+
+# --------------------------------------------------------------------------------------
+# Statements (the body of a `when`)
+# --------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Assign:
+    target: Ref
+    value: Expr
+
+
+@dataclass(frozen=True, slots=True)
+class Reinit:
+    """``reinit(x, expr)`` -- restart a state at a new value without changing the model."""
+
+    target: Ref
+    value: Expr
+
+
+type Statement = Assign | Reinit
+
+
+# --------------------------------------------------------------------------------------
+# Equations
+# --------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Equal:
+    """``lhs = rhs``. Acausal: which side is "the answer" is decided by causalization."""
+
+    lhs: Expr
+    rhs: Expr
+
+
+@dataclass(frozen=True, slots=True)
+class Connect:
+    """``connect(a, b)``.
+
+    Kept as its own node rather than expanded on sight, because expanding it needs the
+    whole connection set -- three flanges meeting at a point produce one sum equation,
+    not three pairwise ones.
+    """
+
+    a: Ref
+    b: Ref
+
+
+@dataclass(frozen=True, slots=True)
+class WhenBranch:
+    condition: Expr
+    body: tuple[Statement, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class When:
+    branches: tuple[WhenBranch, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class IfBranch:
+    condition: Expr
+    body: tuple[Equation, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class IfEquation:
+    branches: tuple[IfBranch, ...]
+    otherwise: tuple[Equation, ...] = ()
+
+
+type Equation = Equal | Connect | When | IfEquation
+
+
+# --------------------------------------------------------------------------------------
+# Declarations
+# --------------------------------------------------------------------------------------
+
+type Variability = Literal["continuous", "discrete", "parameter", "constant"]
+type Causality = Literal["none", "input", "output"]
+type ConnectorKind = Literal["none", "flow", "stream"]
+type Restriction = Literal["model", "connector", "package", "record", "block", "type", "function"]
+
+
+@dataclass(frozen=True)
+class Modification:
+    """A modification, which in Modelica is one recursive shape used for everything.
+
+    ``R = 100`` is a value. ``v(start = 0, fixed = true)`` is entries. ``c(C = 0.01,
+    v(start = 0))`` is both, nested. Built-in attributes (``start``, ``unit``, ``min``)
+    and component bindings are the same construct and are stored the same way -- the
+    difference is only what the name resolves to, which is a later stage's problem.
+    """
+
+    value: Expr | None = None
+    entries: dict[str, Modification] = field(default_factory=dict[str, "Modification"])
+
+    def __bool__(self) -> bool:
+        return self.value is not None or bool(self.entries)
+
+
+EMPTY = Modification()
+
+
+@dataclass(frozen=True)
+class Component:
+    """One declared component: ``parameter Real k(unit = "1/s") = 0.5 "Cooling rate";``."""
+
+    name: str
+    type_name: str
+    modification: Modification = EMPTY
+    variability: Variability = "continuous"
+    causality: Causality = "none"
+    connector: ConnectorKind = "none"
+    comment: str = ""
+
+
+@dataclass(frozen=True)
+class Extends:
+    type_name: str
+    modification: Modification = EMPTY
+
+
+@dataclass(frozen=True)
+class Class:
+    """A class definition -- ``model``, ``connector``, ``package``, ``type``, ...
+
+    ``type Voltage = Real(unit = "V")`` is represented as a ``type`` class with a single
+    ``extends``, which is what a short class definition means.
+    """
+
+    name: str
+    restriction: Restriction
+    partial: bool = False
+    comment: str = ""
+    extends: tuple[Extends, ...] = ()
+    components: tuple[Component, ...] = ()
+    equations: tuple[Equation, ...] = ()
+    initial_equations: tuple[Equation, ...] = ()
+    classes: tuple[Class, ...] = ()
+
+
+@dataclass(frozen=True)
+class Program:
+    """The top level of one source file or one Python module."""
+
+    classes: tuple[Class, ...] = ()
+
+    def find(self, name: str) -> Class | None:
+        """Look up a class by dotted name: ``prog.find("Electrical.Resistor")``."""
+        parts = name.split(".")
+        candidates = self.classes
+        found: Class | None = None
+        for part in parts:
+            found = next((c for c in candidates if c.name == part), None)
+            if found is None:
+                return None
+            candidates = found.classes
+        return found

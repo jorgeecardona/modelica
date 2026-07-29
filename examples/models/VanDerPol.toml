@@ -1,0 +1,46 @@
+summary = "The van der Pol oscillator at mu = 1000: a relaxation limit cycle whose step size has to swing over three orders of magnitude."
+teaches = ["stiffness from a nonlinearity", "step-size control", "why a fixed step is hopeless"]
+requires = []
+
+[parse]
+classes = ["VanDerPol"]
+
+[flatten]
+model = "VanDerPol"
+states = ["x", "y"]
+equations = 2
+index = 1
+balanced = true
+
+# The full limit cycle has period ~ (3 - 2*ln 2)*mu = 1614 s, made of long slow arcs and
+# near-vertical jumps. `stop` covers the first slow arc, which is enough to expose bad
+# step-size control without making the test a benchmark. Reference values agree to ~1e-6
+# across scipy's Radau, BDF and LSODA.
+[simulate]
+stop = 50.0
+tolerance = 1e-9
+
+[[simulate.point]]
+t = 1.0
+values = { x = -1.88837065, y = 0.73573753 }
+rtol = 1e-4
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { x = -1.22841942, y = 2.37142118 }
+rtol = 1e-4
+source = "reference"
+
+[[simulate.point]]
+t = 50.0
+values = { x = -1.65854995, y = 0.94665684 }
+rtol = 1e-4
+source = "reference"
+
+# On the slow manifold the trajectory is pinned near |x| = 2; a solver that loses the
+# stiff branch runs away immediately.
+[[simulate.invariant]]
+expr = "x"
+min = -2.1
+max = 2.1

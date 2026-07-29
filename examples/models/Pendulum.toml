@@ -1,0 +1,59 @@
+summary = "A point mass on a rigid rod in Cartesian coordinates: an index-3 DAE that cannot be simulated without index reduction."
+teaches = ["a constraint equation", "index 3", "Pantelides", "dummy derivatives", "consistent initialisation"]
+requires = []
+
+[parse]
+classes = ["Pendulum"]
+
+[flatten]
+model = "Pendulum"
+index = 3
+# Which two of x, y, vx, vy survive as states depends on how dummy derivatives are
+# selected, so only the count is asserted.
+state_count = 2
+balanced = true
+
+# Released horizontally (x = L, y = 0) from rest. In polar form theta'' = -(g/L)*sin(theta)
+# with theta(0) = pi/2, which is where the reference below comes from; the full swing
+# period is 2.36784194758 s.
+[simulate]
+stop = 2.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 0.5
+values = { x = 0.39104879155, y = -0.920369948785, vx = -3.91104800395, vy = -1.66173460755 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 1.0
+values = { x = -0.986291751132, y = -0.165010853126, vx = -0.296905515917, vy = 1.77464364111 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 2.0
+values = { x = 0.793566195343, y = -0.608483930444, vx = 2.10243787444, vy = 2.74193539301 }
+rtol = 1e-6
+source = "reference"
+
+# The constraint itself. Index reduction differentiates it away, so nothing forces this
+# to hold any more -- it holds only if the reduction was done correctly and the drift is
+# controlled. This single line is the reason the example exists.
+[[simulate.invariant]]
+expr = "x ^ 2 + y ^ 2"
+value = 1.0
+atol = 1e-8
+
+# The two differentiated constraints, which are what the solver actually integrates.
+[[simulate.invariant]]
+expr = "x * vx + y * vy"
+value = 0.0
+atol = 1e-8
+
+# Energy, zero at the horizontal release point.
+[[simulate.invariant]]
+expr = "0.5 * (vx ^ 2 + vy ^ 2) + 9.81 * y"
+value = 0.0
+atol = 1e-7

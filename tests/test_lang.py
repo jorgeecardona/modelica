@@ -1,0 +1,355 @@
+"""The two directions of :mod:`modelica.lang`, checked against each other.
+
+The parser and the printer share one precedence table, which is what makes
+``parse(unparse(x)) == x`` a structural property rather than a coincidence: the level that
+decides whether the printer emits a bracket is the level that decides where the parser
+stops. These tests are the evidence for that claim.
+
+Three kinds of check live here. **Round trips** over the example corpus and over a table of
+expressions -- the property itself. **Precedence** cases pinned as trees, so the one
+deliberate deviation from the specification (see :mod:`modelica.lang.precedence`) is
+written down where it can fail rather than only in a docstring. And **refusals**: every
+construct the printer cannot emit must be rejected by name, because a parser that quietly
+misreads ``for`` is worse than one that has never heard of it.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from modelica import ir
+from modelica.lang import (
+    ModelicaSyntaxError,
+    parse,
+    parse_expression,
+    tokenize,
+    unparse,
+    unparse_expr,
+)
+from modelica.lang.lexer import Kind
+
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+CORPUS = sorted(EXAMPLES.glob("*/*.mo"))
+
+
+def _ids(paths: list[Path]) -> list[str]:
+    return [p.stem for p in paths]
+
+
+# --------------------------------------------------------------------------------------
+# Round trips
+# --------------------------------------------------------------------------------------
+
+
+def test_corpus_is_not_empty() -> None:
+    assert CORPUS, f"no .mo files found under {EXAMPLES}"
+
+
+@pytest.mark.parametrize("source", CORPUS, ids=_ids(CORPUS))
+def test_corpus_round_trips_through_text(source: Path) -> None:
+    """Print a parsed model and read it back: the same value, not merely a similar one."""
+    once = parse(source.read_text(encoding="utf-8"), source.name)
+    twice = parse(unparse(once), source.name)
+    assert twice == once
+
+
+@pytest.mark.parametrize("source", CORPUS, ids=_ids(CORPUS))
+def test_printing_is_a_fixed_point(source: Path) -> None:
+    """The printer's output is already normalised -- printing it again changes nothing."""
+    printed = unparse(parse(source.read_text(encoding="utf-8"), source.name))
+    assert unparse(parse(printed, source.name)) == printed
+
+
+#: Expressions in the exact spelling the printer produces. Parsing then printing must be
+#: the identity on every one of them, which pins the bracketing rules from both sides.
+CANONICAL = [
+    "a",
+    "a.b.c",
+    "1",
+    "1.5",
+    "true",
+    "false",
+    '"a string"',
+    "der(h)",
+    "sqrt(2.0 * g * h)",
+    "f()",
+    "-a",
+    "not b",
+    "a + b",
+    "a - b - c",
+    "a - (b - c)",
+    "a * b + c",
+    "a * (b + c)",
+    "(a + b) * c",
+    "a / b / c",
+    "a / (b / c)",
+    "-a * b",
+    "-(a * b)",
+    "-a ^ b",
+    "(-a) ^ b",
+    "a ^ (b ^ c)",
+    "(a ^ b) ^ c",
+    "a < b and c >= d",
+    "not (a and b)",
+    "a or b and c",
+    "(a or b) and c",
+    "if a > 0.0 then b else c",
+    "1.0 + (if a then 2.0 else 3.0)",
+    "if a then b else (if c then d else e)",
+]
+
+
+@pytest.mark.parametrize("text", CANONICAL)
+def test_expression_round_trips_through_text(text: str) -> None:
+    assert unparse_expr(parse_expression(text)) == text
+
+
+@pytest.mark.parametrize("text", CANONICAL)
+def test_expression_round_trips_through_the_tree(text: str) -> None:
+    node = parse_expression(text)
+    assert parse_expression(unparse_expr(node)) == node
+
+
+def test_elseif_is_input_only_sugar() -> None:
+    """``elseif`` is a spelling, not a node -- it desugars, so it prints back nested.
+
+    That is why it is absent from :data:`CANONICAL`: the text round trip is exact only for
+    what the printer emits, and the printer has no ``elseif`` to emit.
+    """
+    sugared = parse_expression("if a then b elseif c then d else e")
+    assert sugared == parse_expression("if a then b else (if c then d else e)")
+    assert unparse_expr(sugared) == "if a then b else (if c then d else e)"
+
+
+# --------------------------------------------------------------------------------------
+# Precedence, pinned as trees
+# --------------------------------------------------------------------------------------
+
+A, B, C = ir.Ref(("a",)), ir.Ref(("b",)), ir.Ref(("c",))
+
+TREES = [
+    ("a + b * c", ir.Binary("+", A, ir.Binary("*", B, C))),
+    ("a * b + c", ir.Binary("+", ir.Binary("*", A, B), C)),
+    ("a - b - c", ir.Binary("-", ir.Binary("-", A, B), C)),
+    ("a / b * c", ir.Binary("*", ir.Binary("/", A, B), C)),
+    ("a ^ b * c", ir.Binary("*", ir.Binary("^", A, B), C)),
+    ("not a and b", ir.Binary("and", ir.Unary("not", A), B)),
+    ("a and b or c", ir.Binary("or", ir.Binary("and", A, B), C)),
+    # The deliberate deviation: the sign binds tighter than `*`, so this is `(-a) * b`
+    # rather than the specification's `-(a * b)`. The two are equal in IEEE arithmetic,
+    # and the tighter binding is what makes the round trip exact.
+    ("-a * b", ir.Binary("*", ir.Unary("-", A), B)),
+    # ...but it stays looser than `^`, which the specification does require.
+    ("-a ^ b", ir.Unary("-", ir.Binary("^", A, B))),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), TREES, ids=[t for t, _ in TREES])
+def test_precedence(text: str, expected: ir.Expr) -> None:
+    assert parse_expression(text) == expected
+
+
+@pytest.mark.parametrize("text", ["a ^ b ^ c", "a < b < c", "a == b == c", "a >= b >= c"])
+def test_non_associative_operators_refuse_to_chain(text: str) -> None:
+    """``a ^ b ^ c`` has no reading the printer could reproduce, so it is an error."""
+    with pytest.raises(ModelicaSyntaxError):
+        parse_expression(text)
+
+
+def test_a_signed_exponent_needs_brackets() -> None:
+    """``factor: primary [ "^" primary ]`` -- the specification forbids ``a ^ -b``."""
+    with pytest.raises(ModelicaSyntaxError):
+        parse_expression("a ^ -b")
+    assert parse_expression("a ^ (-b)") == ir.Binary("^", A, ir.Unary("-", B))
+
+
+# --------------------------------------------------------------------------------------
+# What a model parses to
+# --------------------------------------------------------------------------------------
+
+MODEL = """
+within Some.Package;
+
+model Ball "A bouncing ball"
+  parameter Real g = 9.81 "Gravity";
+  parameter Real e = 0.8;
+  Real h(start = 1.0, fixed = true);
+  Real v(start = 0.0, fixed = true);
+equation
+  der(h) = v;
+  der(v) = -g;
+  when h <= 0.0 then
+    reinit(v, -e * pre(v));
+  end when;
+  annotation(experiment(StopTime = 5.0));
+end Ball;
+"""
+
+
+def test_a_model_parses_to_the_expected_value() -> None:
+    ball = parse(MODEL).find("Ball")
+    assert ball is not None
+    assert ball.restriction == "model"
+    assert ball.comment == "A bouncing ball"
+    assert [c.name for c in ball.components] == ["g", "e", "h", "v"]
+    assert [c.variability for c in ball.components] == 2 * ["parameter"] + 2 * ["continuous"]
+    assert ball.components[0].modification.value == ir.RealLiteral(9.81)
+    assert ball.components[0].comment == "Gravity"
+    assert ball.components[2].modification.entries["fixed"].value == ir.BoolLiteral(value=True)
+    assert len(ball.equations) == 3
+    assert ball.equations[0] == ir.Equal(ir.Call("der", (ir.Ref(("h",)),)), ir.Ref(("v",)))
+    when = ball.equations[2]
+    assert isinstance(when, ir.When)
+    assert isinstance(when.branches[0].body[0], ir.Reinit)
+
+
+def test_within_and_annotations_are_accepted_and_dropped() -> None:
+    """Neither survives into the IR, so neither may appear when the model is printed back."""
+    printed = unparse(parse(MODEL))
+    assert "within" not in printed
+    assert "annotation" not in printed
+
+
+CONNECTOR = """
+type Voltage = Real(unit = "V");
+
+connector Pin
+  Voltage v;
+  flow Real i;
+end Pin;
+"""
+
+
+def test_a_connector_and_a_short_type_definition() -> None:
+    voltage, pin = parse(CONNECTOR).classes
+    assert voltage.restriction == "type"
+    assert voltage.extends[0].type_name == "Real"
+    assert voltage.extends[0].modification.entries["unit"].value == ir.StringLiteral("V")
+    assert pin.restriction == "connector"
+    assert [c.connector for c in pin.components] == ["none", "flow"]
+
+
+CIRCUIT = """
+partial model TwoPin
+  Pin p;
+  Pin n;
+end TwoPin;
+
+model Resistor
+  extends TwoPin;
+  parameter Real R = 1.0;
+equation
+  connect(p, n);
+end Resistor;
+"""
+
+
+def test_extends_and_connect() -> None:
+    two_pin, resistor = parse(CIRCUIT).classes
+    assert two_pin.partial
+    assert resistor.extends == (ir.Extends("TwoPin"),)
+    assert resistor.equations == (ir.Connect(ir.Ref(("p",)), ir.Ref(("n",))),)
+
+
+# --------------------------------------------------------------------------------------
+# Refusals: unsupported constructs are named, not misread
+# --------------------------------------------------------------------------------------
+
+UNSUPPORTED = [
+    ("for", "model M\nequation\n  for i in 1:3 loop\n  end for;\nend M;\n"),
+    ("algorithm", "model M\nalgorithm\n  x := 1;\nend M;\n"),
+    ("import", "model M\n  import Modelica.Constants;\nend M;\n"),
+    ("redeclare", "model M\n  redeclare Real x;\nend M;\n"),
+    ("replaceable", "model M\n  replaceable Real x;\nend M;\n"),
+    ("inner", "model M\n  inner Real x;\nend M;\n"),
+    ("outer", "model M\n  outer Real x;\nend M;\n"),
+    ("enumeration", "model M\n  type E = enumeration(a, b);\nend M;\n"),
+    ("external", "function f\nexternal;\nend f;\n"),
+    ("while", "model M\nequation\n  while x loop\n  end while;\nend M;\n"),
+]
+
+
+@pytest.mark.parametrize(("keyword", "source"), UNSUPPORTED, ids=[k for k, _ in UNSUPPORTED])
+def test_unsupported_constructs_are_refused_by_name(keyword: str, source: str) -> None:
+    with pytest.raises(ModelicaSyntaxError, match=keyword):
+        parse(source)
+
+
+def test_arrays_are_refused() -> None:
+    with pytest.raises(ModelicaSyntaxError, match=r"[Aa]rray"):
+        parse("model M\n  Real x[3];\nend M;\n")
+    with pytest.raises(ModelicaSyntaxError, match=r"[Aa]rray"):
+        parse_expression("{1, 2, 3}")
+
+
+def test_named_function_arguments_are_refused() -> None:
+    with pytest.raises(ModelicaSyntaxError):
+        parse_expression("f(x = 1)")
+
+
+def test_a_mismatched_end_name_is_an_error() -> None:
+    with pytest.raises(ModelicaSyntaxError, match="Other"):
+        parse("model M\nend Other;\n")
+
+
+def test_an_error_points_at_the_offending_line() -> None:
+    with pytest.raises(ModelicaSyntaxError) as caught:
+        parse("model M\n  Real x\nend M;\n")
+    assert caught.value.lineno == 3
+    assert caught.value.filename == "<modelica>"
+
+
+def test_the_filename_reaches_the_error() -> None:
+    with pytest.raises(ModelicaSyntaxError) as caught:
+        parse("model M\n  Real x\nend M;\n", "Ball.mo")
+    assert caught.value.filename == "Ball.mo"
+
+
+# --------------------------------------------------------------------------------------
+# Lexer
+# --------------------------------------------------------------------------------------
+
+
+def test_comments_and_whitespace_never_reach_the_parser() -> None:
+    tokens = tokenize("a /* block\ncomment */ + // line comment\nb")
+    assert [t.text for t in tokens] == ["a", "+", "b", ""]
+    assert tokens[-1].kind is Kind.END
+
+
+def test_a_token_knows_where_it_came_from() -> None:
+    (_first, second, *_rest) = tokenize("model\n  Real x;\n")
+    assert (second.text, second.line, second.column) == ("Real", 2, 3)
+
+
+def test_keywords_are_distinguished_from_names() -> None:
+    kinds = {t.text: t.kind for t in tokenize("model Model der")}
+    assert kinds == {"model": Kind.KEYWORD, "Model": Kind.NAME, "der": Kind.KEYWORD, "": Kind.END}
+
+
+def test_a_string_token_carries_the_decoded_value() -> None:
+    (token, _end) = tokenize(r'"a \"quoted\" line\nbreak"')
+    assert token.kind is Kind.STRING
+    assert token.text == 'a "quoted" line\nbreak'
+
+
+@pytest.mark.parametrize(
+    ("text", "kind"),
+    [("1", Kind.INT), ("1.", Kind.REAL), ("1.5", Kind.REAL), ("1e3", Kind.REAL), (".5", Kind.REAL)],
+)
+def test_numbers_are_classified(text: str, kind: Kind) -> None:
+    assert tokenize(text)[0].kind is kind
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        ('"unterminated', "unterminated string"),
+        ("/* unterminated", "unterminated block comment"),
+        ("a @ b", "unexpected character"),
+    ],
+)
+def test_lexer_errors(source: str, message: str) -> None:
+    with pytest.raises(ModelicaSyntaxError, match=message):
+        tokenize(source)

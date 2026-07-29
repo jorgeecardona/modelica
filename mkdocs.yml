@@ -42,8 +42,27 @@ markdown_extensions:
 
 plugins:
   - search
+  # The notebooks are executed here, at build time. `allow_errors: false` means a cell that
+  # raises fails the build -- which is the point: it makes the pages tests that happen to
+  # render, so a documented API cannot quietly stop working.
+  - mkdocs-jupyter:
+      execute: true
+      allow_errors: false
+      include: ["*.py"]
+      include_source: true
+      ignore_h1_titles: true
 
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Examples: examples.md
+  - Notebooks:
+      - Simulating a model: notebooks/simulating.py
+      - Enumerating the discrete half: notebooks/verifying.py
+  - Ideas:
+      - Backends: ideas/backends.md
+      - Benchmarks: ideas/benchmarks.md
+      - PDEs: ideas/pdes.md
+      - GPU backends: ideas/vulkan.md
+      - Verification: ideas/verification.md
   - Changelog: changelog.md

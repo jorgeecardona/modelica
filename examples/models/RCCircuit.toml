@@ -1,0 +1,58 @@
+summary = "A capacitor charging through a resistor: the smallest model built out of connected components."
+teaches = ["connect", "flow variables", "extends", "hierarchical names", "alias equations"]
+requires = ["Electrical"]
+
+[parse]
+classes = ["RCCircuit"]
+
+[flatten]
+model = "RCCircuit"
+states = ["c.v"]
+index = 1
+balanced = true
+
+[simulate]
+stop = 5.0
+tolerance = 1e-9
+
+# tau = R*C = 100 * 0.01 = 1 s, so c.v(t) = 1 - exp(-t) and the current is exp(-t)/R.
+[[simulate.point]]
+t = 0.5
+values = { "c.v" = 0.393469340287, "r.i" = 0.00606530659713 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 1.0
+values = { "c.v" = 0.632120558829, "r.i" = 0.00367879441171 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 3.0
+values = { "c.v" = 0.950212931632 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 5.0
+values = { "c.v" = 0.993262053001 }
+rtol = 1e-8
+source = "analytic"
+
+# Kirchhoff's voltage law around the loop, which flattening must have produced.
+[[simulate.invariant]]
+expr = "r.v + c.v"
+value = 1.0
+atol = 1e-9
+
+# Kirchhoff's current law: the same current everywhere in a series loop.
+[[simulate.invariant]]
+expr = "r.i - c.i"
+value = 0.0
+atol = 1e-9
+
+[[simulate.invariant]]
+expr = "ground.p.v"
+value = 0.0
+atol = 1e-12

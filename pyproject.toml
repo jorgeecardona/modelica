@@ -7,13 +7,16 @@
 # abandoned Modelon/JModelica.org upload (version "trunk"). The git repo keeps the
 # historical name; the import package matches the distribution.
 name = "modelica"
-version = "0.0.2"
+version = "0.0.3"
 description = "Pure-Python Modelica toolchain: parse, flatten, simulate, and exchange via FMI 3.0 and SSP 2.0"
 readme = "README.md"
-# 3.11+, no compatibility shims: this is a full rewrite of a 2010 Python 2 codebase, and
-# the modelling layer leans on 3.11 features (Self, StrEnum, exception groups for
-# multi-error diagnostics, and the tomllib/typing niceties) rather than back-porting them.
-requires-python = ">=3.11"
+# 3.12+, no compatibility shims: this is a full rewrite of a 2010 Python 2 codebase, and
+# the modelling layer leans on the modern typing surface (Self, StrEnum, exception groups
+# for multi-error diagnostics, tomllib) rather than back-porting it. The floor is 3.12 and
+# not 3.11 because of the `sim` extra: NumPy 2.4 requires 3.12 itself, and its stubs spell
+# `ArrayLike` with `collections.abc.Buffer` -- a name that does not exist earlier, and
+# without which every array argument in this package types as partially unknown.
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Jorge Cardona", email = "jorgeecardona@gmail.com" }]
@@ -34,7 +37,6 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
@@ -52,8 +54,23 @@ dependencies = []
 # SUNDIALS and must not be a hard requirement of `pip install modelica`.
 sim = ["numpy>=2.0", "scipy>=1.13"]
 sundials = ["scikit-sundae>=1.0"]
-# docs are an *extra* (not a uv dependency-group) so external services can install them via pip
-docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
+# Model-checking the discrete half of a model (`modelica.verify`). An extra rather than a
+# dev-only tool because "does this model's event iteration converge?" is a question about
+# *your* model, not about this package's tests -- but it stays out of the base install,
+# because a simulator that cannot run without a model checker would be an odd thing.
+verify = ["musil>=0.6"]
+# docs are an *extra* (not a uv dependency-group) so external services can install them via pip.
+# The notebooks under docs/notebooks are *executed* at build time, which is what stops them
+# rotting: a page that stopped working fails `mkdocs build --strict` in CI rather than sitting
+# there showing output from a version of the code that no longer exists. They are `.py` files in
+# percent format rather than `.ipynb` so that a diff of one is readable.
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocs-jupyter>=0.25",
+    "jupytext>=1.16",
+    "ipykernel>=6.29",
+]
 
 [project.urls]
 Homepage = "https://gitlab.com/jorgeecardona/pymodelica"
@@ -79,6 +96,7 @@ dev = [
     "pytest-cov>=6",
     "numpy>=2.0",
     "scipy>=1.13",
+    "musil>=0.6",
 ]
 
 [tool.pytest.ini_options]
@@ -86,7 +104,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -102,10 +120,33 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# The pages under docs/notebooks are notebooks in jupytext's percent format: `# %%` splits
+# them into cells, and mkdocs-jupyter executes them at build time. A notebook is a script
+# read top to bottom, not a module, so the rules that keep modules tidy misread it.
+"docs/notebooks/*" = [
+    "INP001",  # a notebook is not part of a package; there is nothing to import it
+    "T201",    # `print` is how a cell says something
+    "E402",    # imports sit in the cell that first needs them, after the prose explaining why
+    "B018",    # a bare expression on the last line is how a cell displays a value
+]
+# Each example is the Python twin of a `.mo` file next to it, and the tests assert the two
+# flatten to the same model. That correspondence outranks the house style: the docstring is
+# the Modelica description string, the component names are the ones in the `.mo`.
+"examples/*" = [
+    "INP001",  # examples are read and run, not imported
+    "T201",    # the `__main__` block prints the generated Modelica; that is the demo
+    "D400",    # class docstrings become Modelica description strings, which take no period
+    "ANN201",  # `def equations(self)` is the DSL's form; annotating 24 of them buys nothing
+    "E741",    # `l` is the inductor, because `l` is the inductor in the `.mo` twin
+]
 "tests/*" = [
     "S101",    # asserts are the point of tests
     "PLR2004", # literal expectations in asserts are clearer than named constants
     "ARG",     # pytest fixture signatures are fixed; params can go unused
+    # The simulation tests reach NumPy and `modelica.sim.solve` through an importorskip, so
+    # the module and everything that comes out of it is `Any` by construction. Annotating
+    # them properly would mean importing at module scope what the skip exists to avoid.
+    "ANN401",
 ]
 
 [tool.ruff.lint.pydocstyle]
@@ -117,7 +158,11 @@ known-first-party = ["modelica"]
 [tool.pyright]
 include = ["src", "tests"]
 extraPaths = ["src"]
-pythonVersion = "3.11"
+# Kept equal to the `requires-python` floor: checking against a version the project does not
+# claim to support proves nothing about the version it does. (The two disagreed briefly, and
+# it showed -- read as 3.11, NumPy's `ArrayLike` refers to `collections.abc.Buffer`, which
+# does not exist there, and every array argument in the package became partially unknown.)
+pythonVersion = "3.12"
 typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"

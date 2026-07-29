@@ -1,0 +1,60 @@
+summary = "A tank draining through an orifice; the level reaches zero at a known time and must stay there."
+teaches = ["if in an equation", "a state event", "sqrt", "a solution that must not go negative"]
+requires = []
+
+[parse]
+classes = ["DrainingTank"]
+
+[flatten]
+model = "DrainingTank"
+states = ["level"]
+index = 1
+balanced = true
+
+# sqrt(level) = 1 - (a/(2A))*sqrt(2g)*t, so level(t) = (1 - 0.0442944691807*t)^2
+# and the tank is empty at t = 22.5761820493 s.
+[simulate]
+stop = 30.0
+tolerance = 1e-9
+
+[[simulate.point]]
+t = 5.0
+values = { level = 0.606105308193 }
+rtol = 1e-7
+source = "analytic"
+
+[[simulate.point]]
+t = 10.0
+values = { level = 0.310310616386 }
+rtol = 1e-7
+source = "analytic"
+
+[[simulate.point]]
+t = 20.0
+values = { level = 0.013021232772 }
+rtol = 1e-6
+source = "analytic"
+
+# Empty, and staying empty: the `if` branch must latch, not chatter.
+[[simulate.point]]
+t = 30.0
+values = { level = 0.0, outflow = 0.0 }
+atol = 1e-9
+source = "analytic"
+
+# The whole point of the event: a negative level would be physical nonsense, and is
+# exactly what you get if the branch is evaluated without a zero crossing.
+[[simulate.invariant]]
+expr = "level"
+min = 0.0
+max = 1.0
+atol = 1e-12
+
+# The level touches zero rather than crossing it -- der(level) is zero there too -- so the
+# crossing is a double root, and an error of eps in the level moves it by sqrt(eps). No
+# solver locates it to the tolerance it integrates with; a hundredth of a millisecond is
+# what Radau at 1e-9 actually delivers, and asking for more would be asking for arithmetic
+# that does not exist.
+[simulate.events]
+times = [22.5761820493]
+atol = 1e-4

@@ -1,0 +1,53 @@
+summary = "A mass on a spring and damper released from 1 m: the same second-order physics as the RLC circuit, through a different domain's connectors."
+teaches = ["translational connectors", "three components on one flange", "domain analogies"]
+requires = ["Translational"]
+
+[parse]
+classes = ["MassSpringDamper"]
+
+[flatten]
+model = "MassSpringDamper"
+states = ["mass.s", "mass.v"]
+index = 1
+balanced = true
+
+# m=1, c=4, d=0.4 -> omega_0 = 2 rad/s, zeta = 0.1: lightly damped.
+[simulate]
+stop = 10.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 1.0
+values = { "mass.s" = -0.258070263439, "mass.v" = -1.50323100425 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 3.0
+values = { "mass.s" = 0.505105559266, "mass.v" = 0.339950098865 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 5.0
+values = { "mass.s" = -0.33685168059, "mass.v" = 0.370691413969 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { "mass.s" = 0.079116023619, "mass.v" = -0.235994839113 }
+rtol = 1e-6
+source = "reference"
+
+# Three flanges meet at the wall and three at the mass: forces there must sum to zero.
+# This is what `connect` on a flow variable means, stated as behaviour.
+[[simulate.invariant]]
+expr = "spring.flange_a.f + damper.flange_a.f + wall.flange.f"
+value = 0.0
+atol = 1e-8
+
+[[simulate.invariant]]
+expr = "mass.s"
+min = -1.0
+max = 1.0

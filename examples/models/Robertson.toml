@@ -1,0 +1,63 @@
+summary = "Robertson's autocatalytic reaction: the standard stiff benchmark, spanning ten decades in time."
+teaches = ["stiffness", "why an explicit solver is not enough", "mass conservation"]
+requires = []
+
+[parse]
+classes = ["Robertson"]
+
+[flatten]
+model = "Robertson"
+states = ["y1", "y2", "y3"]
+equations = 3
+index = 1
+balanced = true
+
+# The rate constants span 0.04 to 3e7, so the fast transient dies in microseconds while
+# the slow one runs for decades. An explicit method is forced down to ~1e-5 steps for
+# the whole run; a stiff one takes a few hundred.
+[simulate]
+stop = 4000.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 0.4
+values = { y1 = 0.985172113861, y2 = 3.38639537898e-5, y3 = 0.0147940221851 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 4.0
+values = { y1 = 0.905518678584, y2 = 2.24047568755e-5, y3 = 0.0944589166587 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 40.0
+values = { y1 = 0.715827068722, y2 = 9.18553476464e-6, y3 = 0.284163745743 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 400.0
+values = { y1 = 0.45051866847, y2 = 3.22290144168e-6, y3 = 0.549478108629 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 4000.0
+values = { y1 = 0.183202257777, y2 = 8.94237125278e-7, y3 = 0.816796847986 }
+rtol = 1e-6
+source = "reference"
+
+# Mass is conserved to machine precision -- the classic sanity check for this problem.
+[[simulate.invariant]]
+expr = "y1 + y2 + y3"
+value = 1.0
+atol = 1e-10
+
+# y2 is tiny and positive throughout; a solver that lets it go negative will produce
+# garbage from the y2^2 term.
+[[simulate.invariant]]
+expr = "y2"
+min = 0.0
+max = 4e-5

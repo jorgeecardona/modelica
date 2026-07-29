@@ -15,7 +15,7 @@ pip install "modelica[sim]"   # + numpy/scipy for simulation
 ## Status
 
 Pre-alpha. This is a **full rewrite** of a 2010 Python 2 experiment — none of that code
-survives, only the goal. Python 3.11+.
+survives, only the goal. Python 3.12+.
 
 ## Why
 

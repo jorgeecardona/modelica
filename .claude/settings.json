@@ -17,7 +17,19 @@
       "Read(//home/jcardona/.cache/ms-playwright-mcp/**)",
       "Read(//home/jcardona/.cache/ms-playwright-mcp/mcp-chrome-for-testing-3b855a0/**)",
       "Bash(ls -la /home/jcardona/.cache/ms-playwright-mcp/mcp-chrome-for-testing-3b855a0/ | head -30; echo \"=== chrome procs ===\"; pgrep -af 'chrome-for-testing|/chrome ' | grep -v 'node ' | head)",
-      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); i=d['info']; print\\(i['name'], i['version']\\); print\\(i['summary']\\); print\\('files:', [u['filename'] for u in d['urls']]\\)\")"
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); i=d['info']; print\\(i['name'], i['version']\\); print\\(i['summary']\\); print\\('files:', [u['filename'] for u in d['urls']]\\)\")",
+      "Bash(git push *)",
+      "Bash(timeout 115 uv run python -u -)",
+      "Bash(uv run python -c ' *)",
+      "Bash(uv run python -u -c ' *)",
+      "Bash(python3 -)",
+      "Bash(uv *)",
+      "Bash(git -C /home/jcardona/stuff/personal/self/projects/pymodelica status --short)",
+      "Bash(git --no-pager log --oneline -3)",
+      "Bash(timeout 300 uv run pytest -q -rs)",
+      "Bash(timeout 120 uv run python -c ' *)",
+      "Bash(timeout 300 uv run pytest \"tests/test_examples.py::test_front_ends_flatten_to_the_same_model[Robertson]\" -q)",
+      "Bash(timeout 600 make check)"
     ]
   }
 }

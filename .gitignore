@@ -9,3 +9,4 @@ public/
 .pytest_cache/
 .coverage
 logs/
+.cache/

@@ -1,0 +1,42 @@
+summary = "A hot object cooling toward ambient: one state, one equation, closed-form answer."
+teaches = ["der", "parameter", "start/fixed", "a scalar ODE"]
+requires = []
+
+[parse]
+classes = ["NewtonCooling"]
+
+[flatten]
+model = "NewtonCooling"
+states = ["T"]
+equations = 1
+index = 1
+balanced = true
+
+[simulate]
+stop = 10.0
+tolerance = 1e-9
+
+# T(t) = T_amb + (T0 - T_amb)*exp(-k*t) = 25 + 65*exp(-t/2)
+[[simulate.point]]
+t = 1.0
+values = { T = 64.4244928813 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 5.0
+values = { T = 30.3355249106 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 10.0
+values = { T = 25.4379665549 }
+rtol = 1e-8
+source = "analytic"
+
+# It cools; it never overshoots ambient.
+[[simulate.invariant]]
+expr = "T"
+min = 25.0
+max = 90.0

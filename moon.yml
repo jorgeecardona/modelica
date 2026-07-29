@@ -9,13 +9,16 @@ layer: 'library'
 language: 'python'
 
 tasks:
+  # Everything, not just src and tests: the pre-commit hook lints whatever Python is staged,
+  # and a hook stricter than CI is a hook people learn to pass with --no-verify. The examples
+  # and the notebooks have their own per-file-ignores in pyproject.
   lint:
-    command: 'uv run ruff check src tests'
-    inputs: ['src/**/*.py', 'tests/**/*.py', 'pyproject.toml']
+    command: 'uv run ruff check src tests examples docs/notebooks'
+    inputs: ['src/**/*.py', 'tests/**/*.py', 'examples/**/*.py', 'docs/notebooks/*.py', 'pyproject.toml']
 
   format-check:
-    command: 'uv run ruff format --check src tests'
-    inputs: ['src/**/*.py', 'tests/**/*.py', 'pyproject.toml']
+    command: 'uv run ruff format --check src tests examples docs/notebooks'
+    inputs: ['src/**/*.py', 'tests/**/*.py', 'examples/**/*.py', 'docs/notebooks/*.py', 'pyproject.toml']
 
   typecheck:
     command: 'uv run pyright'
@@ -25,17 +28,26 @@ tasks:
     command: 'uv run pytest -q'
     inputs: ['src/**/*.py', 'tests/**/*.py', 'pyproject.toml']
 
-  # The floor named in pyproject's `requires-python = ">=3.11"`, run rather than asserted.
+  # The floor named in pyproject's `requires-python = ">=3.12"`, run rather than asserted.
   # A claimed floor nobody executes is fiction (the lesson from pytest-parallex, where the
   # python floor had never once been run). ~10s, and it also proves the core imports with
-  # no optional numerics installed.
+  # no optional numerics installed. Keep the version here equal to `requires-python`.
   test-python-floor:
-    command: 'uv run --isolated --python 3.11 --with-editable . --with pytest --with numpy --with scipy pytest -q'
+    command: 'uv run --isolated --python 3.12 --with-editable . --with pytest --with numpy --with scipy pytest -q'
     inputs: ['src/**/*.py', 'tests/**/*.py', 'pyproject.toml']
 
+  # The notebooks under docs/notebooks import the package and run it, so the numerics and the
+  # model checker have to be here too -- this task builds the docs *and* executes them, which
+  # is why `src/**/*.py` and `examples/**/*` are inputs: a change to either can break a page.
   docs:
-    command: 'uv run --extra docs mkdocs build --strict'
-    inputs: ['docs/**/*', 'mkdocs.yml', 'README.md', 'CHANGELOG.md']
+    command: 'uv run --extra docs --extra sim --extra verify mkdocs build --strict'
+    inputs:
+      - 'docs/**/*'
+      - 'examples/**/*'
+      - 'src/**/*.py'
+      - 'mkdocs.yml'
+      - 'README.md'
+      - 'CHANGELOG.md'
     outputs: ['site']
 
   build:

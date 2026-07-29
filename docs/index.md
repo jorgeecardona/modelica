@@ -10,7 +10,7 @@ pip install "modelica[sim]"   # + numpy/scipy for simulation
 
 !!! warning "Pre-alpha"
     A full rewrite of a 2010 prototype, in progress. The API is not stable and the layers
-    below are being built bottom-up. Python 3.11+.
+    below are being built bottom-up. Python 3.12+.
 
 ## The layers
 
