@@ -687,24 +687,42 @@ different answers and a caller reading the field cannot tell them apart.
 """
 
 
+def _closed(work: _Work, selection: frozenset[str]) -> bool:
+    """Whether a state set is closed under integration -- the test the matching cannot make.
+
+    ``vy`` is ``der(y)``. Choosing ``vy`` as a state and leaving ``y`` algebraic asks the
+    solver to integrate ``vy`` forward while reading ``y`` off the constraint, and nothing
+    left in the model then says that the ``y`` it reads is the integral of the ``vy`` it
+    carries: the equation that said so, ``der(y) = vy``, was spent making the two one
+    variable during alias elimination. The trajectory satisfies every equation and drifts
+    anyway.
+
+    The matching does not catch this because structurally there is nothing to catch -- the
+    equations count. So it is a condition on the *set*: a state's antiderivative, when the
+    model has one to offer, is a state too. States come in chains from the bottom up.
+    """
+    for name in selection:
+        integral = work.integral.get(name)
+        if integral is not None and work.is_unknown(integral) and integral not in selection:
+            return False
+    return True
+
+
 def _candidates(work: _Work, states: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
     """Every admissible state set, the chosen one first.
 
-    A set of unknowns can be the states exactly when holding them back still leaves an
-    equation for every remaining unknown -- so the test is the matching itself, run once per
-    candidate set with that set forbidden. The pendulum answers ``(y, vy)``, ``(x, vx)`` and
-    a few structurally valid oddities; the two useful ones are the two the literature names,
-    and they are two *exchanges* apart, which is why this enumerates rather than perturbing
-    the chosen set.
+    A set of unknowns can be the states when two things hold. It must be *structurally*
+    admissible -- holding the set back still leaves an equation for every remaining unknown,
+    which is the matching itself, run once per candidate with that set forbidden. And it must
+    be closed under integration, which the matching cannot see; :func:`_closed` says why.
+
+    The pendulum answers ``(y, vy)`` and ``(x, vx)``: the two the literature names, two
+    *exchanges* apart, which is why this enumerates rather than perturbing the chosen set.
 
     Structural, not numerical. A set appearing here means the equations can be arranged to
     compute everything else from it, not that the arrangement is well conditioned -- the
     pendulum's ``(y, vy)`` is on this list and still goes singular at the bottom of the
     swing. Which of them is *usable where* is a question for the runtime; this is the menu.
-
-    This is the mode list a dynamic state selection would switch between. Nothing switches
-    yet, and that is the open gap. The alternatives are recorded anyway because they are a
-    property of the model rather than of the runtime.
     """
     differentiable = [
         name for name in work.variables if work.is_unknown(name) and name in work.derivative
@@ -714,7 +732,7 @@ def _candidates(work: _Work, states: tuple[str, ...]) -> tuple[tuple[str, ...], 
     found: list[tuple[str, ...]] = [states]
     for combination in combinations(differentiable, len(states)):
         selection = tuple(sorted(combination, key=lambda name: work.order[name]))
-        if selection == states:
+        if selection == states or not _closed(work, frozenset(selection)):
             continue
         try:
             _Matching(work, excluded=frozenset(selection)).run()

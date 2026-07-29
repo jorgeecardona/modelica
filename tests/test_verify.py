@@ -121,10 +121,15 @@ def test_the_pendulum_has_the_second_state_set_the_literature_names() -> None:
 
     It is two exchanges away from the chosen set, which is why the candidates are
     enumerated rather than found by perturbing the selection one variable at a time.
+
+    And there are exactly two. The four unknowns admit five structurally valid selections,
+    but the three mixed ones -- ``(x, vy)``, ``(y, vx)``, ``(vx, vy)`` -- take a velocity
+    without its position, which integrates the velocity forward while reading the position
+    off the constraint with nothing left to say the two agree. A runtime switching into one
+    of those would drift, so they are inadmissible rather than merely unhelpful.
     """
     candidates = _system(MODELS / "Pendulum.mo").candidates
-    assert candidates[0] == ("y", "vy")
-    assert ("x", "vx") in candidates
+    assert candidates == (("y", "vy"), ("x", "vx"))
 
 
 def test_a_moving_jacobian_during_a_search_breaks_liveness() -> None:

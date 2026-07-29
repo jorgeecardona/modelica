@@ -72,6 +72,13 @@ class System:
     them yet; they are recorded because the alternatives are a property of the model, and a
     runtime that will eventually have to choose should be handed the choice rather than
     rediscover it.
+
+    Admissible means two things: the remaining equations determine everything the set does
+    not, and the set is closed under integration -- if ``vy`` is a state and the model knows
+    ``vy`` is ``der(y)``, then ``y`` is a state too. The second is not pedantry. Integrating
+    ``vy`` while reading ``y`` off a constraint leaves nothing tying the two together, since
+    ``der(y) = vy`` was spent making them one variable, and the trajectory drifts while
+    satisfying every equation. Sets that fail either test never reach this list.
     """
 
     name: str
