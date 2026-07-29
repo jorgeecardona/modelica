@@ -74,8 +74,20 @@ source of truth and is bumped automatically when shipped source changes.
   unknown, so the test is the matching itself, run once per candidate with that set
   forbidden. The pendulum answers `(y, vy)` and `(x, vx)` — the two the literature names,
   which are *two* exchanges apart, so they are enumerated rather than found by perturbing the
-  chosen set one variable at a time. Nothing switches between them yet; this is the menu the
-  eventual dynamic state selection chooses from.
+  chosen set one variable at a time. This is the menu dynamic state selection chooses from.
+- `modelica.sim.emit`: **dynamic state selection**, and with it the pendulum simulates. Each
+  candidate set is causalized into its own blocks and scored by the product of its 1×1 pivots
+  — `4x²` against `4y²` for the pendulum, so the crossover is at 45°, which is the answer the
+  literature gives. The emitter writes one `rhs`/`observe`/`indicators`/`transition` per set
+  plus a picker that reads which one is live from a workspace slot appended after the latches,
+  so nothing above the emitter needs an extra argument and numba still compiles the lot.
+  Crossings come one per *ordered* pair (a pair compares with one smooth expression; a maximum
+  does not) and read `−1` outside their origin, because a set the run is not using is not a set
+  it can leave. A 20% margin on the scores is what makes the switch terminate rather than
+  chatter. The crossing itself costs no accuracy — every state of every set is an unknown of
+  the model, so the destination's states are already computed when the transition rewrites the
+  vector. Pendulum over two seconds: four switches, `x² + y² = 1` held to 2·10⁻¹⁶, energy drift
+  1.6·10⁻¹⁰.
 - `modelica.verify.check_selection`: the switching modelled with the linear algebra as the
   adversary — which set is usable is not the engine's to choose, and it only finds out by
   failing to factor one. The two assumptions that makes necessary are surfaced through
