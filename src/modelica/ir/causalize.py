@@ -30,13 +30,14 @@ and the matching produces them without being told to.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import combinations
 from math import comb
 from typing import TYPE_CHECKING
 
 from modelica.ir import nodes as ir
 from modelica.ir.derive import (
+    ONE,
     ZERO,
     DerivativeError,
     add,
@@ -50,7 +51,7 @@ from modelica.ir.derive import (
 )
 from modelica.ir.flat import FlatVariable
 from modelica.ir.rewrite import names, residual, solve_for, substitute
-from modelica.ir.system import Block, System
+from modelica.ir.system import Block, Mode, System
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping
@@ -654,8 +655,12 @@ def _blocks(work: _Work, matched: dict[int, str]) -> tuple[Block, ...]:
         members = sorted(component)
         equations = tuple(work.equations[index] for index in members)
         unknowns = tuple(matched[index] for index in members)
-        assignment = solve_for(residual(equations[0]), unknowns[0]) if len(members) == 1 else None
-        blocks.append(Block(unknowns, equations, assignment))
+        assignment = pivot = None
+        if len(members) == 1:
+            left = residual(equations[0])
+            assignment = solve_for(left, unknowns[0])
+            pivot = simplify(d_dx(left, unknowns[0]))
+        blocks.append(Block(unknowns, equations, assignment, pivot))
     return tuple(blocks)
 
 
@@ -708,8 +713,39 @@ def _closed(work: _Work, selection: frozenset[str]) -> bool:
     return True
 
 
-def _candidates(work: _Work, states: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
-    """Every admissible state set, the chosen one first.
+def _conditioning(blocks: tuple[Block, ...]) -> ir.Expr:
+    """The product of the 1x1 blocks' pivots: how far this selection is from unsolvable.
+
+    Block-lower-triangular means the determinant factors, and a 1x1 block's factor is just
+    the number it divides by. Those factors are where state selection shows: choosing ``y``
+    as a state is what makes a block solve for ``x``, and ``2x`` is what that block then
+    divides by. Zero there is not a bad arrangement of the arithmetic, it is the selection
+    failing, which is the thing a runtime has to react to.
+
+    Blocks larger than 1x1 are left out. Their factor is a determinant this pass never
+    forms, and it is also the wrong place to look: an algebraic loop is a property of the
+    equations, so it turns up in every selection that keeps those equations together and
+    cannot tell them apart. The pendulum's 3x3 solve for ``(F, der_vx, der_vy)`` is
+    identical in both of its modes.
+    """
+    product: ir.Expr = ONE
+    for block in blocks:
+        if block.pivot is not None:
+            product = mul(product, block.pivot)
+    return simplify(product)
+
+
+def _mode(work: _Work, matched: dict[int, str], states: tuple[str, ...]) -> Mode:
+    """Sort one matching into blocks. The conditioning is filled in later, if at all."""
+    return Mode(
+        states=states,
+        derivative={name: work.derivative[name] for name in states},
+        blocks=_blocks(work, matched),
+    )
+
+
+def _modes(work: _Work, matched: dict[int, str], states: tuple[str, ...]) -> tuple[Mode, ...]:
+    """Every admissible state selection, causalized, the chosen one first.
 
     A set of unknowns can be the states when two things hold. It must be *structurally*
     admissible -- holding the set back still leaves an equation for every remaining unknown,
@@ -719,27 +755,32 @@ def _candidates(work: _Work, states: tuple[str, ...]) -> tuple[tuple[str, ...], 
     The pendulum answers ``(y, vy)`` and ``(x, vx)``: the two the literature names, two
     *exchanges* apart, which is why this enumerates rather than perturbing the chosen set.
 
-    Structural, not numerical. A set appearing here means the equations can be arranged to
-    compute everything else from it, not that the arrangement is well conditioned -- the
-    pendulum's ``(y, vy)`` is on this list and still goes singular at the bottom of the
-    swing. Which of them is *usable where* is a question for the runtime; this is the menu.
+    Structural, not numerical. A selection appearing here means the equations can be arranged
+    to compute everything else from it, not that the arrangement is well conditioned -- the
+    pendulum's ``(y, vy)`` is on this list and still goes singular at the bottom of the swing.
+    Where each one is usable is what :attr:`~modelica.ir.system.Mode.pivot` is for.
     """
+    chosen = _mode(work, matched, states)
     differentiable = [
         name for name in work.variables if work.is_unknown(name) and name in work.derivative
     ]
     if comb(len(differentiable), len(states)) > _SELECTIONS:
-        return (states,)
-    found: list[tuple[str, ...]] = [states]
+        return (chosen,)
+    found: list[Mode] = [chosen]
     for combination in combinations(differentiable, len(states)):
         selection = tuple(sorted(combination, key=lambda name: work.order[name]))
         if selection == states or not _closed(work, frozenset(selection)):
             continue
         try:
-            _Matching(work, excluded=frozenset(selection)).run()
+            alternative = _Matching(work, excluded=frozenset(selection)).run()
         except CausalizationError:
             continue
-        found.append(selection)
-    return tuple(found)
+        found.append(_mode(work, alternative, selection))
+    # Conditioning is a comparison, so a lone mode does not get one -- there is nothing to
+    # compare it against, and the product would be a long expression nobody reads.
+    if len(found) == 1:
+        return tuple(found)
+    return tuple(replace(mode, pivot=_conditioning(mode.blocks)) for mode in found)
 
 
 def _statement(statement: ir.Statement, work: _Work) -> ir.Statement:
@@ -774,10 +815,7 @@ def causalize(flat: FlatModel) -> System:
     return System(
         name=flat.name,
         variables=tuple(sorted(work.variables.values(), key=lambda v: work.order[v.name])),
-        states=states,
-        candidates=_candidates(work, states),
-        derivative={name: work.derivative[name] for name in states},
-        blocks=_blocks(work, matched),
+        modes=_modes(work, matched, states),
         index=1 + max(work.depth.values(), default=0),
         aliases=dict(work.aliases),
         whens=tuple(_when(when, work) for when in flat.whens),
