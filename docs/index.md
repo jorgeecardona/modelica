@@ -37,8 +37,12 @@ current code does. The `.ipynb` ones carry figures and sliders and are meant to 
 | [Where the smoothness breaks](notebooks/events.ipynb) | bounce events, the step size collapsing into them, and the pendulum switching state sets |
 | [Enumerating the discrete half](notebooks/verifying.py) | model-checking the event iteration, state selection, FMI modes and the co-simulation master |
 
+The `.ipynb` pages read their models from `examples/`, so running them wants a checkout:
+
 ```bash
-pip install "modelica[sim]" matplotlib ipywidgets   # what the .ipynb pages need
+git clone https://gitlab.com/jorgeecardona/pymodelica && cd pymodelica
+pip install "modelica[sim]" matplotlib ipywidgets
+jupyter lab docs/notebooks/
 ```
 
 ## Standards targeted
