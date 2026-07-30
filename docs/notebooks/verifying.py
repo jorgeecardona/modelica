@@ -8,7 +8,7 @@
 #
 # The second is **finite**, so it can be enumerated instead of sampled. That is what
 # `modelica.verify` does, using [musil](https://gitlab.com/jorgeecardona/musil) as the
-# checker. The design note is [Verification](../ideas/verification.md); this notebook runs it.
+# checker. The design note is [Verification](../../ideas/verification/); this notebook runs it.
 
 # %%
 from pathlib import Path

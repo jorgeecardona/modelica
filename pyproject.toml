@@ -62,14 +62,25 @@ verify = ["musil>=0.6"]
 # docs are an *extra* (not a uv dependency-group) so external services can install them via pip.
 # The notebooks under docs/notebooks are *executed* at build time, which is what stops them
 # rotting: a page that stopped working fails `mkdocs build --strict` in CI rather than sitting
-# there showing output from a version of the code that no longer exists. They are `.py` files in
-# percent format rather than `.ipynb` so that a diff of one is readable.
+# there showing output from a version of the code that no longer exists.
+#
+# Two formats, on purpose. The narrative pages are `.py` in jupytext percent format, so their
+# diffs are readable and nothing but source is ever committed. The `.ipynb` ones are the pages
+# a reader is meant to *open and run*: matplotlib figures the library will not grow a
+# dependency to draw, and ipywidgets sliders that need a live kernel. They are committed with
+# their outputs stripped, so they diff like the percent files and cannot show stale results.
+#
+# matplotlib and ipywidgets are docs-only for the reason stated in `modelica.sim.view`: a
+# result renders its own chart in vanilla JavaScript so that the *library* needs neither. Here
+# we are the notebook, not the library, and a phase portrait wants a plotting library.
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
     "mkdocs-jupyter>=0.25",
     "jupytext>=1.16",
     "ipykernel>=6.29",
+    "ipywidgets>=8.1",
+    "matplotlib>=3.9",
 ]
 
 [project.urls]
@@ -120,14 +131,24 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# The pages under docs/notebooks are notebooks in jupytext's percent format: `# %%` splits
-# them into cells, and mkdocs-jupyter executes them at build time. A notebook is a script
-# read top to bottom, not a module, so the rules that keep modules tidy misread it.
+# The pages under docs/notebooks are notebooks -- either jupytext percent format, where
+# `# %%` splits a `.py` into cells, or `.ipynb`. Both are executed by mkdocs-jupyter at build
+# time. A notebook is a script read top to bottom, not a module, so the rules that keep
+# modules tidy misread it.
 "docs/notebooks/*" = [
     "INP001",  # a notebook is not part of a package; there is nothing to import it
     "T201",    # `print` is how a cell says something
     "E402",    # imports sit in the cell that first needs them, after the prose explaining why
     "B018",    # a bare expression on the last line is how a cell displays a value
+    # The rest are the plotting notebooks, where the figures are the output:
+    "ANN",     # a helper defined in one cell and called in the next takes its types from the
+               # cell above it; and matplotlib's own surface is only partly typed, so
+               # spelling out `ax: Axes` buys no checking here (pyright reads src and tests)
+    "RUF001", "RUF002",  # `26×26`, `√(x²+y²) − L`, `resistor–capacitor`: chart titles and
+                         # prose are typeset, and the ambiguous-character rule is about
+                         # identifiers being confusable, not about axis labels
+    "RUF059",  # `fig, ax = plt.subplots()` is matplotlib's own idiom; renaming the figure
+               # `_fig` in the cells that only touch the axes would be noise
 ]
 # Each example is the Python twin of a `.mo` file next to it, and the tests assert the two
 # flatten to the same model. That correspondence outranks the house style: the docstring is

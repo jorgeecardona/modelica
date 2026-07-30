@@ -45,10 +45,17 @@ plugins:
   # The notebooks are executed here, at build time. `allow_errors: false` means a cell that
   # raises fails the build -- which is the point: it makes the pages tests that happen to
   # render, so a documented API cannot quietly stop working.
+  #
+  # Both formats. The `.py` pages are jupytext percent notebooks -- source only, readable
+  # diffs. The `.ipynb` pages are the ones meant to be opened and run: they carry matplotlib
+  # figures and ipywidgets sliders, and they are committed with their outputs stripped, so
+  # they diff like the percent files and cannot render results from an older version of the
+  # code. The widget *state* in the built page is whatever executing it here produced; the
+  # sliders only move again when a reader runs the notebook against a kernel.
   - mkdocs-jupyter:
       execute: true
       allow_errors: false
-      include: ["*.py"]
+      include: ["*.py", "*.ipynb"]
       include_source: true
       ignore_h1_titles: true
 
@@ -58,6 +65,9 @@ nav:
   - Examples: examples.md
   - Notebooks:
       - Simulating a model: notebooks/simulating.py
+      - Turning the knobs: notebooks/exploring.ipynb
+      - The shape of the equations: notebooks/structure.ipynb
+      - Where the smoothness breaks: notebooks/events.ipynb
       - Enumerating the discrete half: notebooks/verifying.py
   - Ideas:
       - Backends: ideas/backends.md

@@ -64,7 +64,7 @@ print(f"explicit:   {system.is_explicit}")
 # %% [markdown]
 # `candidates` is every state set that *would* also have worked. Here there is only one, so
 # there is nothing to choose. The pendulum is the interesting case — see the
-# [verification notebook](verifying.py).
+# [verification notebook](../verifying/).
 #
 # ## 4. Causalized system → generated code
 #

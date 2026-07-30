@@ -110,6 +110,18 @@ source of truth and is bumped automatically when shipped source changes.
   with `allow_errors: false`. A page whose code stopped working fails `mkdocs build --strict`
   in CI rather than sitting there showing output from a version that no longer exists. They
   are `.py` in percent format rather than `.ipynb` so a diff of one is readable.
+- Docs: three **`.ipynb` notebooks** with matplotlib figures and ipywidgets sliders, meant to
+  be opened and run rather than only read — *Turning the knobs* (parameter studies by
+  rewriting a `FlatVariable.binding`, a damping sweep, overshoot and settling time against
+  critical damping), *The shape of the equations* (the incidence matrix of a generated RC
+  ladder, what alias elimination deletes from it, the block-lower-triangular staircase, and
+  the pendulum's 3×3 block that cannot be sorted away), and *Where the smoothness breaks*
+  (bounce events against the geometric series they should follow, the solver's step size
+  collapsing into each event, both state sets' pivots crossing at 45°, and constraint drift
+  never exceeding one machine epsilon). Committed with outputs stripped, so they diff like
+  the percent files and cannot render results from an older version of the code; the site
+  executes them like the others. matplotlib and ipywidgets joined the `docs` extra — the
+  library itself still draws its own charts with no plotting dependency.
 
 ## 0.0.2
 

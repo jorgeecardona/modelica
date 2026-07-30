@@ -24,6 +24,23 @@ pip install "modelica[sim]"   # + numpy/scipy for simulation
 
 Start with [Architecture](architecture.md) for the data model and the build order.
 
+## Notebooks
+
+Every notebook here is executed when this site is built, so what you read is what the
+current code does. The `.ipynb` ones carry figures and sliders and are meant to be opened:
+
+| Page | Shows |
+| --- | --- |
+| [Simulating a model](notebooks/simulating.py) | source → AST → flat model → system → code → trajectory, stopping at each stage |
+| [Turning the knobs](notebooks/exploring.ipynb) | a parameter study as a `for` loop over copies of the flat model, and the same thing on sliders |
+| [The shape of the equations](notebooks/structure.ipynb) | incidence matrices, what alias elimination deletes, and the BLT staircase |
+| [Where the smoothness breaks](notebooks/events.ipynb) | bounce events, the step size collapsing into them, and the pendulum switching state sets |
+| [Enumerating the discrete half](notebooks/verifying.py) | model-checking the event iteration, state selection, FMI modes and the co-simulation master |
+
+```bash
+pip install "modelica[sim]" matplotlib ipywidgets   # what the .ipynb pages need
+```
+
 ## Standards targeted
 
 * **Modelica Language Specification 3.x**
