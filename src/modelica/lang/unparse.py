@@ -69,12 +69,34 @@ def _render_expr(node: ir.Expr) -> str:  # noqa: C901, PLR0911 -- one case per n
             return f"{op}{unparse_expr(operand, minimum=UNARY_SIGN)}"
         case ir.Call(name=name, args=args):
             return f"{name}({', '.join(unparse_expr(a) for a in args)})"
-        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
-            return (
-                f"if {unparse_expr(condition, minimum=IF + 1)}"
-                f" then {unparse_expr(then, minimum=IF + 1)}"
-                f" else {unparse_expr(otherwise, minimum=IF + 1)}"
-            )
+        case ir.IfExpr():
+            return _if_chain(node)
+
+
+def _if_chain(node: ir.IfExpr) -> str:
+    """``if a then x elseif b then y else z``, however deeply the IR nests it.
+
+    A conditional whose else-branch is another conditional is one chain, not a tree, and
+    Modelica has ``elseif`` to say so. Emitting ``else (if ...)`` instead is legal and
+    parses back to the same IR, but a staged schedule written that way -- nine gas levels
+    on a roaster, say -- comes out as nine opening parentheses and a wall of closing ones,
+    which nobody can read and nobody would have written by hand.
+
+    Flattening here rather than at the call sites means every front-end gets it: a chain
+    built by folding a table in Python prints exactly like the ``.mo`` a person would type.
+    """
+    parts: list[str] = []
+    branch = node
+    while True:
+        keyword = "if" if not parts else "elseif"
+        parts.append(
+            f"{keyword} {unparse_expr(branch.condition, minimum=IF + 1)}"
+            f" then {unparse_expr(branch.then, minimum=IF + 1)}"
+        )
+        if not isinstance(branch.otherwise, ir.IfExpr):
+            parts.append(f"else {unparse_expr(branch.otherwise, minimum=IF + 1)}")
+            return " ".join(parts)
+        branch = branch.otherwise
 
 
 def _modification(mod: ir.Modification) -> str:

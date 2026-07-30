@@ -97,7 +97,8 @@ CANONICAL = [
     "(a or b) and c",
     "if a > 0.0 then b else c",
     "1.0 + (if a then 2.0 else 3.0)",
-    "if a then b else (if c then d else e)",
+    "if a then b elseif c then d else e",
+    "if a then b elseif c then d elseif e then f else g",
 ]
 
 
@@ -112,15 +113,32 @@ def test_expression_round_trips_through_the_tree(text: str) -> None:
     assert parse_expression(unparse_expr(node)) == node
 
 
-def test_elseif_is_input_only_sugar() -> None:
-    """``elseif`` is a spelling, not a node -- it desugars, so it prints back nested.
+def test_elseif_is_a_spelling_and_the_one_the_printer_picks() -> None:
+    """``elseif`` is not a node: both spellings parse to the same nested tree.
 
-    That is why it is absent from :data:`CANONICAL`: the text round trip is exact only for
-    what the printer emits, and the printer has no ``elseif`` to emit.
+    Which leaves the printer free to choose, and it chooses the chain. The nested spelling
+    is what the tree literally is, but a conditional whose else-branch is another
+    conditional is one decision taken in stages, and stacking parentheses to say so costs
+    a reader one bracket per stage for no information. A nine-level gas schedule is the
+    case that settled it.
     """
-    sugared = parse_expression("if a then b elseif c then d else e")
-    assert sugared == parse_expression("if a then b else (if c then d else e)")
-    assert unparse_expr(sugared) == "if a then b else (if c then d else e)"
+    for text in ("if a then b elseif c then d else e", "if a then b else (if c then d else e)"):
+        assert parse_expression(text) == ir.IfExpr(
+            A, B, ir.IfExpr(C, ir.Ref(("d",)), ir.Ref(("e",)))
+        )
+        assert unparse_expr(parse_expression(text)) == "if a then b elseif c then d else e"
+
+
+def test_a_conditional_in_a_then_branch_still_gets_its_brackets() -> None:
+    """Only the else-branch chains.
+
+    A conditional nested in a ``then`` is a different tree and has to keep the parentheses
+    that say so, or it would print as a chain and parse back as something else entirely.
+    """
+    node = ir.IfExpr(A, ir.IfExpr(B, C, ir.Ref(("d",))), ir.Ref(("e",)))
+    printed = unparse_expr(node)
+    assert printed == "if a then (if b then c else d) else e"
+    assert parse_expression(printed) == node
 
 
 # --------------------------------------------------------------------------------------

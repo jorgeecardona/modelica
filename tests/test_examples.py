@@ -43,7 +43,17 @@ MODELS = EXAMPLES / "models"
 MODEL_FILES = sorted(MODELS.glob("*.mo"))
 LIBRARY_FILES = sorted(LIBRARY.glob("*.mo"))
 
-SOURCES = frozenset({"analytic", "reference"})
+SOURCES = frozenset({"analytic", "reference", "measured"})
+"""Where a reference number is allowed to have come from.
+
+``analytic`` is a closed form and ``reference`` a trusted solver -- both of them things
+this project could in principle have got wrong in the same way twice. ``measured`` is a
+reading off a real machine, which cannot be wrong in this project's favour, and is the
+only one of the three that says the model is about the world rather than about itself.
+It buys that with tolerance: a measured point is asserted to within the model's honest
+agreement with the hardware, degrees rather than ulps, so a spec that leans on measured
+points alone will not catch a regression. Carry both kinds where you have both.
+"""
 METHODS = frozenset({"RK45", "RK23", "DOP853", "Radau", "BDF", "LSODA"})
 
 

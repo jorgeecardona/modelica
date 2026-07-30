@@ -83,6 +83,7 @@ method    = "LSODA"            # optional; any scipy `solve_ivp` method, default
 # A value at a point in time. `source` records where the number came from:
 #   "analytic"  — closed form, written out in a comment
 #   "reference" — scipy at rtol/atol 1e-12, i.e. a golden trajectory
+#   "measured"  — read off real hardware; see `RoastingMachine`
 [[simulate.point]]
 t      = 1.0
 values = { "c.v" = 0.632120558829 }
@@ -116,7 +117,7 @@ needed, plus exactly one new capability.
 | `MassSpringDamper` | the same physics through a different domain's connectors | scipy |
 | `DrainingTank` | `if` in an equation → a state event; `sqrt` | analytic |
 | `BouncingBall` | `when` / `reinit` / `pre` — repeated events, state reinitialisation | analytic |
-| `RoastingMachine` | `time` in an equation → time events; a crossing passed through rather than latched | scipy |
+| `RoastingMachine` | `time` in an equation → time events; a staged schedule | **a real machine** |
 | `Pendulum` | a constraint equation → index 3 → Pantelides + dummy derivatives | scipy |
 | `Robertson` | stiffness: a stiff solver is mandatory, explicit RK dies | scipy |
 | `VanDerPol` | a relaxation limit cycle; step-size control across 3 orders of magnitude | scipy |
@@ -124,12 +125,23 @@ needed, plus exactly one new capability.
 `Robertson` and `VanDerPol` are not physical-modelling examples — they are the classic
 Hairer–Wanner stiff test problems, here to hold the solver honest.
 
+`RoastingMachine` is the one example whose reference is neither a closed form nor a
+solver. It is a Loring S15 that roasted five batches of coffee on 2026-07-30, logged over
+Modbus at 1.5 s; the model carries the first batch's own gas trace, and the spec checks it
+against what the machine's bean probe actually read — 1.0 °C rms over 14 minutes and
+196 °C of rise. Parameters were fitted to that batch and then checked, unchanged, against
+the other four. What it cannot do is as instructive as what it can: nobody weighed the
+charge, so the drying that dominates the first half is folded into an effective heat
+capacity rather than modelled, and the spec says so at length.
+
 ## Adding one
 
 1. Write the `.mo`. Keep it short and physically real; no synthetic equations.
 2. Write the `.py` twin, same stem.
 3. Work out the reference: closed form if one exists, otherwise scipy at `rtol=1e-12`.
-   Say which in `source`.
+   Say which in `source`. If the model is of something that exists and you can get a log
+   off it, `measured` beats both — but carry a `reference` point too, because degrees of
+   slack cannot catch a regression.
 4. Write the `.toml`. Assert only what you are sure of.
 5. `make test` — the corpus guard checks the set is well-formed, and the twin check runs
    immediately, even while the stages that would simulate it are still skipped.
