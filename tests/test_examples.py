@@ -44,6 +44,7 @@ MODEL_FILES = sorted(MODELS.glob("*.mo"))
 LIBRARY_FILES = sorted(LIBRARY.glob("*.mo"))
 
 SOURCES = frozenset({"analytic", "reference"})
+METHODS = frozenset({"RK45", "RK23", "DOP853", "Radau", "BDF", "LSODA"})
 
 
 def _ids(paths: list[Path]) -> list[str]:
@@ -98,6 +99,7 @@ def test_simulate_section_is_well_formed(model: Path) -> None:
         return
     stop = simulate["stop"]
     assert stop > 0, "`stop` must be positive"
+    assert simulate.get("method", "Radau") in METHODS, f"unknown method {simulate['method']!r}"
 
     for point in simulate.get("point", []):
         assert 0 <= point["t"] <= stop, f"point at t={point['t']} lies outside [0, {stop}]"
@@ -372,6 +374,7 @@ def test_simulates_as_specified(model: Path) -> None:
         stop=spec["stop"],
         tolerance=spec.get("tolerance", 1e-6),
         times=sorted({point["t"] for point in spec.get("point", [])}) or None,
+        method=spec.get("method", "Radau"),
     )
 
     _check_points(spec, result, np)

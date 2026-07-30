@@ -78,6 +78,7 @@ equations = 14                 # optional, only where the count is unambiguous
 [simulate]
 stop      = 5.0
 tolerance = 1e-8
+method    = "LSODA"            # optional; any scipy `solve_ivp` method, default "Radau"
 
 # A value at a point in time. `source` records where the number came from:
 #   "analytic"  — closed form, written out in a comment

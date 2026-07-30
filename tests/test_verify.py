@@ -82,7 +82,12 @@ def test_event_iteration_settles_at_every_event(model: Path) -> None:
     if run is None:
         pytest.skip("no simulate section")
     system = _system(model)
-    result = simulate(system, stop=run["stop"], tolerance=run.get("tolerance", 1e-6))
+    result = simulate(
+        system,
+        stop=run["stop"],
+        tolerance=run.get("tolerance", 1e-6),
+        method=run.get("method", "Radau"),
+    )
     for report in check_run(system, result):
         assert report.ok, str(report)
 

@@ -16,9 +16,18 @@ balanced = true
 # near-vertical jumps. `stop` covers the first slow arc, which is enough to expose bad
 # step-size control without making the test a benchmark. Reference values agree to ~1e-6
 # across scipy's Radau, BDF and LSODA.
+#
+# `method` is here and nowhere else, and it is about the integrator rather than the model.
+# All three methods walk this problem in the same number of steps -- ~40k for LSODA against
+# ~80k for Radau, at the same tolerance -- but scipy's Radau and BDF are written in Python
+# and LSODA is compiled Fortran, so the same work costs 22 s or 0.4 s depending only on
+# which one is asked. Nothing about the emitted code changes: profiling puts 2 s of a 34 s
+# run in the model and the rest in the solver's own linear algebra. So this is a statement
+# about scipy, kept next to the model that provoked it.
 [simulate]
 stop = 50.0
 tolerance = 1e-9
+method = "LSODA"
 
 [[simulate.point]]
 t = 1.0
