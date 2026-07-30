@@ -1090,7 +1090,7 @@ wheels = [
 
 [[package]]
 name = "modelica"
-version = "0.0.7"
+version = "0.0.8"
 source = { editable = "." }
 
 [package.optional-dependencies]
@@ -1134,7 +1134,7 @@ requires-dist = [
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
     { name = "mkdocs-jupyter", marker = "extra == 'docs'", specifier = ">=0.25" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
-    { name = "musil", marker = "extra == 'verify'", specifier = ">=0.6" },
+    { name = "musil", marker = "extra == 'verify'", specifier = ">=0.7" },
     { name = "numpy", marker = "extra == 'sim'", specifier = ">=2.0" },
     { name = "scikit-sundae", marker = "extra == 'sundials'", specifier = ">=1.0" },
     { name = "scipy", marker = "extra == 'sim'", specifier = ">=1.13" },
@@ -1143,7 +1143,7 @@ provides-extras = ["sim", "sundials", "verify", "docs"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "musil", specifier = ">=0.6" },
+    { name = "musil", specifier = ">=0.7" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pyright", specifier = ">=1.1.390" },
     { name = "pytest", specifier = ">=8" },
@@ -1154,11 +1154,11 @@ dev = [
 
 [[package]]
 name = "musil"
-version = "0.6.2"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/fa/20/04ea2c8072f08bfa8a53dc787fe75b7b052c006432d7f419c3ed92a3d3d3/musil-0.6.2.tar.gz", hash = "sha256:a2e32fe5240fd2ce2639f2843d8b0f1181005df43cab39cd211902000ad7c096", size = 115705, upload-time = "2026-06-28T19:40:15.305Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/95/36922ff5e54737dfed1e958883a8b7e172d6fc78e32ec0817287ecc41b61/musil-0.7.0.tar.gz", hash = "sha256:4929314181fec5ad6beab5ac7d5daa57e33ba7d5f772718db842df9006ad63a8", size = 122555, upload-time = "2026-07-30T06:04:05.11Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/32/40a707fcbbd03119fcf94f836c0d50c4564f76d40bc325ca2b3fc1aa8196/musil-0.6.2-py3-none-any.whl", hash = "sha256:f24c46c98f4a2cd04dfe758f3044d9163b49893117f1d170796c3a7e05f322c0", size = 58431, upload-time = "2026-06-28T19:40:16.316Z" },
+    { url = "https://files.pythonhosted.org/packages/de/e5/fb51b1c3560520b8c1664ef90130443ea3582ad2c1764b4eb219662d92d5/musil-0.7.0-py3-none-any.whl", hash = "sha256:a552ecc201bc29ae159a64db034f94f343641118d0beb4c6e477a7139c26ca18", size = 61719, upload-time = "2026-07-30T06:04:04.089Z" },
 ]
 
 [[package]]

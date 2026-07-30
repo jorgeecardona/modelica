@@ -50,6 +50,8 @@ from musil import (
     check_liveness,
     check_open,
     explore,
+    fixed_points,
+    protocol_actions,
 )
 
 from modelica.fmi.modes import Interface, Mode, table
@@ -58,7 +60,7 @@ from modelica.sim.kernel import Kernel, build
 from modelica.ssp.master import Component, Phase, Progress, moves, start
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from musil import Graph, LivenessResult, OpenResult
     from musil import Result as CheckResult
@@ -344,30 +346,27 @@ def check_iteration(
     The two questions are asked differently on purpose. *Settling* is a property of the
     whole model, so it is one liveness check over every configuration at once. *Settling in
     one place* is a property of each configuration separately -- two configurations are
-    allowed to disagree, that is what a latch is for -- so it needs the reachable set of
-    each one on its own.
+    allowed to disagree, that is what a latch is for -- which is exactly what
+    :func:`musil.fixed_points` reports, per initial state.
     """
     kernel = model if isinstance(model, Kernel) else build(model)
     discrete = _Discrete(kernel, t, y)
     checkable = iteration(kernel, t=t, y=y, start=start)
-    outcomes: dict[Instant, tuple[Instant, ...]] = {}
-    explored = 0
-    for configuration in checkable.initial_states():
-        graph = explore(iteration(kernel, t=t, y=y, start=[configuration]))
-        explored += len(graph.states)
-        # `fired` is bookkeeping for the iteration, not part of where it ended up: the same
-        # latches reached by one event or by three are the same answer.
-        outcomes[configuration] = tuple(
-            dict.fromkeys(
-                Instant(state.latches, state.state, frozenset())
-                for state in graph.states
-                if not graph.edges[state]
-            )
-        )
+    settling = fixed_points(checkable)
     return Report(
         name=kernel.name,
-        explored=explored,
-        outcomes=outcomes,
+        explored=len(explore(checkable).states),
+        # `fired` is bookkeeping for the iteration, not part of where it ended up: the same
+        # latches reached by one event or by three are the same answer, so the outcomes are
+        # deduplicated with it dropped.
+        outcomes={
+            configuration: tuple(
+                dict.fromkeys(
+                    Instant(end.latches, end.state, frozenset()) for end in sorted(ends, key=str)
+                )
+            )
+            for configuration, ends in settling.by_init.items()
+        },
         liveness=check_liveness(checkable, goal=discrete.settled, goal_name="settled"),
     )
 
@@ -650,25 +649,17 @@ def modes(interface: Interface) -> Model[Mode]:
     machine says: what may be called next is a function of where you are, and of nothing you
     did to get there. If that ever stops being true the table is the wrong shape, and this
     is where it shows.
+
+    The actions come straight out of the table through :func:`musil.protocol_actions`, so
+    there is no second description of the sequence for the table to drift from -- calls that
+    are legal without moving contribute no action, which is the same reading a guard gives
+    them.
     """
-    transitions = table(interface)
-    actions = [
-        Action(
-            name=f"{call} in {mode}",
-            enabled=lambda s, _m=mode: s == _m,
-            apply=lambda _s, _m=mode, _t=target: _t,
-        )
-        for mode, calls in transitions.items()
-        for call, target in calls.items()
-        if target is not None and target != mode
-    ]
     return Model(
-        # A list of one, not the mode itself: a `Mode` is a `StrEnum` and therefore a `str`,
-        # and musil <= 0.6.2 reads any non-dataclass iterable as "several initial states" --
-        # so a bare mode was taken apart into its characters and every mode came back
-        # unreachable. Fixed upstream; the list is correct either way and says what it means.
-        init=[Mode.INSTANTIATED],
-        actions=actions,
+        init=Mode.INSTANTIATED,
+        actions=protocol_actions(
+            table(interface), get=lambda s: s, with_state=lambda _s, target: target
+        ),
         terminal=lambda s: s is Mode.FREED,
     )
 
@@ -709,6 +700,12 @@ class MasterReport:
     components: tuple[Component, ...]
     safety: CheckResult[Progress]
     liveness: LivenessResult[Progress]
+    declined: bool
+    """Whether the master refused the system at load time rather than stepping it.
+
+    An outcome, not a failure: the components did not offer what the algorithm needs, and
+    saying so before anything moves is the correct behaviour. ``ok`` stays true.
+    """
 
     @property
     def ok(self) -> bool:
@@ -722,11 +719,20 @@ class MasterReport:
             return f"master over {who}: {self.safety}"
         if not self.liveness.ok:
             return f"master over {who}: {self.liveness}"
+        if self.declined:
+            return (
+                f"master over {who}: declined before stepping anything -- a rollback-based"
+                " algorithm needs `canGetAndSetFMUState` from every component"
+            )
         return f"master over {who}: every component reaches the horizon together"
 
 
 def master(
-    components: tuple[Component, ...], *, horizon: int = 2, retries: int = 1
+    components: tuple[Component, ...],
+    *,
+    horizon: int = 2,
+    retries: int = 1,
+    require_rollback: bool = True,
 ) -> Model[Progress]:
     """A co-simulation master, as a model checker's model.
 
@@ -743,9 +749,17 @@ def master(
     """
 
     def out(state: Progress) -> list[tuple[str, Progress]]:
-        return list(moves(state, components, horizon=horizon, retries=retries))
+        return list(
+            moves(
+                state,
+                components,
+                horizon=horizon,
+                retries=retries,
+                require_rollback=require_rollback,
+            )
+        )
 
-    catalogue = _reachable_moves(start(components), components, horizon, retries)
+    catalogue = {name for state in _walk(start(components), out) for name, _ in out(state)}
     return Model(
         init=[start(components)],
         actions=[
@@ -774,50 +788,55 @@ def master(
                 )
             ),
         },
-        terminal=lambda s: s.phase is Phase.DONE,
+        terminal=lambda s: s.phase in (Phase.DONE, Phase.DECLINED),
     )
 
 
-def _reachable_moves(
-    origin: Progress, components: tuple[Component, ...], horizon: int, retries: int
-) -> set[str]:
-    """Every move name the protocol can ever offer, so the actions can be built by name.
+def _walk(origin: Progress, out: Callable[[Progress], list[tuple[str, Progress]]]) -> set[Progress]:
+    """Every state the protocol can reach, so the move names can be collected once.
 
-    musil wants a fixed list of actions and asks each one whether it is enabled; the
-    protocol offers moves per state. Collecting the names once bridges the two without
-    letting the action list depend on where the search happens to be.
+    musil wants a fixed list of actions and asks each whether it is enabled; the protocol
+    offers moves per state. Walking it here bridges the two without letting the action list
+    depend on where the search happens to be.
     """
     seen = {origin}
     frontier = [origin]
-    names: set[str] = set()
     while frontier:
-        for name, target in moves(frontier.pop(), components, horizon=horizon, retries=retries):
-            names.add(name)
+        for _, target in out(frontier.pop()):
             if target not in seen:
                 seen.add(target)
                 frontier.append(target)
-    return names
+    return seen
 
 
 def check_master(
-    components: tuple[Component, ...], *, horizon: int = 2, retries: int = 1
+    components: tuple[Component, ...],
+    *,
+    horizon: int = 2,
+    retries: int = 1,
+    require_rollback: bool = True,
 ) -> MasterReport:
-    """Prove the master never strands itself and every component reaches the horizon.
+    """Prove the master finishes, or declines before it has moved anything.
 
-    The interesting run is the one where a component that cannot roll back has already
-    stepped when another refuses: there is no move that puts it back, the master has nothing
-    left to offer, and the check reports a deadlock with the interleaving that produced it.
+    Both endings count as settling, and that is the point of the load-time precondition: a
+    system whose FMUs cannot all roll back is not one this algorithm can step, and the honest
+    place to say so is before the first `fmi3DoStep`.
+
+    ``require_rollback=False`` drops the precondition and the run that motivated it comes
+    back: a component that cannot roll back has already stepped when another refuses, there
+    is no move that puts it back, and the master has nothing left to offer.
     """
-    model = master(components, horizon=horizon, retries=retries)
+    model = master(components, horizon=horizon, retries=retries, require_rollback=require_rollback)
     return MasterReport(
         components=components,
         safety=check(model),
         liveness=check_liveness(
             model,
-            goal=lambda s: s.phase is Phase.DONE,
-            goal_name="every component at the horizon",
+            goal=lambda s: s.phase in (Phase.DONE, Phase.DECLINED),
+            goal_name="the horizon, or a refusal before moving",
             fair=[action.name for action in model.actions],
         ),
+        declined=require_rollback and not all(c.rollback for c in components),
     )
 
 

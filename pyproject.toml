@@ -7,7 +7,7 @@
 # abandoned Modelon/JModelica.org upload (version "trunk"). The git repo keeps the
 # historical name; the import package matches the distribution.
 name = "modelica"
-version = "0.0.7"
+version = "0.0.8"
 description = "Pure-Python Modelica toolchain: parse, flatten, simulate, and exchange via FMI 3.0 and SSP 2.0"
 readme = "README.md"
 # 3.12+, no compatibility shims: this is a full rewrite of a 2010 Python 2 codebase, and
@@ -58,7 +58,7 @@ sundials = ["scikit-sundae>=1.0"]
 # dev-only tool because "does this model's event iteration converge?" is a question about
 # *your* model, not about this package's tests -- but it stays out of the base install,
 # because a simulator that cannot run without a model checker would be an odd thing.
-verify = ["musil>=0.6"]
+verify = ["musil>=0.7"]
 # docs are an *extra* (not a uv dependency-group) so external services can install them via pip.
 # The notebooks under docs/notebooks are *executed* at build time, which is what stops them
 # rotting: a page that stopped working fails `mkdocs build --strict` in CI rather than sitting
@@ -107,7 +107,7 @@ dev = [
     "pytest-cov>=6",
     "numpy>=2.0",
     "scipy>=1.13",
-    "musil>=0.6",
+    "musil>=0.7",
 ]
 
 [tool.pytest.ini_options]
