@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from modelica.ir.system import System
-    from modelica.sim.emit import Code
+    from modelica.sim.emit import Code, Trigger
 
 __all__ = ["SimulationError", "simulate"]
 
@@ -47,6 +47,20 @@ _STANDSTILL = 1e-12
 
 _ITERATIONS = 100
 """Events allowed to act at one instant before the iteration is called non-convergent."""
+
+_REARM = 1e-9
+"""How far a crossing that just fired is held off zero while the run leaves it behind.
+
+A segment restarts exactly on the root the previous one located, so the fired indicator
+reads as zero give or take noise -- and SciPy, asked for crossings in either direction,
+is entitled to report that noise as a fresh event at the same instant, forever. A ball's
+``when`` moves the state off the root by reinitialising it and a mode switch carries its
+own hysteresis margin, but a relation crossed in passing -- beans rising through boiling,
+a gas schedule reaching its cut -- leaves nothing behind to step over. So the crossing
+that fired is nudged to the side its latch says it is on, for the segment that follows,
+and the nudge is money: it moves the *next* root of that relation by ``_REARM`` over the
+indicator's slope, which is orders below the tolerance any spec asserts an event time to.
+"""
 
 
 class SimulationError(Exception):
@@ -150,6 +164,7 @@ class _Run:
         self.relative = relative
         self.absolute = absolute
         self.method = method
+        self.rearm: dict[int, float] = {}
         self.triggers = [self._trigger(k) for k in range(kernel.events)]
 
     # -- the functions SciPy calls ------------------------------------------------------
@@ -167,7 +182,7 @@ class _Run:
 
         def crossing(t: float, y: NDArray[np.float64]) -> float:
             z = self.kernel.indicators(t, y, self.p, self.w, np.empty(self.kernel.events))
-            return float(z[index])
+            return float(z[index]) + self.rearm.get(index, 0.0)
 
         crossing.terminal = True  # pyright: ignore[reportFunctionMemberAccess]
         crossing.direction = self.kernel.code.events[index].direction  # pyright: ignore[reportFunctionMemberAccess]
@@ -273,7 +288,26 @@ class _Run:
                 )
                 raise SimulationError(message)
             pending = self._stale(at, y, fired)
+        self.rearm = {
+            index: offset
+            for index in fired
+            if (offset := self._offset(self.kernel.code.events[index])) is not None
+        }
         return y
+
+    def _offset(self, trigger: Trigger) -> float | None:
+        """Which side of its own zero a crossing that just fired restarts on.
+
+        A latched relation sits on the side its latch was left holding. A ``when`` branch
+        fired as its condition became true, so it restarts on the true side. A mode switch
+        gets nothing: its indicator carries a hysteresis margin of its own, and is only
+        watched from the state set it would leave.
+        """
+        if trigger.switch is not None:
+            return None
+        if trigger.latch is not None and not self.w[trigger.latch] > HELD:
+            return -_REARM
+        return _REARM
 
     def _stale(self, t: float, y: NDArray[np.float64], fired: set[int]) -> int | None:
         """The first latch that no longer agrees with the relation it is holding.

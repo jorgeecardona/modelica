@@ -116,6 +116,7 @@ needed, plus exactly one new capability.
 | `MassSpringDamper` | the same physics through a different domain's connectors | scipy |
 | `DrainingTank` | `if` in an equation → a state event; `sqrt` | analytic |
 | `BouncingBall` | `when` / `reinit` / `pre` — repeated events, state reinitialisation | analytic |
+| `RoastingMachine` | `time` in an equation → time events; a crossing passed through rather than latched | scipy |
 | `Pendulum` | a constraint equation → index 3 → Pantelides + dummy derivatives | scipy |
 | `Robertson` | stiffness: a stiff solver is mandatory, explicit RK dies | scipy |
 | `VanDerPol` | a relaxation limit cycle; step-size control across 3 orders of magnitude | scipy |

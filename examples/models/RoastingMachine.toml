@@ -1,0 +1,78 @@
+summary = "A drum coffee roaster over one batch: a staged gas schedule, so `time` itself makes events."
+teaches = ["time in an equation", "time events", "a staged schedule", "leaving a fired event behind"]
+requires = []
+
+[parse]
+classes = ["RoastingMachine"]
+
+[flatten]
+model = "RoastingMachine"
+states = ["T_drum", "T_bean", "m_w"]
+equations = 5
+index = 1
+balanced = true
+
+# One batch, told by its events. The drum is preheated to 200 C and 12 kg of cold beans
+# go in at t = 0, so the drum dips first -- the roaster's *turning point*, bottoming at
+# 187.8 C near t = 62 -- while the beans climb. At t = 64.47 the beans pass boiling and
+# the drying branch switches on: a state event crossed in passing, which the integrator
+# has to step over and leave behind, not an event that latches at a touch (DrainingTank)
+# or reinitialises a state (BouncingBall). The other two events come from `time` alone:
+# the gas is cut at t = 480, just as the beans reach first crack (196 C at t = 482), and
+# goes out at t = 640, where the batch is dropped at 210 C after 14 K of development.
+# The tail past flame-out is the drum still cooking the beans on stored heat -- the
+# reason a real batch leaves the drum in a hurry.
+[simulate]
+stop = 720.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 60.0
+values = { T_drum = 460.911268678, T_bean = 369.215571300, m_w = 1.44 }
+rtol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 300.0
+values = { T_drum = 487.021772667, T_bean = 429.622578883, m_w = 0.618120699746 }
+rtol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 480.0
+values = { T_drum = 511.720971730, T_bean = 468.689216144, m_w = 0.160730561032 }
+rtol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 640.0
+values = { T_drum = 488.081355520, T_bean = 482.992079394 }
+rtol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 720.0
+values = { T_drum = 467.642140886, T_bean = 477.868133999, m_w = 0.0125034070688 }
+rtol = 1e-8
+source = "reference"
+
+# The beans only ever dry: the moisture starts at 1.44 kg and the drying branch is
+# proportional to what is left, so it decays without ever crossing zero.
+[[simulate.invariant]]
+expr = "m_w"
+min = 0.0
+max = 1.44
+atol = 1e-12
+
+# No batch of coffee survives 227 C, and none starts below the room it was stored in.
+[[simulate.invariant]]
+expr = "T_bean"
+min = 293.15
+max = 500.0
+atol = 1e-9
+
+# Boiling reached, gas cut, flame out -- in that order. The first is a state event and
+# comes from the reference trajectory; the other two are the schedule's own parameters.
+[simulate.events]
+times = [64.473612944, 480.0, 640.0]
+atol = 1e-6
