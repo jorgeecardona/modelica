@@ -103,6 +103,51 @@ times = [0.451523641437, 0.813742554587]
 atol  = 1e-6
 ```
 
+## Drawing one
+
+A model of a *mechanism* has a picture that a line plot cannot show, and for those the spec
+carries an optional `[animate]` section: bodies at their coordinates, rods and springs
+between them, the path a bob sweeps, and a panel underneath for the one scalar worth
+watching. Coordinates are Modelica expressions over the model's own variables — the same
+`parse_expression` + `emit_expr` road the invariants take — so `x2` means the model's `x2`.
+
+```toml
+[animate]
+stop  = 40.0                  # optional; defaults to [simulate].stop
+fps   = 30
+speed = 1.0                   # seconds of model time per second of video
+title = "..."
+width = 6.6                   # inches; the height follows the plane, never given
+
+[[animate.part]]              # kind = rod | spring | mass | pivot | track
+kind  = "spring"
+from  = ["0", "0"]            # `at` instead of `from`/`to` for mass and pivot
+to    = ["xp", "yp"]
+coils = 14
+
+[[animate.part]]
+kind  = "mass"
+at    = ["x2", "y2"]
+trace = 4.0                   # seconds of path kept behind it
+color = 1                     # index into the palette; 0 if omitted
+
+[[animate.plot]]
+expr  = "energy"
+label = "total energy (J)"
+ylim  = [-35.5, -33.5]        # worth fixing for a conserved quantity — see below
+```
+
+`python examples/animate.py <Model>` writes `<Model>.mp4`; `--out x.gif` writes a GIF
+instead, and `--still 24.0` writes one frame at that instant, which is what you want while
+a scene is being written. It needs `matplotlib` (the `docs` extra) and, for `.mp4`, ffmpeg
+— neither of which the library itself will ever depend on.
+
+Two things that are easy to get wrong, both now defaulted the right way. Leave `xlim`/`ylim`
+out unless you have a reason: the frame is computed from everything the run actually
+visits, and a guess clips a chaotic path. And fix `ylim` on a panel showing a *conserved*
+quantity: left to itself the axis zooms into the integrator's last digit, and a line flat
+to one part in 10⁹ is drawn as violent noise — the exact opposite of the claim.
+
 ## The models
 
 Ordered the way the toolchain gets built: each one needs everything the ones above it
@@ -119,11 +164,19 @@ needed, plus exactly one new capability.
 | `BouncingBall` | `when` / `reinit` / `pre` — repeated events, state reinitialisation | analytic |
 | `RoastingMachine` | `time` in an equation → time events; a staged schedule | **a real machine** |
 | `Pendulum` | a constraint equation → index 3 → Pantelides + dummy derivatives | scipy |
+| `AtwoodPendulum` | five coupled degrees of freedom → a 4×4 implicit block to solve | scipy + energy |
 | `Robertson` | stiffness: a stiff solver is mandatory, explicit RK dies | scipy |
 | `VanDerPol` | a relaxation limit cycle; step-size control across 3 orders of magnitude | scipy |
 
 `Robertson` and `VanDerPol` are not physical-modelling examples — they are the classic
 Hairer–Wanner stiff test problems, here to hold the solver honest.
+
+`AtwoodPendulum` is the one whose reference nobody can eyeball: the trajectory is chaotic,
+so a golden point five seconds in says something about this toolchain's arithmetic and
+nothing about the physics. What checks the *model* is its own total energy, written out as
+a variable and asserted flat. The equations came out of a computer algebra system and no
+one can proofread them by reading; the invariant is what proofreads them, and it caught a
+singular mass matrix in the first draft.
 
 `RoastingMachine` is the one example whose reference is neither a closed form nor a
 solver. It is a Loring S15 that roasted five batches of coffee on 2026-07-30, logged over

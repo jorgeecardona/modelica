@@ -57,3 +57,37 @@ atol = 1e-8
 expr = "0.5 * (vx ^ 2 + vy ^ 2) + 9.81 * y"
 value = 0.0
 atol = 1e-7
+
+# The picture: `examples/animate.py Pendulum`. The model is already in Cartesian
+# coordinates, so the scene is the model -- `x` and `y` are drawn where they are.
+[animate]
+stop = 6.0
+fps = 30
+xlim = [-1.14, 1.14]
+ylim = [-1.12, 0.12]
+title = "Pendulum -- an index-3 DAE, drawn"
+width = 6.4
+
+[[animate.part]]
+kind = "rod"
+from = ["0", "0"]
+to = ["x", "y"]
+
+[[animate.part]]
+kind = "pivot"
+at = ["0", "0"]
+
+[[animate.part]]
+kind = "mass"
+at = ["x", "y"]
+trace = 2.0
+
+# The same invariant as above, now as a line that must not move. Index reduction
+# differentiates the constraint away; if it drifts, this is where it shows. The scale is
+# fixed at the size of the energy the swing is actually trading -- 9.81 J/kg between the
+# release point and the bottom -- because that is the scale on which "does not move" is a
+# claim worth making. Left to itself the axis would fill with the tenth decimal place.
+[[animate.plot]]
+expr = "0.5 * (vx ^ 2 + vy ^ 2) + 9.81 * y"
+label = "energy (J/kg)"
+ylim = [-10.0, 10.0]

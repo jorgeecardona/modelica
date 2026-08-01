@@ -1,0 +1,177 @@
+summary = "A swinging Atwood machine on an elastic string carrying a double pendulum: five coupled degrees of freedom, a 4x4 linear block, and a conserved energy that is the only proof the algebra is right."
+teaches = [
+    "a Lagrangian model written as equations, not as an ODE",
+    "an implicit block the flattener has to solve",
+    "energy as an invariant",
+    "chaos",
+]
+requires = []
+
+[parse]
+classes = ["AtwoodPendulum"]
+
+[flatten]
+model = "AtwoodPendulum"
+states = ["z", "r", "th", "p1", "p2", "vz", "vr", "om", "w1", "w2"]
+index = 1
+balanced = true
+
+# Where this came from, and why it is written the way it is.
+#
+# A pulley at the origin. On one side a counterweight `M` that moves only vertically, `z`
+# below the pulley. On the other an elastic string -- natural length `L`, stiffness `k` --
+# of current length `r` at angle `th` from the downward vertical, and at its end a body
+# `m0` from which a double pendulum hangs: rods `l1`, `l2`, bobs `m1`, `m2`, at angles
+# `p1`, `p2`. The string being elastic rather than inextensible is what makes `z` and `r`
+# independent: they are coupled only through the tension `k*(z + r - L)`, which is the one
+# thing the two sides of the pulley say to each other.
+#
+# Five degrees of freedom, and the equations are the Euler-Lagrange equations for them --
+# derived once with a computer algebra system, then hand-reduced with
+# `sin(a)sin(b) + cos(a)cos(b) = cos(a - b)` into the six named cosines and sines at the
+# top of the equation section. Nothing was solved for an acceleration. Each of the four
+# non-trivial equations is *linear* in `der(vr)`, `der(om)`, `der(w1)`, `der(w2)` and
+# mentions several of them, so what the flattener gets is a 4x4 implicit block -- the
+# largest in this corpus, and the reason the model is here. Writing it this way rather than
+# as an explicit ODE is the whole argument for a Modelica tool: the inversion is its job.
+#
+# `m0` is not decoration. Without a mass at the pivot the kinetic energy is degenerate --
+# the map from four velocities to the two bob velocities has a kernel, so the mass matrix
+# is singular and there is no ODE at all. The first draft of this model omitted it and the
+# derivation's own eigenvalue check found the zero. A massless point that other masses hang
+# from is a modelling mistake, not a simplification.
+#
+# The parameters are chosen, not measured; there is no real machine here. What pins them is
+# that the motion has to stay on screen: an Atwood machine is unbalanced by construction, so
+# the heavier side wins and either the swinging mass is hauled into the pulley (`M` large)
+# or it descends forever (`M` small). At `M = 2.1` against `m0 + m1 + m2 = 2.0` the
+# counterweight is just heavy enough to hold the swinging side up, and everything stays
+# bounded -- `r` within [0.80, 1.15] and `z` within [0.68, 1.07] over a minute. `z`'s start
+# is the vertical equilibrium, `L - r + M*g/k`, so the run begins with the string already
+# carrying the counterweight and only the tilt to release.
+[simulate]
+stop = 30.0
+tolerance = 1e-10
+
+# scipy at rtol = atol = 1e-12. Chaotic trajectories separate exponentially, so these are
+# a statement about this toolchain's arithmetic and not about the physical system: nothing
+# real stays on a particular one of these curves for 30 seconds. That is exactly what makes
+# them a good regression test -- any change that perturbs the arithmetic shows up here long
+# before it would show up in a picture.
+[[simulate.point]]
+t = 5.0
+values = { r = 0.98607375672, th = 0.11073553532, p1 = -0.34575039251, p2 = 0.020076847806, z = 0.91334377109 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 15.0
+values = { r = 0.83722685199, th = -0.49987281045, p1 = -0.39823776542, p2 = 0.15942569372, z = 1.005299352 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 30.0
+values = { r = 0.84954318998, th = 0.30980604561, p1 = -0.13580862961, p2 = -0.46591164721, z = 1.0172826292 }
+rtol = 1e-5
+source = "reference"
+
+# The check that matters. Total energy is written out in the model as a variable; nothing
+# in the equations forces it to hold, and every way of getting a Lagrangian wrong -- a
+# dropped Coriolis term, a sign, a factor of two -- moves it. This one line is why the
+# model is trustworthy at all: it was written against a symbolic derivation nobody can
+# proofread, and this is what proofreads it.
+[[simulate.invariant]]
+expr = "energy"
+value = -34.499512464789206
+atol = 1e-7
+
+# The string never goes slack: an elastic string that went into compression would be
+# pushing, which a string cannot do, and the model would be quietly wrong from there on.
+# Over 30 s the tension stays within [12.8, 29.8] N, either side of the 20.6 N it carries
+# at rest.
+[[simulate.invariant]]
+expr = "tension"
+min = 1.0
+max = 40.0
+
+# Bounded, which is the whole reason for this mass ratio.
+[[simulate.invariant]]
+expr = "r"
+min = 0.6
+max = 1.3
+
+# The picture: `python examples/animate.py AtwoodPendulum`. Read from the top: the
+# counterweight on its vertical track, the pulley, the spring down to the swinging body,
+# then the two rods. Only the second bob leaves a trail -- it is the one whose path never
+# repeats, and three overlapping trails would be a scribble.
+[animate]
+stop = 40.0
+fps = 30
+# No `xlim`/`ylim`: the frame is computed from everything the run actually visits, which
+# for a chaotic trajectory is the only way to get it right. Guessed limits clipped the
+# second bob's path on the first attempt.
+title = "A double pendulum on a spring Atwood machine"
+width = 6.6
+
+[[animate.part]]
+kind = "track"
+from = ["xc", "-0.5"]
+to = ["xc", "-1.25"]
+
+[[animate.part]]
+kind = "rod"
+from = ["xc", "0"]
+to = ["xc", "yc"]
+
+[[animate.part]]
+kind = "pivot"
+at = ["0", "0"]
+
+[[animate.part]]
+kind = "mass"
+at = ["xc", "yc"]
+size = 1.3
+color = 1
+
+[[animate.part]]
+kind = "spring"
+from = ["0", "0"]
+to = ["xp", "yp"]
+coils = 14
+
+[[animate.part]]
+kind = "mass"
+at = ["xp", "yp"]
+size = 1.1
+color = 1
+
+[[animate.part]]
+kind = "rod"
+from = ["xp", "yp"]
+to = ["x1", "y1"]
+
+[[animate.part]]
+kind = "mass"
+at = ["x1", "y1"]
+size = 0.85
+
+[[animate.part]]
+kind = "rod"
+from = ["x1", "y1"]
+to = ["x2", "y2"]
+
+[[animate.part]]
+kind = "mass"
+at = ["x2", "y2"]
+size = 0.75
+trace = 4.0
+
+# A flat line under a trajectory that never repeats. The scale is fixed at a joule either
+# side of the true value, because that is a scale a reader can judge "conserved" on; left
+# to itself the axis would zoom into the tenth digit and draw the solver's noise.
+[[animate.plot]]
+expr = "energy"
+label = "total energy (J)"
+color = 2
+ylim = [-35.5, -33.5]

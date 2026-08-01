@@ -223,6 +223,22 @@ def _unary(op: ir.UnaryOp, operand: ir.Expr) -> ir.Expr:
     return ir.Unary(op, operand)
 
 
+def _fold(node: ir.Expr | None) -> ir.Expr | None:
+    """The same folding, for the places an expression is *not* walked.
+
+    A declaration attribute -- `start`, `min`, a parameter's own binding -- is carried
+    across untouched, so `start = -0.6` kept the parsed `Unary('-', 0.6)` while the Python
+    front-end's `start=-0.6` arrived already negative. The two spell the same model and
+    compared unequal, which `AtwoodPendulum` (the first example in the corpus with a
+    negative start) is what found.
+    """
+    match node:
+        case ir.Unary(op=op, operand=operand):
+            return _unary(op, operand)
+        case _:
+            return node
+
+
 def _prefix_expr(node: ir.Expr, prefix: _Path, local: frozenset[str]) -> ir.Expr:
     match node:
         case ir.Ref():
@@ -379,7 +395,7 @@ class _Flattener:
 
         def attribute(key: str) -> ir.Expr | None:
             entry = total.entries.get(key)
-            return entry.value if entry is not None else None
+            return _fold(entry.value) if entry is not None else None
 
         unit = attribute("unit")
         if unit is not None and not isinstance(unit, ir.StringLiteral):
@@ -388,7 +404,7 @@ class _Flattener:
         if fixed is not None and not isinstance(fixed, ir.BoolLiteral):
             raise FlattenError(f"{name}: `fixed` must be a boolean literal")
 
-        binding = total.value
+        binding = _fold(total.value)
         variable = FlatVariable(
             name=name,
             base_type=base,

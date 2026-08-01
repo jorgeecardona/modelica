@@ -10,3 +10,9 @@ public/
 .coverage
 logs/
 .cache/
+# What `examples/animate.py` writes. The scenes are in the specs and the renderer is in
+# the tree, so the videos are reproducible in a command -- committing tens of megabytes of
+# them would be committing a build artefact.
+media/
+*.mp4
+*.gif
