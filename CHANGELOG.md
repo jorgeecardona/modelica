@@ -88,6 +88,26 @@ source of truth and is bumped automatically when shipped source changes.
   the model, so the destination's states are already computed when the transition rewrites the
   vector. Pendulum over two seconds: four switches, `x² + y² = 1` held to 2·10⁻¹⁶, energy drift
   1.6·10⁻¹⁰.
+- `modelica.sim.emit`: **the analytic state Jacobian**, as an eighth generated function.
+  Forward mode by source transformation over the same blocks the right-hand side runs, one
+  row vector per variable so the emitted source stays the size of the model rather than its
+  square. It is not a speedup and is not offered as one — measured against SciPy's own
+  difference quotient the step counts are identical and the wall clock moves by less than
+  the noise, because for systems this small a difference quotient is two right-hand sides.
+  It is *exactness*: a block that Newton iterates on has no derivative a difference quotient
+  can see (perturbing the input re-runs the loop, so the answer is only as smooth as the
+  tolerance it stopped at) while its residual differentiates into one linear solve against
+  the matrix the block was already solved with; and a latched relation is frozen, so the
+  exact derivative steps across a switch that a difference quotient would straddle. Both are
+  why FMI asks for `fmi3GetDirectionalDerivative` rather than differencing outputs itself.
+  Wired into `solve_ivp` for the implicit methods and to those only, since SciPy warns about
+  arguments a solver ignores, and handed back in a fresh array each call because Radau keeps
+  the last Jacobian it was given across steps.
+- `tests/test_examples.py`: the emitted Jacobian against central differences of the emitted
+  right-hand side, at twelve points along each model's own simulated trajectory rather than
+  around the initial point — which is where models are at their most degenerate, every rate
+  zero. Only the pendulum exercises the implicit path, and it is the one that catches a sign
+  flip in either the 1×1 or the 3×3 tangent solve.
 - `modelica.verify.check_selection`: the switching modelled with the linear algebra as the
   adversary — which set is usable is not the engine's to choose, and it only finds out by
   failing to factor one. The two assumptions that makes necessary are surfaced through

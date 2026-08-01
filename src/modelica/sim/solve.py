@@ -18,7 +18,7 @@ until someone actually calls :func:`simulate`.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import numpy as np
 from scipy.integrate import (  # pyright: ignore[reportMissingTypeStubs]
@@ -38,6 +38,9 @@ if TYPE_CHECKING:
     from modelica.sim.emit import Code, Trigger
 
 __all__ = ["SimulationError", "simulate"]
+
+_IMPLICIT = frozenset({"Radau", "BDF", "LSODA"})
+"""The methods that solve with a Jacobian, and so are the ones worth handing an exact one."""
 
 _CHATTER = 100
 """Consecutive zero-length segments before we call it a Zeno point and give up."""
@@ -172,6 +175,19 @@ class _Run:
     def derivative(self, t: float, y: NDArray[np.float64]) -> NDArray[np.float64]:
         return self.kernel.rhs(t, y, self.p, self.w, np.empty(self.kernel.states))
 
+    def slope(self, t: float, y: NDArray[np.float64]) -> NDArray[np.float64]:
+        """The exact Jacobian, into an array of its own every time.
+
+        Every other call here fills a scratch buffer, and this one deliberately does not.
+        An implicit solver keeps the last Jacobian it was given across steps -- Radau
+        reuses ``self.J`` until it decides the iteration has gone stale -- so handing back
+        one buffer would let the next evaluation rewrite a matrix the solver still believes
+        it is holding. One allocation per Jacobian is nothing: they are asked for orders of
+        magnitude less often than the right-hand side.
+        """
+        n = self.kernel.states
+        return self.kernel.jacobian(t, y, self.p, self.w, np.zeros((n, n)))
+
     def _trigger(self, index: int) -> Callable[[float, NDArray[np.float64]], float]:
         """A terminal zero crossing for one event.
 
@@ -221,7 +237,13 @@ class _Run:
         return self._result(times, values, events)
 
     def _segment(self, t: float, stop: float, y: NDArray[np.float64]) -> _Solution:
-        """Integrate until the end or until something fires."""
+        """Integrate until the end or until something fires.
+
+        The Jacobian goes to the implicit methods and to those only: an explicit one has no
+        use for it and SciPy warns about arguments a solver ignores, which is a warning
+        worth keeping meaningful.
+        """
+        implicit: dict[str, Any] = {"jac": self.slope} if self.method in _IMPLICIT else {}
         solution = cast(
             "_Solution",
             solve_ivp(  # pyright: ignore[reportUnknownArgumentType]
@@ -233,6 +255,7 @@ class _Run:
                 atol=self.absolute,
                 dense_output=True,
                 events=self.triggers or None,
+                **implicit,
             ),
         )
         if not solution.success:

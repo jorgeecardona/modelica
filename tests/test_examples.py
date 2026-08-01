@@ -284,6 +284,82 @@ def test_selects_the_specified_states(model: Path) -> None:
         assert len(system.states) == spec["state_count"]
 
 
+def _difference(rhs: Callable[[Any], Any], y: Any, np: Any) -> Any:
+    """``d(dy)/dy`` by central differences, which is the thing the emitter has to beat."""
+    columns: list[Any] = []
+    for slot in range(len(y)):
+        step = 1e-7 * max(1.0, abs(float(y[slot])))
+        ahead, behind = y.copy(), y.copy()
+        ahead[slot] += step
+        behind[slot] -= step
+        columns.append((rhs(ahead) - rhs(behind)) / (2.0 * step))
+    return np.stack(columns, axis=1)
+
+
+@pytest.mark.parametrize("model", MODEL_FILES, ids=_ids(MODEL_FILES))
+def test_the_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
+    """The emitted derivative, against the crude one, at points a real run visits.
+
+    A difference quotient is the wrong tool for the job -- it is why the exact one is
+    emitted at all -- but it is an *independent* tool, which is what a cross-check needs.
+    Where the two are both valid they have to agree, and every way of getting the source
+    transformation wrong (a chain rule term dropped, a solved block differentiated as if it
+    were explicit, a latch read one way in the value and the other in the derivative) moves
+    one and not the other.
+
+    The states come from the simulated trajectory rather than from a perturbation of the
+    initial point, because the initial point is where models are at their most degenerate:
+    a pendulum hanging still, a ball not yet falling, every rate zero. ``latch`` re-freezes
+    the relations at each sample so the discrete configuration matches the state -- and both
+    functions then read that same configuration, which is precisely the claim being tested.
+
+    Samples where the right-hand side itself is not finite are skipped. Those are states the
+    integrator would never have been asked about (the tank below empty, a state set past the
+    point where its own linear algebra is singular), and a difference quotient of an
+    infinity says nothing about anything.
+    """
+    spec = _spec(model).get("simulate")
+    if spec is None:
+        pytest.skip("no simulate section")
+    np = _module("numpy")
+    parse = _require("modelica.lang", "parse")
+    flatten = _require("modelica.sim", "flatten")
+    causalize = _require("modelica.sim", "causalize")
+    build = _require("modelica.sim", "build")
+    simulate = _require("modelica.sim", "simulate")
+
+    system = causalize(flatten(_sources(model, parse), model.stem))
+    kernel = build(system)
+    result = simulate(
+        system,
+        stop=spec["stop"],
+        tolerance=spec.get("tolerance", 1e-6),
+        method=spec.get("method", "Radau"),
+    )
+    trajectory = np.stack([result[name] for name in system.states])
+
+    p, _, w = kernel.start()
+    checked, t = 0, 0.0
+
+    def rhs(state: Any) -> Any:
+        return kernel.rhs(t, state, p, w, np.empty(len(state))).copy()
+
+    for index in np.unique(np.linspace(0, len(result) - 1, 12).astype(int)):
+        t = float(result.time[index])
+        y = np.ascontiguousarray(trajectory[:, index])
+        kernel.latch(t, y, p, w)
+        exact = kernel.jacobian(t, y, p, w, np.zeros((len(y), len(y)))).copy()
+        crude = _difference(rhs, y, np)
+        if not np.all(np.isfinite(crude)) or not np.all(np.isfinite(exact)):
+            continue
+        checked += 1
+        scale = max(1.0, float(np.max(np.abs(crude))))
+        assert np.allclose(exact, crude, rtol=1e-4, atol=1e-6 * scale), (
+            f"t = {t:.6g}\nemitted:\n{exact}\ndifferenced:\n{crude}"
+        )
+    assert checked, "every sample was skipped -- the check never ran"
+
+
 UNSIMULATED: dict[str, str] = {}
 """Models whose *simulation* is a known gap, and precisely which gap."""
 

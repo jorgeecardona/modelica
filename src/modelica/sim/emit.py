@@ -8,8 +8,8 @@ compiler will run as-is and Numba will compile to machine code without leaving n
 mode. The same emitter, pointed at a different set of templates, is what will produce C
 for FMU export.
 
-The generated module holds seven functions, all of them filling a caller-supplied array so
-that no allocation happens inside the integrator:
+The generated module holds eight functions, all of them filling a caller-supplied array
+rather than returning a new one, so that the step loop allocates as little as it can:
 
 ``parameters(p)``
     Evaluate the parameter bindings, in dependency order.
@@ -19,6 +19,8 @@ that no allocation happens inside the integrator:
     Record which relations hold at the initial point -- see below.
 ``rhs(t, y, p, w, dy)``
     The state derivatives: the blocks, in the order causalization sorted them.
+``jacobian(t, y, p, w, out)``
+    ``d(dy)/dy``, exactly -- the same blocks differentiated, not sampled.
 ``observe(t, y, p, w, out)``
     Every variable of the model, aliases included -- what a result is read from.
 ``indicators(t, y, p, w, z)``
@@ -49,6 +51,24 @@ line exactly as it was -- the mode is discrete state, so it belongs in ``w`` bes
 latches rather than in a signature SciPy has no room for. Switching is an event like any
 other: :func:`_better` watches one state set's conditioning overtake another's, and the
 transition re-reads the state vector in the new set's variables.
+
+``jacobian`` is ``rhs`` differentiated by source transformation, forward mode, one block at
+a time. It is not a faster difference quotient -- for the small systems here a difference
+quotient is two right-hand sides and hard to beat -- it is an *exact* one. Two places make
+that the difference between right and approximately right. A block that Newton iterates on
+has no derivative a difference quotient can see: perturbing the input re-runs the loop, so
+the answer is only as smooth as the tolerance the loop stopped at, while differentiating
+the block's own residual gives the derivative of the exact solution from one linear solve
+against the matrix the block was already solved with. And a latched relation is frozen by
+construction, so an exact Jacobian steps *across* a switch without the difference quotient
+ever straddling it. Both are why FMI asks for `fmi3GetDirectionalDerivative` rather than
+offering to difference the outputs itself.
+
+It is the one function that allocates. Its intermediates are rows of length ``n`` rather
+than scalars, so the source stays the size of the model instead of the size of the model
+squared, and a row has to come from somewhere. That is a deliberate trade and an affordable
+one: an implicit solver asks for a Jacobian once every several steps and for the right-hand
+side several times per step.
 """
 
 from __future__ import annotations
@@ -59,7 +79,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
 from modelica.ir import nodes as ir
-from modelica.ir.derive import ZERO, d_dx, mul, simplify, sub
+from modelica.ir.derive import ONE, ZERO, d_dx, mul, simplify, sub
 from modelica.ir.rewrite import contains, names, residual, substitute
 from modelica.lang.unparse import unparse_expr
 
@@ -88,6 +108,7 @@ class EmitError(Exception):
 
 _CONDITIONAL: Final = 0
 _NOT: Final = 3
+_PRODUCT: Final = 6
 _SIGN: Final = 7
 _PRIMARY: Final = 9
 
@@ -143,9 +164,37 @@ function has in hand -- it reads the pre-event state vector -- so it drops there
 """
 
 _RESERVED: Final = frozenset(
-    {"abs", "dy", "event", "max", "min", "np", "out", "p", "range", "t", "w", "y", "z"}
+    {
+        "_A",
+        "_D",
+        "_M",
+        "_R",
+        "_b",
+        "_null",
+        "_seed",
+        "_step",
+        "_x",
+        "abs",
+        "dy",
+        "event",
+        "max",
+        "min",
+        "np",
+        "out",
+        "p",
+        "range",
+        "t",
+        "w",
+        "y",
+        "z",
+    }
 )
-"""Names the generated code uses itself, which no variable may be renamed onto."""
+"""Names the generated code uses itself, which no variable may be renamed onto.
+
+The underscored ones are the scratch locals of a solve or a tangent. Modelica lets an
+identifier start with an underscore, so ``_A`` is a name a model may legally use, and it
+would otherwise be renamed straight onto the matrix the block is being solved in.
+"""
 
 
 def _real(value: float) -> str:
@@ -518,6 +567,9 @@ class _Emitter:
     held: dict[ir.Expr, ir.Expr] = field(default_factory=dict[ir.Expr, ir.Expr])
     """Each watched relation, mapped to the test on its latch slot that replaces it."""
 
+    tangents: dict[str, str] = field(default_factory=dict[str, str])
+    """Each variable, mapped to the local holding its row of the tangent."""
+
     switching: int | None = None
     """The workspace slot holding which state set is in use, when there is a choice."""
 
@@ -528,6 +580,7 @@ class _Emitter:
         )
         taken = set(_RESERVED)
         self.symbols = {name: _identifier(name, taken) for name in self.observed}
+        self.tangents = {name: _identifier(f"$d_{name}", taken) for name in self.observed}
         self.symbols["time"] = "t"
         self.slots = {name: slot for slot, name in enumerate(self.observed)}
         self.watched = _watched(self.system)
@@ -544,8 +597,8 @@ class _Emitter:
 
     # -- pieces ------------------------------------------------------------------------
 
-    def expr(self, node: ir.Expr) -> str:
-        return emit_expr(_latched(node, self.held), self.symbols)
+    def expr(self, node: ir.Expr, *, minimum: int = _CONDITIONAL) -> str:
+        return emit_expr(_latched(node, self.held), self.symbols, minimum=minimum)
 
     def live(self, mode: Mode) -> list[str]:
         """The blocks with every relation read directly, for setting the latches."""
@@ -693,6 +746,103 @@ class _Emitter:
             for unknown in block.unknowns
         )
         return lines
+
+    # -- derivatives ---------------------------------------------------------------------
+
+    def combination(self, node: ir.Expr, carried: Mapping[str, str]) -> str | None:
+        """``sum_v (d node / d v) . dv``, or ``None`` when nothing ``node`` reads moves.
+
+        ``None`` rather than a string of zeros: a variable whose tangent is structurally zero
+        is left out of ``carried`` entirely, so the sums downstream of it get shorter instead
+        of longer. In a model of any size most variables do not depend on most states, and
+        this is the only thing keeping the emitted source proportional to the sparsity.
+        """
+        terms: list[str] = []
+        for name in dict.fromkeys(names(node)):
+            row = carried.get(name)
+            if row is None:
+                continue
+            partial = simplify(d_dx(node, name))
+            if partial == ZERO:
+                continue
+            terms.append(
+                row if partial == ONE else f"{self.expr(partial, minimum=_PRODUCT)} * {row}"
+            )
+        return " + ".join(terms) if terms else None
+
+    def chain(self, unknown: str, node: ir.Expr, carried: dict[str, str]) -> list[str]:
+        """The tangent of an explicit assignment: the chain rule, written out."""
+        total = self.combination(node, carried)
+        if total is None:
+            carried.pop(unknown, None)
+            return []
+        carried[unknown] = row = self.tangents[unknown]
+        return [f"{row} = {total}"]
+
+    def implicit(self, block: Block, carried: dict[str, str], width: int) -> list[str]:
+        """The tangent of a solved block, without solving it again.
+
+        ``g(u, v) = 0`` differentiates to ``(dg/du) u' = -(dg/dv) v'``, so the tangent is one
+        solve against the very matrix the block was solved with, evaluated at the answer. The
+        iteration is not differentiated -- its *fixed point* is -- which is what makes this
+        exact where a difference quotient over the same block cannot be.
+        """
+        rows = [self.combination(residual(equation), carried) for equation in block.equations]
+        if all(row is None for row in rows):
+            for unknown in block.unknowns:
+                carried.pop(unknown, None)
+            return []
+        jacobian = _jacobian(block)
+        if len(block.unknowns) == 1:
+            carried[block.unknowns[0]] = row = self.tangents[block.unknowns[0]]
+            return [f"{row} = -({rows[0]}) / ({self.expr(jacobian[0][0])})"]
+        size = len(block.unknowns)
+        lines = [f"_M = np.zeros(({size}, {size}))", f"_R = np.zeros(({size}, {width}))"]
+        for position, entries in enumerate(jacobian):
+            lines.extend(
+                f"_M[{position}, {column}] = {self.expr(entry)}"
+                for column, entry in enumerate(entries)
+                if entry != ZERO
+            )
+            if rows[position] is not None:
+                lines.append(f"_R[{position}] = {rows[position]}")
+        lines.append("_D = np.linalg.solve(_M, -_R)")
+        for position, unknown in enumerate(block.unknowns):
+            carried[unknown] = row = self.tangents[unknown]
+            lines.append(f"{row} = _D[{position}]")
+        return lines
+
+    def differentiate(self, mode: Mode) -> list[str]:
+        """``d(dy)/dy`` by forward mode over the very blocks the right-hand side runs.
+
+        One row vector per variable rather than one scalar per (variable, state) pair. The
+        scalars are quicker for the two-state models in the corpus -- no array to allocate --
+        but they put a line in the source for every pair, so a hundred-state model emits a
+        hundred times the text and spends its life in the bytecode compiler. The row vectors
+        keep the source the size of the model.
+
+        The seed rows and the zero row are module-level constants, read and never written,
+        so the only arrays this allocates are the tangents it actually computes. A state
+        whose derivative is another state costs nothing at all: its row *is* a row of the
+        identity, and it is handed straight to ``out``.
+        """
+        width = len(mode.states)
+        lines = list(self.unpack(mode))
+        carried: dict[str, str] = {}
+        for slot, state in enumerate(mode.states):
+            carried[state] = row = self.tangents[state]
+            lines.append(f"{row} = _seed[{slot}]")
+        for block in mode.blocks:
+            lines.extend(self.solve(block))
+            if block.assignment is not None:
+                lines.extend(self.chain(block.unknowns[0], block.assignment, carried))
+            else:
+                lines.extend(self.implicit(block, carried, width))
+        lines.extend(
+            f"out[{slot}] = {carried.get(mode.derivative[state]) or '_null'}"
+            for slot, state in enumerate(mode.states)
+        )
+        return [*lines, "return out"]
 
     # -- functions ---------------------------------------------------------------------
 
@@ -856,12 +1006,15 @@ class _Emitter:
     def code(self) -> Code:
         events = self.events()
         modes = self.system.modes
+        width = len(self.system.states)
         parts = [
             "import numpy as np",
+            f"_seed = np.eye({width})\n_null = np.zeros({width})",
             self.parameters(),
             self.initial(),
             self.latches(),
             self.dispatch("rhs", "t, y, p, w, dy", [self.rhs(m) for m in modes]),
+            self.dispatch("jacobian", "t, y, p, w, out", [self.differentiate(m) for m in modes]),
             self.dispatch("observe", "t, y, p, w, out", [self.observe(m) for m in modes]),
             self.dispatch(
                 "indicators",

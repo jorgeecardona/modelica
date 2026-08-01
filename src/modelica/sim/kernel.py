@@ -1,7 +1,7 @@
 """Generated source, turned into functions you can call.
 
 :mod:`modelica.sim.emit` writes the model out as text; this executes that text and hands
-back the seven functions bound together, with the array sizes the caller needs to allocate.
+back the eight functions bound together, with the array sizes the caller needs to allocate.
 Splitting it out is not ceremony -- the same :class:`~modelica.sim.emit.Code` will later
 be handed to a C compiler for FMU export instead of to CPython, and everything above this
 line stays the same.
@@ -78,13 +78,14 @@ class _Transition(Protocol):
 
 @dataclass(frozen=True)
 class Kernel:
-    """The compiled model: seven functions and the shapes of the arrays they expect."""
+    """The compiled model: eight functions and the shapes of the arrays they expect."""
 
     code: Code
     parameters: _Prepare
     initial: _Initial
     latch: _Latch
     rhs: _Evaluate
+    jacobian: _Evaluate
     observe: _Evaluate
     indicators: _Evaluate
     transition: _Transition
@@ -130,6 +131,7 @@ def build(model: System | Code, *, jit: bool = False) -> Kernel:
         initial=namespace["initial"],
         latch=namespace["latch"],
         rhs=namespace["rhs"],
+        jacobian=namespace["jacobian"],
         observe=namespace["observe"],
         indicators=namespace["indicators"],
         transition=namespace["transition"],

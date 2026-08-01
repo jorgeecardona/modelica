@@ -52,11 +52,18 @@ plugins:
   # they diff like the percent files and cannot render results from an older version of the
   # code. The widget *state* in the built page is whatever executing it here produced; the
   # sliders only move again when a reader runs the notebook against a kernel.
+  #
+  # `include_requirejs` is load-bearing, not decoration. The widget bundle nbconvert points at
+  # (`@jupyter-widgets/html-manager/dist/embed-amd.js`) is an AMD module, so without a loader on
+  # the page it dies with `ReferenceError: define is not defined` and every widget renders at
+  # zero height -- an invisible gap where the prose promises sliders. With the flag: three
+  # sliders at their stored values and the figure that state produced, and a clean console.
   - mkdocs-jupyter:
       execute: true
       allow_errors: false
       include: ["*.py", "*.ipynb"]
       include_source: true
+      include_requirejs: true
       ignore_h1_titles: true
 
 nav:
@@ -68,6 +75,7 @@ nav:
       - Turning the knobs: notebooks/exploring.ipynb
       - The shape of the equations: notebooks/structure.ipynb
       - Where the smoothness breaks: notebooks/events.ipynb
+      - Roasting a batch: notebooks/roasting.ipynb
       - Enumerating the discrete half: notebooks/verifying.py
   - Ideas:
       - Backends: ideas/backends.md
