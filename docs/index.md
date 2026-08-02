@@ -1,43 +1,79 @@
 # modelica
 
-Pure-Python Modelica toolchain: parse Modelica, flatten it to a DAE, simulate it, and
-exchange models via **FMI 3.0** and **SSP 2.0**.
+A Modelica toolchain written only in Python. It reads Modelica source, flattens it to a
+DAE, simulates it, and draws it. It exchanges models through **FMI 3.0** and **SSP 2.0**.
 
 ```bash
-pip install modelica          # core: parse + model structure, zero dependencies
-pip install "modelica[sim]"   # + numpy/scipy for simulation
+pip install modelica          # the core: parse, model structure, diagrams. No dependencies.
+pip install "modelica[sim]"   # adds numpy and scipy, and therefore simulation
 ```
 
 !!! warning "Pre-alpha"
-    A full rewrite of a 2010 prototype, in progress. The API is not stable and the layers
-    below are being built bottom-up. Python 3.12+.
+    This is a full rewrite of a prototype from 2010, and it is not finished. The API is not
+    stable. The layers below are being built from the bottom up. Python 3.12 or later.
 
 ## The layers
 
-| Module | Does |
+| Module | What it does |
 | --- | --- |
-| `modelica.lang` | Modelica source → tokens → AST |
-| `modelica.ir` | AST → flat model; matching, BLT sorting, index reduction |
-| `modelica.sim` | flat model → ODE/DAE problem; solvers and events |
-| `modelica.fmi` | FMI 3.0 — import, simulate, and export FMUs |
+| `modelica.lang` | Modelica source to tokens to an AST |
+| `modelica.build` | Python classes to the same AST values |
+| `modelica.ir` | AST to a flat model, then matching, BLT sorting and index reduction |
+| `modelica.sim` | Flat model to an ODE or DAE problem, with solvers and events |
+| `modelica.diagram` | Any stage to a picture: SVG, Graphviz or Mermaid |
+| `modelica.fmi` | FMI 3.0 — import, simulate and export an FMU |
 | `modelica.ssp` | SSP 2.0 — system composition and a co-simulation master |
 
 Start with [Architecture](architecture.md) for the data model and the build order.
 
+## See a model first
+
+A Modelica model is a graph, and the fastest way to understand one is to look at it.
+
+```python
+from modelica import diagram
+
+diagram.of("examples/models/RLCCircuit.mo", "examples/library/Electrical.mo")
+```
+
+```mermaid
+graph LR
+  nsource["source<br/>ConstantVoltage"]
+  nr["r<br/>Resistor"]
+  nl["l<br/>Inductor"]
+  nc["c<br/>Capacitor"]
+  nground["ground<br/>Ground"]
+  n0(( ))
+  nsource ---|p p| nr
+  nr ---|n p| nl
+  nl ---|n p| nc
+  nc ---|n| n0
+  nsource ---|n| n0
+  nground ---|p| n0
+```
+
+The three connectors that meet at the bottom are one junction, and not three separate
+lines. That is what the flattener makes of them: one sum of currents, taken once.
+
+[Drawing a model](notebooks/drawing.ipynb) shows the other two pictures — equations against
+variables, and blocks in the order the solver runs them.
+
 ## Notebooks
 
-Every notebook here is executed when this site is built, so what you read is what the
-current code does. The `.ipynb` ones carry figures and sliders and are meant to be opened:
+Every notebook here is executed when this site is built. What you read is what the current
+code does. The `.ipynb` pages carry figures and sliders, and they are meant to be opened.
 
-| Page | Shows |
+| Page | What it shows |
 | --- | --- |
-| [Simulating a model](notebooks/simulating.py) | source → AST → flat model → system → code → trajectory, stopping at each stage |
-| [Turning the knobs](notebooks/exploring.ipynb) | a parameter study as a `for` loop over copies of the flat model, and the same thing on sliders |
-| [The shape of the equations](notebooks/structure.ipynb) | incidence matrices, what alias elimination deletes, and the BLT staircase |
-| [Where the smoothness breaks](notebooks/events.ipynb) | bounce events, the step size collapsing into them, and the pendulum switching state sets |
-| [Enumerating the discrete half](notebooks/verifying.py) | model-checking the event iteration, state selection, FMI modes and the co-simulation master |
+| [Simulating a model](notebooks/simulating.py) | Source to AST to flat model to system to code to trajectory, stopping at each stage |
+| [Drawing a model](notebooks/drawing.ipynb) | The three pictures of one model, and what each one is for |
+| [Turning the knobs](notebooks/exploring.ipynb) | A parameter study as a `for` loop over copies of the flat model, then the same thing on sliders |
+| [The shape of the equations](notebooks/structure.ipynb) | Incidence matrices, what alias elimination removes, and the BLT staircase |
+| [Where the smoothness breaks](notebooks/events.ipynb) | Bounce events, the step size collapsing into them, and the pendulum changing state sets |
+| [Roasting a batch](notebooks/roasting.ipynb) | A model of a real machine, checked against what the machine recorded |
+| [Enumerating the discrete half](notebooks/verifying.py) | Model checking of the event iteration, state selection, FMI modes and the co-simulation master |
 
-The `.ipynb` pages read their models from `examples/`, so running them wants a checkout:
+The `.ipynb` pages read their models from `examples/`, so you need a checkout to run them:
 
 ```bash
 git clone https://gitlab.com/jorgeecardona/pymodelica && cd pymodelica
@@ -45,19 +81,24 @@ pip install "modelica[sim]" matplotlib ipywidgets
 jupyter lab docs/notebooks/
 ```
 
-## Standards targeted
+## Standards
 
 * **Modelica Language Specification 3.x**
 * **FMI 3.0** — [fmi-standard.org](https://fmi-standard.org/)
 * **SSP 2.0** — [ssp-standard.org](https://ssp-standard.org/)
 
+## How these pages are written
+
+They follow ASD-STE100 Simplified Technical English. [The style page](style.md) lists the
+rules and the two places this project departs from them.
+
 ## Trademarks
 
-Modelica® is a registered trademark of the [Modelica Association](https://modelica.org/),
-as are FMI and SSP. They are used here descriptively, to identify the language this
-software parses and the standards it implements.
+Modelica® is a registered trademark of the [Modelica Association](https://modelica.org/).
+FMI and SSP are also its trademarks. These pages use the names to identify the language
+this software reads and the standards it implements.
 
-This project is **not affiliated with, sponsored by, or endorsed by the Modelica
-Association** — it is an independent open-source implementation. The language itself, its
-specification and the Modelica Standard Library live at
+This project is **not affiliated with the Modelica Association, and the Association does
+not sponsor or endorse it.** It is an independent open-source implementation. The language,
+its specification and the Modelica Standard Library are at
 [modelica.org](https://modelica.org/).

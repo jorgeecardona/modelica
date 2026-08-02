@@ -1,28 +1,28 @@
 # Examples — the behaviour spec
 
-Every model here is a **specification**, not a demo. A Modelica model already says what the
-system does; pairing it with a small file of expected behaviour turns the pair into an
-acceptance test that no layer of the toolchain can quietly break.
+Every model here is a **specification**, and not a demonstration. A Modelica model already
+says what the system does. Put a small file of expected behaviour beside it, and the pair
+becomes an acceptance test that no layer of the toolchain can quietly break.
 
 ```
 examples/
-  library/*.mo     small component packages (Electrical, Translational, Thermal,
-                   Rotational, Machines, Blocks)
-  library/*.py     the same packages through the Python front-end
+  library/*.mo     small component packages: Electrical, Translational, Thermal,
+                   Rotational, Machines, Blocks
+  library/*.py     the same packages through the Python front end
   models/*.mo      one self-contained example model each
-  models/*.py      the same model through the Python front-end
+  models/*.py      the same model through the Python front end
   models/*.toml    what that model must do — the spec
 ```
 
-`tests/test_examples.py` reads the corpus and runs it. Stages that are not implemented yet
-report as skipped rather than failing, so the suite is a live progress meter: as `lang`,
-`ir` and `sim` land, skips turn into passes without a single spec being edited.
+`tests/test_examples.py` reads the corpus and runs it. A stage that is not implemented yet
+reports as skipped and not as failed. The suite is therefore a live progress meter: as
+`lang`, `ir` and `sim` land, skips turn into passes, and no spec is edited.
 
 ## Written twice, on purpose
 
-Every example exists in both front-ends, under the same stem: `RCCircuit.mo` and
-`RCCircuit.py` are the same model, and the suite asserts they say the same thing. That pair
-is the only thing keeping `modelica.build` and `modelica.lang` from drifting apart.
+Every example exists in both front ends, under the same stem. `RCCircuit.mo` and
+`RCCircuit.py` are the same model, and the suite asserts that they say the same thing. That
+pair is the only thing that keeps `modelica.build` and `modelica.lang` from drifting apart.
 
 ```python
 class RCCircuit(Model):
@@ -40,26 +40,26 @@ class RCCircuit(Model):
         yield connect(self.source.n, self.ground.p)
 ```
 
-Conventions:
+Four conventions apply.
 
 * A **library** twin defines its classes and ends with
-  `PACKAGE = package("Electrical", __name__, "...")`. The name `PACKAGE` rather than
-  `Electrical` avoids an `Electrical.Electrical` on import.
+  `PACKAGE = package("Electrical", __name__, "...")`. The name is `PACKAGE` and not
+  `Electrical`, which avoids an `Electrical.Electrical` on import.
 * A **model** twin is one class named after the file, so `getattr(module, path.stem)` finds
   it.
 * The examples are not an installed package. A model that uses a library adds the sibling
-  directory to `sys.path` at the top of the file, which keeps `import Electrical` reading
-  exactly like the Modelica `import`.
-* Running a twin directly prints its Modelica: `python examples/models/RCCircuit.py`.
+  directory to `sys.path` at the top of the file. `import Electrical` then reads exactly
+  like the Modelica `import`.
+* Run a twin directly to print its Modelica: `python examples/models/RCCircuit.py`.
 
-The comparison is on normalised text today — blank lines dropped, numeric literals folded
-through `repr(float(...))` so `1e4` and `10000.0` agree. Once `modelica.lang.parse` exists
-it becomes a comparison of flat models as values, which is the check actually worth having.
+Today the comparison is on normalised text. Blank lines are dropped, and numeric literals
+go through `repr(float(...))` so that `1e4` and `10000.0` agree. Once the comparison of
+flat models as values replaces it, the check becomes the one actually worth having.
 
 ## The spec format
 
-TOML, one file per model, named after it. **An absent key is not an assertion** — write
-only what you are willing to commit to.
+TOML, one file per model, named after it. **An absent key asserts nothing.** Write only
+what you are willing to commit to.
 
 ```toml
 summary  = "One line: what the model is."
@@ -81,9 +81,9 @@ stop      = 5.0
 tolerance = 1e-8
 method    = "LSODA"            # optional; any scipy `solve_ivp` method, default "Radau"
 
-# A value at a point in time. `source` records where the number came from:
-#   "analytic"  — closed form, written out in a comment
-#   "reference" — scipy at rtol/atol 1e-12, i.e. a golden trajectory
+# A value at a point in time. `source` says where the number came from:
+#   "analytic"  — a closed form, written out in a comment
+#   "reference" — scipy at rtol/atol 1e-12, which is a golden trajectory
 #   "measured"  — read off real hardware; see `RoastingMachine`
 [[simulate.point]]
 t      = 1.0
@@ -92,7 +92,7 @@ rtol   = 1e-6
 source = "analytic"
 
 # Something that must hold at every output point: an expression, and either a value it
-# equals or bounds it stays within. `after` restricts it to t >= after.
+# equals or bounds it stays within. `after` restricts the check to t >= after.
 [[simulate.invariant]]
 expr = "y1 + y2 + y3"
 value = 1.0
@@ -106,11 +106,12 @@ atol  = 1e-6
 
 ## Drawing one
 
-A model of a *mechanism* has a picture that a line plot cannot show, and for those the spec
+A model of a *mechanism* has a picture that a line plot cannot show. For those the spec
 carries an optional `[animate]` section: bodies at their coordinates, rods and springs
 between them, the path a bob sweeps, and a panel underneath for the one scalar worth
-watching. Coordinates are Modelica expressions over the model's own variables — the same
-`parse_expression` + `emit_expr` road the invariants take — so `x2` means the model's `x2`.
+watching. The coordinates are Modelica expressions over the model's own variables, on the
+same `parse_expression` and `emit_expr` road the invariants take, so `x2` means the model's
+`x2`.
 
 ```toml
 [animate]
@@ -138,107 +139,126 @@ label = "total energy (J)"
 ylim  = [-35.5, -33.5]        # worth fixing for a conserved quantity — see below
 ```
 
-`python examples/animate.py <Model>` writes `<Model>.mp4`; `--out x.gif` writes a GIF
-instead, and `--still 24.0` writes one frame at that instant, which is what you want while
-a scene is being written. It needs `matplotlib` (the `docs` extra) and, for `.mp4`, ffmpeg
-— neither of which the library itself will ever depend on.
+`python examples/animate.py <Model>` writes `<Model>.mp4`. `--out x.gif` writes a GIF
+instead. `--still 24.0` writes one frame at that instant, which is what you want while you
+write a scene. It needs `matplotlib`, which is in the `docs` extra, and for `.mp4` it needs
+ffmpeg. The library itself will never depend on either.
 
-Two things that are easy to get wrong, both now defaulted the right way. Leave `xlim`/`ylim`
-out unless you have a reason: the frame is computed from everything the run actually
-visits, and a guess clips a chaotic path. And fix `ylim` on a panel showing a *conserved*
-quantity: left to itself the axis zooms into the integrator's last digit, and a line flat
-to one part in 10⁹ is drawn as violent noise — the exact opposite of the claim.
+Two things are easy to get wrong, and both now default the right way. Leave `xlim` and
+`ylim` out unless you have a reason: the frame is computed from everything the run visits,
+and a guess clips a chaotic path. And fix `ylim` on a panel that shows a *conserved*
+quantity: left alone, the axis zooms into the last digit of the integrator, and a line that
+is flat to one part in 10⁹ is drawn as violent noise. That is the opposite of the claim.
+
+## Seeing one
+
+Every model in the corpus draws. A picture is often the fastest way to check that a model
+says what you meant.
+
+```bash
+python -m modelica.diagram examples/models/RLCCircuit.mo examples/library/Electrical.mo > rlc.svg
+python -m modelica.diagram examples/models/DCMotor.mo examples/library/Electrical.mo \
+    examples/library/Rotational.mo examples/library/Machines.mo --depth 2 > motor.svg
+```
+
+`--view incidence` draws the equations against the variables they contain, and
+`--view blocks` draws the order the solver runs in. `tests/test_diagram.py` draws every
+model in the corpus on every run, and it asserts that no box names a component the flat
+model does not have.
 
 ## The models
 
-Ordered the way the toolchain gets built: each one needs everything the ones above it
-needed, plus exactly one new capability.
+They are ordered the way the toolchain was built. Each one needs everything that the ones
+above it needed, plus exactly one new capability.
 
-| Model | New capability it forces | Reference |
+| Model | The new capability it forces | Reference |
 | --- | --- | --- |
 | `NewtonCooling` | `der()`, parameters, one state, one equation | analytic |
 | `RCCircuit` | `connect()`, `flow`, `extends`, a component library | analytic |
-| `TwoBodyHeat` | connectors in a second domain; a conservation invariant | analytic |
-| `RLCCircuit` | two states, a coupled linear system | scipy |
-| `MassSpringDamper` | the same physics through a different domain's connectors | scipy |
-| `DrainingTank` | `if` in an equation → a state event; `sqrt` | analytic |
-| `BouncingBall` | `when` / `reinit` / `pre` — repeated events, state reinitialisation | analytic |
-| `RoastingMachine` | `time` in an equation → time events *and* a state event; a parameter bound to other parameters; modelling the sensor | **a real machine** |
-| `Pendulum` | a constraint equation → index 3 → Pantelides + dummy derivatives | scipy |
-| `AtwoodPendulum` | five coupled degrees of freedom → a 4×4 implicit block to solve | scipy + energy |
-| `Robertson` | stiffness: a stiff solver is mandatory, explicit RK dies | scipy |
-| `VanDerPol` | a relaxation limit cycle; step-size control across 3 orders of magnitude | scipy |
-| `PIControl` | `input`/`output` connectors: a signal has a direction, and a loop | scipy |
+| `TwoBodyHeat` | connectors in a second domain, and a conservation invariant | analytic |
+| `RLCCircuit` | two states, and a coupled linear system | scipy |
+| `MassSpringDamper` | the same physics through the connectors of another domain | scipy |
+| `DrainingTank` | `if` in an equation, which makes a state event; `sqrt` | analytic |
+| `BouncingBall` | `when`, `reinit` and `pre`: repeated events, and a state set again | analytic |
+| `RoastingMachine` | `time` in an equation, which makes time events *and* a state event; a parameter bound to other parameters; a model of the sensor | **a real machine** |
+| `Pendulum` | a constraint equation, which makes index 3: Pantelides and dummy derivatives | scipy |
+| `AtwoodPendulum` | five coupled degrees of freedom, which leave a 4×4 implicit block | scipy and energy |
+| `Robertson` | stiffness: a stiff solver is mandatory, and explicit Runge-Kutta dies | scipy |
+| `VanDerPol` | a relaxation limit cycle: step size control over three orders of magnitude | scipy |
+| `PIControl` | `input` and `output` connectors: a signal has a direction, and a loop | scipy |
 | `DCMotor` | two domains at once, and a component that holds components | scipy |
 
-`Robertson` and `VanDerPol` are not physical-modelling examples — they are the classic
-Hairer–Wanner stiff test problems, here to hold the solver honest.
+`Robertson` and `VanDerPol` are not physical-modelling examples. They are the classic
+Hairer-Wanner stiff test problems, and they are here to hold the solver honest.
 
-`AtwoodPendulum` is the one whose reference nobody can eyeball: the trajectory is chaotic,
-so a golden point five seconds in says something about this toolchain's arithmetic and
-nothing about the physics. What checks the *model* is its own total energy, written out as
-a variable and asserted flat. The equations came out of a computer algebra system and no
-one can proofread them by reading; the invariant is what proofreads them, and it caught a
-singular mass matrix in the first draft.
+`AtwoodPendulum` is the one whose reference nobody can read by eye. The trajectory is
+chaotic, so a golden point five seconds in says something about the arithmetic of this
+toolchain and nothing about the physics. What checks the *model* is its own total energy,
+written out as a variable and asserted flat. A computer algebra system produced the
+equations and nobody can proofread them by reading. The invariant is what proofreads them,
+and it caught a singular mass matrix in the first draft.
 
-`PIControl` and `DCMotor` are the two newest, and each was added to make the toolchain
-do something it had never been asked to do.
+`PIControl` and `DCMotor` are the two newest. Each one was added to make the toolchain do
+something nobody had asked it to do.
 
-`PIControl` is a block diagram rather than a physical network. Its connectors carry an
-`input Real` or an `output Real` instead of a potential and a flow, so a connection is
-directed: it says which end computes the number. Three things came out of adding it. The
-flattener compared connectors by class name, which made `connect(source.y, error.u1)`
-illegal -- Modelica compares them by the variables they carry, and an output joined to an
-input is the ordinary case. It gained the opposite check at the same time, because two
-outputs on one wire really is an error and the message should say so. And the corpus
-harness turned out to accept an `after` key on an invariant, as the format documents, and
-then ignore it -- so "the loop settles on the setpoint" was silently being asserted of
+`PIControl` is a block diagram and not a physical network. Its connectors carry an `input
+Real` or an `output Real` instead of a potential and a flow, so a connection is directed:
+it says which end computes the number. Three things came out of adding it. The flattener
+compared connectors by class name, which made `connect(source.y, error.u1)` illegal;
+Modelica compares them by the variables they carry, and an output joined to an input is the
+ordinary case. The flattener gained the opposite check at the same time, because two
+outputs on one wire really is an error and the message should say which two. And the corpus
+harness turned out to read the `after` key on an invariant, exactly as this page documents
+it, and then ignore it. "The loop settles on the setpoint" was quietly being asserted of
 the transient as well.
 
-`DCMotor` is the first example where a component holds components: `Machines.Motor` has a
+`DCMotor` is the first example where a component holds components. `Machines.Motor` has a
 winding, a coil, the converter and the rotor inside it, and three connectors on its
-boundary that are wired both from inside and from outside. It is also the first that
-lives in two domains at once, joined by `EMF`, which turns current into torque and speed
-into voltage and therefore carries one connector of each kind. It found a bug that had
-been invisible until then: a modification written on an inner component, `winding(R =
-Rw)`, was not given the enclosing instance's path, so the binding named a variable that
-did not exist. At the top level the prefix is empty and nothing moves, which is exactly
-why no earlier example could catch it. It also moved `ref()` into `modelica.build`, where
-the second caller proved it belonged.
+boundary that are wired from inside and from outside. It is also the first model that lives
+in two domains at once. `EMF` joins them: it turns current into torque and speed into
+voltage, so it carries one connector of each kind. It found a bug that nothing before it
+could have found. A modification written on an inner component, `winding(R = Rw)`, was not
+given the path of the enclosing instance, so the binding named a variable that did not
+exist. At the top level that prefix is empty and nothing moves, which is exactly why every
+earlier example passed. Adding it also moved `ref()` into `modelica.build`, where the
+second caller proved that it belonged.
 
-`RoastingMachine` is the one example whose reference is neither a closed form nor a
-solver. It is a Loring S15 that roasted five batches of coffee on 2026-07-30, logged over
-Modbus at 1.5 s; the model carries the first batch's own gas trace, and the spec checks it
-against what the machine's bean probe actually read — 1.67 °C rms over the whole batch,
-1.24 °C after the first two minutes. The machine parameters were fitted against all five
-batches at once, each keeping its own gas, its own probe reading at charge, and its own
-machine temperature at charge.
+`RoastingMachine` is the one example whose reference is neither a closed form nor a solver.
+It is a Loring S15 that roasted five batches of coffee on 2026-07-30, logged over Modbus
+every 1.5 s. The model carries the gas trace of the first batch, and the spec checks it
+against what the bean probe of the machine actually read: 1.67 °C rms over the whole batch,
+and 1.24 °C after the first two minutes. The machine parameters were fitted against all
+five batches at once. Each batch kept its own gas, its own probe reading at charge, and its
+own machine temperature at charge.
 
 It is also the example that models its own instrument. One of the four states is the
-thermocouple, which has heat capacity and therefore lags: at charge it has been hanging in
-217 °C recirculating air and is then buried in 13.8 kg of 20 °C coffee, and the dive that
-follows — the *turning point* every roaster reads — is a property of the probe as much as of
-the beans. Adding that state is what lets the spec check the roast from `t = 0` rather than
-skipping the first ninety seconds, and it prints a number nobody has otherwise: the coffee
-runs about 8 K ahead of the display two minutes in.
+thermocouple. The thermocouple has heat capacity, so it lags. At charge it has been hanging
+in 217 °C recirculating air, and it is then buried in 13.8 kg of coffee at 20 °C. The dive
+that follows is the *turning point* that every roaster reads, and it is a property of the
+probe as much as of the beans. That state is what lets the spec check the roast from `t =
+0` instead of skipping the first ninety seconds. It also prints a number that nobody has
+otherwise: two minutes in, the coffee runs about 8 K ahead of the display.
 
-The batch was also weighed, which is what makes the drying worth anything, and the weighing
-overturned the physics rather than merely tuning it. Gating evaporation at boiling — water
-leaves when water boils — cannot reproduce the measured 15 % mass loss at any rate: forced
-to remove the right mass, the curve comes apart. Sweeping the onset downward improves the
-fit and the mass balance together, monotonically, all the way to ambient, because a coffee
-bean is porous and gives up bound water by diffusion the whole time it is warm. The spec
-carries that table, and the reason it was nearly missed: with the machine parameters held
-fixed no drying law works, since those parameters had already absorbed the missing heat.
+The batch was also weighed, which is what makes the drying model worth anything. The
+weighing overturned the physics rather than tuning it. Gate the evaporation at boiling —
+water leaves when water boils — and no rate reproduces the measured 15 % mass loss: force
+it to remove the right mass, and the curve comes apart. Sweep the onset downward and the
+fit and the mass balance improve together, monotonically, all the way to ambient. A coffee
+bean is porous, and it gives up bound water by diffusion for as long as it is warm. The
+spec carries that table, and it carries the reason the finding was nearly missed: with the
+machine parameters held fixed, no drying law works, because those parameters had already
+absorbed the missing heat.
 
 ## Adding one
 
-1. Write the `.mo`. Keep it short and physically real; no synthetic equations.
-2. Write the `.py` twin, same stem.
-3. Work out the reference: closed form if one exists, otherwise scipy at `rtol=1e-12`.
-   Say which in `source`. If the model is of something that exists and you can get a log
-   off it, `measured` beats both — but carry a `reference` point too, because degrees of
-   slack cannot catch a regression.
+1. Write the `.mo`. Keep it short and physically real. Write no synthetic equations.
+2. Write the `.py` twin, with the same stem.
+3. Work out the reference. Use a closed form if one exists, and otherwise scipy at
+   `rtol=1e-12`. Say which one in `source`. If the model is of something that exists, and
+   you can get a log off it, then `measured` beats both. Carry a `reference` point as well,
+   because degrees of slack cannot catch a regression.
 4. Write the `.toml`. Assert only what you are sure of.
-5. `make test` — the corpus guard checks the set is well-formed, and the twin check runs
-   immediately, even while the stages that would simulate it are still skipped.
+5. Run `make test`. The corpus guard checks that the set is well formed, and the twin check
+   runs at once, even while the stages that would simulate it are still skipped.
+6. Draw it: `python -m modelica.diagram examples/models/<Model>.mo <the libraries it uses>`.
+   A wrong connection is easier to see than to read.

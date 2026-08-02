@@ -6,6 +6,57 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `modelica.diagram`: **a model is a graph, and now you can see it.** Three pictures, one
+  per stage: `schematic` reads the classes before flattening and shows components and
+  connections; `incidence` reads a `FlatModel` and shows which equation touches which
+  variable; `blocks` reads a `System` and shows the order the solver runs in. Each returns
+  a `Graph`, which writes itself as SVG, Graphviz or Mermaid, and renders itself in a
+  notebook. There is a CLI: `python -m modelica.diagram <model.mo> <libraries...>`. No new
+  dependency — the SVG, including the layout, is drawn here.
+  - The schematic resolves names with `modelica.ir.flatten`'s own machinery rather than a
+    second copy, which is why `Scope`, `Found` and `effective` are public now. A test holds
+    the two together: no box may name a component the flat model does not have.
+  - The SVG names no colour. Every line and character is `currentColor`, so one image reads
+    correctly on a light page and a dark one — no second copy, no script, no CDN.
+  - The layout starts from a circle, never from random positions, so a rebuild of the docs
+    site produces no diff.
+- `modelica.ir.flatten`: **connectors are compared by structure, not by class name.**
+  `connect(source.y, error.u1)` joining an `output` connector to an `input` one was
+  rejected as "mixes connector types"; Modelica compares the variables the two carry, and
+  an output joined to an input is the ordinary case. The opposite check arrived with it:
+  two outputs on one wire is a real error, and the message says which two.
+- `modelica.ir.flatten`: **a modification on an inner component now gets the enclosing
+  instance's path.** `winding(R = Rw)` inside a component bound `R` to a variable that did
+  not exist, and code generation died on "nothing computes 'Rw'". At the top level the
+  prefix is empty and nothing moves, which is why no earlier example could catch it.
+- `modelica.build.ref`: promoted from a private helper in one example. A parameter computed
+  from other parameters, and a component modification that reads one, are both written in
+  the class body, where `self` does not exist yet.
+- `modelica.ir.source`: `to_program` and `flatten` moved out of `modelica.sim`. They have no
+  numerics in them, and reaching them through `modelica.sim` pulled NumPy into a package
+  whose promise is that reading a model's structure costs nothing. `modelica.sim` re-exports
+  both, so no caller changes.
+- `examples/`: `Blocks`, `Rotational` and `Machines` libraries, and two models.
+  - `PIControl` — a block diagram: `input`/`output` connectors, a directed signal, and a
+    closed loop. It found both flattener issues above and one in the corpus harness, which
+    read the documented `after` key on an invariant and then ignored it.
+  - `DCMotor` — the first model in two domains at once, and the first whose component holds
+    components: `Machines.Motor` has the winding, coil, converter and rotor inside it, with
+    three connectors wired from both sides.
+  - Both agree with an independently integrated reference to 1e-10.
+- `tests/test_diagram.py`: 63 tests. Every model in the corpus draws, the SVG parses as XML,
+  the same model draws the same bytes twice, and no drawn component is missing from the flat
+  model.
+- **Docs rewritten in ASD-STE100 Simplified Technical English.** Short sentences, active
+  voice, one idea per sentence, one topic per paragraph, and one meaning per word. Modelica
+  is used worldwide and most readers here do not read English first; the standard costs the
+  writer some effort and saves every reader some. `docs/style.md` records the rules followed
+  and the two places this project departs from them. No claim, number or reason was dropped
+  in the rewrite.
+- Docs: *Drawing a model*, a new executed notebook — the three pictures, what each one is
+  for, and what keeps them honest. The architecture pipeline diagram is a Mermaid graph
+  instead of ASCII art, and the site now renders `mermaid` fences.
+
 - `modelica.ir`: the expression, equation and class value types the whole toolchain is
   built on. Frozen dataclasses throughout.
 - `modelica.lang.lexer`: a hand-written tokenizer. Strings arrive decoded, comments and

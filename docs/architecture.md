@@ -1,47 +1,45 @@
 # Architecture
 
-The design rule for this rewrite: **every stage is a value you can hold.** Parsing returns
-an AST, flattening returns a flat model, causalization returns a sorted block structure,
-and simulation returns trajectories — each one an ordinary, inspectable Python object
-rather than state hidden inside a compiler. The 2010 prototype failed the other way: the
-grammar (pyparsing) *was* the program, so there was nothing to look at between "source" and
-"result".
+One rule shapes this rewrite: **every stage is a value you can hold.**
 
-Nothing here is implemented yet. This is the target, and the order it gets built in.
+Parsing returns an AST. Flattening returns a flat model. Causalization returns a sorted
+block structure. Simulation returns trajectories. Each one is an ordinary Python object
+that you can print, compare and change. None of them is state hidden inside a compiler.
+
+The 2010 prototype failed in the other direction. Its grammar was written in pyparsing, so
+the grammar *was* the program. Nothing existed between "source" and "result" that a person
+could look at.
 
 ## The pipeline
 
-```
-Modelica source                Python model
-   │  modelica.lang               │  modelica.build
-   │  lexer + recursive descent   │  descriptors + operator overloading
-   ▼                              ▼
-AST ─────────────────────────► modelica.ir.Class
-   │  modelica.ir              instantiation / flattening
-   ▼
-FlatModel                      variables + equations + expression IR
-   │  modelica.ir              matching, BLT sorting, index reduction
-   ▼
-CausalizedModel                sorted blocks, known index, states chosen
-   │  modelica.sim             residual/RHS construction
-   ▼
-Problem  ──►  Solver  ──►  Result
+```mermaid
+graph TD
+    MO["Modelica source (.mo)"] -->|"modelica.lang: lexer, recursive descent"| AST["ir.Class"]
+    PY["Python model (modelica.build)"] -->|"descriptors, operator overloading"| AST
+    AST -->|"modelica.ir: instantiate, flatten"| FLAT["FlatModel: variables + equations"]
+    FLAT -->|"modelica.ir: match, sort, reduce the index"| SYS["System: sorted blocks, states chosen"]
+    SYS -->|"modelica.sim: emit and compile"| PROB["Problem"]
+    PROB --> SOLVER["Solver"] --> RESULT["Result"]
+    AST -.->|"modelica.diagram"| PIC["Graph: a picture of any stage"]
+    FLAT -.-> PIC
+    SYS -.-> PIC
 ```
 
-Two exchange formats cut across it:
+Two exchange formats cross the pipeline.
 
-* **FMI 3.0** (`modelica.fmi`) attaches at both ends — read an FMU someone else compiled
-  and simulate it through the same `Problem`/`Solver` interface, or export a
-  `CausalizedModel` as an FMU.
-* **SSP 2.0** (`modelica.ssp`) sits above — a `.ssp` names components (usually FMUs) and
-  wires them, so it drives a co-simulation master over several `Problem`s at once.
+* **FMI 3.0** (`modelica.fmi`) attaches at both ends. It reads an FMU that another tool
+  compiled and simulates it through the same `Problem` and `Solver`. It also exports a
+  `System` as an FMU.
+* **SSP 2.0** (`modelica.ssp`) sits above. A `.ssp` file names components, which are
+  usually FMUs, and wires them together. A co-simulation master then steps several
+  `Problem`s at once.
 
-## Two front-ends, one IR
+## Two front ends, one IR
 
-A model can arrive as a `.mo` file or as Python. `modelica.build` is **not** a wrapper that
-generates Modelica text and parses it back; it is a peer of `modelica.lang` that constructs
-`modelica.ir` values directly. Both roads end at the same `ir.Class`, and everything
-downstream — flattening, index reduction, code generation, FMU export — sees only that.
+A model arrives as a `.mo` file, or as Python. `modelica.build` is **not** a wrapper that
+writes Modelica text and parses it back. It is a peer of `modelica.lang`, and it builds
+`modelica.ir` values directly. Both roads end at the same `ir.Class`. Everything below —
+flattening, index reduction, code generation, FMU export — sees only that.
 
 ```python
 class NewtonCooling(Model):
@@ -54,181 +52,215 @@ class NewtonCooling(Model):
         yield der(self.T) == -self.k * self.T
 ```
 
-Four mappings carry the whole front-end: a declaration is a **descriptor** (so `self.T`
-reads as a reference without any instance existing), `==` builds an **equation** rather
-than a bool (Modelica's `=` is acausal, so this is the honest reading), Python inheritance
-is **`extends`**, and a Python module is a **`package`**.
+Four mappings carry the whole front end:
 
-The acceptance test is equality of values, not of text: every example in `examples/` is
-written twice, once per front-end, and the pair must flatten to the identical `FlatModel`.
-Until the parser lands the comparison runs through `unparse` — render the Python model as
-Modelica and diff it against the handwritten file — which is weaker, and is replaced by the
-value comparison the moment `modelica.lang.parse` exists.
+* A declaration is a **descriptor**, so `self.T` reads as a reference and no instance has
+  to exist.
+* `==` builds an **equation** and not a bool. Modelica's `=` is acausal, so this is the
+  honest reading of it.
+* Python inheritance is **`extends`**.
+* A Python module is a **`package`**.
 
-Why bother with a second front-end at all: Modelica text is the interchange format, but a
-model that is *generated* — swept over parameters, assembled from a topology, built inside
-a notebook — wants to be a Python value. Making the two peers rather than layering one on
-the other means neither can quietly become the poor relation.
+The acceptance test compares values, not text. Every example in `examples/` is written
+twice, once per front end, and the pair must flatten to the same `FlatModel`.
 
-## Performance: where the time actually goes
+Why have a second front end at all? Modelica text is the interchange format. But a model
+that is *generated* wants to be a Python value: a model swept over parameters, or assembled
+from a topology, or built inside a notebook. The two front ends are peers, and neither can
+quietly become the poor relation.
+
+## Performance: where the time goes
 
 The goal is a Python engine that stands next to LSODA, DASSL, RADAU5 and CVODE. That is
-achievable, and the reason is that a stiff solver spends almost none of its time in the
-parts written in Python.
+possible, because a stiff solver spends almost none of its time in the parts written in
+Python.
 
-Split the work in two:
+The work splits in two.
 
-* **Control** — step-size and order selection, error norms, the Newton loop, event
-  location, Jacobian reuse heuristics. This runs *once per step*, on scalars and small
-  arrays. Python is fine here; scipy's `Radau` and `BDF` are pure Python + NumPy and are
-  used in production every day.
-* **Kernel** — evaluating the residual/RHS and the Jacobian, and the linear solve. This
-  runs several times per step and dominates.
+* **Control.** Step size and order selection, error norms, the Newton loop, event location,
+  and the rules for reusing a Jacobian. This runs once per step, on scalars and small
+  arrays. Python is fast enough here. SciPy's `Radau` and `BDF` are pure Python and NumPy,
+  and they are used in production every day.
+* **Kernel.** The residual or right-hand side, the Jacobian, and the linear solve. This
+  runs several times per step, and it dominates.
 
-The dominant factor is algorithmic, not linguistic. On Robertson, an explicit method needs
-on the order of 10⁷–10⁸ steps and a good stiff method needs a few hundred; that ~10⁶ ratio
-is entirely independent of the implementation language. Getting the order/step-size control
-and the index reduction right buys more than any amount of micro-optimisation, and getting
-them wrong cannot be recovered by rewriting the inner loop in C.
+The largest factor is the algorithm, not the language. On Robertson, an explicit method
+needs 10⁷ to 10⁸ steps and a good stiff method needs a few hundred. That ratio of about 10⁶
+does not depend on the implementation language at all. Correct order control, correct step
+size control and correct index reduction buy more than any micro-optimisation. If you get
+them wrong, no amount of C in the inner loop recovers it.
 
-That leaves the per-step constant, and it is closed by **generating code**:
+What is left is the cost of one step, and **generated code** closes it.
 
-> **The IR must be compilable.** `modelica.sim` emits source for the RHS, the Jacobian and
-> the event indicator functions, and hands it to a compiler — Numba `@njit` first, C as a
-> fallback path for FMU export. It does **not** build a tree of closures and walk it at
-> every evaluation.
+> **The IR must be compilable.** `modelica.sim` emits source for the right-hand side, the
+> Jacobian and the event indicators, and gives it to a compiler. Numba `@njit` comes first,
+> and C is the fallback path for FMU export. It does **not** build a tree of closures and
+> walk it at every evaluation.
 
-This is a constraint on the IR design, which is why it is recorded here and not in a
-performance-tuning note later. The expression IR is small, typed, closed under symbolic
-differentiation, and free of Python objects that cannot be spelled as arithmetic —
-precisely so that a straightforward emitter can turn a `FlatModel` into a nopython
-function. An interpreter over the same IR stays as the reference implementation: it is what
-the compiled kernel is tested against, and what runs when Numba is not installed.
+This is a constraint on the design of the IR, which is why it is recorded here and not in a
+tuning note later. The expression IR is small, typed, closed under symbolic
+differentiation, and free of any Python object that cannot be written as arithmetic. A
+straightforward emitter can therefore turn a `FlatModel` into a nopython function. An
+interpreter over the same IR stays as the reference implementation. It is what the compiled
+kernel is tested against, and it is what runs when Numba is absent.
 
-The naive alternative — a closure tree walked from Python — is 10–100× worse, and no amount
-of solver quality hides it.
+The other design — a tree of closures walked from Python — is 10 to 100 times slower. No
+amount of solver quality hides that.
 
-### Matching is the floor, not the ceiling
+### Matching the Fortran codes is the floor
 
-"As fast as the Fortran codes" is the wrong ambition to stop at, because a compiler that
-owns the model can do three things a precompiled library structurally cannot:
+"As fast as the Fortran codes" is the wrong place to stop. A compiler that owns the model
+can do three things that a precompiled library cannot.
 
-* **Inline the RHS into the integrator loop.** RADAU5 is a library: it calls the user's `F`
-  through a function pointer, across a boundary the optimiser cannot see through, with the
-  parameters living in memory it has to load. A JIT compiles the model and the step
-  together — the RHS is inlined and the parameters are constants folded once at compile
-  time, not reloaded once per stage per step.
+* **Put the right-hand side inside the integrator loop.** RADAU5 is a library. It calls the
+  user's `F` through a function pointer, across a boundary the optimiser cannot see
+  through, and the parameters live in memory it must load. A JIT compiles the model and the
+  step together. The right-hand side is inlined, and the parameters are folded to constants
+  once at compile time instead of loaded once per stage per step.
 * **Differentiate the model.** The equations are held symbolically, so an analytic *and
-  sparse* Jacobian is free, with the pattern falling straight out of the incidence matrix
-  matching already built. A black-box integrator must finite-difference it: *n* extra RHS
-  evaluations per Jacobian, plus truncation error injected exactly where it damages Newton
+  sparse* Jacobian is free. Its pattern falls straight out of the incidence matching that
+  is already built. A black-box integrator must use finite differences: *n* extra
+  evaluations per Jacobian, and truncation error injected exactly where it hurts Newton
   convergence.
-* **Shrink the system before the solver sees it.** Tearing and BLT turn a simultaneous
-  block of *n* equations into a much smaller torn system wrapped in an assignment sequence.
-  That is a symbolic transformation on the model; a bare ODE library receives the system
-  already assembled and cannot perform it.
+* **Make the system smaller before the solver sees it.** Tearing and BLT turn a
+  simultaneous block of *n* equations into a much smaller torn system inside a sequence of
+  assignments. That is a symbolic transformation on the model. A bare ODE library receives
+  the system already assembled, and cannot do it.
 
-So the target is to be *faster* on the classic problems, not merely close — and the claim
-is only worth making against a fixed harness. [Benchmarks](ideas/benchmarks.md) records
-which problem sets that means and why the measurement is a work-precision diagram rather
-than a timing. The compiler that makes the three points above possible is written for this
-workload rather than adopted from a general-purpose one; [backends](ideas/backends.md)
-covers that decision and the debuggability it is meant to buy.
+So the target is to be *faster* on the classic problems, and not merely close. The claim is
+only worth making against a fixed harness. [Benchmarks](ideas/benchmarks.md) records which
+problem sets that means, and why the measurement is a work-precision diagram and not a
+timing. [Backends](ideas/backends.md) covers the compiler that makes the three points above
+possible, and the debuggability it is meant to buy.
 
-## Layer notes
+## The layers
 
-### `modelica.lang` — source → AST
+### `modelica.lang` — source to AST
 
-Hand-written lexer and recursive-descent parser against the Modelica Language
-Specification 3.x grammar. No parser-generator and no `pyparsing`: the grammar is stable
-and small enough to write out, and only a hand-written parser gives usable errors
-("expected `end <name>;` at 12:5, to close `model Foo` opened at 3:1"). AST nodes are
-frozen dataclasses carrying source spans.
+A lexer and a recursive-descent parser, both written by hand, against the Modelica Language
+Specification 3.x grammar. There is no parser generator and no pyparsing. The grammar is
+stable and small enough to write out. Only a hand-written parser gives a usable error:
+"expected `end <name>;` at 12:5, to close `model Foo` opened at 3:1". AST nodes are frozen
+dataclasses that carry source spans.
 
-### `modelica.build` — Python → IR
+### `modelica.build` — Python to IR
 
-Descriptors, operator overloading and a metaclass, and nothing else. Every value in it is a
-frozen dataclass: `flow(...)`, `parameter(...)` and friends return a *new* declaration
-rather than mutating one, so a builder expression means the same thing wherever it appears.
-The single mutation in the module is `__set_name__`, which is unavoidable — a descriptor
-learns its own name only after it exists.
+Descriptors, operator overloading and a metaclass, and nothing else. Every value in the
+module is a frozen dataclass. `flow(...)`, `parameter(...)` and the rest return a *new*
+declaration instead of changing one, so a builder expression means the same thing wherever
+it appears. The module changes exactly one thing in place: `__set_name__`. That is
+unavoidable, because a descriptor learns its own name only after it exists.
 
-One consequence of Python's rules is worth stating, because it shaped the design.
+One rule of Python shaped the design, and it is worth stating.
+
 Rich comparison gives priority to the *right* operand when its type is a proper subclass of
-the left's, with none of the "differs from the base" guard the numeric operators have. Had
-`Declaration` subclassed `Expression`, `der(self.h) == self.v` would have run
-`self.v.__eq__` and produced `v = der(h)` — the same equation acausally, but not the same
-text, and a mismatch with no visible cause. `Declaration` is therefore a descriptor that
-*returns* an `Expression`, which removes the possibility instead of documenting it.
+the left one. The numeric operators guard against this and the comparison operators do not.
+If `Declaration` had subclassed `Expression`, then `der(self.h) == self.v` would have run
+`self.v.__eq__` and produced `v = der(h)`. That is the same equation acausally, but not the
+same text, and the mismatch would have had no visible cause. So `Declaration` is a
+descriptor that *returns* an `Expression`. The design removes the possibility instead of
+documenting it.
 
-### `modelica.ir` — AST → solvable system
+### `modelica.ir` — AST to a solvable system
 
-The interesting layer, and the one the whole project stands on.
+This is the interesting layer, and the whole project stands on it.
 
-* **Flattening** — resolve `extends`, expand components and `for`-equations, apply
-  modifications, connect `connect()` equations into their potential/flow forms. Output:
-  a `FlatModel` of typed variables and scalar equations over an expression IR.
-* **Expression IR** — separate from the AST on purpose. The AST mirrors what was written;
-  the IR is what gets differentiated and evaluated, so it is small, typed, and closed under
-  symbolic differentiation.
-* **Matching + BLT** — bipartite matching of equations to unknowns, then Tarjan SCC to get
-  block-lower-triangular form: which equations must be solved simultaneously and which are
-  a straight assignment sequence.
-* **Index reduction** — Pantelides to find the structurally singular subsets, symbolic
-  differentiation of those equations, and the dummy-derivative method to select states.
-  A high-index DAE is the normal case for a physical model written with `connect()`; a
-  toolchain that cannot reduce the index cannot simulate a mechanical model at all.
+* **Flattening** resolves `extends`, expands components and `for` equations, applies
+  modifications, and turns `connect()` into its potential and flow equations. It produces a
+  `FlatModel`: typed variables and scalar equations over an expression IR.
+* **The expression IR** is separate from the AST on purpose. The AST mirrors what the
+  modeller wrote. The IR is what gets differentiated and evaluated, so it is small, typed
+  and closed under symbolic differentiation.
+* **Matching and BLT** first match equations to unknowns in a bipartite graph, then run
+  Tarjan's algorithm to get block-lower-triangular form. That says which equations must be
+  solved together, and which are a plain sequence of assignments.
+* **Index reduction** runs Pantelides to find the structurally singular subsets,
+  differentiates those equations symbolically, and selects states by the dummy-derivative
+  method. A high-index DAE is the normal case for a physical model written with
+  `connect()`. A toolchain that cannot reduce the index cannot simulate a mechanical model
+  at all.
 
 ### `modelica.sim` — running it
 
-`Problem` is the interface every backend consumes: an explicit ODE where causalization
-achieved one, a residual DAE otherwise. Backends:
+`Problem` is the interface every backend consumes. It is an explicit ODE where
+causalization achieved one, and a residual DAE otherwise. There are two backends.
 
-* **scipy** (`sim` extra) — `solve_ivp` for ODE form, plus root-finding for the algebraic
-  blocks. The default, because it installs everywhere.
-* **SUNDIALS IDA** via [scikit-SUNDAE](https://github.com/NREL/scikit-sundae) (`sundials`
-  extra) — real index-1 DAE integration with consistent initialization. Optional because it
-  needs a compiled SUNDIALS.
+* **SciPy** (the `sim` extra) uses `solve_ivp` for the ODE form, plus root finding for the
+  algebraic blocks. It is the default, because it installs everywhere.
+* **SUNDIALS IDA**, through [scikit-SUNDAE](https://github.com/NREL/scikit-sundae) (the
+  `sundials` extra), gives real index-1 DAE integration with consistent initialization. It
+  is optional, because it needs a compiled SUNDIALS.
 
-Events (zero crossings from `if`/`when`, and state events generally) are the part that
-makes this harder than "call an integrator": the solver must stop at the crossing, the
-model is re-initialized, and integration restarts. That is designed in from the start, not
-bolted on.
+Events are the part that makes this harder than calling an integrator. A zero crossing
+comes from an `if` or a `when`, and a state event generally. The solver must stop at the
+crossing, the model is initialized again, and integration restarts. That is designed in
+from the start, and not added later.
+
+### `modelica.diagram` — showing it
+
+A model is a graph before it is anything else. The components are the nodes and `connect()`
+gives the edges. The source text holds that graph where no person can see it, and
+flattening removes it: the equations keep every piece of the information and none of the
+shape.
+
+This layer gets the shape back, as a value. There are three pictures, one for each stage.
+
+| Function | Reads | Shows |
+| --- | --- | --- |
+| `schematic` | classes, before flattening | components and connections |
+| `incidence` | a `FlatModel` | which equation touches which variable |
+| `blocks` | a `System` | the order the solver runs in |
+
+Each one returns a `Graph`, and a `Graph` writes itself as SVG, as Graphviz source or as
+Mermaid source. Three decisions are worth stating.
+
+* **It resolves names with the flattener's own code.** `Scope`, `Found` and `effective` in
+  `modelica.ir.flatten` are public for this reason. A second implementation of `extends`
+  would drift from the first, and then the picture would show a model that the toolchain
+  does not simulate. A test holds them together: no box may name a component that the flat
+  model does not have.
+* **The SVG names no colour.** Every line and every character uses `currentColor`, and the
+  boxes use the same colour at six percent. One image therefore reads correctly on a white
+  page and on a dark one. There is no second copy, no script and no request to a network.
+* **The layout starts from a circle.** These images go into a site that CI rebuilds. A
+  layout that started from random positions would produce a new diff on every build, and
+  then nobody would read the diffs.
 
 ### `modelica.fmi` — FMI 3.0
 
-`modelDescription.xml` parsed into dataclasses (variables, causality/variability, model
-structure, unit definitions), the FMU's shared library loaded through `ctypes`, and both
-interface types wrapped: Model Exchange (the FMU supplies the derivatives, we integrate)
-and Co-Simulation (the FMU integrates itself between communication points). Export goes the
-other way: a `CausalizedModel` plus a generated `modelDescription.xml`, with the FMU's C
+`modelDescription.xml` is parsed into dataclasses: variables, causality and variability,
+model structure, and unit definitions. The FMU's shared library is loaded through `ctypes`.
+Both interface types are wrapped. In Model Exchange the FMU supplies the derivatives and we
+integrate. In Co-Simulation the FMU integrates itself between communication points. Export
+goes the other way: a `System` plus a generated `modelDescription.xml`, with the FMU's C
 entry points backed by the Python evaluator.
 
 ### `modelica.ssp` — SSP 2.0
 
-A `.ssp` is a zip: `SystemStructure.ssd` (components, connectors, connections, possibly
-nested systems), `.ssv` parameter sets, `.ssb` bindings. Parsed into a composition graph,
-resolved against the FMUs it references, and executed by a co-simulation master that steps
-the components and exchanges signals at communication points. SSP 2.0 specifics that matter
-to the data model: FMI 3.0 component support, the `structuralParameter` connector kind,
-clocked connectors, and arrays in connectors/connections.
+A `.ssp` file is a zip. It holds `SystemStructure.ssd` for the components, connectors,
+connections and any nested systems; `.ssv` files for parameter sets; and `.ssb` files for
+bindings. This layer parses them into a composition graph, resolves it against the FMUs it
+references, and runs a co-simulation master that steps the components and exchanges signals
+at communication points. Four parts of SSP 2.0 matter to the data model: FMI 3.0
+components, the `structuralParameter` connector kind, clocked connectors, and arrays in
+connectors and connections.
 
 ## Build order
 
-0. `ir` + `build` + `lang.unparse` — the value types, the Python front-end, and a way to
-   read them back as text. **Done**; the example corpus is written twice against it.
-1. `lang.parse` + `ir` far enough to flatten a trivial `model` into scalar equations.
-   The parser is **done**: `lang.lexer` and `lang.parse` read the whole example corpus, and
-   `parse(unparse(x)) == x` holds over it because both directions climb the same
+0. `ir`, `build` and `lang.unparse` — the value types, the Python front end, and a way to
+   read them back as text. **Done.** The example corpus is written twice against it.
+1. `lang.parse`, and `ir` far enough to flatten a trivial `model` into scalar equations.
+   **Done.** `lang.lexer` and `lang.parse` read the whole example corpus, and
+   `parse(unparse(x)) == x` holds over it, because both directions climb the same
    precedence table.
-2. `sim` on the explicit-ODE case, scipy backend — first end-to-end simulation.
-3. Matching/BLT, then Pantelides + dummy derivatives — first physical model with
+2. `sim` on the explicit-ODE case, with the SciPy backend. The first end-to-end simulation.
+3. Matching and BLT, then Pantelides and dummy derivatives. The first physical model with
    `connect()`.
 4. Events.
-5. Code generation from the `FlatModel` (Numba), with work-precision diagrams against
-   scipy's Fortran-backed integrators on Robertson and van der Pol — see
+5. Code generation from the `FlatModel`, with Numba. Then work-precision diagrams against
+   SciPy's Fortran-backed integrators on Robertson and van der Pol. See
    [benchmarks](ideas/benchmarks.md) for the harness this has to answer to.
-6. `fmi` import (read + simulate an existing FMU) — validates the variable/model-structure
-   data model against real files.
+6. `fmi` import: read and simulate an existing FMU. This checks the variable and model
+   structure data model against real files.
 7. `fmi` export.
-8. `ssp` composition + co-simulation master.
+8. `ssp` composition and the co-simulation master.

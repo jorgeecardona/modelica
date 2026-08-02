@@ -1,93 +1,99 @@
 # Benchmarks: what "as good as the Fortran codes" has to mean
 
 A claim about solver performance is worthless without a fixed set of problems and a fixed
-way of measuring. This page records which ones this project targets, and why the obvious
+way to measure. This page records which problems this project targets, and why the obvious
 metric is the wrong one.
 
 ## FLOPS is the wrong number
 
-LINPACK has not gone away — HPL still underpins the [TOP500][top500], refreshed twice a
-year, and HPCG was added alongside it precisely because HPL had stopped being
-representative of real workloads. But a single throughput figure says nothing useful about
-an integrator. On Robertson, an explicit method needs on the order of 10⁷–10⁸ steps where a
-good stiff method needs a few hundred. A solver that is 10× slower per step and takes 10⁶
-fewer steps wins by five orders of magnitude, and no FLOPS count shows that.
+LINPACK has not gone away. HPL still underpins the [TOP500][top500], and the list is
+refreshed twice a year. HPCG was added beside it for one reason: HPL had stopped
+representing real workloads.
 
-The metric the field actually uses is the **work-precision diagram**: the error the solver
-*achieved* against the CPU time it took, swept across a range of tolerances, one curve per
-method. Lower and to the left wins. It is the honest measurement because it prices in the
-two things a scalar timing hides — that a loose tolerance is not free accuracy, and that a
-method which fails to converge has not "run fast".
+A single throughput figure says nothing useful about an integrator. On Robertson, an
+explicit method needs 10⁷ to 10⁸ steps where a good stiff method needs a few hundred. A
+solver that is 10 times slower per step, and takes 10⁶ fewer steps, wins by five orders of
+magnitude. No FLOPS count shows that.
+
+The field uses the **work-precision diagram** instead. It plots the error the solver
+*achieved* against the CPU time it took, swept over a range of tolerances, with one curve
+per method. Lower and to the left wins. It is the honest measurement, because it prices in
+the two things a scalar timing hides: a loose tolerance is not free accuracy, and a method
+that fails to converge has not "run fast".
 
 ## The problem sets
 
-**[Test Set for IVP Solvers][bari]** — Mazzia & Magherini, University of Bari and INdAM,
-release 2.4 (February 2008). The canonical collection: Robertson, HIRES, Ring Modulator
-(15-dimensional stiff), E5, Beam (80-dimensional), Medical Akzo Nobel, EMEP. Each problem
-ships with a high-precision reference solution, which is what makes an *error* axis
-possible at all. Ported to R as `deTestSet` and to Julia as `IVPTestSuite.jl`.
+**[Test Set for IVP Solvers][bari]**, by Mazzia and Magherini, University of Bari and
+INdAM, release 2.4 of February 2008. This is the canonical collection: Robertson, HIRES,
+Ring Modulator (stiff, 15 dimensions), E5, Beam (80 dimensions), Medical Akzo Nobel, and
+EMEP. Every problem ships with a high-precision reference solution, which is the only thing
+that makes an *error* axis possible. It was ported to R as `deTestSet` and to Julia as
+`IVPTestSuite.jl`.
 
-**[Hairer's testset and drivers][hairer]** — the reference harness for RADAU5, DOPRI5,
-DOP853, RODAS and SEULEX, from the authors of those codes. If the claim is "faster than
-RADAU5", this is the harness that has to say so.
+**[Hairer's testset and drivers][hairer]** is the reference harness for RADAU5, DOPRI5,
+DOP853, RODAS and SEULEX, written by the authors of those codes. If the claim is "faster
+than RADAU5", this harness has to say so.
 
-**[SciMLBenchmarks.jl][scimlbench]**, results published at [benchmarks.sciml.ai][sciml] —
-the live one. Actively maintained, cross-language (Julia, Python including Jax, MATLAB, R,
-and the Fortran codes through wrappers), and it carries the IVP-test-set problems above. It
-is also the direct precedent for the position taken here: it is where "a high-level
-language can beat the Fortran codes" was argued and defended in public with numbers.
+**[SciMLBenchmarks.jl][scimlbench]**, published at [benchmarks.sciml.ai][sciml], is the
+live one. It is actively maintained. It crosses languages: Julia, Python including Jax,
+MATLAB, R, and the Fortran codes through wrappers. It carries the IVP test set problems
+above. It is also the direct precedent for the position taken here, because it is where "a
+high-level language can beat the Fortran codes" was argued and defended in public, with
+numbers.
 
-**[casella/ScalableTestSuite][scalable]** — the Modelica-specific one, and the one that
-tests the *compiler* rather than only the integrator. Models are parameterised by size, so
-both compile time and simulation time can be plotted against *n*. Paper: ["Towards a
-benchmark suite for high-performance Modelica compilers"][eoolt], EOOLT. OpenModelica
-publishes [per-branch results][omcresults] against it, which gives a public baseline to
-measure against rather than a number from a paper.
+**[casella/ScalableTestSuite][scalable]** is the Modelica-specific one, and it tests the
+*compiler* and not only the integrator. Its models take a size parameter, so both compile
+time and simulation time can be plotted against *n*. The paper is ["Towards a benchmark
+suite for high-performance Modelica compilers"][eoolt], at EOOLT. OpenModelica publishes
+[per-branch results][omcresults] against it, which gives a public baseline to measure
+against instead of a number from a paper.
 
 ## Why beating them is a design goal and not bravado
 
-The interesting claim is not "Python can be fast". It is that a compiler which knows it is
-compiling a *differential-algebraic system* can do three things a precompiled general
-integrator structurally cannot:
+The interesting claim is not that Python can be fast. It is that a compiler which knows it
+is compiling a *differential-algebraic system* can do three things that a precompiled
+general integrator cannot.
 
-* **Inline the right-hand side into the integrator loop.** RADAU5 is a library: it calls
+* **It puts the right-hand side inside the integrator loop.** RADAU5 is a library. It calls
   the user's `F` through a function pointer, across a call boundary it cannot see through,
-  with the parameters living in memory it must load. A JIT compiles the model and the
-  integrator together, so the RHS is inlined, the parameters are constants, and the
-  constant-folding happens once at compile time instead of once per stage per step.
-* **Differentiate the model.** The equations are held symbolically, so an analytic — and
-  sparse — Jacobian is free. A black-box integrator has to finite-difference it, which
-  costs *n* extra RHS evaluations per Jacobian and injects truncation error into the Newton
-  iteration exactly where it hurts convergence.
-* **Shrink the system before the solver sees it.** Tearing and BLT reduce a simultaneous
-  block of *n* equations to a much smaller torn system with an assignment sequence around
-  it. That is a symbolic transformation on the model; a bare ODE library is handed the
-  system already assembled and has no way to perform it.
+  and the parameters live in memory it must load. A JIT compiles the model and the
+  integrator together. The right-hand side is inlined, the parameters are constants, and
+  the folding happens once at compile time instead of once per stage per step.
+* **It differentiates the model.** The equations are held symbolically, so an analytic and
+  sparse Jacobian is free. A black-box integrator must use finite differences. That costs
+  *n* extra evaluations per Jacobian, and it injects truncation error into the Newton
+  iteration exactly where that hurts convergence.
+* **It makes the system smaller before the solver sees it.** Tearing and BLT reduce a
+  simultaneous block of *n* equations to a much smaller torn system inside a sequence of
+  assignments. That is a symbolic transformation on the model. A bare ODE library receives
+  the system already assembled and cannot do it.
 
-None of the three is available to a library that receives a black-box residual. All three
-are available to a compiler that owns the model. That is the whole argument for writing our
-own rather than binding to an existing one — see [the backends note](backends.md).
+A library that receives a black-box residual has none of the three. A compiler that owns
+the model has all three. That is the whole argument for writing our own instead of binding
+to one that exists. [The backends note](backends.md) carries the rest of it.
 
-The [Rumoca][rumoca] work (Modelica as a universal algebraic frontend, via a Rust-native
-compiler) is contemporary evidence that this space is live and that the frontend-plus-IR
-framing is not idiosyncratic.
+The [Rumoca][rumoca] work — Modelica as a universal algebraic front end, through a
+Rust-native compiler — is current evidence that this space is live, and that the
+front-end-plus-IR framing is not idiosyncratic.
 
 ## What gets measured here, and when
 
-Build-order stage 5 is where this becomes real: code generation from the `FlatModel`, with
-work-precision diagrams against scipy's Fortran-backed integrators. The staging:
+Stage 5 of the build order is where this becomes real: code generation from the
+`FlatModel`, with work-precision diagrams against the Fortran-backed integrators of scipy.
+The staging has three steps.
 
-1. **Robertson and van der Pol** first — small, stiff, universally understood, and both are
-   in the Bari set with reference solutions. They catch order/step-size control bugs.
-2. **HIRES, E5, Ring Modulator** next — enough dimension and enough stiffness that Jacobian
-   strategy and linear-solve cost start to matter.
-3. **ScalableTestSuite** last — where compile time enters the picture, and where the
-   symbolic stages (matching, BLT, tearing, index reduction) are what is actually under
-   test rather than the integrator.
+1. **Robertson and van der Pol** first. They are small, stiff and universally understood,
+   and both are in the Bari set with reference solutions. They catch bugs in order control
+   and step size control.
+2. **HIRES, E5 and the Ring Modulator** next. They have enough dimension and enough
+   stiffness that the Jacobian strategy and the cost of the linear solve start to matter.
+3. **ScalableTestSuite** last. Compile time enters the picture there, and the symbolic
+   stages — matching, BLT, tearing, index reduction — are what is under test, rather than
+   the integrator.
 
-Every number published from this project cites the problem, the tolerance sweep, the
-reference solution used for the error axis, and the machine. A timing without those is not
-a benchmark, it is an anecdote.
+Every number published from this project cites four things: the problem, the tolerance
+sweep, the reference solution used for the error axis, and the machine. A timing without
+them is not a benchmark. It is an anecdote.
 
 [bari]: https://archimede.dm.uniba.it/~testset/
 [eoolt]: https://dl.acm.org/doi/10.1145/3365984.3365988

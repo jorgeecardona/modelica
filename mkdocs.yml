@@ -35,7 +35,15 @@ markdown_extensions:
       permalink: true
   - pymdownx.highlight:
       anchor_linenums: true
-  - pymdownx.superfences
+  # `mermaid` fences are drawn in the browser by the copy of mermaid that
+  # mkdocs-material ships. That keeps a diagram as *text* in the page it explains, so it
+  # diffs like prose and cannot go stale beside the words. `modelica.diagram` writes this
+  # form with `to_mermaid()`, and writes SVG for everywhere else.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.snippets:
       base_path: [".", "docs"]
       check_paths: true
@@ -72,6 +80,7 @@ nav:
   - Examples: examples.md
   - Notebooks:
       - Simulating a model: notebooks/simulating.py
+      - Drawing a model: notebooks/drawing.ipynb
       - Turning the knobs: notebooks/exploring.ipynb
       - The shape of the equations: notebooks/structure.ipynb
       - Where the smoothness breaks: notebooks/events.ipynb
@@ -83,4 +92,5 @@ nav:
       - PDEs: ideas/pdes.md
       - GPU backends: ideas/vulkan.md
       - Verification: ideas/verification.md
+  - How these pages are written: style.md
   - Changelog: changelog.md

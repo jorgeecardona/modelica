@@ -1,92 +1,97 @@
-# One IR, several backends — and a debugger that still works
+# One IR, several backends, and a debugger that still works
 
-OpenModelica's pipeline is `.mo` → generated C → a C compiler → an executable → run it.
-That works, and it is fast, and it makes debugging genuinely painful: when the trajectory
-goes wrong, what you have to look at is thousands of lines of machine-written C with names
-like `$DER$Pbody$Pv` and a `.mat` file of numbers. The symptom appears in a language you
-did not write, three translations away from the equation you got wrong.
+OpenModelica has this pipeline: `.mo` to generated C, then a C compiler, then an
+executable, then run it. It works, and it is fast, and it makes debugging genuinely
+painful. When the trajectory goes wrong, you have to read thousands of lines of
+machine-written C with names like `$DER$Pbody$Pv`, plus a `.mat` file of numbers. The
+symptom appears in a language you did not write, three translations away from the equation
+you got wrong.
 
-This project takes the compiled path — [performance](../architecture.md#performance-where-the-time-actually-goes)
-leaves no choice — but refuses to inherit that debugging story. The way out is to make the
-compiler ours, and to keep a second, slow, honest evaluator over the same IR.
+This project takes the compiled path, because
+[performance](../architecture.md#performance-where-the-time-goes) leaves no choice. It
+refuses to inherit that debugging story. The way out has two parts: own the compiler, and
+keep a second, slow, honest evaluator over the same IR.
 
 ## Two evaluators over one IR
 
-`modelica.ir.evaluate` is a tree-walking interpreter. It is slow, it allocates, and it will
-never be on the hot path. It is also the **reference tier**, and it is always available:
+`modelica.ir.evaluate` is an interpreter that walks the tree. It is slow, it allocates, and
+it will never be on the hot path. It is also the **reference tier**, and it is always
+there.
 
-* It reports errors in *Modelica* terms — `division by zero in equation 12 of BouncingBall:
-  ball.v / ball.m` — because it still has the IR node and the source span attached to it,
-  where the compiled kernel has only a NaN.
+* It reports an error in *Modelica* terms: "division by zero in equation 12 of
+  BouncingBall: ball.v / ball.m". It can, because it still holds the IR node and the source
+  span. The compiled kernel holds only a NaN.
 * It is what the compiled kernel is tested against. Any expression, any model, both
-  evaluators, same answer. That is a property test, not a hope.
-* It gives **differential debugging**: when a compiled run disagrees with the interpreted
-  run, step both and find the first equation where they diverge. That question cannot even
-  be *asked* of a generated-C pipeline, because there is nothing to compare against.
-* It runs when the compiler is not installed. `pip install modelica` with no Numba still
-  simulates; it is just slow.
+  evaluators, one answer. That is a property test, and not a hope.
+* It gives **differential debugging**. When a compiled run disagrees with an interpreted
+  run, step both and find the first equation where they diverge. You cannot even ask that
+  question of a generated-C pipeline, because there is nothing to compare against.
+* It runs when the compiler is absent. `pip install modelica` with no Numba still
+  simulates. It is only slow.
 
-So the fast path is an optimisation over a correct thing, rather than the only thing.
+So the fast path is an optimisation of a correct thing, and not the only thing.
 
-## Backends are emitters, not rewrites
+## A backend is an emitter, not a rewrite
 
-Because the IR compiles to *source*, adding a target is writing an emitter:
+The IR compiles to *source*, so adding a target means writing an emitter.
 
-| Backend | What it emits | For |
+| Backend | What it emits | What it is for |
 | --- | --- | --- |
-| interpreter | nothing — walks the IR | reference, error messages, no-dependency install |
+| interpreter | nothing; it walks the IR | reference, error messages, install with no dependency |
 | Numba | Python source, `@njit` | the default fast path |
-| C | a translation unit | FMU export, where a shared library is the deliverable |
-| SPIR-V / Vulkan | compute shaders | width — ensembles, MOL systems (see [GPU backends](vulkan.md)) |
-| CuPy / Jax | array expressions | batched parameter sweeps on NVIDIA |
+| C | one translation unit | FMU export, where a shared library is the deliverable |
+| SPIR-V and Vulkan | compute shaders | width: ensembles and MOL systems. See [GPU backends](vulkan.md) |
+| CuPy and Jax | array expressions | batched parameter sweeps on NVIDIA |
 
-The shared work — flattening, matching, BLT, index reduction, tearing, symbolic
-differentiation, common-subexpression elimination — happens once, above all of them. Only
-the last step differs. This is the [vLLM][vllm]/[XLA][xla] shape: one intermediate
-representation that carries all the domain knowledge, and hardware backends that are
-narrow, replaceable, and individually testable.
+The shared work happens once, above all of them: flattening, matching, BLT, index
+reduction, tearing, symbolic differentiation, and common-subexpression elimination. Only
+the last step differs. This is the shape of [vLLM][vllm] and [XLA][xla]: one intermediate
+representation carries all the domain knowledge, and the hardware backends stay narrow,
+replaceable and separately testable.
 
 ## Tailored, not adopted
 
-The point of borrowing the *shape* from XLA is not to use XLA. A general-purpose tensor
-compiler is built for a workload that is not ours: large dense array ops, batch dimensions,
-fusion across a dataflow graph. A DAE right-hand side is a few hundred scalar operations
+Borrowing the *shape* of XLA is not the same as using XLA. A general tensor compiler is
+built for a workload that is not ours: large dense array operations, batch dimensions, and
+fusion across a dataflow graph. A DAE right-hand side is a few hundred scalar operations,
 with a sparsity pattern we already know exactly, evaluated millions of times, inside a loop
-whose control flow is decided by an error norm.
+whose control flow an error norm decides.
 
-Writing our own compiler for that shape buys things a general one will not give:
+Writing our own compiler for that shape buys five things that a general one will not give.
 
-* **The integrator and the model compile together.** RADAU5 is a library: it calls `F`
-  through a function pointer it cannot see through. Ours inlines the RHS into the step, so
-  the optimiser sees one function.
-* **Sparsity is structural, not discovered.** The Jacobian pattern falls out of the
-  incidence matrix that matching already built. No colouring heuristics, no probing.
-* **Specialisation is a choice, not a policy.** Parameters can be *burned in* as literals
-  and constant-folded, or left as a kernel *argument* so one compiled artefact serves a
-  whole sweep. Two compile modes, picked by the caller — the same decision vLLM makes about
-  what to bake into a CUDA graph and what to keep as a runtime input.
+* **The integrator and the model compile together.** RADAU5 is a library, and it calls `F`
+  through a function pointer it cannot see through. Ours puts the right-hand side inside
+  the step, so the optimiser sees one function.
+* **Sparsity is structural, not discovered.** The pattern of the Jacobian falls out of the
+  incidence matrix that matching already built. There is no colouring heuristic and no
+  probing.
+* **Specialisation is a choice, not a policy.** Burn the parameters in as literals and fold
+  them, or leave them as an argument so that one compiled artefact serves a whole sweep.
+  Two compile modes, and the caller picks. vLLM makes the same decision about what to bake
+  into a CUDA graph and what to keep as a runtime input.
 * **Caching is free.** The IR nodes are frozen, slotted and hashable, so a `FlatModel` has
-  a content hash without any extra machinery. That hash is the cache key for the compiled
-  kernel: recompile only when the model actually changed, not when the file's mtime did.
-* **Fixed-step co-simulation is a static dispatch sequence.** No branching between
-  communication points means the whole schedule can be recorded once and replayed — CUDA
-  graphs, or `cml_replay` on the Vulkan side. That optimisation is only visible to a
-  compiler that knows it is compiling a simulation.
+  a content hash and needs no extra machinery to get one. That hash is the cache key for
+  the compiled kernel. It recompiles when the model changed, and not when the mtime of the
+  file changed.
+* **Fixed-step co-simulation is a static dispatch sequence.** Nothing branches between
+  communication points, so the whole schedule can be recorded once and replayed. That is
+  CUDA graphs, or `cml_replay` on the Vulkan side. Only a compiler that knows it is
+  compiling a simulation can see that optimisation.
 
-None of these are general-purpose optimisations. They are all consequences of knowing the
-workload is a DAE, which is exactly the knowledge a general compiler has been careful to
+None of these five is a general-purpose optimisation. Each one follows from knowing that
+the workload is a DAE. That is exactly the knowledge a general compiler has been careful to
 throw away.
 
 ## What this costs
 
-Honesty about the trade: a hand-written compiler is a maintenance burden that adopting one
-would not be. The mitigations are that the IR is deliberately small (arithmetic, calls,
-conditionals — no arrays-of-structs, no user-defined types at the expression level), that
-the interpreter pins down the semantics independently of any emitter, and that each backend
-is tested against the interpreter rather than against the others. The surface that has to
-be correct is the IR and the interpreter; the emitters are mechanical.
+A hand-written compiler is a maintenance burden, and adopting one would not be. Three
+things reduce that cost. The IR is deliberately small: arithmetic, calls and conditionals,
+with no arrays of structs and no user-defined types at the expression level. The
+interpreter pins down the semantics on its own, apart from any emitter. And each backend is
+tested against the interpreter, and not against the other backends. So the surface that has
+to be correct is the IR and the interpreter. The emitters are mechanical.
 
-Where this is measured, and against what, is in [benchmarks](benchmarks.md).
+[Benchmarks](benchmarks.md) says where this is measured, and against what.
 
 [vllm]: https://github.com/vllm-project/vllm
 [xla]: https://openxla.org/xla
