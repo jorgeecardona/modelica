@@ -77,6 +77,7 @@ verify = ["musil>=0.7"]
 # everywhere else, and a caller who wants it writes `pip install modelica[sim] numba` and
 # accepts the older numpy explicitly. When Numba's ceiling moves past 2.5 this becomes a
 # two-line change: add the extra, add it to `dev`, delete this paragraph.
+#
 # docs are an *extra* (not a uv dependency-group) so external services can install them via pip.
 # The notebooks under docs/notebooks are *executed* at build time, which is what stops them
 # rotting: a page that stopped working fails `mkdocs build --strict` in CI rather than sitting
