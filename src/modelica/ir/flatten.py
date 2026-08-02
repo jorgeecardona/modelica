@@ -19,6 +19,12 @@ Two decisions worth stating:
   different sets, or the flow variable at the boundary drops out of the equations and
   the model goes underdetermined. Flow sums count inside connectors positive, outside
   negative; an inside connector left unconnected gets its flow variables pinned to zero.
+
+:class:`Scope`, :class:`Found` and :func:`effective` are public because a second consumer
+needs them: :mod:`modelica.diagram` draws the model *before* it is flattened, and to do
+that it must resolve the same type names and fold the same ``extends`` chains. A second
+implementation would drift, and then the picture would show a model that this pass does
+not build. They resolve names and merge classes. They produce no equations.
 """
 
 from __future__ import annotations
@@ -30,7 +36,7 @@ from typing import Literal
 from modelica.ir import nodes as ir
 from modelica.ir.flat import BaseType, FlatModel, FlatVariable
 
-__all__ = ["FlattenError", "flatten"]
+__all__ = ["Effective", "FlattenError", "Found", "Member", "Scope", "effective", "flatten"]
 
 _PREDEFINED: frozenset[BaseType] = frozenset(("Real", "Integer", "Boolean", "String"))
 
@@ -48,7 +54,7 @@ class FlattenError(Exception):
 
 
 @dataclass(frozen=True)
-class _Found:
+class Found:
     """A resolved class plus the enclosing chain its own names resolve against."""
 
     cls: ir.Class
@@ -57,11 +63,11 @@ class _Found:
 
 
 @dataclass(frozen=True)
-class _Scope:
+class Scope:
     program: ir.Program
     chain: tuple[ir.Class, ...] = ()
 
-    def resolve(self, name: str) -> _Found | BaseType:
+    def resolve(self, name: str) -> Found | BaseType:
         head, *rest = name.split(".")
         if head in _PREDEFINED and not rest:
             return head
@@ -72,21 +78,21 @@ class _Scope:
             nested = next((c for c in found.cls.classes if c.name == part), None)
             if nested is None:
                 raise FlattenError(f"{found.cls.name!r} has no nested class {part!r}")
-            found = _Found(nested, (nested, *found.chain))
+            found = Found(nested, (nested, *found.chain))
         return found
 
-    def _find_head(self, head: str) -> _Found | None:
+    def _find_head(self, head: str) -> Found | None:
         for depth, cls in enumerate(self.chain):
             for nested in cls.classes:
                 if nested.name == head:
-                    return _Found(nested, (nested, *self.chain[depth:]))
+                    return Found(nested, (nested, *self.chain[depth:]))
         for cls in self.program.classes:
             if cls.name == head:
-                return _Found(cls, (cls,))
+                return Found(cls, (cls,))
         return None
 
-    def inside(self, found: _Found) -> _Scope:
-        return _Scope(self.program, found.chain)
+    def inside(self, found: Found) -> Scope:
+        return Scope(self.program, found.chain)
 
 
 # --------------------------------------------------------------------------------------
@@ -122,34 +128,34 @@ def _merged(*mods: ir.Modification) -> ir.Modification:
 
 
 @dataclass
-class _Member:
+class Member:
     component: ir.Component
-    scope: _Scope
+    scope: Scope
     """Where the component was declared -- its type name resolves here."""
     mods: tuple[ir.Modification, ...] = ()
     """Modifications picked up from ``extends`` clauses, weakest first."""
 
 
 @dataclass
-class _Effective:
+class Effective:
     """One class with its whole ``extends`` chain folded in."""
 
-    members: dict[str, _Member] = field(default_factory=dict[str, "_Member"])
+    members: dict[str, Member] = field(default_factory=dict[str, "Member"])
     equations: list[ir.Equation] = field(default_factory=list[ir.Equation])
     initial_equations: list[ir.Equation] = field(default_factory=list[ir.Equation])
 
 
-def _effective(found: _Found, scope: _Scope) -> _Effective:
+def effective(found: Found, scope: Scope) -> Effective:
     inner = scope.inside(found)
-    result = _Effective()
+    result = Effective()
     for extends in found.cls.extends:
         base = inner.resolve(extends.type_name)
-        if not isinstance(base, _Found):
+        if not isinstance(base, Found):
             raise FlattenError(
                 f"{found.cls.name} extends predefined type {extends.type_name!r}; "
                 f"only `type` classes may do that"
             )
-        base_effective = _effective(base, inner)
+        base_effective = effective(base, inner)
         for name, member in base_effective.members.items():
             if name in result.members:
                 raise FlattenError(f"{found.cls.name} inherits {name!r} twice")
@@ -162,7 +168,7 @@ def _effective(found: _Found, scope: _Scope) -> _Effective:
     for component in found.cls.components:
         if component.name in result.members:
             raise FlattenError(f"{found.cls.name} declares {component.name!r} twice")
-        result.members[component.name] = _Member(component, inner)
+        result.members[component.name] = Member(component, inner)
     result.equations += found.cls.equations
     result.initial_equations += found.cls.initial_equations
     return result
@@ -173,11 +179,11 @@ def _effective(found: _Found, scope: _Scope) -> _Effective:
 # --------------------------------------------------------------------------------------
 
 
-def _base_of(found: _Found | BaseType, scope: _Scope) -> tuple[BaseType, ir.Modification]:
+def _base_of(found: Found | BaseType, scope: Scope) -> tuple[BaseType, ir.Modification]:
     """Follow a ``type`` alias chain to its predefined base, collecting attributes."""
     collected = ir.EMPTY
     current = found
-    while isinstance(current, _Found):
+    while isinstance(current, Found):
         if current.cls.restriction != "type":
             raise FlattenError(f"{current.cls.name!r} is not a type")
         if len(current.cls.extends) != 1 or current.cls.components:
@@ -335,27 +341,27 @@ class _Flattener:
     whens: list[ir.When] = field(default_factory=list[ir.When])
     initial_equations: list[ir.Equal] = field(default_factory=list[ir.Equal])
     connections: _Connections = field(default_factory=_Connections)
-    connectors: dict[_Path, _Found] = field(default_factory=dict[_Path, "_Found"])
+    connectors: dict[_Path, Found] = field(default_factory=dict[_Path, "Found"])
 
     # -- components -------------------------------------------------------------------
 
     def instantiate(
         self,
-        found: _Found,
-        scope: _Scope,
+        found: Found,
+        scope: Scope,
         prefix: _Path,
         outer: ir.Modification,
         floor: ir.Variability,
     ) -> None:
-        effective = _effective(found, scope)
-        local = frozenset(effective.members)
+        merged = effective(found, scope)
+        local = frozenset(merged.members)
         if outer.value is not None:
             raise FlattenError(f"{'.'.join(prefix)}: a composite component cannot have a value")
-        for name, member in effective.members.items():
+        for name, member in merged.members.items():
             self._component(member, (*prefix, name), outer.entries.get(name, ir.EMPTY), floor)
-        for equation in effective.equations:
+        for equation in merged.equations:
             self._equation(equation, prefix, local)
-        for equation in effective.initial_equations:
+        for equation in merged.initial_equations:
             if not isinstance(equation, ir.Equal):
                 raise FlattenError("only `a = b` equations may appear in initial equation")
             self.initial_equations.append(
@@ -366,13 +372,13 @@ class _Flattener:
             )
 
     def _component(
-        self, member: _Member, path: _Path, outer: ir.Modification, floor: ir.Variability
+        self, member: Member, path: _Path, outer: ir.Modification, floor: ir.Variability
     ) -> None:
         component = member.component
         total = _merged(component.modification, *member.mods, outer)
         resolved = member.scope.resolve(component.type_name)
         variability = _tighten(component.variability, floor)
-        if isinstance(resolved, _Found) and resolved.cls.restriction != "type":
+        if isinstance(resolved, Found) and resolved.cls.restriction != "type":
             if resolved.cls.restriction == "connector":
                 self.connectors[path] = resolved
             self.instantiate(resolved, member.scope, path, total, variability)
@@ -460,11 +466,11 @@ class _Flattener:
 
     # -- connect expansion ------------------------------------------------------------
 
-    def _connector_leaves(self, found: _Found, scope: _Scope) -> list[_ConnectorLeaf]:
+    def _connector_leaves(self, found: Found, scope: Scope) -> list[_ConnectorLeaf]:
         leaves: list[_ConnectorLeaf] = []
-        for name, member in _effective(found, scope).members.items():
+        for name, member in effective(found, scope).members.items():
             resolved = member.scope.resolve(member.component.type_name)
-            if isinstance(resolved, _Found) and resolved.cls.restriction != "type":
+            if isinstance(resolved, Found) and resolved.cls.restriction != "type":
                 leaves.extend(
                     _ConnectorLeaf((name, *leaf.path), leaf.kind)
                     for leaf in self._connector_leaves(resolved, member.scope)
@@ -479,7 +485,7 @@ class _Flattener:
         for path, found in self.connectors.items():
             # An inside connector nobody connected: its flows have nowhere to go.
             if len(path) > 1 and not self.connections.connected((path, "inside")):
-                for leaf in self._connector_leaves(found, _Scope(self.program)):
+                for leaf in self._connector_leaves(found, Scope(self.program)):
                     if leaf.kind == "flow":
                         self.equations.append(
                             ir.Equal(ir.Ref((*path, *leaf.path)), ir.RealLiteral(0.0))
@@ -491,7 +497,7 @@ class _Flattener:
             joined = ", ".join(".".join(path) for path, _ in endpoints)
             raise FlattenError(f"connect() mixes connector types {sorted(classes)}: {joined}")
         first_path = endpoints[0][0]
-        leaves = self._connector_leaves(self.connectors[first_path], _Scope(self.program))
+        leaves = self._connector_leaves(self.connectors[first_path], Scope(self.program))
         for leaf in leaves:
             refs = [ir.Ref((*path, *leaf.path)) for path, _ in endpoints]
             if leaf.kind == "flow":
@@ -515,9 +521,9 @@ class _Flattener:
 
 def flatten(program: ir.Program, model: str) -> FlatModel:
     """Flatten class ``model`` (a dotted name) as found in ``program``."""
-    scope = _Scope(program)
+    scope = Scope(program)
     found = scope.resolve(model)
-    if not isinstance(found, _Found):
+    if not isinstance(found, Found):
         raise FlattenError(f"{model!r} is a predefined type, not a model")
     if found.cls.restriction not in ("model", "block"):
         raise FlattenError(f"{model!r} is a {found.cls.restriction}, not a model")

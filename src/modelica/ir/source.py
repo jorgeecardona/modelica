@@ -1,10 +1,16 @@
-"""Whatever you have, flattened.
+"""Whatever you have, collected into one program.
 
 :mod:`modelica.ir.flatten` insists on an :class:`~modelica.ir.nodes.Program`, because a
 pass that resolves names should not also be in the business of guessing what it was
 handed. This module does that guessing once, at the edge, so that every caller above it
--- tests, the CLI, FMU export -- can pass what it happens to have: a parsed program, a
-single class, a :mod:`modelica.build` package, or a list mixing all three.
+-- tests, the CLI, FMU export, :mod:`modelica.diagram` -- can pass what it happens to
+have: a parsed program, a single class, a :mod:`modelica.build` package, or a list mixing
+all three.
+
+It sits under :mod:`modelica.ir` and not under :mod:`modelica.sim` for one reason: it
+must cost nothing to import. :mod:`modelica.sim` pulls in NumPy, and a caller that only
+reads the structure of a model -- an editor, a diagram, a linter -- must not pay for a
+numerical stack it does not use.
 
 The list form is what makes libraries work. A model and the libraries it needs are
 separate files and separate programs; naming resolution needs them side by side in one

@@ -7,7 +7,7 @@
 # abandoned Modelon/JModelica.org upload (version "trunk"). The git repo keeps the
 # historical name; the import package matches the distribution.
 name = "modelica"
-version = "0.0.12"
+version = "0.0.13"
 description = "Pure-Python Modelica toolchain: parse, flatten, simulate, and exchange via FMI 3.0 and SSP 2.0"
 readme = "README.md"
 # 3.12+, no compatibility shims: this is a full rewrite of a 2010 Python 2 codebase, and
@@ -173,6 +173,9 @@ ignore = [
                            # Bundling them into a dataclass to satisfy a counter would make
                            # every call site longer than the annotate() it replaced
 ]
+# A command-line program says what it has to say on stdout. `print` is the interface,
+# not a leftover debugging call.
+"src/modelica/diagram/__main__.py" = ["T201"]
 # Each example is the Python twin of a `.mo` file next to it, and the tests assert the two
 # flatten to the same model. That correspondence outranks the house style: the docstring is
 # the Modelica description string, the component names are the ones in the `.mo`.

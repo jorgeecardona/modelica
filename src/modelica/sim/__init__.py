@@ -20,6 +20,9 @@ from typing import TYPE_CHECKING, Any
 
 from modelica.ir.causalize import CausalizationError as CausalizationError
 from modelica.ir.causalize import causalize as causalize
+from modelica.ir.source import Source as Source
+from modelica.ir.source import flatten as flatten
+from modelica.ir.source import to_program as to_program
 from modelica.ir.system import Block as Block
 from modelica.ir.system import System as System
 from modelica.sim.emit import Code as Code
@@ -29,9 +32,6 @@ from modelica.sim.emit import emit as emit
 from modelica.sim.emit import emit_expr as emit_expr
 from modelica.sim.kernel import Kernel as Kernel
 from modelica.sim.kernel import build as build
-from modelica.sim.model import Source as Source
-from modelica.sim.model import flatten as flatten
-from modelica.sim.model import to_program as to_program
 from modelica.sim.result import Event as Event
 from modelica.sim.result import Result as Result
 from modelica.sim.view import View as View
