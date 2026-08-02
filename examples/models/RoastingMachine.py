@@ -1,6 +1,16 @@
 """The Python twin of ``RoastingMachine.mo``."""
 
-from modelica.build import Expression, Model, Real, der, if_, parameter, time, to_modelica
+from modelica import ir
+from modelica.build import (
+    Expression,
+    Model,
+    Real,
+    der,
+    if_,
+    parameter,
+    time,
+    to_modelica,
+)
 
 GAS = (
     (66.7, 20),
@@ -17,6 +27,15 @@ GAS = (
 IDLE = 20
 """Where the burner sits once the schedule has run out -- the same idle it charged on."""
 
+BOILING = 373.15
+"""Water's boiling point in kelvin, at the pressure a Berlin roastery works at.
+
+A literal in the ``.mo`` and a name here, because the two front-ends have to render the
+same text and only one of them is linted. Worth knowing that it is not universal: a
+roastery in Medellin boils at about 365 K, and the whole drying phase of a roast moves
+with it.
+"""
+
 
 def staged(steps: tuple[tuple[float, int], ...], last: int) -> Expression | int:
     """Fold a schedule into one conditional on ``time``.
@@ -32,21 +51,54 @@ def staged(steps: tuple[tuple[float, int], ...], last: int) -> Expression | int:
     return if_(time < until, level, staged(rest, last))
 
 
+def ref(name: str) -> Expression:
+    """A bare reference to another declaration in the same model.
+
+    Inside ``equations`` a name is reached as ``self.x``, but a *parameter* that is
+    computed from other parameters is bound in the class body, before any instance
+    exists. In Modelica that is an ordinary reference -- ``m_dry = m_green*(1 - moisture)``
+    -- so this is what spells one from Python.
+    """
+    return Expression(ir.Ref((name,)))
+
+
 class RoastingMachine(Model):
-    """A Loring S15 coffee roaster over one batch -- the gas schedule makes time events"""
+    """A Loring S15 coffee roaster over one batch -- gas on a clock, water on a threshold"""
 
     T_amb = parameter(Real, 293.15, unit="K", doc="The roastery, 20 degC")
-    C_mach = parameter(Real, 6e5, unit="J/K", doc="Machine hot mass: steel, lining, loop air")
-    C_bean = parameter(Real, 3e4, unit="J/K", doc="15 kg of green coffee, drying folded in")
-    UA = parameter(Real, 222, unit="W/K", doc="Air-to-bean coupling over the whole bed")
-    G_loss = parameter(Real, 164, unit="W/K", doc="Loop to ambient: the bleed and the shell")
-    Q_max = parameter(Real, 1.25e5, unit="W", doc="Burner at 100 percent")
 
-    T_mach = Real("Machine temperature", unit="K", start=424.45, fixed=True)
-    T_bean = Real("Bean temperature", unit="K", start=293.15, fixed=True)
-    bean = Real("Bean temperature in degC -- the number the roaster reads", unit="degC")
+    m_green = parameter(Real, 15, unit="kg", doc="The charge. Rated, not weighed")
+    moisture = parameter(Real, 0.115, doc="Water in the green coffee, by mass")
+    m_dry = parameter(Real, ref("m_green") * (1 - ref("moisture")), unit="kg", doc="Dry matter")
+    cp_dry = parameter(Real, 1800, unit="J/(kg.K)", doc="Dry coffee")
+    cp_water = parameter(Real, 4186, unit="J/(kg.K)", doc="Water")
+    L = parameter(Real, 2.26e6, unit="J/kg", doc="Latent heat of vaporisation")
+    k_dry = parameter(Real, 4.67e-6, unit="1/(K.s)", doc="Drying rate above boiling")
+
+    C_mach = parameter(Real, 5.3e5, unit="J/K", doc="Machine hot mass: steel, lining, loop air")
+    UA = parameter(Real, 261, unit="W/K", doc="Air-to-bean coupling over the whole bed")
+    G_loss = parameter(Real, 259, unit="W/K", doc="Loop to ambient: the bleed and the shell")
+    Q_max = parameter(Real, 1.39e5, unit="W", doc="Burner at 100 percent")
+    tau_probe = parameter(Real, 17.8, unit="s", doc="Bean probe time constant")
+
+    T_mach = Real("Machine temperature", unit="K", start=428.23, fixed=True)
+    T_bean = Real("Bean temperature -- the coffee itself", unit="K", start=293.15, fixed=True)
+    T_probe = Real("Bean probe temperature", unit="K", start=489.98, fixed=True)
+    m_w = Real(
+        "Water still in the beans",
+        unit="kg",
+        start=ref("m_green") * ref("moisture"),
+        fixed=True,
+    )
+
+    C_bean = Real("Heat capacity of the charge -- falls as it dries", unit="J/K")
+    evap = Real("Evaporation rate", unit="kg/s")
     burner = Real("Gas modulation, per cent -- the machine's own signal")
     Q_burner = Real("Burner heat into the loop", unit="W")
+    bean = Real("What the coffee is at, in degC", unit="degC")
+    probe = Real("What the roaster reads, in degC", unit="degC")
+    lag = Real("How far the coffee runs ahead of its own probe", unit="K")
+    loss = Real("Weight lost as steam, per cent of the charge")
 
     def equations(self):
         yield self.burner == staged(GAS, IDLE)
@@ -54,8 +106,19 @@ class RoastingMachine(Model):
         yield self.C_mach * der(self.T_mach) == self.Q_burner - self.UA * (
             self.T_mach - self.T_bean
         ) - self.G_loss * (self.T_mach - self.T_amb)
-        yield self.C_bean * der(self.T_bean) == self.UA * (self.T_mach - self.T_bean)
+        yield self.evap == if_(
+            self.T_bean > BOILING, self.k_dry * self.m_w * (self.T_bean - BOILING), 0
+        )
+        yield self.C_bean == self.m_dry * self.cp_dry + self.m_w * self.cp_water
+        yield self.C_bean * der(self.T_bean) == self.UA * (
+            self.T_mach - self.T_bean
+        ) - self.L * self.evap
+        yield der(self.m_w) == -self.evap
+        yield self.tau_probe * der(self.T_probe) == self.T_bean - self.T_probe
         yield self.bean == self.T_bean - 273.15
+        yield self.probe == self.T_probe - 273.15
+        yield self.lag == self.T_bean - self.T_probe
+        yield self.loss == 100 * (self.m_green * self.moisture - self.m_w) / self.m_green
 
 
 if __name__ == "__main__":

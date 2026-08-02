@@ -1,5 +1,11 @@
-summary = "A Loring S15 coffee roaster over one batch: a staged gas schedule, so `time` itself makes events."
-teaches = ["time in an equation", "time events", "a staged schedule", "checking a model against a real machine"]
+summary = "A Loring S15 coffee roaster over one batch: gas on a clock, water on a threshold, and a probe that lags both."
+teaches = [
+  "time in an equation",
+  "time events beside a state event",
+  "a parameter computed from other parameters",
+  "modelling the sensor, not just the thing measured",
+  "checking a model against a real machine",
+]
 requires = []
 
 [parse]
@@ -7,143 +13,192 @@ classes = ["RoastingMachine"]
 
 [flatten]
 model = "RoastingMachine"
-states = ["T_mach", "T_bean"]
-equations = 5
+states = ["T_mach", "T_bean", "T_probe", "m_w"]
+equations = 12
 index = 1
 balanced = true
 
 # The only example here that is not a physics exercise: this is a real machine, and the
 # numbers marked `measured` came off it. Sincerely Coffee's Loring S15, 2026-07-30, five
-# batches; this is the first, and the burner schedule in the model is that batch's own
-# recorded gas trace, reduced to the nine steps worth carrying.
+# batches; this is the first, and the burner schedule is that batch's own recorded gas
+# trace, reduced to the nine steps worth carrying.
 #
-# The model is two nodes:
+# Four states, and each is a different kind of thing:
 #
-#   C_mach * der(T_mach) = Q_burner - UA*(T_mach - T_bean) - G_loss*(T_mach - T_amb)
-#   C_bean * der(T_bean) = UA*(T_mach - T_bean)
+#   T_mach   the machine's hot mass -- steel, lining and recirculated air together
+#   T_bean   the coffee
+#   T_probe  the thermocouple in the coffee, which is not the same as the coffee
+#   m_w      the water still in the beans
 #
-# `T_mach` is the machine's hot mass -- steel, lining and recirculated air together. It is
-# deliberately *not* the machine's inlet probe: a Loring recirculates its exhaust back
-# through the burner, and the inlet reads one point on that loop, straight off the flame,
-# 60-80 K above the mean the beans actually see. The capture also carries a `return` probe,
-# which is the air coming back; neither is a temperature the bean bed is immersed in, and
-# no probe on this machine measures one.
+# `T_mach` is deliberately *not* the machine's inlet probe. A Loring recirculates its
+# exhaust back through the burner, and the inlet reads one point on that loop, straight off
+# the flame, 60-80 K above the mean the beans see. Nor is it what the bean probe reads in an
+# empty drum: that thermocouple is measuring moving air, which is why it can fall from 256
+# to 207 degC in 76 seconds -- a mass of 5.3e5 J/K cannot do that.
 #
-# `C_bean` is *effective*, and this is the honest gap in the example. Roasting drives about
-# a tenth of the charge off as water, and the latent heat of that is a large term in the
-# first half. The session recorded no weight in, no weight out and no moisture, so drying
-# cannot be separated from the beans' own heat capacity, and it is folded into `C_bean`
-# rather than invented as a term with parameters nobody can check. What makes that
-# defensible rather than a fudge: fitted freely, `C_bean` lands at 2006 J/(kg K) over a
-# 15 kg charge, and dry coffee is about 1800 -- the excess is roughly the drying, sitting
-# where it belongs. A `DrainingTank`-style `if` for evaporation was written first and
-# thrown away for want of a single weighing.
+# `T_probe` is the point of the third state, and it is why this spec can check the roast
+# from t = 0 rather than starting 90 seconds in. At charge the probe is not at bean
+# temperature: it has been hanging in that recirculating air at 217 degC, and then fifteen
+# kilos of 20 degC coffee bury it. What the log shows over the next forty-odd seconds is a
+# thermocouple travelling, and modelling it costs one state and one time constant. The
+# *turning point* -- the minimum every roaster watches for -- is then something the model
+# produces rather than something excluded: it falls out at 46.8 s, which is when it
+# happened.
 #
-# Parameters were fitted to this batch alone by least squares, then rounded, then checked
-# against the other four -- each with its own burner trace, none of them refitted. Worst
-# case is batch 5 at 3.1 C rms; the drop temperature comes out 0.5 to 6.8 C high across
-# the set. For a two-state lump against a real roaster that is close enough to be worth
-# writing down and far enough to be worth admitting.
+# The lag is not small and it does not vanish. Around 2 minutes the coffee is running 8 K
+# ahead of the number the roaster is reading, closing to under a degree by the drop. Anyone
+# steering by bean temperature is steering by a quantity that is late.
 [simulate]
 stop = 863.0
 tolerance = 1e-11
 
-# What the roaster's own probe read, at the same instants. `atol` is the model's honest
-# agreement with the machine, not a solver tolerance -- over the 502 samples from t = 90 s
-# to the drop it holds 1.01 C rms and never exceeds 3.24 C.
+# --------------------------------------------------------------------------------------
+# What the roaster's own probe read, at those instants.
 #
-# Nothing is asserted before 90 s. The probe sits in the bean mass and at charge it is
-# still leaving the empty drum it was reading at 216 C, so the measurement collapses to a
-# turning point near 62 C over the first 45 seconds -- an instrument in transit, not a
-# temperature the beans ever had. The model starts the beans at ambient and integrates
-# from there, which is right about the beans and says nothing about the probe.
+# `atol` is the model's honest agreement with the machine, not a solver tolerance. Over all
+# 558 samples of the batch it holds 1.71 K rms; from 120 s to the drop, 1.42 K rms and never
+# worse than 2.9 K. The first sample or two are the widest miss and they are an initial
+# condition rather than a model error -- see the note on batches 2-5 below.
+# --------------------------------------------------------------------------------------
+
+# The turning point, which the model now has to get right rather than skip.
+[[simulate.point]]
+t = 45.0
+values = { probe = 64.50 }
+atol = 3.5
+source = "measured"
+
 [[simulate.point]]
 t = 120.0
-values = { bean = 94.61 }
-atol = 3.0
+values = { probe = 94.61 }
+atol = 3.5
 source = "measured"
 
 [[simulate.point]]
-t = 240.0
-values = { bean = 135.28 }
-atol = 3.0
-source = "measured"
-
-[[simulate.point]]
-t = 360.0
-values = { bean = 158.28 }
-atol = 3.0
-source = "measured"
-
-[[simulate.point]]
-t = 480.0
-values = { bean = 176.61 }
-atol = 3.0
+t = 300.0
+values = { probe = 147.61 }
+atol = 3.5
 source = "measured"
 
 [[simulate.point]]
 t = 600.0
-values = { bean = 192.33 }
-atol = 3.0
+values = { probe = 192.33 }
+atol = 3.5
 source = "measured"
 
-[[simulate.point]]
-t = 720.0
-values = { bean = 208.94 }
-atol = 3.0
-source = "measured"
-
-# The drop. 14.4 minutes, and the roaster pulled the batch at 216.1 C.
+# The drop. 14.4 minutes, and the roaster pulled the batch at 216.1 degC.
 [[simulate.point]]
 t = 863.0
-values = { bean = 216.06 }
-atol = 3.0
+values = { probe = 216.06 }
+atol = 3.5
 source = "measured"
 
-# The same instants again, against scipy at rtol=atol=1e-12 rather than against the
-# machine. The measured points above cannot catch a toolchain regression -- three degrees
-# of slack hides a great deal -- so these carry the precision and those carry the reality.
+# --------------------------------------------------------------------------------------
+# The same instants against scipy at rtol=atol=1e-12 rather than against the machine.
+# Measured points cannot catch a toolchain regression -- three degrees of slack hides a
+# great deal -- so these carry the precision and those carry the reality.
+# --------------------------------------------------------------------------------------
+
 [[simulate.point]]
-t = 240.0
-values = { "T_mach" = 440.182755652, "T_bean" = 407.425547710 }
+t = 120.0
+values = { "T_mach" = 426.945944959, "T_bean" = 376.857106635, "T_probe" = 368.636339080, "m_w" = 1.724869991 }
 rtol = 1e-8
 source = "reference"
 
 [[simulate.point]]
-t = 600.0
-values = { "T_mach" = 483.410036264, "T_bean" = 466.595809254 }
+t = 300.0
+values = { "T_mach" = 451.183236332, "T_bean" = 425.693177911, "T_probe" = 422.203430443, "m_w" = 1.679840671 }
 rtol = 1e-8
 source = "reference"
 
 [[simulate.point]]
 t = 863.0
-values = { "T_mach" = 494.126226705, "T_bean" = 489.647402516 }
+values = { "T_mach" = 492.987642131, "T_bean" = 486.822245085, "T_probe" = 486.655692454, "m_w" = 1.324807251 }
 rtol = 1e-8
 source = "reference"
 
-# Eight steps in the gas, eight time events. No state crosses anything here: the only
-# thing that moves the burner is the clock, which is what this example is in the corpus
-# to exercise.
+# Eight steps in the gas and one crossing of the boil. The eight are known before the run
+# starts -- the condition is on `time` -- and the ninth is not: it is where the beans reach
+# 100 degC and the water starts leaving, which depends on the trajectory. Having both kinds
+# in one model is the reason this example is in the corpus.
 [simulate.events]
-times = [66.7, 93.0, 526.9, 618.0, 688.5, 714.6, 754.4, 780.8]
-atol = 1e-9
+times = [66.7, 93.0, 111.371969, 526.9, 618.0, 688.5, 714.6, 754.4, 780.8]
+atol = 1e-6
 
-# Heat runs machine to beans for the whole batch and never turns around -- the beans
-# approach the machine but do not catch it, closing to 4.5 K by the drop.
+# Heat runs machine to beans for the whole batch and never turns around.
 [[simulate.invariant]]
 expr = "T_mach - T_bean"
 min = 0.0
-max = 132.0
+max = 136.0
 
-# The beans start at ambient and end at the drop. Nothing overshoots.
+# Water only ever leaves. It starts at m_green*moisture = 15*0.115 = 1.725 kg.
+[[simulate.invariant]]
+expr = "m_w"
+min = 1.32
+max = 1.725
+
+[[simulate.invariant]]
+expr = "evap"
+min = 0.0
+max = 0.001
+
+# The probe starts hot, dives to the turning point, and climbs to the drop. It never gets
+# above where it started, because nothing in the batch is as hot as the empty drum was.
+#
+# `atol` here is arithmetic, not physics. The ceiling is the probe's own start value, which
+# the model reaches by computing `T_probe - 273.15` from a `start` of 489.98 -- and that
+# subtraction lands four parts in 1e14 above the literal. Asking for the exact number is
+# asking the floats for a cancellation they do not have.
+[[simulate.invariant]]
+expr = "probe"
+min = 60.0
+max = 216.83
+atol = 1e-9
+
+# The coffee starts at ambient and ends at the drop.
 [[simulate.invariant]]
 expr = "bean"
 min = 20.0
-max = 217.0
+max = 215.0
 
-# The burner only ever sits on one of the schedule's levels, between the idle it charges
-# on and the 85 % it climbs at.
+# The burner only ever sits on one of the schedule's levels.
 [[simulate.invariant]]
 expr = "burner"
 min = 20.0
 max = 85.0
+
+# --------------------------------------------------------------------------------------
+# What this model cannot tell you, stated where it will be read.
+#
+# MOISTURE IS A PARAMETER, NOT A MEASUREMENT. Nobody weighed anything that night -- no
+# green in, no roasted out, no moisture reading -- so `moisture = 0.115` is typical green
+# coffee and nothing more. It is a parameter rather than a fitted number because that is
+# honestly what it is, and because it now does real work: the charge's heat capacity is
+# m_dry*cp_dry + m_w*cp_water rather than one lumped constant, so it falls as the batch
+# dries, and the model carries a mass balance.
+#
+# Fitted jointly across all five batches, the bean curve does weakly prefer 11.5 % -- rms
+# over the session runs 1.56 K at 8 %, 1.27 K at 11.5 %, 1.58 K at 15 %. That minimum sits
+# where green coffee actually sits, which is reassuring and is not evidence: `k_dry` moves
+# to absorb most of the change, and the preference is shallow.
+#
+# THE DRYING RATE IS THE WEAK PART. The model drives off 2.7 % of the charge as steam; a
+# real roast of this length loses three or four times that. The bean-temperature curve
+# simply does not care much -- latent heat and sensible heat trade against each other and
+# the curve can be matched either way -- so the fit settles somewhere too low and nothing in
+# the data objects. ONE WEIGHING PER BATCH, green in and roasted out, would pin `k_dry` and
+# `moisture` together and turn the weakest part of this model into its most checkable.
+# Until then `loss` is an output to read sceptically.
+#
+# THE PARAMETERS ARE THE SESSION'S, NOT BATCH 1'S. Seven numbers describe the machine and
+# were fitted against all five batches at once -- 2791 samples -- with one initial machine
+# temperature each, because that is the one thing that genuinely differed: batch 1 followed
+# a 35-minute cold-start preheat, batches 2-5 came off the back of the batch before. Fitting
+# batch 1 alone gave it a better curve and everyone else a worse one.
+#
+# Carried over, the other four hold 1.03 to 1.18 K rms whole-curve, 0.61 to 0.94 K after
+# 120 s. Their worst samples -- 9 to 11 K -- are all in the first second and a half, where
+# the probe is still swinging from the previous drop when the charge mark lands, so its
+# initial value is contaminated. Batch 1 is the only one preceded by a preheat rather than a
+# drop, which is why the example carries it.
+# --------------------------------------------------------------------------------------

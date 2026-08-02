@@ -149,6 +149,10 @@ ignore = [
                          # identifiers being confusable, not about axis labels
     "RUF059",  # `fig, ax = plt.subplots()` is matplotlib's own idiom; renaming the figure
                # `_fig` in the cells that only touch the axes would be noise
+    "PLR0913", "PLR0917",  # a direct-label helper takes an axes, a point, a string, a colour
+                           # and a nudge -- six arguments that are six separate things.
+                           # Bundling them into a dataclass to satisfy a counter would make
+                           # every call site longer than the annotate() it replaced
 ]
 # Each example is the Python twin of a `.mo` file next to it, and the tests assert the two
 # flatten to the same model. That correspondence outranks the house style: the docstring is

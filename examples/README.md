@@ -162,7 +162,7 @@ needed, plus exactly one new capability.
 | `MassSpringDamper` | the same physics through a different domain's connectors | scipy |
 | `DrainingTank` | `if` in an equation → a state event; `sqrt` | analytic |
 | `BouncingBall` | `when` / `reinit` / `pre` — repeated events, state reinitialisation | analytic |
-| `RoastingMachine` | `time` in an equation → time events; a staged schedule | **a real machine** |
+| `RoastingMachine` | `time` in an equation → time events *and* a state event; a parameter bound to other parameters; modelling the sensor | **a real machine** |
 | `Pendulum` | a constraint equation → index 3 → Pantelides + dummy derivatives | scipy |
 | `AtwoodPendulum` | five coupled degrees of freedom → a 4×4 implicit block to solve | scipy + energy |
 | `Robertson` | stiffness: a stiff solver is mandatory, explicit RK dies | scipy |
@@ -181,11 +181,22 @@ singular mass matrix in the first draft.
 `RoastingMachine` is the one example whose reference is neither a closed form nor a
 solver. It is a Loring S15 that roasted five batches of coffee on 2026-07-30, logged over
 Modbus at 1.5 s; the model carries the first batch's own gas trace, and the spec checks it
-against what the machine's bean probe actually read — 1.0 °C rms over 14 minutes and
-196 °C of rise. Parameters were fitted to that batch and then checked, unchanged, against
-the other four. What it cannot do is as instructive as what it can: nobody weighed the
-charge, so the drying that dominates the first half is folded into an effective heat
-capacity rather than modelled, and the spec says so at length.
+against what the machine's bean probe actually read — 1.7 °C rms over the whole batch,
+1.4 °C after the first two minutes. The seven machine parameters were fitted against all
+five batches at once, each keeping its own initial machine temperature.
+
+It is also the example that models its own instrument. One of the four states is the
+thermocouple, which has heat capacity and therefore lags: at charge it has been hanging in
+217 °C recirculating air and is then buried in fifteen kilos of 20 °C coffee, and the dive
+that follows — the *turning point* every roaster reads — is a property of the probe as much
+as of the beans. Adding that state is what lets the spec check the roast from `t = 0` rather
+than skipping the first ninety seconds, and it prints a number nobody has otherwise: the
+coffee runs about 8 K ahead of the display two minutes in.
+
+What it cannot do is as instructive as what it can. Nobody weighed the charge, so `moisture`
+is a parameter set to what green coffee typically is rather than to what that coffee was —
+and the model drives off a third of the water it should. The spec says so at length, because
+the fix is two numbers on a scale.
 
 ## Adding one
 
