@@ -108,6 +108,36 @@ source of truth and is bumped automatically when shipped source changes.
   around the initial point — which is where models are at their most degenerate, every rate
   zero. Only the pendulum exercises the implicit path, and it is the one that catches a sign
   flip in either the 1×1 or the 3×3 tangent solve.
+- `modelica.sim.kernel`: **the compiled path is executed rather than claimed.** `jit=True` has
+  handed the generated module to Numba since the emitter existed, and nothing had ever run it —
+  Numba is in no dependency group, so "there is a Numba backend" was a docstring rather than a
+  fact. `tests/test_jit.py` now checks every generated function, compiled against interpreted,
+  bit for bit, on five models chosen to force every shape the emitter writes; plus a whole
+  simulation, bounces and all, agreeing to 1e-12.
+- `modelica.sim.kernel`: **`error_model="numpy"`**. Numba defaults to raising
+  `ZeroDivisionError` where CPython would, while the interpreted kernel divides numpy scalars
+  and gets an infinity — a real semantic fork between the two tiers, and the interpreted one is
+  the reference tier that differential debugging depends on. Defensive rather than a fix for an
+  observed failure, and said that way on purpose: no model in the corpus reaches a division by
+  exactly zero (the pendulum at `y = -L` comes closest and its Newton lands near 1e-16, not on
+  0.0). But an exact zero pivot is reachable in principle exactly where this engine has
+  something to say — a state set going singular, which dynamic state selection survives by
+  switching rather than stopping. An infinity there is information; an exception is a crash.
+- Measured, because the reason to compile is not the same for every model: on `AtwoodPendulum`
+  (10 states, a 4×4 implicit block) Numba is **21× on `rhs` and 44× on `jacobian`** — 33.6 µs to
+  1.61 µs, 180.6 µs to 4.07 µs. On a two-state model it is 1.0×, the dispatch costing what the
+  arithmetic does. And put back in context it is a **1.55× on the simulation**, because 63% of
+  that run is SciPy's Radau, which is written in Python: compiling the model is nearly free and
+  nearly finished, and it is not where the time is.
+- `moon run :test-jit`, and deliberately **no `jit` extra** — which is a finding, not an
+  oversight. Numba pins `numpy<2.5` as far as its current release (0.66) and this project runs
+  2.5. Declaring the extra was tried and reverted: uv locks one resolution across every extra,
+  so naming Numba anywhere in `pyproject.toml` rolled the whole lock back to numpy 2.4.6, dev
+  environment included — every other test would have run against a numpy nobody installs, to
+  support an optional backend most callers never ask for. `[tool.uv] conflicts` would separate
+  them at the price of declaring `sim` and `jit` mutually exclusive, which is false. So the task
+  installs Numba into a throwaway environment where numpy resolves down on its own, and
+  `tests/test_jit.py` skips itself everywhere else.
 - `modelica.verify.check_selection`: the switching modelled with the linear algebra as the
   adversary — which set is usable is not the engine's to choose, and it only finds out by
   failing to factor one. The two assumptions that makes necessary are surfaced through

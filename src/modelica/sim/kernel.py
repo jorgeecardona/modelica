@@ -154,6 +154,22 @@ def _accelerate(namespace: dict[str, Any]) -> None:
     Numba is asked for by name rather than ``from numba import njit`` because it is
     genuinely optional: it is in no dependency group, so it is absent from the environment
     the type checker reads, and a real import would have to be suppressed there.
+
+    ``error_model="numpy"`` keeps the two tiers saying the same thing. Numba defaults to
+    ``"python"``, where dividing by zero raises ``ZeroDivisionError`` the way CPython does,
+    while the interpreted kernel divides *numpy* scalars and gets an infinity. That is a
+    genuine semantic fork between the two, and the interpreted tier is the reference one --
+    differential debugging (see `docs/ideas/backends.md`) is worth nothing if the fast path
+    can answer a question the slow path answers differently.
+
+    Stated honestly, it is defensive rather than a fix for an observed failure: no model in
+    the corpus reaches a division by exactly zero. The pendulum comes closest and does not
+    arrive -- at ``y = -L`` its Newton lands on an ``x`` of about 1e-16 rather than on 0.0, so
+    both tiers return the same finite nonsense. But an exact zero pivot is *reachable in
+    principle* precisely where this engine has something to say: it is a state set going
+    singular, which dynamic state selection exists to survive by switching rather than by
+    stopping. An infinity there is information; an exception is a crash. The default model
+    was chosen for scripts, and this is a numerical kernel.
     """
     try:
         numba = importlib.import_module("numba")
@@ -163,4 +179,4 @@ def _accelerate(namespace: dict[str, Any]) -> None:
     njit: Any = numba.njit
     for name, value in list(namespace.items()):
         if isinstance(value, FunctionType):
-            namespace[name] = njit(cache=False)(value)
+            namespace[name] = njit(cache=False, error_model="numpy")(value)

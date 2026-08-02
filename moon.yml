@@ -36,6 +36,19 @@ tasks:
     command: 'uv run --isolated --python 3.12 --with-editable . --with pytest --with numpy --with scipy pytest -q'
     inputs: ['src/**/*.py', 'tests/**/*.py', 'pyproject.toml']
 
+  # `build(system, jit=True)` compiles the emitted module with Numba, and until this task
+  # existed nothing ever ran it. Isolated, and Numba named here rather than in pyproject:
+  # it pins `numpy<2.5` while this project runs 2.5, and uv locks one resolution across every
+  # extra, so merely *declaring* it rolled the whole lock -- dev environment included -- back
+  # a numpy minor. The long version is in pyproject where the extra would have gone. numpy
+  # resolves down inside this throwaway environment and nowhere else, and `tests/test_jit.py`
+  # skips itself in the normal one, which is why running it there is not enough.
+  test-jit:
+    command: >-
+      uv run --isolated --with-editable . --with pytest --with numpy --with scipy
+      --with numba pytest -q tests/test_jit.py
+    inputs: ['src/**/*.py', 'tests/test_jit.py', 'examples/models/*', 'pyproject.toml']
+
   # The notebooks under docs/notebooks import the package and run it, so the numerics and the
   # model checker have to be here too -- this task builds the docs *and* executes them, which
   # is why `src/**/*.py` and `examples/**/*` are inputs: a change to either can break a page.
@@ -75,6 +88,7 @@ tasks:
       - '~:typecheck'
       - '~:test'
       - '~:test-python-floor'
+      - '~:test-jit'
       - '~:build'
       - '~:docs'
       - '~:version-guard'

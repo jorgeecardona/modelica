@@ -7,7 +7,7 @@
 # abandoned Modelon/JModelica.org upload (version "trunk"). The git repo keeps the
 # historical name; the import package matches the distribution.
 name = "modelica"
-version = "0.0.11"
+version = "0.0.12"
 description = "Pure-Python Modelica toolchain: parse, flatten, simulate, and exchange via FMI 3.0 and SSP 2.0"
 readme = "README.md"
 # 3.12+, no compatibility shims: this is a full rewrite of a 2010 Python 2 codebase, and
@@ -59,6 +59,24 @@ sundials = ["scikit-sundae>=1.0"]
 # *your* model, not about this package's tests -- but it stays out of the base install,
 # because a simulator that cannot run without a model checker would be an odd thing.
 verify = ["musil>=0.7"]
+#
+# There is deliberately no `jit` extra, and that is a finding rather than an oversight.
+# `build(system, jit=True)` compiles the emitted module with Numba, and it earns its keep --
+# 21x on the right-hand side and 44x on the Jacobian for the largest model in the corpus --
+# but Numba pins `numpy<2.5` as far as its current release (0.66) and this project runs 2.5.
+#
+# Declaring the extra was tried and reverted. uv locks one resolution across every extra, so
+# naming numba anywhere in this file rolled the *whole* lock back to numpy 2.4.6, dev
+# environment included: every other test would then have been running against a numpy nobody
+# installs, to support an optional backend most callers never ask for. `[tool.uv] conflicts`
+# would separate them, at the price of declaring `sim` and `jit` mutually exclusive, which is
+# false -- together is exactly how they are used.
+#
+# So Numba stays out of the dependency graph entirely. `moon run :test-jit` installs it into a
+# throwaway environment where numpy resolves down on its own, `tests/test_jit.py` skips itself
+# everywhere else, and a caller who wants it writes `pip install modelica[sim] numba` and
+# accepts the older numpy explicitly. When Numba's ceiling moves past 2.5 this becomes a
+# two-line change: add the extra, add it to `dev`, delete this paragraph.
 # docs are an *extra* (not a uv dependency-group) so external services can install them via pip.
 # The notebooks under docs/notebooks are *executed* at build time, which is what stops them
 # rotting: a page that stopped working fails `mkdocs build --strict` in CI rather than sitting

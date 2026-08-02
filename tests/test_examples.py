@@ -284,16 +284,34 @@ def test_selects_the_specified_states(model: Path) -> None:
         assert len(system.states) == spec["state_count"]
 
 
-def _difference(rhs: Callable[[Any], Any], y: Any, np: Any) -> Any:
-    """``d(dy)/dy`` by central differences, which is the thing the emitter has to beat."""
-    columns: list[Any] = []
+def _difference(rhs: Callable[[Any], Any], y: Any, np: Any) -> tuple[Any, Any]:
+    """``d(dy)/dy`` by central differences, and how far it admits it might be out.
+
+    Two step sizes, not one, because the crude tool has to be allowed to say how crude it is
+    being. A central difference carries a truncation error of order ``h^2 f'''``, so halving
+    the step should quarter it: ``|D(h) - D(2h)| / 3`` is that error, measured rather than
+    assumed, and ``(4 D(h) - D(2h)) / 3`` is the Richardson extrapolation it implies, good to
+    ``h^4``.
+
+    Both are needed, and the reason is `DrainingTank`. Its right-hand side is a square root,
+    so as the tank empties the exact derivative goes to infinity and the third derivative
+    goes there faster; a difference quotient near the bottom is wrong by parts in ten
+    thousand while the emitted derivative is exact. Comparing against a fixed tolerance there
+    does not test the Jacobian, it tests the finite difference -- and fails the wrong one of
+    the two. Comparing within the quotient's own demonstrated uncertainty is both stricter
+    where it is sharp and honest where it is not.
+    """
+    coarse: list[Any] = []
+    fine: list[Any] = []
     for slot in range(len(y)):
-        step = 1e-7 * max(1.0, abs(float(y[slot])))
-        ahead, behind = y.copy(), y.copy()
-        ahead[slot] += step
-        behind[slot] -= step
-        columns.append((rhs(ahead) - rhs(behind)) / (2.0 * step))
-    return np.stack(columns, axis=1)
+        step = 1e-6 * max(1.0, abs(float(y[slot])))
+        for width, into in ((step, coarse), (step / 2.0, fine)):
+            ahead, behind = y.copy(), y.copy()
+            ahead[slot] += width
+            behind[slot] -= width
+            into.append((rhs(ahead) - rhs(behind)) / (2.0 * width))
+    near, far = np.stack(fine, axis=1), np.stack(coarse, axis=1)
+    return (4.0 * near - far) / 3.0, np.abs(near - far) / 3.0
 
 
 @pytest.mark.parametrize("model", MODEL_FILES, ids=_ids(MODEL_FILES))
@@ -317,6 +335,12 @@ def test_the_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
     integrator would never have been asked about (the tank below empty, a state set past the
     point where its own linear algebra is singular), and a difference quotient of an
     infinity says nothing about anything.
+
+    The run is deliberately *not* held to the spec's tolerance. What the trajectory is for is
+    supplying states worth asking about, and both functions are then evaluated at the same
+    one -- so a state that is off the true trajectory by a millimetre is as good a question
+    as a state that is on it. Asking at ``1e-6`` rather than the ``1e-10`` some specs demand
+    costs this check nothing and saves the corpus's stiffest models a great deal.
     """
     spec = _spec(model).get("simulate")
     if spec is None:
@@ -333,7 +357,7 @@ def test_the_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
     result = simulate(
         system,
         stop=spec["stop"],
-        tolerance=spec.get("tolerance", 1e-6),
+        tolerance=max(spec.get("tolerance", 1e-6), 1e-6),
         method=spec.get("method", "Radau"),
     )
     trajectory = np.stack([result[name] for name in system.states])
@@ -349,13 +373,14 @@ def test_the_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
         y = np.ascontiguousarray(trajectory[:, index])
         kernel.latch(t, y, p, w)
         exact = kernel.jacobian(t, y, p, w, np.zeros((len(y), len(y)))).copy()
-        crude = _difference(rhs, y, np)
+        crude, doubt = _difference(rhs, y, np)
         if not np.all(np.isfinite(crude)) or not np.all(np.isfinite(exact)):
             continue
         checked += 1
         scale = max(1.0, float(np.max(np.abs(crude))))
-        assert np.allclose(exact, crude, rtol=1e-4, atol=1e-6 * scale), (
-            f"t = {t:.6g}\nemitted:\n{exact}\ndifferenced:\n{crude}"
+        slack = 1e-6 * scale + 4.0 * doubt
+        assert np.all(np.abs(exact - crude) <= 1e-4 * np.abs(crude) + slack), (
+            f"t = {t:.6g}\nemitted:\n{exact}\ndifferenced:\n{crude}\nits own doubt:\n{doubt}"
         )
     assert checked, "every sample was skipped -- the check never ran"
 
