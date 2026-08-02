@@ -200,10 +200,12 @@ def _base_of(found: Found | BaseType, scope: Scope) -> tuple[BaseType, ir.Modifi
 # --------------------------------------------------------------------------------------
 
 
-def _prefix_ref(ref: ir.Ref, prefix: _Path, local: frozenset[str]) -> ir.Ref:
+def _prefix_ref(
+    ref: ir.Ref, prefix: _Path, local: frozenset[str], *, strict: bool = True
+) -> ir.Ref:
     if ref.parts[0] in local:
         return ir.Ref((*prefix, *ref.parts))
-    if ref.parts == ("time",):
+    if ref.parts == ("time",) or not strict:
         return ref
     raise FlattenError(f"unknown name {ref.name!r} in an equation")
 
@@ -245,24 +247,50 @@ def _fold(node: ir.Expr | None) -> ir.Expr | None:
             return node
 
 
-def _prefix_expr(node: ir.Expr, prefix: _Path, local: frozenset[str]) -> ir.Expr:
+def _prefix_expr(
+    node: ir.Expr, prefix: _Path, local: frozenset[str], *, strict: bool = True
+) -> ir.Expr:
+    def go(inner: ir.Expr) -> ir.Expr:
+        return _prefix_expr(inner, prefix, local, strict=strict)
+
     match node:
         case ir.Ref():
-            return _prefix_ref(node, prefix, local)
+            return _prefix_ref(node, prefix, local, strict=strict)
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
-            return ir.Binary(op, _prefix_expr(lhs, prefix, local), _prefix_expr(rhs, prefix, local))
+            return ir.Binary(op, go(lhs), go(rhs))
         case ir.Unary(op=op, operand=operand):
-            return _unary(op, _prefix_expr(operand, prefix, local))
+            return _unary(op, go(operand))
         case ir.Call(name=name, args=args):
-            return ir.Call(name, tuple(_prefix_expr(a, prefix, local) for a in args))
+            return ir.Call(name, tuple(go(a) for a in args))
         case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
-            return ir.IfExpr(
-                _prefix_expr(condition, prefix, local),
-                _prefix_expr(then, prefix, local),
-                _prefix_expr(otherwise, prefix, local),
-            )
+            return ir.IfExpr(go(condition), go(then), go(otherwise))
         case _:
             return node
+
+
+def _prefix_modification(
+    mod: ir.Modification, prefix: _Path, local: frozenset[str]
+) -> ir.Modification:
+    """Give a modification's expressions the path of the class that wrote them.
+
+    ``winding(R = Rw)`` inside ``Motor`` means *this* motor's ``Rw``. One level down that
+    variable is called ``motor.Rw``, and without this the binding names a variable that
+    does not exist. At the top level the prefix is empty and nothing moves, which is why
+    it stayed hidden until a component of the corpus held components of its own.
+
+    The keys are left alone. ``R`` names a parameter of the *inner* class, and only the
+    value beside it is written in the outer one. And an unknown name is kept rather than
+    rejected: an equation must resolve every name, but an attribute may legally hold
+    something this pass does not yet instantiate.
+    """
+    if not prefix or not mod:
+        return mod
+    return ir.Modification(
+        value=None if mod.value is None else _prefix_expr(mod.value, prefix, local, strict=False),
+        entries={
+            name: _prefix_modification(entry, prefix, local) for name, entry in mod.entries.items()
+        },
+    )
 
 
 def _prefix_statement(node: ir.Statement, prefix: _Path, local: frozenset[str]) -> ir.Statement:
@@ -313,6 +341,17 @@ class _ConnectorLeaf:
     path: _Path
     """Relative to the connector instance."""
     kind: ir.ConnectorKind
+    causality: ir.Causality = "none"
+    """``input`` or ``output`` on a signal connector, ``none`` on a physical one."""
+
+    @property
+    def shape(self) -> tuple[_Path, ir.ConnectorKind]:
+        """What two connectors must agree on before they can be connected.
+
+        The names and the flow prefixes, and not the causality: ``connect(a.y, b.u)``
+        joins an output to an input, which is the whole point of a signal connector.
+        """
+        return (self.path, self.kind)
 
 
 # --------------------------------------------------------------------------------------
@@ -358,7 +397,9 @@ class _Flattener:
         if outer.value is not None:
             raise FlattenError(f"{'.'.join(prefix)}: a composite component cannot have a value")
         for name, member in merged.members.items():
-            self._component(member, (*prefix, name), outer.entries.get(name, ir.EMPTY), floor)
+            self._component(
+                member, (*prefix, name), outer.entries.get(name, ir.EMPTY), floor, local
+            )
         for equation in merged.equations:
             self._equation(equation, prefix, local)
         for equation in merged.initial_equations:
@@ -372,10 +413,21 @@ class _Flattener:
             )
 
     def _component(
-        self, member: Member, path: _Path, outer: ir.Modification, floor: ir.Variability
+        self,
+        member: Member,
+        path: _Path,
+        outer: ir.Modification,
+        floor: ir.Variability,
+        local: frozenset[str],
     ) -> None:
         component = member.component
-        total = _merged(component.modification, *member.mods, outer)
+        # `outer` arrived from the enclosing class and was prefixed there. These two were
+        # written *here*, so they are prefixed here, against the path of the class that
+        # holds them -- everything in `path` except this component's own name.
+        here = path[:-1]
+        own = _prefix_modification(component.modification, here, local)
+        inherited = tuple(_prefix_modification(mod, here, local) for mod in member.mods)
+        total = _merged(own, *inherited, outer)
         resolved = member.scope.resolve(component.type_name)
         variability = _tighten(component.variability, floor)
         if isinstance(resolved, Found) and resolved.cls.restriction != "type":
@@ -472,11 +524,13 @@ class _Flattener:
             resolved = member.scope.resolve(member.component.type_name)
             if isinstance(resolved, Found) and resolved.cls.restriction != "type":
                 leaves.extend(
-                    _ConnectorLeaf((name, *leaf.path), leaf.kind)
+                    _ConnectorLeaf((name, *leaf.path), leaf.kind, leaf.causality)
                     for leaf in self._connector_leaves(resolved, member.scope)
                 )
             else:
-                leaves.append(_ConnectorLeaf((name,), member.component.connector))
+                leaves.append(
+                    _ConnectorLeaf((name,), member.component.connector, member.component.causality)
+                )
         return leaves
 
     def expand_connections(self) -> None:
@@ -491,13 +545,55 @@ class _Flattener:
                             ir.Equal(ir.Ref((*path, *leaf.path)), ir.RealLiteral(0.0))
                         )
 
-    def _expand_set(self, endpoints: list[_Endpoint]) -> None:
-        classes = {self.connectors[path].cls.name for path, _ in endpoints}
-        if len(classes) > 1:
-            joined = ", ".join(".".join(path) for path, _ in endpoints)
-            raise FlattenError(f"connect() mixes connector types {sorted(classes)}: {joined}")
+    def _matched_leaves(self, endpoints: list[_Endpoint]) -> list[_ConnectorLeaf]:
+        """The scalars a connection set joins, after checking every end has the same ones.
+
+        Modelica compares connectors by *structure*, not by class name. Two connectors
+        can be connected when they carry the same scalar names with the same flow
+        prefixes. Causality is deliberately not part of that comparison: a signal wire
+        goes from an ``output`` connector to an ``input`` one, so demanding one class
+        would make every signal connection illegal.
+        """
+        scope = Scope(self.program)
         first_path = endpoints[0][0]
-        leaves = self._connector_leaves(self.connectors[first_path], Scope(self.program))
+        leaves = self._connector_leaves(self.connectors[first_path], scope)
+        reference = sorted(leaf.shape for leaf in leaves)
+        for path, _ in endpoints[1:]:
+            other = self._connector_leaves(self.connectors[path], scope)
+            if sorted(leaf.shape for leaf in other) != reference:
+                first = self.connectors[first_path].cls.name
+                second = self.connectors[path].cls.name
+                raise FlattenError(
+                    f"connect({'.'.join(first_path)}, {'.'.join(path)}) joins {first} to "
+                    f"{second}, and the two do not carry the same variables"
+                )
+        return leaves
+
+    def _one_source_only(self, endpoints: list[_Endpoint]) -> None:
+        """A signal has one source, and this finds a set that was given two.
+
+        Which end drives depends on the role as well as the prefix. A component's
+        ``output`` drives the wire from inside the model. The enclosing model's own
+        ``input`` drives it from outside, because the value arrives through the boundary.
+        """
+        scope = Scope(self.program)
+        driving: list[str] = []
+        for path, role in endpoints:
+            drives: ir.Causality = "output" if role == "inside" else "input"
+            driving += [
+                ".".join((*path, *leaf.path))
+                for leaf in self._connector_leaves(self.connectors[path], scope)
+                if leaf.causality == drives
+            ]
+        if len(driving) > 1:
+            raise FlattenError(
+                f"connect() joins {' and '.join(driving)}, which all write the signal; "
+                f"a signal has one source"
+            )
+
+    def _expand_set(self, endpoints: list[_Endpoint]) -> None:
+        leaves = self._matched_leaves(endpoints)
+        self._one_source_only(endpoints)
         for leaf in leaves:
             refs = [ir.Ref((*path, *leaf.path)) for path, _ in endpoints]
             if leaf.kind == "flow":

@@ -121,6 +121,8 @@ def test_simulate_section_is_well_formed(model: Path) -> None:
         assert invariant["expr"], "an invariant needs an expression"
         bounded = "min" in invariant or "max" in invariant
         assert ("value" in invariant) ^ bounded, "an invariant is either a value or bounds"
+        after = invariant.get("after")
+        assert after is None or 0 <= after < stop, f"`after = {after}` is outside [0, {stop})"
 
     events = simulate.get("events")
     if events is not None:
@@ -441,7 +443,16 @@ def _check_invariants(spec: dict[str, Any], result: Any, np: Any) -> None:
     for invariant in spec.get("invariant", []):
         read = _reader(invariant["expr"], result.names)
         values = np.array([read(result.values[:, j]) for j in range(len(result))])
-        label = f"{invariant['expr']!r} over {len(result)} samples"
+        # `after` is for something that is only true once the model has settled: a
+        # controller reaches its setpoint, a transient dies away. Asserting it from t = 0
+        # would assert it of the transient, which is the part that is supposed to move.
+        after = invariant.get("after")
+        if after is not None:
+            values = values[result.time >= after]
+            assert len(values), f"nothing is sampled after t = {after}"
+        label = f"{invariant['expr']!r} over {len(values)} samples"
+        if after is not None:
+            label += f" after t = {after}"
         if "value" in invariant:
             wanted = invariant["value"]
             close = np.isclose(

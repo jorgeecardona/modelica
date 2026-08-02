@@ -6,7 +6,8 @@ acceptance test that no layer of the toolchain can quietly break.
 
 ```
 examples/
-  library/*.mo     small component packages (Electrical, Translational, Thermal)
+  library/*.mo     small component packages (Electrical, Translational, Thermal,
+                   Rotational, Machines, Blocks)
   library/*.py     the same packages through the Python front-end
   models/*.mo      one self-contained example model each
   models/*.py      the same model through the Python front-end
@@ -167,6 +168,8 @@ needed, plus exactly one new capability.
 | `AtwoodPendulum` | five coupled degrees of freedom → a 4×4 implicit block to solve | scipy + energy |
 | `Robertson` | stiffness: a stiff solver is mandatory, explicit RK dies | scipy |
 | `VanDerPol` | a relaxation limit cycle; step-size control across 3 orders of magnitude | scipy |
+| `PIControl` | `input`/`output` connectors: a signal has a direction, and a loop | scipy |
+| `DCMotor` | two domains at once, and a component that holds components | scipy |
 
 `Robertson` and `VanDerPol` are not physical-modelling examples — they are the classic
 Hairer–Wanner stiff test problems, here to hold the solver honest.
@@ -177,6 +180,31 @@ nothing about the physics. What checks the *model* is its own total energy, writ
 a variable and asserted flat. The equations came out of a computer algebra system and no
 one can proofread them by reading; the invariant is what proofreads them, and it caught a
 singular mass matrix in the first draft.
+
+`PIControl` and `DCMotor` are the two newest, and each was added to make the toolchain
+do something it had never been asked to do.
+
+`PIControl` is a block diagram rather than a physical network. Its connectors carry an
+`input Real` or an `output Real` instead of a potential and a flow, so a connection is
+directed: it says which end computes the number. Three things came out of adding it. The
+flattener compared connectors by class name, which made `connect(source.y, error.u1)`
+illegal -- Modelica compares them by the variables they carry, and an output joined to an
+input is the ordinary case. It gained the opposite check at the same time, because two
+outputs on one wire really is an error and the message should say so. And the corpus
+harness turned out to accept an `after` key on an invariant, as the format documents, and
+then ignore it -- so "the loop settles on the setpoint" was silently being asserted of
+the transient as well.
+
+`DCMotor` is the first example where a component holds components: `Machines.Motor` has a
+winding, a coil, the converter and the rotor inside it, and three connectors on its
+boundary that are wired both from inside and from outside. It is also the first that
+lives in two domains at once, joined by `EMF`, which turns current into torque and speed
+into voltage and therefore carries one connector of each kind. It found a bug that had
+been invisible until then: a modification written on an inner component, `winding(R =
+Rw)`, was not given the enclosing instance's path, so the binding named a variable that
+did not exist. At the top level the prefix is empty and nothing moves, which is exactly
+why no earlier example could catch it. It also moved `ref()` into `modelica.build`, where
+the second caller proved it belonged.
 
 `RoastingMachine` is the one example whose reference is neither a closed form nor a
 solver. It is a Loring S15 that roasted five batches of coffee on 2026-07-30, logged over

@@ -98,6 +98,7 @@ __all__ = [
     "package",
     "parameter",
     "pre",
+    "ref",
     "reinit",
     "sign",
     "sin",
@@ -295,6 +296,28 @@ def if_(condition: Operand, then: Operand, otherwise: Operand) -> Expression:
     Generates a state event unless wrapped in :func:`no_event`.
     """
     return Expression(ir.IfExpr(_lift(condition), _lift(then), _lift(otherwise)))
+
+
+def ref(name: str) -> Expression:
+    """A bare reference to another declaration of the same class.
+
+    Inside ``equations`` a name is reached as ``self.x``. A *parameter* computed from
+    other parameters, and a component modification that reads one, are written in the
+    class body instead -- and there no instance exists yet, so ``self`` is out of reach.
+    A declaration does not even know its own name at that point: Python assigns it
+    afterwards, through ``__set_name__``.
+
+    Modelica writes these as plain references::
+
+        parameter Real m_dry = m_green * (1 - moisture);
+        Electrical.Resistor winding(R = Rw);
+
+    and this is how to spell one from Python::
+
+        m_dry = parameter(Real, ref("m_green") * (1 - ref("moisture")), unit="kg")
+        winding = Electrical.Resistor(R=ref("Rw"))
+    """
+    return Expression(ir.Ref((name,)))
 
 
 time = Expression(ir.Ref(("time",)))

@@ -1,0 +1,72 @@
+summary = "A first-order plant under PI control: the setpoint steps to 1, the loop overshoots by 8 percent and settles."
+teaches = ["input and output connectors", "a signal is directed", "a closed loop", "block diagrams"]
+requires = ["Blocks"]
+
+[parse]
+classes = ["PIControl"]
+
+[flatten]
+model = "PIControl"
+states = ["controller.x", "plant.y.signal"]
+index = 1
+balanced = true
+
+# The loop: e = r - y, der(x) = e/0.5, u = 2*(x + e), der(y) = u - y. Two states, and no
+# algebraic loop: the plant is a lag, so its output is a state and nothing has to be
+# solved simultaneously.
+[simulate]
+stop = 8.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 0.5
+values = { "plant.y.signal" = 0.736918097926, "controller.x" = 0.587793452261 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 1.0
+values = { "plant.y.signal" = 1.027003073741, "controller.x" = 0.677014941360 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 2.0
+values = { "plant.y.signal" = 1.052744100904, "controller.x" = 0.544277954862 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 5.0
+values = { "plant.y.signal" = 0.999544948805, "controller.x" = 0.499908426121 }
+rtol = 1e-6
+source = "reference"
+
+# A connection between signal connectors is an equality, and this says so as behaviour:
+# the wire from the plant to the subtraction carries the same number at both ends.
+[[simulate.invariant]]
+expr = "plant.y.signal - error.u2.signal"
+value = 0.0
+atol = 1e-12
+
+# The error is the setpoint minus the measurement. If the arrow ever pointed the other
+# way, this would come out negated.
+[[simulate.invariant]]
+expr = "error.y.signal - (setpoint.y.signal - plant.y.signal)"
+value = 0.0
+atol = 1e-12
+
+# Integral action removes the offset, so the plant ends on the setpoint. A proportional
+# controller alone would stop short of it and stay there.
+[[simulate.invariant]]
+expr = "plant.y.signal"
+value = 1.0
+atol = 1e-4
+after = 6.0
+
+# The overshoot is a property of this gain pair, and a regression in the loop would move
+# it. The peak is 1.0791 at t = 1.35.
+[[simulate.invariant]]
+expr = "plant.y.signal"
+min = -0.001
+max = 1.08

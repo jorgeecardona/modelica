@@ -1,0 +1,83 @@
+summary = "A DC motor started from rest on 12 V: the current spikes, the rotor runs up, and both settle against viscous friction."
+teaches = ["two domains in one model", "a component that holds components", "a parameter passed inward"]
+requires = ["Electrical", "Rotational", "Machines"]
+
+[parse]
+classes = ["DCMotor"]
+
+[flatten]
+model = "DCMotor"
+states = ["motor.coil.i", "motor.rotor.phi", "motor.rotor.w"]
+index = 1
+balanced = true
+
+# The whole model in three equations, which is what the reference integrates:
+#   Lw di/dt = V - Rw*i - k*w        the electrical loop, back-EMF included
+#   J  dw/dt = k*i - d*w             the shaft, driven against friction
+#   dphi/dt  = w
+# The electrical constant is Lw/Rw = 0.1 s and the mechanical one is J/(d + k^2/Rw) =
+# 0.04 s, so the current leads and the speed follows it.
+[simulate]
+stop = 1.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 0.05
+values = { "motor.coil.i" = 8.495005266515, "motor.rotor.w" = 6.066538164398 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.1
+values = { "motor.coil.i" = 9.694658439319, "motor.rotor.w" = 18.067803661975 }
+rtol = 1e-6
+source = "reference"
+
+# Past the peak the back-EMF has overtaken the supply, so the current is briefly negative
+# -- the motor is giving energy back. A sign error anywhere in the coupling loses this.
+[[simulate.point]]
+t = 0.3
+values = { "motor.coil.i" = -3.330888780021, "motor.rotor.w" = 26.715578549678 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 1.0
+values = { "motor.coil.i" = 0.161272330307, "motor.rotor.w" = 23.989558170241 }
+rtol = 1e-6
+source = "reference"
+
+# The motor's own terminals carry the supply voltage. This is the connection across the
+# boundary of a component that has components inside it, stated as behaviour.
+[[simulate.invariant]]
+expr = "motor.p.v - motor.n.v"
+value = 12.0
+atol = 1e-9
+
+# Current in at one terminal is current out at the other, through everything inside.
+[[simulate.invariant]]
+expr = "motor.p.i + motor.n.i"
+value = 0.0
+atol = 1e-9
+
+# Torque balance on the shaft: what the converter makes, the friction and the rotor take.
+[[simulate.invariant]]
+expr = "motor.flange.tau + friction.flange.tau"
+value = 0.0
+atol = 1e-9
+
+# Steady state: 12 = Rw*i + k*w with k*i = d*w gives w = 23.904 rad/s. The approach is
+# oscillatory, so this is a settling band and not a limit: 1 percent from t = 0.9, which
+# is where the reference envelope actually is.
+[[simulate.invariant]]
+expr = "motor.rotor.w"
+value = 23.904382470120
+rtol = 1e-2
+after = 0.9
+
+# The run-up draws twenty times the running current: 10.0 A against 0.096 A. Sizing a
+# supply for the steady state alone is how a real one browns out.
+[[simulate.invariant]]
+expr = "motor.coil.i"
+min = -3.4
+max = 10.02

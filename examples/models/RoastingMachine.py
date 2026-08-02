@@ -1,6 +1,5 @@
 """The Python twin of ``RoastingMachine.mo``."""
 
-from modelica import ir
 from modelica.build import (
     Expression,
     Model,
@@ -8,6 +7,7 @@ from modelica.build import (
     der,
     if_,
     parameter,
+    ref,
     time,
     to_modelica,
 )
@@ -27,6 +27,7 @@ GAS = (
 IDLE = 20
 """Where the burner sits once the schedule has run out -- the same idle it charged on."""
 
+
 def staged(steps: tuple[tuple[float, int], ...], last: int) -> Expression | int:
     """Fold a schedule into one conditional on ``time``.
 
@@ -39,17 +40,6 @@ def staged(steps: tuple[tuple[float, int], ...], last: int) -> Expression | int:
         return last
     (until, level), rest = steps[0], steps[1:]
     return if_(time < until, level, staged(rest, last))
-
-
-def ref(name: str) -> Expression:
-    """A bare reference to another declaration in the same model.
-
-    Inside ``equations`` a name is reached as ``self.x``, but a *parameter* that is
-    computed from other parameters is bound in the class body, before any instance
-    exists. In Modelica that is an ordinary reference -- ``m_dry = m_green*(1 - moisture)``
-    -- so this is what spells one from Python.
-    """
-    return Expression(ir.Ref((name,)))
 
 
 class RoastingMachine(Model):
@@ -101,9 +91,10 @@ class RoastingMachine(Model):
             self.T_bean > self.T_dry, self.k_dry * self.m_w * (self.T_bean - self.T_dry), 0
         )
         yield self.C_bean == self.m_dry * self.cp_dry + self.m_w * self.cp_water
-        yield self.C_bean * der(self.T_bean) == self.UA * (
-            self.T_mach - self.T_bean
-        ) - self.L * self.evap
+        yield (
+            self.C_bean * der(self.T_bean)
+            == self.UA * (self.T_mach - self.T_bean) - self.L * self.evap
+        )
         yield der(self.m_w) == -self.evap
         yield self.tau_probe * der(self.T_probe) == self.T_bean - self.T_probe
         yield self.bean == self.T_bean - 273.15
