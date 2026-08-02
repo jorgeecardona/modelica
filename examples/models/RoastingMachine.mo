@@ -1,18 +1,19 @@
 model RoastingMachine "A Loring S15 coffee roaster over one batch -- gas on a clock, water on a threshold"
   parameter Real T_amb(unit = "K") = 293.15 "The roastery, 20 degC";
-  parameter Real m_green(unit = "kg") = 15 "The charge. Rated, not weighed";
-  parameter Real moisture = 0.115 "Water in the green coffee, by mass";
+  parameter Real m_green(unit = "kg") = 13.8 "The charge, weighed";
+  parameter Real moisture = 0.13 "Water in the green coffee, by mass";
   parameter Real m_dry(unit = "kg") = m_green * (1 - moisture) "Dry matter";
   parameter Real cp_dry(unit = "J/(kg.K)") = 1800 "Dry coffee";
   parameter Real cp_water(unit = "J/(kg.K)") = 4186 "Water";
   parameter Real L(unit = "J/kg") = 2260000.0 "Latent heat of vaporisation";
-  parameter Real k_dry(unit = "1/(K.s)") = 4.67e-6 "Drying rate above boiling";
-  parameter Real C_mach(unit = "J/K") = 530000.0 "Machine hot mass: steel, lining, loop air";
-  parameter Real UA(unit = "W/K") = 261 "Air-to-bean coupling over the whole bed";
-  parameter Real G_loss(unit = "W/K") = 259 "Loop to ambient: the bleed and the shell";
-  parameter Real Q_max(unit = "W") = 139000.0 "Burner at 100 percent";
-  parameter Real tau_probe(unit = "s") = 17.8 "Bean probe time constant";
-  Real T_mach(unit = "K", start = 428.23, fixed = true) "Machine temperature";
+  parameter Real k_dry(unit = "1/(K.s)") = 2.02e-5 "Drying rate above the onset";
+  parameter Real T_dry(unit = "K") = 313.15 "Below this, drying is too slow to matter";
+  parameter Real C_mach(unit = "J/K") = 520000.0 "Machine hot mass: steel, lining, loop air";
+  parameter Real UA(unit = "W/K") = 140 "Air-to-bean coupling over the whole bed";
+  parameter Real G_loss(unit = "W/K") = 384 "Loop to ambient: the bleed and the shell";
+  parameter Real Q_max(unit = "W") = 132000.0 "Burner at 100 percent";
+  parameter Real tau_probe(unit = "s") = 18.1 "Bean probe time constant";
+  Real T_mach(unit = "K", start = 510.53, fixed = true) "Machine temperature";
   Real T_bean(unit = "K", start = 293.15, fixed = true) "Bean temperature -- the coffee itself";
   Real T_probe(unit = "K", start = 489.98, fixed = true) "Bean probe temperature";
   Real m_w(unit = "kg", start = m_green * moisture, fixed = true) "Water still in the beans";
@@ -28,7 +29,7 @@ equation
   burner = if time < 66.7 then 20 elseif time < 93.0 then 27 elseif time < 526.9 then 85 elseif time < 618.0 then 79 elseif time < 688.5 then 70 elseif time < 714.6 then 61 elseif time < 754.4 then 50 elseif time < 780.8 then 37 else 20;
   Q_burner = burner / 100 * Q_max;
   C_mach * der(T_mach) = Q_burner - UA * (T_mach - T_bean) - G_loss * (T_mach - T_amb);
-  evap = if T_bean > 373.15 then k_dry * m_w * (T_bean - 373.15) else 0;
+  evap = if T_bean > T_dry then k_dry * m_w * (T_bean - T_dry) else 0;
   C_bean = m_dry * cp_dry + m_w * cp_water;
   C_bean * der(T_bean) = UA * (T_mach - T_bean) - L * evap;
   der(m_w) = -evap;

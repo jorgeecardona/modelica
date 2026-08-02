@@ -27,16 +27,6 @@ GAS = (
 IDLE = 20
 """Where the burner sits once the schedule has run out -- the same idle it charged on."""
 
-BOILING = 373.15
-"""Water's boiling point in kelvin, at the pressure a Berlin roastery works at.
-
-A literal in the ``.mo`` and a name here, because the two front-ends have to render the
-same text and only one of them is linted. Worth knowing that it is not universal: a
-roastery in Medellin boils at about 365 K, and the whole drying phase of a roast moves
-with it.
-"""
-
-
 def staged(steps: tuple[tuple[float, int], ...], last: int) -> Expression | int:
     """Fold a schedule into one conditional on ``time``.
 
@@ -67,21 +57,22 @@ class RoastingMachine(Model):
 
     T_amb = parameter(Real, 293.15, unit="K", doc="The roastery, 20 degC")
 
-    m_green = parameter(Real, 15, unit="kg", doc="The charge. Rated, not weighed")
-    moisture = parameter(Real, 0.115, doc="Water in the green coffee, by mass")
+    m_green = parameter(Real, 13.8, unit="kg", doc="The charge, weighed")
+    moisture = parameter(Real, 0.13, doc="Water in the green coffee, by mass")
     m_dry = parameter(Real, ref("m_green") * (1 - ref("moisture")), unit="kg", doc="Dry matter")
     cp_dry = parameter(Real, 1800, unit="J/(kg.K)", doc="Dry coffee")
     cp_water = parameter(Real, 4186, unit="J/(kg.K)", doc="Water")
     L = parameter(Real, 2.26e6, unit="J/kg", doc="Latent heat of vaporisation")
-    k_dry = parameter(Real, 4.67e-6, unit="1/(K.s)", doc="Drying rate above boiling")
+    k_dry = parameter(Real, 2.02e-5, unit="1/(K.s)", doc="Drying rate above the onset")
+    T_dry = parameter(Real, 313.15, unit="K", doc="Below this, drying is too slow to matter")
 
-    C_mach = parameter(Real, 5.3e5, unit="J/K", doc="Machine hot mass: steel, lining, loop air")
-    UA = parameter(Real, 261, unit="W/K", doc="Air-to-bean coupling over the whole bed")
-    G_loss = parameter(Real, 259, unit="W/K", doc="Loop to ambient: the bleed and the shell")
-    Q_max = parameter(Real, 1.39e5, unit="W", doc="Burner at 100 percent")
-    tau_probe = parameter(Real, 17.8, unit="s", doc="Bean probe time constant")
+    C_mach = parameter(Real, 5.2e5, unit="J/K", doc="Machine hot mass: steel, lining, loop air")
+    UA = parameter(Real, 140, unit="W/K", doc="Air-to-bean coupling over the whole bed")
+    G_loss = parameter(Real, 384, unit="W/K", doc="Loop to ambient: the bleed and the shell")
+    Q_max = parameter(Real, 1.32e5, unit="W", doc="Burner at 100 percent")
+    tau_probe = parameter(Real, 18.1, unit="s", doc="Bean probe time constant")
 
-    T_mach = Real("Machine temperature", unit="K", start=428.23, fixed=True)
+    T_mach = Real("Machine temperature", unit="K", start=510.53, fixed=True)
     T_bean = Real("Bean temperature -- the coffee itself", unit="K", start=293.15, fixed=True)
     T_probe = Real("Bean probe temperature", unit="K", start=489.98, fixed=True)
     m_w = Real(
@@ -107,7 +98,7 @@ class RoastingMachine(Model):
             self.T_mach - self.T_bean
         ) - self.G_loss * (self.T_mach - self.T_amb)
         yield self.evap == if_(
-            self.T_bean > BOILING, self.k_dry * self.m_w * (self.T_bean - BOILING), 0
+            self.T_bean > self.T_dry, self.k_dry * self.m_w * (self.T_bean - self.T_dry), 0
         )
         yield self.C_bean == self.m_dry * self.cp_dry + self.m_w * self.cp_water
         yield self.C_bean * der(self.T_bean) == self.UA * (

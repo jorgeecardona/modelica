@@ -32,20 +32,19 @@ balanced = true
 #
 # `T_mach` is deliberately *not* the machine's inlet probe. A Loring recirculates its
 # exhaust back through the burner, and the inlet reads one point on that loop, straight off
-# the flame, 60-80 K above the mean the beans see. Nor is it what the bean probe reads in an
-# empty drum: that thermocouple is measuring moving air, which is why it can fall from 256
-# to 207 degC in 76 seconds -- a mass of 5.3e5 J/K cannot do that.
+# the flame. Nor is it what the bean probe reads in an empty drum: that thermocouple is
+# measuring moving air, which is why it can fall from 256 to 207 degC in 76 seconds -- no
+# mass of 5.2e5 J/K does that.
 #
 # `T_probe` is the point of the third state, and it is why this spec can check the roast
 # from t = 0 rather than starting 90 seconds in. At charge the probe is not at bean
-# temperature: it has been hanging in that recirculating air at 217 degC, and then fifteen
-# kilos of 20 degC coffee bury it. What the log shows over the next forty-odd seconds is a
-# thermocouple travelling, and modelling it costs one state and one time constant. The
-# *turning point* -- the minimum every roaster watches for -- is then something the model
-# produces rather than something excluded: it falls out at 46.8 s, which is when it
-# happened.
+# temperature: it has been hanging in that recirculating air at 217 degC, and then thirteen
+# and a half kilos of 20 degC coffee bury it. What the log shows over the next forty-odd
+# seconds is a thermocouple travelling, and modelling it costs one state and one time
+# constant. The *turning point* -- the minimum every roaster watches for -- is then
+# something the model produces rather than something excluded.
 #
-# The lag is not small and it does not vanish. Around 2 minutes the coffee is running 8 K
+# The lag is not small and it does not vanish. Around two minutes the coffee is running 8 K
 # ahead of the number the roaster is reading, closing to under a degree by the drop. Anyone
 # steering by bean temperature is steering by a quantity that is late.
 [simulate]
@@ -56,41 +55,52 @@ tolerance = 1e-11
 # What the roaster's own probe read, at those instants.
 #
 # `atol` is the model's honest agreement with the machine, not a solver tolerance. Over all
-# 558 samples of the batch it holds 1.71 K rms; from 120 s to the drop, 1.42 K rms and never
-# worse than 2.9 K. The first sample or two are the widest miss and they are an initial
-# condition rather than a model error -- see the note on batches 2-5 below.
+# 558 samples of the batch it holds 1.67 K rms; from 120 s to the drop, 1.24 K rms and never
+# worse than 2.9 K.
 # --------------------------------------------------------------------------------------
 
-# The turning point, which the model now has to get right rather than skip.
+# The turning point, which the model has to get right rather than skip.
 [[simulate.point]]
 t = 45.0
 values = { probe = 64.50 }
-atol = 3.5
+atol = 3.0
 source = "measured"
 
 [[simulate.point]]
 t = 120.0
 values = { probe = 94.61 }
-atol = 3.5
+atol = 3.0
 source = "measured"
 
 [[simulate.point]]
 t = 300.0
 values = { probe = 147.61 }
-atol = 3.5
+atol = 3.0
 source = "measured"
 
 [[simulate.point]]
 t = 600.0
 values = { probe = 192.33 }
-atol = 3.5
+atol = 3.0
 source = "measured"
 
 # The drop. 14.4 minutes, and the roaster pulled the batch at 216.1 degC.
 [[simulate.point]]
 t = 863.0
 values = { probe = 216.06 }
-atol = 3.5
+atol = 3.0
+source = "measured"
+
+# The batch was also weighed, which is the only reason the drying below is worth anything.
+# 13.8 kg in, 11.73-11.76 kg out over the four weighed batches: 14.78 to 15.00 % lost.
+# Roasting drives off dry matter as well as water -- CO2, volatiles, chaff, three or four
+# points of it -- and this model has no term for that, so what it must reproduce is the
+# water alone. 11.37 % is the measured total less an assumed 3.5 % organic loss, and that
+# 3.5 % is the softest number on this page.
+[[simulate.point]]
+t = 863.0
+values = { loss = 11.37 }
+atol = 0.5
 source = "measured"
 
 # --------------------------------------------------------------------------------------
@@ -101,46 +111,49 @@ source = "measured"
 
 [[simulate.point]]
 t = 120.0
-values = { "T_mach" = 426.945944959, "T_bean" = 376.857106635, "T_probe" = 368.636339080, "m_w" = 1.724869991 }
+values = { "T_mach" = 497.843990816, "T_bean" = 376.482274438, "T_probe" = 367.954896103, "m_w" = 1.668878566 }
 rtol = 1e-8
 source = "reference"
 
 [[simulate.point]]
 t = 300.0
-values = { "T_mach" = 451.183236332, "T_bean" = 425.693177911, "T_probe" = 422.203430443, "m_w" = 1.679840671 }
+values = { "T_mach" = 504.376598656, "T_bean" = 425.615863674, "T_probe" = 422.088239040, "m_w" = 1.197078860 }
 rtol = 1e-8
 source = "reference"
 
 [[simulate.point]]
 t = 863.0
-values = { "T_mach" = 492.987642131, "T_bean" = 486.822245085, "T_probe" = 486.655692454, "m_w" = 1.324807251 }
+values = { "T_mach" = 502.072738773, "T_bean" = 488.061924124, "T_probe" = 487.707134726, "m_w" = 0.216640919 }
 rtol = 1e-8
 source = "reference"
 
-# Eight steps in the gas and one crossing of the boil. The eight are known before the run
-# starts -- the condition is on `time` -- and the ninth is not: it is where the beans reach
-# 100 degC and the water starts leaving, which depends on the trajectory. Having both kinds
-# in one model is the reason this example is in the corpus.
+# Eight steps in the gas and one crossing of the drying onset. The eight are known before
+# the run starts -- the condition is on `time` -- and the ninth is not: it is where the
+# beans reach 40 degC and the water starts leaving, which depends on the trajectory. Having
+# both kinds in one model is the reason this example is in the corpus.
 [simulate.events]
-times = [66.7, 93.0, 111.371969, 526.9, 618.0, 688.5, 714.6, 754.4, 780.8]
+times = [20.241885, 66.7, 93.0, 526.9, 618.0, 688.5, 714.6, 754.4, 780.8]
 atol = 1e-6
 
 # Heat runs machine to beans for the whole batch and never turns around.
 [[simulate.invariant]]
 expr = "T_mach - T_bean"
 min = 0.0
-max = 136.0
+max = 218.0
 
-# Water only ever leaves. It starts at m_green*moisture = 15*0.115 = 1.725 kg.
+# Water only ever leaves. It starts at m_green*moisture = 13.8*0.13, which is 1.794 the way
+# people write it and 1.7940000000000003 the way binary floats hold it -- hence the `atol`,
+# which is the product's last bit and not a statement about water.
 [[simulate.invariant]]
 expr = "m_w"
-min = 1.32
-max = 1.725
+min = 0.21
+max = 1.794
+atol = 1e-9
 
 [[simulate.invariant]]
 expr = "evap"
 min = 0.0
-max = 0.001
+max = 0.003
 
 # The probe starts hot, dives to the turning point, and climbs to the drop. It never gets
 # above where it started, because nothing in the batch is as hot as the empty drum was.
@@ -168,37 +181,48 @@ min = 20.0
 max = 85.0
 
 # --------------------------------------------------------------------------------------
-# What this model cannot tell you, stated where it will be read.
+# THE DRYING ONSET IS NOT 100 degC, AND THAT MATTERS.
 #
-# MOISTURE IS A PARAMETER, NOT A MEASUREMENT. Nobody weighed anything that night -- no
-# green in, no roasted out, no moisture reading -- so `moisture = 0.115` is typical green
-# coffee and nothing more. It is a parameter rather than a fitted number because that is
-# honestly what it is, and because it now does real work: the charge's heat capacity is
-# m_dry*cp_dry + m_w*cp_water rather than one lumped constant, so it falls as the batch
-# dries, and the model carries a mass balance.
+# An earlier version of this model gated evaporation at boiling, on the reasoning that
+# water leaves when water boils. Once the batch was weighed, that model could not be made
+# to work: forced to remove the mass actually measured, the curve came apart, and left
+# alone it removed less than a quarter of the water. Sweeping the onset downward improves
+# the fit and the mass balance together, monotonically, all the way to ambient --
 #
-# Fitted jointly across all five batches, the bean curve does weakly prefer 11.5 % -- rms
-# over the session runs 1.56 K at 8 %, 1.27 K at 11.5 %, 1.58 K at 15 %. That minimum sits
-# where green coffee actually sits, which is reassuring and is not evidence: `k_dry` moves
-# to absorb most of the change, and the preference is shallow.
+#     onset   moisture   curve rms   water lost   dried by half-time
+#      100C     14.5%      1.806K       11.24%          38.7%
+#       60C     13.5%      1.492K       11.27%          51.9%
+#       40C     13.0%      1.373K       11.37%          58.1%
+#       20C     12.5%      1.232K       11.41%          64.3%
 #
-# THE DRYING RATE IS THE WEAK PART. The model drives off 2.7 % of the charge as steam; a
-# real roast of this length loses three or four times that. The bean-temperature curve
-# simply does not care much -- latent heat and sensible heat trade against each other and
-# the curve can be matched either way -- so the fit settles somewhere too low and nothing in
-# the data objects. ONE WEIGHING PER BATCH, green in and roasted out, would pin `k_dry` and
-# `moisture` together and turn the weakest part of this model into its most checkable.
-# Until then `loss` is an output to read sceptically.
+# -- which says the truth has no threshold and that this linear law stands in for something
+# smoother. A coffee bean is porous and gives up bound water by diffusion the whole time it
+# is warm, which is why roasters call the *first* third of a roast the drying phase; only a
+# puddle waits for 100 degC.
 #
-# THE PARAMETERS ARE THE SESSION'S, NOT BATCH 1'S. Seven numbers describe the machine and
-# were fitted against all five batches at once -- 2791 samples -- with one initial machine
-# temperature each, because that is the one thing that genuinely differed: batch 1 followed
-# a 35-minute cold-start preheat, batches 2-5 came off the back of the batch before. Fitting
-# batch 1 alone gave it a better curve and everyone else a worse one.
+# `T_dry = 40 degC` is therefore a modelling choice and not a measurement. It costs 0.14 K
+# of fit against no threshold at all, and it buys a crossing that is a real event rather
+# than one firing at t = 0 and meaning nothing.
 #
-# Carried over, the other four hold 1.03 to 1.18 K rms whole-curve, 0.61 to 0.94 K after
-# 120 s. Their worst samples -- 9 to 11 K -- are all in the first second and a half, where
-# the probe is still swinging from the previous drop when the charge mark lands, so its
-# initial value is contaminated. Batch 1 is the only one preceded by a preheat rather than a
-# drop, which is why the example carries it.
+# Worth recording how this was nearly missed. Holding the seven machine parameters fixed and
+# sweeping only the drying, no combination reproduces both the curve and the mass -- the
+# obvious reading being that a term is missing, and first crack being genuinely exothermic
+# makes that a tempting one. But those seven had been fitted against a model whose latent
+# sink was four times too small, so `UA`, `G_loss` and `Q_max` had already absorbed the
+# missing heat; adding it back on top of them has to fail. Refitting everything together is
+# what showed the shape was fine all along.
+#
+# MOISTURE REMAINS A PARAMETER. Nobody measured the water content of that coffee -- the
+# weighing gives total loss, not what fraction of the green was water -- so `moisture = 0.13`
+# is a value consistent with the mass balance rather than a reading. A green moisture meter
+# would turn the softest two numbers on this page, `moisture` and the 3.5 % organic loss,
+# into one measurement and one residual.
+#
+# THE PARAMETERS ARE THE SESSION'S, NOT BATCH 1'S. Fitted against all five batches at once,
+# with one initial machine temperature each, because that is what genuinely differed: batch
+# 1 followed a 35-minute cold-start preheat, batches 2-5 came off a purge-and-reheat between
+# roasts. Carried over unchanged the other four hold 1.23 to 1.39 K rms whole-curve, 0.96 to
+# 1.20 K after 120 s -- better than batch 1, which is the one the example carries because it
+# is the only one whose probe was not still swinging from the previous drop at the charge
+# mark.
 # --------------------------------------------------------------------------------------

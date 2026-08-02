@@ -181,22 +181,27 @@ singular mass matrix in the first draft.
 `RoastingMachine` is the one example whose reference is neither a closed form nor a
 solver. It is a Loring S15 that roasted five batches of coffee on 2026-07-30, logged over
 Modbus at 1.5 s; the model carries the first batch's own gas trace, and the spec checks it
-against what the machine's bean probe actually read — 1.7 °C rms over the whole batch,
-1.4 °C after the first two minutes. The seven machine parameters were fitted against all
-five batches at once, each keeping its own initial machine temperature.
+against what the machine's bean probe actually read — 1.67 °C rms over the whole batch,
+1.24 °C after the first two minutes. The machine parameters were fitted against all five
+batches at once, each keeping its own gas, its own probe reading at charge, and its own
+machine temperature at charge.
 
 It is also the example that models its own instrument. One of the four states is the
 thermocouple, which has heat capacity and therefore lags: at charge it has been hanging in
-217 °C recirculating air and is then buried in fifteen kilos of 20 °C coffee, and the dive
-that follows — the *turning point* every roaster reads — is a property of the probe as much
-as of the beans. Adding that state is what lets the spec check the roast from `t = 0` rather
-than skipping the first ninety seconds, and it prints a number nobody has otherwise: the
-coffee runs about 8 K ahead of the display two minutes in.
+217 °C recirculating air and is then buried in 13.8 kg of 20 °C coffee, and the dive that
+follows — the *turning point* every roaster reads — is a property of the probe as much as of
+the beans. Adding that state is what lets the spec check the roast from `t = 0` rather than
+skipping the first ninety seconds, and it prints a number nobody has otherwise: the coffee
+runs about 8 K ahead of the display two minutes in.
 
-What it cannot do is as instructive as what it can. Nobody weighed the charge, so `moisture`
-is a parameter set to what green coffee typically is rather than to what that coffee was —
-and the model drives off a third of the water it should. The spec says so at length, because
-the fix is two numbers on a scale.
+The batch was also weighed, which is what makes the drying worth anything, and the weighing
+overturned the physics rather than merely tuning it. Gating evaporation at boiling — water
+leaves when water boils — cannot reproduce the measured 15 % mass loss at any rate: forced
+to remove the right mass, the curve comes apart. Sweeping the onset downward improves the
+fit and the mass balance together, monotonically, all the way to ambient, because a coffee
+bean is porous and gives up bound water by diffusion the whole time it is warm. The spec
+carries that table, and the reason it was nearly missed: with the machine parameters held
+fixed no drying law works, since those parameters had already absorbed the missing heat.
 
 ## Adding one
 
