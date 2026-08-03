@@ -13,6 +13,9 @@ pip install modelica          # the core: parse, model structure, diagrams. No d
 pip install "modelica[sim]"   # adds numpy and scipy, and therefore simulation
 ```
 
+**Documentation: <https://jorgeecardona.gitlab.io/pymodelica/>** — the architecture, the
+example corpus, and seven notebooks that are executed when the site is built.
+
 ## Status
 
 Pre-alpha. This is a full rewrite of a Python 2 experiment from 2010. No code of that
@@ -46,8 +49,8 @@ You can use each layer without the layers above it.
 | `modelica.fmi` | FMI 3.0. Read an FMU and simulate it, or export a flat model as one. |
 | `modelica.ssp` | SSP 2.0. Read the `.ssd`, `.ssv` and `.ssb` files in a `.ssp`, and run a co-simulation master over the components. |
 
-Read [the architecture notes](docs/architecture.md) for the data model and the order the
-layers were built in.
+Read [the architecture notes](https://jorgeecardona.gitlab.io/pymodelica/architecture/)
+for the data model and the order the layers were built in.
 
 ## See a model
 
@@ -100,8 +103,13 @@ The same pipeline publishes the documentation to GitLab Pages.
 
 ## The documentation
 
-These pages follow ASD-STE100 Simplified Technical English. [How these pages are
-written](docs/style.md) lists the rules and the two places this project departs from them.
+The documentation is at **<https://jorgeecardona.gitlab.io/pymodelica/>**. The same
+pipeline that tests the code builds it, and it executes every notebook on the way, so a
+page that stopped working fails the build.
+
+The pages follow ASD-STE100 Simplified Technical English. [How these pages are
+written](https://jorgeecardona.gitlab.io/pymodelica/style/) lists the rules and the two
+places this project departs from them.
 
 ## License
 

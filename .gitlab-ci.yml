@@ -37,6 +37,13 @@ ci:
   environment:
     name: pypi
     url: https://pypi.org/project/modelica/
+  # A hung notebook cell waits forever: mkdocs-jupyter builds the ExecutePreprocessor
+  # config itself and never sets a timeout, so nbclient's default (None) applies. Without
+  # a bound the job spends the whole hour and then reports "Kernel died", which describes
+  # the runner tearing the process down rather than what actually stalled. 40 minutes is
+  # comfortably above a healthy run (~6 minutes) and fails while the log still means
+  # something.
+  timeout: 40m
   cache:
     - key:
         files:
@@ -66,19 +73,35 @@ ci:
       else
         moon run :ci -c 1
       fi
+  # `moon run :ci` already built the site (the `docs` task, strict, outputs `site/`), and
+  # `pages` below publishes exactly that. Handing it over as an artifact is what stops the
+  # site being built twice per pipeline.
+  artifacts:
+    paths:
+      - site
+    expire_in: 1 day
 
 # Publish the docs to GitLab Pages. A job named `pages` whose artifact is public/ is what
-# GitLab serves. Builds the same mkdocs site as the `docs` task (strict), but into public/.
-# main only; independent of `ci` (docs aren't gated on tests). Uses the uv image directly —
-# no proto/moon needed here.
+# GitLab serves.
+#
+# It publishes the site the `ci` job already built, and does not build its own. Two reasons,
+# and the second one cost an hour of pipeline before it was noticed:
+#
+#   * The notebooks are *executed* at build time, which is the point -- a page that stopped
+#     working fails the build. Executing them twice per pipeline buys nothing and doubles
+#     the chance of hitting a stall.
+#   * This job installed `--extra docs` while the gate installs `--extra docs --extra sim
+#     --extra verify`. So the artifact GitLab served was built in an environment that
+#     nothing gates, and a page could pass here and fail there, or the reverse.
+#
+# One build, in the gated environment, published from the artifact.
 pages:
-  image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
-  needs: []
+  needs: ["ci"]
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    - uv sync --frozen --extra docs
-    - uv run mkdocs build --strict --site-dir public
+    - test -d site || { echo "the ci job produced no site/ -- did the docs task run?"; exit 1; }
+    - mv site public
   artifacts:
     paths:
       - public
