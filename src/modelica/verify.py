@@ -52,6 +52,7 @@ from musil import (
     explore,
     fixed_points,
     protocol_actions,
+    reaches,
 )
 
 from modelica.fmi.modes import Interface, Mode, table
@@ -62,7 +63,7 @@ from modelica.ssp.master import Component, Phase, Progress, moves, start
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from musil import Graph, LivenessResult, OpenResult
+    from musil import LivenessResult, OpenResult
     from musil import Result as CheckResult
     from numpy.typing import NDArray
 
@@ -688,7 +689,7 @@ def check_modes(interface: Interface) -> ModeReport:
         interface=interface,
         reached=reached,
         unreached=declared - reached,
-        stranded=reached - _reaches(graph, Mode.FREED),
+        stranded=reached - reaches(graph, lambda s: s is Mode.FREED),
         safety=check(model),
     )
 
@@ -838,19 +839,3 @@ def check_master(
         ),
         declined=require_rollback and not all(c.rollback for c in components),
     )
-
-
-def _reaches(graph: Graph[Mode], goal: Mode) -> frozenset[Mode]:
-    """The states from which ``goal`` is reachable, found by walking the edges backwards."""
-    backwards: dict[Mode, list[Mode]] = {}
-    for source, edges in graph.edges.items():
-        for _, target in edges:
-            backwards.setdefault(target, []).append(source)
-    seen = {goal}
-    frontier = [goal]
-    while frontier:
-        for source in backwards.get(frontier.pop(), ()):
-            if source not in seen:
-                seen.add(source)
-                frontier.append(source)
-    return frozenset(seen)

@@ -23,9 +23,26 @@ def test_a_master_over_rollback_capable_components_always_finishes() -> None:
     assert report.ok, str(report)
 
 
-def test_a_component_that_cannot_roll_back_strands_the_master() -> None:
-    """The whole point. The counterexample is the shortest interleaving that gets there."""
+def test_a_component_that_cannot_roll_back_is_declined_before_anything_moves() -> None:
+    """The fix: rollback is a *precondition*, checked at load time, not discovered mid-step.
+
+    Declining is the correct outcome rather than a failure, so ``ok`` stays true -- what the
+    report says is that this algorithm cannot step this system, which is the honest answer and
+    the only one available before the first `fmi3DoStep`.
+    """
     report = verify.check_master(MIXED)
+    assert report.ok, str(report)
+    assert report.declined
+    assert "canGetAndSetFMUState" in str(report)
+
+
+def test_without_the_precondition_the_master_strands_itself() -> None:
+    """And this is why the precondition is there, rather than a paragraph nobody can check.
+
+    The counterexample is the shortest interleaving that gets there: `b` steps, `a` refuses,
+    and there is no move that puts `b` back.
+    """
+    report = verify.check_master(MIXED, require_rollback=False)
     assert not report.ok
     assert report.safety.invariant == "a-rollback-can-put-everyone-back"
     trace = [step.action for step in report.safety.trace]

@@ -48,6 +48,17 @@ class Phase(StrEnum):
 
     DONE = "done"
 
+    DECLINED = "declined"
+    """The master refused the system before stepping anything.
+
+    Not a failure -- the correct answer, and the fix for the trap this module was written to
+    expose. Rollback is a *precondition* of a rollback-based algorithm, so it is checked
+    against the components' capabilities at load time, where the honest answer is "not with
+    these FMUs" and the alternative is discovering it halfway through a step that cannot be
+    undone. A master that wants to accept such a system needs a different algorithm -- fixed
+    step, with a discard treated as fatal -- not a patch to this one.
+    """
+
 
 @dataclass(frozen=True, slots=True)
 class Component:
@@ -105,6 +116,7 @@ def moves(  # noqa: C901, PLR0912 - one branch per protocol move; splitting hide
     *,
     horizon: int,
     retries: int,
+    require_rollback: bool = True,
 ) -> Iterator[tuple[str, Progress]]:
     """Every move legal in ``state``, as ``(name, next)``.
 
@@ -114,11 +126,25 @@ def moves(  # noqa: C901, PLR0912 - one branch per protocol move; splitting hide
     The refusals are in here too, not in a separate adversary, because a refusal is a legal
     answer to ``fmi3DoStep`` rather than a fault -- an FMU that discards a step is behaving,
     and a master that only works when nobody discards does not.
+
+    ``require_rollback=False`` removes the load-time precondition, which is how the trap stays
+    demonstrable rather than becoming a paragraph nobody can check: without it, the protocol
+    is the one that walks into a state where a component that already stepped cannot be put
+    back.
     """
-    if state.phase is Phase.DONE:
+    if state.phase in (Phase.DONE, Phase.DECLINED):
         return
 
     if state.phase is Phase.SAVE:
+        if require_rollback and not all(component.rollback for component in components):
+            # Before anybody moves, and this is the only place it can be caught: once a
+            # component has stepped, "can it be put back" is no longer a question with a
+            # useful answer.
+            yield (
+                "decline",
+                Progress(Phase.DECLINED, state.times, state.saved, state.accepted, state.retries),
+            )
+            return
         for index, component in enumerate(components):
             if component.rollback and state.saved[index] != state.accepted:
                 yield (
