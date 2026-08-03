@@ -100,6 +100,13 @@ def test_flatten_section_is_well_formed(model: Path) -> None:
         assert flatten["states"], "an empty `states` list asserts nothing -- omit the key"
     if "index" in flatten:
         assert flatten["index"] >= 0
+    if "candidates" in flatten:
+        assert flatten["candidates"], "an empty `candidates` list asserts nothing -- omit it"
+        if "states" in flatten:
+            assert sorted(flatten["candidates"][0]) == sorted(flatten["states"]), (
+                "`candidates` is ordered with the chosen set first, so its first entry and "
+                "`states` are the same claim and must agree"
+            )
 
 
 @pytest.mark.parametrize("model", MODEL_FILES, ids=_ids(MODEL_FILES))
@@ -273,7 +280,7 @@ def test_selects_the_specified_states(model: Path) -> None:
     derivatives are what cut it down, so this asks the stage that does them.
     """
     spec = _spec(model).get("flatten")
-    if spec is None or not ("states" in spec or "state_count" in spec):
+    if spec is None or not spec.keys() & {"states", "state_count", "candidates"}:
         pytest.skip("no state expectation")
     parse = _require("modelica.lang", "parse")
     flatten = _require("modelica.sim", "flatten")
@@ -284,6 +291,13 @@ def test_selects_the_specified_states(model: Path) -> None:
         assert sorted(system.states) == sorted(spec["states"])
     if "state_count" in spec:
         assert len(system.states) == spec["state_count"]
+    if "candidates" in spec:
+        # Ordered, and the order carries the claim: `System.candidates` puts the chosen set
+        # first, so this one assertion pins both which sets are admissible and which one the
+        # selection rule took. A model whose candidates are told apart by the geometry does
+        # not need the key; one whose candidates are the same shape does, because there the
+        # answer comes from a tie-break rather than from the model.
+        assert [list(c) for c in system.candidates] == [list(c) for c in spec["candidates"]]
 
 
 def _difference(rhs: Callable[[Any], Any], y: Any, np: Any) -> tuple[Any, Any]:

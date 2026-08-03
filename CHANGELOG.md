@@ -6,6 +6,16 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `examples/TwoInertias`: **two bodies bolted to one shaft** — index 3 again, and for a
+  different reason than the pendulum. The constraint `big.phi = small.phi` is between two
+  *states*, so Pantelides differentiates it twice and the dummy-derivative method throws away
+  one of each pair. What makes it worth a model is that the two candidate state sets are the
+  same shape: `big` and `small` differ only in a number, so nothing in the structure prefers
+  either and the answer comes from a tie-break. `candidates` is a new key in the `.toml`,
+  ordered with the chosen set first, so that a change in the selection rule shows up as a diff
+  in a spec file rather than as a silent change of behaviour. Every reference number is the
+  closed form `w(t) = 10 exp(-t/10)`, and the conserved angular impulse `J w + d phi` is
+  asserted flat at 25 over the whole run.
 - `modelica.sim.emit`: **`observe_jacobian`** — `d(observed)/dy`, exact, by the same forward
   mode that writes `jacobian`. This is what a state estimator calls `H`, and until now every
   caller had to finite-difference it: one extra `observe` per state, and truncation error

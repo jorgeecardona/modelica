@@ -1,0 +1,89 @@
+summary = "Two inertias bolted to one shaft and braked: the constraint is between two states, so the index is 3 and the two candidate state sets are indistinguishable."
+teaches = ["index reduction across a rotational constraint", "a symmetric choice of dummy derivatives", "candidate state sets"]
+requires = ["Rotational"]
+
+[parse]
+classes = ["TwoInertias"]
+
+[flatten]
+model = "TwoInertias"
+index = 3
+balanced = true
+states = ["big.phi", "big.w"]
+
+# The two candidates, in the order `causalize` reports them: the chosen set first. This is
+# what the model is *for*. `Pendulum` is also index 3, but its candidates are told apart by
+# the geometry -- `(x, vx)` and `(y, vy)` behave differently, and one of them goes singular
+# at a point the run reaches. Here they are the same shape: `big` and `small` differ only in
+# a number, so nothing in the structure prefers either, and the choice is whatever the
+# selection rule does with a tie. Recording it means a change in that rule shows up as a diff
+# here rather than as a silent change of behaviour.
+candidates = [["big.phi", "big.w"], ["small.phi", "small.w"]]
+
+# `connect(big.flange_b, small.flange_a)` gives `big.phi = small.phi`, an equation between
+# two *states*. Pantelides differentiates it twice -- to `big.w = small.w` and then to
+# `big.a = small.a` -- and the dummy-derivative method throws away one of each pair. What is
+# left is one rigid body of J = 2.5 against a viscous brake, so
+#
+#     2.5 dw/dt = -0.25 w,   w(0) = 10
+#
+# and the whole run is w(t) = 10 exp(-t/10), phi(t) = 100 (1 - exp(-t/10)). Every number
+# below is that closed form, not another integration.
+[simulate]
+stop = 20.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 2.0
+values = { "big.w" = 8.187307530779819, "big.phi" = 18.12692469220182 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 8.0
+values = { "big.w" = 4.493289641172216, "big.phi" = 55.067103588277845 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 20.0
+values = { "big.w" = 1.353352832366127, "big.phi" = 86.46647167633873 }
+rtol = 1e-8
+source = "analytic"
+
+# The constraint itself, which index reduction differentiated away. Nothing in what the
+# solver integrates forces this any more: it holds only if the reduction was right and the
+# drift is controlled. This line is the reason the example exists, and it is the rotational
+# twin of the pendulum's `x^2 + y^2 = 1`.
+[[simulate.invariant]]
+expr = "small.phi - big.phi"
+value = 0.0
+atol = 1e-8
+
+# Its first derivative. The two bodies turn at one speed, which is what "rigid" means.
+[[simulate.invariant]]
+expr = "small.w - big.w"
+value = 0.0
+atol = 1e-10
+
+# Its second. This equation exists nowhere in the model text -- Pantelides wrote it -- and
+# it is the one the solver actually uses.
+[[simulate.invariant]]
+expr = "small.a - big.a"
+value = 0.0
+atol = 1e-10
+
+# Angular impulse: d/dt (J w + d phi) = -d w + d w = 0, so this is conserved exactly, for
+# any J and any d. It is the analogue of the pendulum's energy line, and it is a stronger
+# check than the reference points because it holds at every sample rather than at three.
+[[simulate.invariant]]
+expr = "2.5 * big.w + 0.25 * big.phi"
+value = 25.0
+atol = 1e-8
+
+# The brake takes the torque the two bodies give up. A sign error in the connection
+# equations, or a flange summed the wrong way, moves this off zero and moves nothing else.
+[[simulate.invariant]]
+expr = "small.flange_b.tau + brake.flange.tau"
+value = 0.0
+atol = 1e-10

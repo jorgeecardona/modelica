@@ -681,7 +681,22 @@ def _blocks(work: _Work, matched: dict[int, str]) -> tuple[Block, ...]:
 
 
 def _states(work: _Work, matched: dict[int, str]) -> tuple[str, ...]:
-    """The unknowns nothing solves for. They are states, or the model is unsolvable."""
+    """The unknowns nothing solves for. They are states, or the model is unsolvable.
+
+    **This is also the tie-break**, and it is worth saying so where it happens rather than
+    leaving it to be discovered. When several state sets are admissible, the one taken here
+    is whatever the matching left free -- so the answer comes from the order the matching
+    walks the unknowns in, which is ``work.order``, which is declaration order. It is
+    deterministic and it is not a judgement: nothing weighs the alternatives.
+
+    Usually the sets are told apart by the model and this does not matter. ``Pendulum``'s
+    ``(x, vx)`` and ``(y, vy)`` behave differently, and one of them goes singular at a point
+    a real run reaches. Where the sets are the same shape it matters and there is nothing
+    better to go on: in ``examples/models/TwoInertias.mo`` two bodies are bolted together and
+    differ only in a number, so ``big`` wins by being written first. That model's ``.toml``
+    records the chosen set and the alternatives in order, which is what turns a change in
+    this rule into a diff rather than into a silent change of behaviour.
+    """
     solved = set(matched.values())
     free = [name for name in work.variables if work.is_unknown(name) and name not in solved]
     stateless = [name for name in free if name not in work.derivative]
