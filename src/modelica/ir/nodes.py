@@ -27,6 +27,7 @@ from typing import Literal
 
 __all__ = [
     "EMPTY",
+    "Array",
     "Assign",
     "Binary",
     "BinaryOp",
@@ -105,6 +106,18 @@ class StringLiteral:
 
 
 @dataclass(frozen=True, slots=True)
+class Array:
+    """``{1, 2}``, and ``{{-100, -100}, {100, 100}}`` when the elements are arrays.
+
+    The toolchain does not solve array equations, and flattening still refuses one. This
+    node exists because *annotations* are full of arrays -- every point, every extent and
+    every colour is one -- and an annotation has to survive the parser to be drawn.
+    """
+
+    elements: tuple[Expr, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Binary:
     op: BinaryOp
     lhs: Expr
@@ -127,6 +140,13 @@ class Call:
 
     name: str
     args: tuple[Expr, ...]
+    named: tuple[tuple[str, Expr], ...] = ()
+    """``Rectangle(extent = ..., lineColor = ...)``: the arguments given by name.
+
+    A pair list rather than a dict, so the node stays hashable and the order the modeller
+    wrote survives -- which is what lets ``parse(unparse(x)) == x`` hold over a file full
+    of graphical annotations.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,8 +157,45 @@ class IfExpr:
 
 
 type Expr = (
-    Ref | RealLiteral | IntLiteral | BoolLiteral | StringLiteral | Binary | Unary | Call | IfExpr
+    Ref
+    | RealLiteral
+    | IntLiteral
+    | BoolLiteral
+    | StringLiteral
+    | Array
+    | Binary
+    | Unary
+    | Call
+    | IfExpr
 )
+
+
+# --------------------------------------------------------------------------------------
+# Modifications and annotations
+#
+# Both are the same construct, and both are defined here -- above the equations and the
+# declarations -- because every one of those can carry an annotation.
+# --------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Modification:
+    """A modification, which in Modelica is one recursive shape used for everything.
+
+    ``R = 100`` is a value. ``v(start = 0, fixed = true)`` is entries. ``c(C = 0.01,
+    v(start = 0))`` is both, nested. Built-in attributes (``start``, ``unit``, ``min``)
+    and component bindings are the same construct and are stored the same way -- the
+    difference is only what the name resolves to, which is a later stage's problem.
+    """
+
+    value: Expr | None = None
+    entries: dict[str, Modification] = field(default_factory=dict[str, "Modification"])
+
+    def __bool__(self) -> bool:
+        return self.value is not None or bool(self.entries)
+
+
+EMPTY = Modification()
 
 
 # --------------------------------------------------------------------------------------
@@ -187,6 +244,8 @@ class Connect:
 
     a: Ref
     b: Ref
+    annotation: Modification = EMPTY
+    """Where the line was drawn. ``Line(points = {{0, 0}, {10, 0}}, color = {0, 0, 255})``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,26 +285,6 @@ type Restriction = Literal["model", "connector", "package", "record", "block", "
 
 
 @dataclass(frozen=True)
-class Modification:
-    """A modification, which in Modelica is one recursive shape used for everything.
-
-    ``R = 100`` is a value. ``v(start = 0, fixed = true)`` is entries. ``c(C = 0.01,
-    v(start = 0))`` is both, nested. Built-in attributes (``start``, ``unit``, ``min``)
-    and component bindings are the same construct and are stored the same way -- the
-    difference is only what the name resolves to, which is a later stage's problem.
-    """
-
-    value: Expr | None = None
-    entries: dict[str, Modification] = field(default_factory=dict[str, "Modification"])
-
-    def __bool__(self) -> bool:
-        return self.value is not None or bool(self.entries)
-
-
-EMPTY = Modification()
-
-
-@dataclass(frozen=True)
 class Component:
     """One declared component: ``parameter Real k(unit = "1/s") = 0.5 "Cooling rate";``."""
 
@@ -256,6 +295,8 @@ class Component:
     causality: Causality = "none"
     connector: ConnectorKind = "none"
     comment: str = ""
+    annotation: Modification = EMPTY
+    """Where the component sits in the enclosing diagram: ``Placement(transformation(...))``."""
 
 
 @dataclass(frozen=True)
@@ -281,6 +322,8 @@ class Class:
     equations: tuple[Equation, ...] = ()
     initial_equations: tuple[Equation, ...] = ()
     classes: tuple[Class, ...] = ()
+    annotation: Modification = EMPTY
+    """What the class looks like: ``Icon(graphics = {...})`` and ``Diagram(...)``."""
 
 
 @dataclass(frozen=True)

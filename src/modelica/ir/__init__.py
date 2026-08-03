@@ -20,6 +20,9 @@ from modelica.ir.nodes import (
     EMPTY as EMPTY,
 )
 from modelica.ir.nodes import (
+    Array as Array,
+)
+from modelica.ir.nodes import (
     Assign as Assign,
 )
 from modelica.ir.nodes import (
@@ -115,6 +118,7 @@ from modelica.ir.nodes import (
 
 __all__ = [
     "EMPTY",
+    "Array",
     "Assign",
     "Binary",
     "BinaryOp",

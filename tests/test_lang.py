@@ -223,11 +223,39 @@ def test_a_model_parses_to_the_expected_value() -> None:
     assert isinstance(when.branches[0].body[0], ir.Reinit)
 
 
-def test_within_and_annotations_are_accepted_and_dropped() -> None:
-    """Neither survives into the IR, so neither may appear when the model is printed back."""
-    printed = unparse(parse(MODEL))
-    assert "within" not in printed
-    assert "annotation" not in printed
+def test_within_is_accepted_and_dropped() -> None:
+    """A `within` clause names the package a file belongs to. Nothing downstream reads it."""
+    assert "within" not in unparse(parse(MODEL))
+
+
+def test_an_annotation_survives_into_the_ir() -> None:
+    """It used to be counted over and thrown away. It is the diagram, so it is kept.
+
+    Where a component sits, and what a class looks like, is written in an annotation and
+    nowhere else. A tool that discards it can only ever guess at a picture of the model.
+    """
+    source = (
+        "model M\n"
+        "  Real x annotation(Placement(transformation(extent = {{-10, -10}, {10, 10}})));\n"
+        "equation\n"
+        "  annotation(Icon(graphics = {Line(points = {{-90, 0}, {-70, 0}})}));\n"
+        "end M;\n"
+    )
+    model = parse(source).classes[0]
+    assert set(model.annotation.entries) == {"Icon"}
+    assert set(model.components[0].annotation.entries) == {"Placement"}
+    assert parse(unparse(parse(source))) == parse(source)
+
+
+def test_a_connect_keeps_the_line_it_was_drawn_as() -> None:
+    source = (
+        "model M\n  Real a;\n  Real b;\nequation\n"
+        "  connect(a, b) annotation(Line(points = {{0, 0}, {10, 0}}, color = {0, 0, 255}));\n"
+        "end M;\n"
+    )
+    connect = parse(source).classes[0].equations[0]
+    assert isinstance(connect, ir.Connect)
+    assert set(connect.annotation.entries) == {"Line"}
 
 
 CONNECTOR = """
@@ -295,16 +323,31 @@ def test_unsupported_constructs_are_refused_by_name(keyword: str, source: str) -
         parse(source)
 
 
-def test_arrays_are_refused() -> None:
+def test_an_array_literal_is_read() -> None:
+    """`{1, 2}` is what every point, extent and colour in an annotation is made of."""
+    assert parse_expression("{1, 2, 3}") == ir.Array(
+        (ir.IntLiteral(1), ir.IntLiteral(2), ir.IntLiteral(3))
+    )
+    nested = parse_expression("{{-100, -100}, {100, 100}}")
+    assert isinstance(nested, ir.Array)
+    assert len(nested.elements) == 2
+
+
+def test_array_declarations_are_still_refused() -> None:
+    """Reading `{1, 2}` is not solving `x[3]`. The declaration is the unimplemented half."""
     with pytest.raises(ModelicaSyntaxError, match=r"[Aa]rray"):
         parse("model M\n  Real x[3];\nend M;\n")
-    with pytest.raises(ModelicaSyntaxError, match=r"[Aa]rray"):
-        parse_expression("{1, 2, 3}")
 
 
-def test_named_function_arguments_are_refused() -> None:
-    with pytest.raises(ModelicaSyntaxError):
-        parse_expression("f(x = 1)")
+def test_named_function_arguments_are_read() -> None:
+    assert parse_expression("f(x = 1)") == ir.Call("f", (), (("x", ir.IntLiteral(1)),))
+    mixed = parse_expression("f(1, y = 2)")
+    assert mixed == ir.Call("f", (ir.IntLiteral(1),), (("y", ir.IntLiteral(2)),))
+
+
+def test_a_positional_argument_cannot_follow_a_named_one() -> None:
+    with pytest.raises(ModelicaSyntaxError, match="positional"):
+        parse_expression("f(x = 1, 2)")
 
 
 def test_a_mismatched_end_name_is_an_error() -> None:

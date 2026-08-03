@@ -19,6 +19,7 @@ a flat list of classes and nothing downstream asks which package a file came fro
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Final
 
 from modelica import ir
@@ -97,6 +98,18 @@ _UNSUPPORTED: Final[dict[str, str]] = {
 }
 
 
+def _merge(first: ir.Modification, second: ir.Modification) -> ir.Modification:
+    """Two annotations on one class are one annotation, the later entry winning."""
+    if not first:
+        return second
+    if not second:
+        return first
+    return ir.Modification(
+        value=second.value if second.value is not None else first.value,
+        entries={**first.entries, **second.entries},
+    )
+
+
 class _Parser:
     """One pass over one source string.
 
@@ -172,28 +185,28 @@ class _Parser:
         token = self._accept(Kind.STRING)
         return token.text if token is not None else ""
 
-    def _annotation(self) -> None:
-        """Consume and discard an annotation: geometry and tool hints, not semantics."""
-        opening = self._accept(Kind.KEYWORD, "annotation")
-        if opening is None:
-            return
-        self._expect(Kind.OP, "(")
-        depth = 1
-        while depth:
-            token = self.token
-            if token.kind is Kind.END:
-                raise self._error("unterminated annotation", opening)
-            if token.kind is Kind.OP and token.text in _OPEN:
-                depth += 1
-            elif token.kind is Kind.OP and token.text in _CLOSE:
-                depth -= 1
-            self.at += 1
+    def _annotation(self) -> ir.Modification:
+        """``annotation(Icon(graphics = {...}))`` -- kept, because it is the diagram.
 
-    def _terminate(self) -> None:
+        An annotation is a class-modification and nothing else, so the modification parser
+        reads it unchanged. It used to be counted over and thrown away, on the reasoning
+        that geometry is not semantics. That is true of the equations and false of the
+        model: where a component sits, and what it looks like, is written here and nowhere
+        else, and a tool that discards it can only ever guess at a diagram.
+        """
+        if not self._check(Kind.KEYWORD, "annotation"):
+            return ir.EMPTY
+        self.at += 1
+        if not self._check(Kind.OP, "("):
+            raise self._error("expected '(' after 'annotation'")
+        return self._modification()
+
+    def _terminate(self) -> ir.Modification:
         """The tail every declaration and equation shares: comment, annotation, ``;``."""
         self._string_comment()
-        self._annotation()
+        annotation = self._annotation()
         self._expect(Kind.OP, ";")
+        return annotation
 
     # -- expressions ----------------------------------------------------------------
 
@@ -273,39 +286,66 @@ class _Parser:
                     raise self._error("output expression lists are not supported yet")
                 self._expect(Kind.OP, ")")
                 return inner
-            case Kind.OP if token.text in ("[", "{"):
-                raise self._error("arrays are not supported yet")
+            case Kind.OP if token.text == "{":
+                return self._array()
+            case Kind.OP if token.text == "[":
+                raise self._error("matrix expressions are not supported yet")
             case Kind.KEYWORD if token.text in ("true", "false"):
                 self.at += 1
                 return ir.BoolLiteral(token.text == "true")
             case Kind.KEYWORD if token.text in ("der", "initial"):
                 self.at += 1
-                return ir.Call(token.text, self._arguments())
+                args, named = self._arguments()
+                return ir.Call(token.text, args, named)
             case Kind.NAME:
                 parts = self._dotted()
                 if self._check(Kind.OP, "("):
-                    return ir.Call(".".join(parts), self._arguments())
+                    args, named = self._arguments()
+                    return ir.Call(".".join(parts), args, named)
                 return ir.Ref(parts)
             case _:
                 self._refuse_unsupported()
         raise self._error(f"expected an expression, found {token.describe()}")
 
-    def _arguments(self) -> tuple[ir.Expr, ...]:
+    def _array(self) -> ir.Array:
+        """``{a, b, c}``, nested as deep as it goes: a point is one, an extent is two."""
+        self._expect(Kind.OP, "{")
+        if self._accept(Kind.OP, "}"):
+            return ir.Array(())
+        elements: list[ir.Expr] = [self.expression()]
+        while self._accept(Kind.OP, ","):
+            elements.append(self.expression())
+        self._expect(Kind.OP, "}")
+        return ir.Array(tuple(elements))
+
+    def _arguments(self) -> tuple[tuple[ir.Expr, ...], tuple[tuple[str, ir.Expr], ...]]:
+        """The arguments of a call, positional first and then the ones given by name.
+
+        Modelica requires every named argument to follow the positional ones, and every
+        graphical record is written entirely by name: ``Line(points = ..., color = ...)``.
+        """
         self._expect(Kind.OP, "(")
         if self._accept(Kind.OP, ")"):
-            return ()
+            return (), ()
         args: list[ir.Expr] = []
+        named: list[tuple[str, ir.Expr]] = []
         while True:
-            if self._check(Kind.NAME) and self._ahead(1).kind is Kind.OP:
-                if self._ahead(1).text == "=":
-                    raise self._error("named function arguments are not supported yet")
-                if self._ahead(1).text == "(":
-                    pass  # a nested call, not a named argument
-            args.append(self.expression())
+            if (
+                self._check(Kind.NAME)
+                and self._ahead(1).kind is Kind.OP
+                and self._ahead(1).text == "="
+            ):
+                name = self._expect(Kind.NAME).text
+                self._expect(Kind.OP, "=")
+                named.append((name, self.expression()))
+            elif named:
+                raise self._error("a positional argument cannot follow a named one")
+            else:
+                args.append(self.expression())
             if not self._accept(Kind.OP, ","):
                 break
         self._expect(Kind.OP, ")")
-        return tuple(args)
+        return tuple(args), tuple(named)
 
     # -- modifications --------------------------------------------------------------
 
@@ -362,8 +402,7 @@ class _Parser:
         self._expect(Kind.OP, ",")
         b = self._reference()
         self._expect(Kind.OP, ")")
-        self._terminate()
-        return ir.Connect(a, b)
+        return ir.Connect(a, b, self._terminate())
 
     def _when(self) -> ir.When:
         opening = self.token
@@ -464,9 +503,10 @@ class _Parser:
             )
             if not self._accept(Kind.OP, ","):
                 break
-        self._annotation()
+        annotation = self._annotation()
         self._expect(Kind.OP, ";")
-        return declared
+        # One annotation, written once, for a clause that may declare several names.
+        return [replace(component, annotation=annotation) for component in declared]
 
     # -- classes --------------------------------------------------------------------
 
@@ -491,13 +531,14 @@ class _Parser:
         if self._accept(Kind.OP, "="):
             base = ir.Extends(self._type_name(), self._modification())
             comment = self._string_comment()
-            self._annotation()
+            annotation = self._annotation()
             self._expect(Kind.OP, ";")
             return ir.Class(
                 name=name,
                 restriction=restriction,
                 partial=partial,
                 comment=comment,
+                annotation=annotation,
                 extends=(base,),
             )
         return self._long_definition(name, restriction, partial=partial)
@@ -515,6 +556,7 @@ class _Parser:
         components: list[ir.Component] = []
         equations: list[ir.Equation] = []
         initial_equations: list[ir.Equation] = []
+        annotation = ir.EMPTY
 
         while not self._keyword("end"):
             if self._check(Kind.END):
@@ -524,7 +566,10 @@ class _Parser:
             if self._accept(Kind.KEYWORD, "public") or self._accept(Kind.KEYWORD, "protected"):
                 continue
             if self._check(Kind.KEYWORD, "annotation"):
-                self._annotation()
+                # A class may write more than one, and they mean one merged annotation:
+                # `Icon(...)` in the first and `Documentation(...)` in the second is the
+                # same class as both in one.
+                annotation = _merge(annotation, self._annotation())
                 self._expect(Kind.OP, ";")
                 continue
             if self._accept(Kind.KEYWORD, "initial"):
@@ -559,6 +604,7 @@ class _Parser:
             equations=tuple(equations),
             initial_equations=tuple(initial_equations),
             classes=tuple(nested),
+            annotation=annotation,
         )
 
     def program(self) -> ir.Program:

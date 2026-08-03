@@ -14,7 +14,7 @@ import pytest
 
 from modelica.ir import nodes as ir
 from modelica.ir.derive import DerivativeError, d_dt, d_dx, der_name, simplify
-from modelica.ir.evaluate import evaluate
+from modelica.ir.evaluate import EvaluationError, evaluate
 
 
 def ref(name: str) -> ir.Ref:
@@ -223,3 +223,28 @@ def test_the_chain_rule_composes(expr: ir.Expr) -> None:
 def test_log10_uses_the_right_constant() -> None:
     value = at(d_dx(ir.Call("log10", (X,)), "x"), POINT)
     assert value == pytest.approx(1.0 / (POINT["x"] * math.log(10)))
+
+
+def test_an_array_is_refused_by_every_stage_that_walks_an_expression() -> None:
+    """``ir.Array`` reaches the IR from annotations only, and three passes must say so.
+
+    An annotation is full of arrays -- every point, extent and colour is one -- so the node
+    exists and a `.mo` file that carries graphics parses. None of that is an *equation*, and
+    array equations are refused at the parser (`_UNSUPPORTED["for"]`). This asserts the three
+    passes below the parser agree, and agree in the same words, because the failure mode
+    worth preventing is one of them quietly inventing a meaning for a list of numbers.
+
+    Delete this when arrays land. Its whole content is that they have not.
+    """
+    # Imported here rather than at the top: this file is about the IR, and `modelica.sim`
+    # reaches the numerics through its package import.
+    from modelica.sim.emit import EmitError, emit_expr  # noqa: PLC0415
+
+    array = ir.Array((num(1.0), num(2.0)))
+
+    with pytest.raises(DerivativeError, match="array equations are not supported yet"):
+        d_dx(array, "x")
+    with pytest.raises(EvaluationError, match="array equations are not supported yet"):
+        evaluate(array, {})
+    with pytest.raises(EmitError, match="array equations are not supported yet"):
+        emit_expr(array, {})

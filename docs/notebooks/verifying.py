@@ -171,17 +171,27 @@ from modelica.verify import check_master
 print(check_master((Component("a", rollback=True), Component("b", rollback=True))))
 
 # %% [markdown]
-# Now make one of them a perfectly conforming FMU that declines to save its state:
+# Now make one of them a perfectly conforming FMU that declines to save its state. Rollback is
+# a *precondition* of a rollback-based algorithm, so the master checks it at load time and
+# refuses — which is the correct outcome, not a failure:
 
 # %%
-mixed = check_master((Component("a", rollback=True), Component("b", rollback=False)))
-print(f"ok: {mixed.ok}\n")
-print(mixed.safety)
+MIXED = (Component("a", rollback=True), Component("b", rollback=False))
+mixed = check_master(MIXED)
+print(f"ok: {mixed.ok}, declined: {mixed.declined}")
+print(mixed)
+
+# %% [markdown]
+# That precondition is not decoration either. Drop it and the trap comes back:
+
+# %%
+print(check_master(MIXED, require_rollback=False).safety)
 
 # %% [markdown]
 # Four moves from the start. `b` takes its step, `a` refuses, and there is no move that puts
 # `b` back — the master has nothing left to offer. No test that happens to use FMUs which all
-# support state saving will ever see it.
+# support state saving will ever see it, which is why the precondition is checked rather than
+# assumed.
 #
 # ## What this cannot do
 #
