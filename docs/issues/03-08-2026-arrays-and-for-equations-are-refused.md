@@ -47,6 +47,22 @@ measurement.
   flattens, simulates, and agrees with an independently integrated reference in its `.toml`.
 - The `for` entry is gone from `_UNSUPPORTED` and its case is gone from `tests/test_lang.py`.
 
+## Prior art, added 2026-08-03
+
+[pymoca](https://github.com/pymoca/pymoca) — a Modelica compiler in Python, BSD licensed, used
+by Deltares under RTC-Tools — implements all of this, and its test corpus names the cases:
+`Array3D`, `ArrayExpand`, `ArrayExpressions`, `MatrixExpressions`, `ForLoop`, `NestedForLoop`,
+`DelayForLoop`, `IndexedConnect`, `ArrayConnectParam`. It is an ANTLR front end with a
+separate `tree` module that flattens, so the flattening reads apart from the grammar.
+
+Two of those are worth studying before designing this. `ArrayConnectParam` and
+`IndexedConnect` are connections *into* an array of components, which is where scalarising at
+flatten time either works or stops working, and it is not in the sketch above.
+
+This is also the construct that most limits what models this toolchain can be given: a
+worked, permissively-licensed implementation makes it cheaper than the `L` suggests. See
+`docs/ideas/landscape.md`.
+
 ## Deliberately not done
 
 - No `field`, `domain` or `pder`. `docs/ideas/pdes.md` records why: every attempt at native

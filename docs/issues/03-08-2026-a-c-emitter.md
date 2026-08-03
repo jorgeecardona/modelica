@@ -49,6 +49,19 @@ inference from reading `emit.py`, not from having tried it.
 - The compiled unit is reachable from Python (ctypes) so the same corpus simulations can run
   through it end to end.
 
+## Prior art, added 2026-08-03
+
+[Rumoca](https://arxiv.org/abs/2606.14998) writes its backends as **Jinja templates** rather
+than as code, and emits CasADi, SymPy, FMI 2.0 and 3.0, JavaScript, JAX, Julia, ONNX and
+embedded C from one intermediate representation. That is `docs/ideas/backends.md`'s claim —
+"the emitters are mechanical" — taken all the way, and this issue is where the claim gets
+tested here: if the C emitter comes out as a near-copy of the Python one with different string
+literals, templates were the right shape.
+
+Their fourth IR is worth knowing about and is not proposed here: a register-based opcode
+stream with Jacobian-vector products precomputed by forward mode, which is the alternative to
+emitting source at all. See `docs/ideas/landscape.md`.
+
 ## Deliberately not done
 
 - No build system for it, and no vendored compiler. The test finds `cc` or skips, the way

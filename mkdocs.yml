@@ -93,6 +93,7 @@ nav:
       - Roasting a batch: notebooks/roasting.ipynb
       - Enumerating the discrete half: notebooks/verifying.py
   - Ideas:
+      - What else exists in Python: ideas/landscape.md
       - Backends: ideas/backends.md
       - Benchmarks: ideas/benchmarks.md
       - PDEs: ideas/pdes.md

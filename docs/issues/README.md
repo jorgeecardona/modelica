@@ -80,8 +80,10 @@ cabildo issues show <slug>
 <!-- BEGIN GENERATED INDEX — `cabildo issues reindex` -->
 | Issue | Area | Kind | Scope | Verify | Status | Waiting on |
 |---|---|---|---|---|---|---|
+| [There is no honest number for how much Modelica this reads, because the corpus is ours](03-08-2026-reachability-and-agreement-against-a-reference-tool.md) | ci | story | L | probe | open | — |
 | [The EKF results live in a log and a deleted scratch file, not in the documentation](03-08-2026-an-estimation-notebook.md) | docs | story | M | inspect | open | — |
 | [The Association has not been told this exists, and the trademark note assumes they will be](03-08-2026-tell-the-modelica-association.md) | docs | idea | XS | inspect | open | — |
+| [The README says nothing in Python reaches a trajectory, and something does](03-08-2026-the-readme-claim-is-too-strong.md) | docs | bug | S | inspect | open | — |
 | [FMI 3.0 export — a System as an FMU, and the two routes disagree in the docs](03-08-2026-fmi-export.md) | fmi | story | L | test | open | — |
 | [FMI 3.0 import — the mode table exists, the FMU reader does not](03-08-2026-fmi-import.md) | fmi | story | L | test | open | — |
 | [The IR nodes were made hashable for CSE, and no stage does CSE](03-08-2026-common-subexpression-elimination.md) | ir | story | M | test | open | — |
@@ -96,15 +98,17 @@ cabildo issues show <slug>
 | [Detecting charge and drop from the bean probe — the models are fine, the decision layer is wrong](03-08-2026-detecting-charge-and-drop-from-the-bean-probe.md) | sim | idea | L | probe | open | — |
 | [Differential debugging is the argument for two tiers, and there is no tool that does it](03-08-2026-differential-debugging-has-no-tool.md) | sim | story | M | test | open | ir-nodes-carry-no-source-span |
 | [RoastingMachine's moisture is assumed, and Cropster has it measured per lot](03-08-2026-green-moisture-as-a-measurement.md) | sim | idea | S | probe | open | — |
+| [JAX gives the ensemble what Vulkan was being asked for, in double precision, today](03-08-2026-jax-is-the-ensemble-vehicle.md) | sim | idea | M | probe | open | the-ensemble-driver |
 | [A phase-change kinetics example — the reachable half of the welding animation](03-08-2026-phase-change-kinetics-example.md) | sim | idea | M | test | open | — |
 | [`spatialDistribution()` — the one PDE the Association standardized, and we do not have it](03-08-2026-spatialdistribution.md) | sim | story | M | test | open | — |
 | [Spike: can an emitted SPIR-V kernel run an ensemble on compute-ml at all?](03-08-2026-spike-a-spirv-emitter-against-compute-ml.md) | sim | spike | L | probe | open | the-ensemble-driver |
 | [The ensemble driver — one compiled model over a matrix of parameters](03-08-2026-the-ensemble-driver.md) | sim | story | M | test | open | — |
 | [The JIT compiles the kernel, not the step — the integrator loop is still Python](03-08-2026-the-jit-compiles-the-kernel-not-the-step.md) | sim | story | L | probe | open | work-precision-harness |
 | [No work-precision harness, so every speed claim in the docs is unmeasured](03-08-2026-work-precision-harness.md) | sim | story | L | probe | open | — |
+| [A Result is readable only by this package, and the whole field reads one `.mat` format](03-08-2026-write-results-other-tools-can-read.md) | sim | story | M | test | open | — |
 | [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_25 open — 25 open; 3 done. Generated; edit the files, then `cabildo issues reindex`._
+_29 open — 29 open; 3 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

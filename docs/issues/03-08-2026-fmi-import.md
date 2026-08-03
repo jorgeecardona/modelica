@@ -50,6 +50,24 @@ than reimplemented.
   matches its published reference trajectory. That FMU, or a script that fetches it, is in the
   repository, because a test that depends on a file nobody can find is not a test.
 
+## Prior art, added 2026-08-03
+
+Two things exist that this should use rather than rebuild.
+
+- **[fmi-cross-check](https://github.com/modelica/fmi-cross-check)** is the corpus: FMUs from
+  many vendors, organised by FMI version, interface type and platform, each with reference
+  results. It is the acceptance test named above, and the files are somebody else's, which is
+  the point.
+- **[FMPy](https://github.com/CATIA-Systems/FMPy)** does this job well and is BSD licensed:
+  pure Python and `ctypes`, FMI 1.0, 2.0 and 3.0, both interface types, and it validates
+  `modelDescription.xml` against the XML schema rather than trusting it. It also ships the
+  `cross_check` module that drives the repository above. Schema validation before parsing is
+  the cheap habit to copy — an FMU that misdescribes its own interface should be refused by
+  name, the way `modelica.lang.parse` refuses a construct.
+
+Worth weighing against `fmi-export` when picking one up: reading FMUs is well served in Python
+already, and writing them is the half that needs a compiler. See `docs/ideas/landscape.md`.
+
 ## Deliberately not done
 
 - No export. It is stage 7 and its own entry.

@@ -50,6 +50,15 @@ already names as the mistake the diagram layer was written to avoid.
   observation that closes this.
 - Both entries are gone from `_UNSUPPORTED` and from `tests/test_lang.py`.
 
+## Prior art, added 2026-08-03
+
+[pymoca](https://github.com/pymoca/pymoca) implements this and tests four separate cases:
+`RedeclareComponents`, `RedeclareClass`, `RedeclareInExtends`, `RedeclareTypeCompatibility`.
+The fourth is the one this issue is most likely to get wrong — a redeclaration that does not
+satisfy its constraining clause — and their test is worth reading before ours is written. They
+also carry `ExpandableConnectorBus`, which is the next thing an MSL reader needs and is not in
+this issue. BSD licensed. See `docs/ideas/landscape.md`.
+
 ## Deliberately not done
 
 - No `inner`/`outer` here, though the MSL uses them together with replaceable media. That is

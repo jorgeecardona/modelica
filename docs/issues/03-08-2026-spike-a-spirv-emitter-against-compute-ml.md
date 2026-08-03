@@ -62,6 +62,17 @@ Blockers 1 and 2 must be settled before any number exists, and both are changes 
 `compute-ml` rather than to this repository. Whoever picks this up should decide that first,
 and say so here if the answer is that `compute-ml` is not the right host.
 
+## A second vehicle, added 2026-08-03
+
+`jax-is-the-ensemble-vehicle` proposes the same workload on JAX: double precision, `vmap`, and
+no device required. [jaxdae](https://arxiv.org/abs/2607.23202) reports batched-gradient wall
+time "nearly flat from batch 1 to 1000" through XLA fusion, which is the scaling this spike
+would be trying to demonstrate.
+
+That does not close this. It changes what the spike is *for*: the hardware question — can a
+generated kernel run on raw Vulkan at all — rather than the only route to a fast ensemble.
+Whichever gets a number first should say so in the other.
+
 ## Deliberately not done
 
 - Not the stiff solver. Time integration is serial by construction and one trajectory of a
