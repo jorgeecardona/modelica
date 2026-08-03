@@ -35,37 +35,53 @@ EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 LIBRARY = EXAMPLES / "library"
 MODELS = EXAMPLES / "models"
 
-COVERED = ("Robertson", "Pendulum", "BouncingBall", "DrainingTank")
+COVERED = ("Robertson", "Pendulum", "BouncingBall", "DrainingTank", "RoastingMachine")
 """Models chosen for the constructs they force the emitter to write, not for coverage.
 
-Compiling costs real time, so this is four models rather than the whole corpus, picked so
+Compiling costs real time, so this is five models rather than the whole corpus, picked so
 that between them every shape in the generated source is compiled at least once:
 ``Robertson`` is explicit blocks and nothing else; ``Pendulum`` is the mode dispatcher, a
 Newton iteration and a 3x3 linear solve, which is the only place `np.linalg.solve` with a
-2-D right-hand side appears; ``BouncingBall`` is a ``when`` with a ``reinit``; and
-``DrainingTank`` is a latched relation read through the workspace. Compiling every function
-of each, measured:
+2-D right-hand side appears; ``BouncingBall`` is a ``when`` with a ``reinit``;
+``DrainingTank`` is a latched relation read through the workspace; and ``RoastingMachine``
+is a nine-segment schedule against ``time``, which is the shape that used to be
+uncompilable. Compiling every function of each, measured:
 
-    Robertson       5.6 s
-    BouncingBall    2.1 s
-    DrainingTank    2.4 s
-    Pendulum       37.9 s      <- two modes, so every function is written and compiled twice
+    Robertson         5.6 s
+    BouncingBall      2.1 s
+    DrainingTank      2.4 s
+    RoastingMachine   3.9 s
+    Pendulum         37.9 s     <- two modes, so every function is written and compiled twice
 
-``RoastingMachine`` is deliberately absent, and that absence is the finding. Its gas schedule
-is a nine-branch `if/elseif` chain on `time`, and Numba does not compile it in any usable
-sense: **31 minutes and 3.8 GB of resident memory without finishing**, against seconds for
-everything else. Numba walks a function's control-flow graph with a *recursive* depth-first
-search -- ``numba.core.transforms.find_setupwiths`` into ``controlflow._dfs_rec``, one Python
-frame per basic block -- and that schedule also comes within about twenty-five frames of the
-default recursion limit of 1000, so it has been seen to raise ``RecursionError`` from a deep
-call site and to proceed from a shallow one on the same machine and the same hour.
+``RoastingMachine`` is here **because** it was the counterexample, and it is worth recording
+what it was a counterexample to. It used to be absent with a finding attached: Numba did not
+compile it in any usable sense -- 31 minutes and 3.8 GB of resident memory without finishing,
+against seconds for everything else -- and the nine-branch chain also came within about
+twenty-five frames of the default recursion limit of 1000 during Numba's *recursive*
+control-flow walk, so it raised ``RecursionError`` from a deep call site and proceeded from a
+shallow one on the same machine and the same hour.
 
-The blast radius is worth stating plainly, because it is a limit of the *backend* rather than
-of that model: **a model whose behaviour is a long schedule against `time` is effectively not
-compilable today.** That is a real class -- recorded gas traces, duty cycles, drive profiles --
-and for those the interpreted tier is the only tier. Flattening such a schedule into branchless
-arithmetic would appease the compiler at the cost of the model no longer resembling the data it
-came from, which is the wrong trade.
+The diagnosis was wrong, and this is the useful part. The chain in ``rhs`` was never the
+problem: it is nine constants and Numba compiles it in a fifth of a second. The problem was
+what *differentiating* it produced. A schedule of constants has derivative zero on every
+segment, so ``d_dx`` wrote ``0.0 if w[30] > 0.5 else 0.0 if w[31] > 0.5 else ...`` -- a
+nine-branch chain whose every answer is the same number -- and ``simplify`` had no fold for
+a conditional with two identical arms. Every block Jacobian carried it, so it landed in
+``rhs``, ``jacobian``, ``observe``, ``indicators`` and ``transition`` alike. One fold in
+``modelica.ir.derive.simplify`` removes it, and the measurements move like this:
+
+                    before          after
+    rhs             5.6 s           0.2 s
+    jacobian        15.6 s, 4.4 GB, out of memory
+                                    2.6 s
+    observe         9.2 s           0.4 s
+    indicators      5.5 s           0.2 s
+    transition      7.5 s           0.5 s
+
+So the claim that "a model whose behaviour is a long schedule against ``time`` is effectively
+not compilable" was a statement about a missing fold, not about Numba and not about the model.
+The recursion limit was never touched. The model was never flattened into branchless
+arithmetic, which is what the earlier note refused to do and was right to refuse.
 """
 
 

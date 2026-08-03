@@ -6,6 +6,17 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `modelica.ir.derive`: **a conditional whose two answers are the same is folded away**, and
+  that one line is what makes a *schedule* compilable. A chain of constant segments has
+  derivative zero on every segment, so differentiating it produced
+  `0.0 if w[30] > 0.5 else 0.0 if w[31] > 0.5 else ...` — nine branches, one answer — and
+  `simplify` had no fold for it. Every block Jacobian carried the chain, so it reached `rhs`,
+  `jacobian`, `observe`, `indicators` and `transition` alike. Compiling `RoastingMachine`
+  under Numba, measured before and after: `jacobian` went from 15.6 s and 4.4 GB *without
+  finishing* to 2.6 s and 0.21 GB, `rhs` from 5.6 s to 0.2 s, and the whole model from
+  uncompilable to 3.9 s. `tests/test_jit.py` covers it now, and the note there that said "a
+  model whose behaviour is a long schedule against `time` is effectively not compilable" is
+  corrected: it was a missing fold, not a limit of Numba and not a fault of the model.
 - `modelica.diagram`: **a model is a graph, and now you can see it.** Three pictures, one
   per stage: `schematic` reads the classes before flattening and shows components and
   connections; `incidence` reads a `FlatModel` and shows which equation touches which

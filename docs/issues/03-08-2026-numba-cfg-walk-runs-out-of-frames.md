@@ -2,50 +2,79 @@
 title: Numba's recursive CFG walk runs out of frames on RoastingMachine, at about 975 of 1000
 status: open
 area: sim
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-03
 kind: bug
 scope: XS
 verify: probe
 ---
 
-## Measured
+## What this was filed as, and why that was wrong
 
-- Compiling `RoastingMachine` with `jit=True` raised `RecursionError: maximum recursion depth
-  exceeded` inside Numba's own control-flow-graph walk (`logs/2026-08-01.md`, session
-  `rusty-replicant-32c43`).
-- The cause was measured rather than guessed: the model's gas schedule is a chain of nine
-  `elseif` branches, and that chain costs about **975 frames** of Numba's recursive CFG walk
-  against CPython's default limit of **1000** (`logs/2026-07-30.md`, where the first diagnosis —
-  "cannot be compiled" — was corrected to "marginal").
-- So whether it compiles depends on how deep the caller's stack already is. It is not a hard
-  failure. It is a failure that depends on who is calling.
-- `RoastingMachine` is not in `tests/test_jit.py`'s `COVERED` tuple (`Robertson`, `Pendulum`,
-  `BouncingBall`, `DrainingTank`), so nothing in the suite compiles the branch chain and CI
-  cannot see this.
+Filed as: raise the recursion limit around the Numba compile, in a `try`/`finally`, and add
+`RoastingMachine` to `tests/test_jit.py`. Both halves of that were wrong, and the second half
+would have hung the suite for half an hour.
 
-## Inferred
+Three things were measured before touching anything, in a throwaway environment
+(`uv run --isolated --with numba`):
 
-The 975 figure is one measurement on one machine with one Numba version; the *margin* is what
-matters, not the number. Any model with a long `elseif` chain — a lookup table, a gain
-schedule, a piecewise characteristic curve — is in the same position, and a schedule with
-eleven branches instead of nine would fail outright. This is inferred from the shape of the
-walk, not measured on an eleven-branch model.
+1. **The recursion limit is not what stops it.** `rhs` compiles at the default limit of 1000,
+   in 5.6 s. The `RecursionError` reported on 2026-07-30 and 2026-08-01 is real and marginal —
+   about 975 frames against 1000, so it depends on the caller's stack — but it is not the
+   blocker, and raising the limit fixes nothing.
+2. **Numba compiles lazily, at the first call**, which `src/modelica/sim/kernel.py:151`
+   already says. So there is no compile to put a `try`/`finally` around in `_accelerate`.
+   The bracket the issue asked for could not have existed where it asked for it.
+3. **`jacobian` is what blows up**, and only `jacobian`. Per generated function, first call,
+   with the address space capped at 6 GB:
 
-## Done
+       rhs              5.6 s   peak rss 0.27 GB   ok
+       jacobian        15.6 s   peak rss 4.40 GB   MemoryError
+       observe          9.2 s                      ok
+       indicators       5.5 s                      ok
+       transition       7.5 s                      ok
 
-- `modelica.sim.kernel` raises the recursion limit around the Numba compile and restores it
-  afterwards, in a `try`/`finally`, with the reason written at the call site and this issue
-  named.
-- `RoastingMachine` joins `COVERED` in `tests/test_jit.py`, so `moon run :test-jit` compiles the
-  nine-branch chain and compares it against the interpreter like the other four.
-- `verify: probe` because a green test in the normal environment proves nothing here — Numba is
-  in no dependency group and `tests/test_jit.py:32` skips itself without it. What closes this is
-  `moon run :test-jit` passing with `RoastingMachine` in it.
+## The actual cause
 
-## Deliberately not done
+Read the emitted source rather than guessing from the timings. The gas schedule is nine
+constant segments, so its derivative is zero on every segment, and `d_dx` wrote that out
+faithfully:
 
-**The branch chain stays.** Flattening the gas schedule into arithmetic was considered and
-declined on 2026-07-30: the chain is a recorded gas trace from a real roast, and flattening it
-would trade the example's one real property — that it is measured, not invented — for an opt-in
-path no test exercises. The model is not the problem; the compiler's recursion budget is.
+    _d_der_T_mach = ... (0.0 if w[30] > 0.5 else 0.0 if w[31] > 0.5 else 0.0 if w[32] > 0.5
+                         else ... else 0.0) ...
+
+A nine-branch chain whose every answer is the same number. `modelica.ir.derive.simplify` had
+folds for arithmetic and none for a conditional with two identical arms, so the chain
+survived. `modelica.sim.emit` builds each implicit block's Jacobian through the same
+`simplify(d_dx(...))` (`emit.py:403`, `emit.py:765`), so the chain landed in **every**
+generated function and not only in `jacobian`.
+
+The model was never the problem. `rhs`'s own schedule — `20 if w[30] > 0.5 else 27 if ...`,
+nine *different* constants — compiles in a fifth of a second and is untouched.
+
+## The fix, and what it moved
+
+One fold in `simplify`: if both arms are structurally equal, return one of them.
+
+                    before                          after
+    rhs             5.6 s                           0.2 s
+    jacobian        15.6 s, 4.4 GB, out of memory   2.6 s, 0.21 GB
+    observe         9.2 s                           0.4 s
+    indicators      5.5 s                           0.2 s
+    transition      7.5 s                           0.5 s
+
+`RoastingMachine` is in `tests/test_jit.py`'s `COVERED` now and `moon run :test-jit` passes in
+35 s for all five models — *less* than the 37.9 s the pendulum alone used to take, because the
+same fold shrinks its two modes as well. `code.events` is still 9, so no relation was folded
+out of the model: only the derivative's chain of zeros went. 593 tests pass.
+
+## What this leaves
+
+- The `RecursionError` is still reachable in principle, on a schedule long enough. It is no
+  longer reachable on anything in the corpus, and it was never the reason `RoastingMachine`
+  would not compile. Not worth a limit change on a hypothetical.
+- `tests/test_jit.py`'s note claiming "a model whose behaviour is a long schedule against
+  `time` is effectively not compilable today" is corrected in the same commit. It was a
+  statement about a missing fold.
+- The 2026-07-30 decision to keep the branch chain rather than flatten it into arithmetic was
+  right, and is now right for a better reason: the chain was never what cost anything.

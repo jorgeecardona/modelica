@@ -177,7 +177,16 @@ def simplify(node: ir.Expr) -> ir.Expr:
         case ir.Call(name=name, args=args):
             return ir.Call(name, tuple(simplify(a) for a in args))
         case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
-            return ir.IfExpr(simplify(condition), simplify(then), simplify(otherwise))
+            chosen, other = simplify(then), simplify(otherwise)
+            if chosen == other:
+                # A test whose two answers are the same is not a test. This one fold is
+                # what keeps a *schedule* differentiable in practice: a chain of `n`
+                # constant segments differentiates to `0.0 if c1 else 0.0 if c2 else ...`,
+                # which is `0.0` and nothing else, and every later stage pays for it if it
+                # is left standing. Numba's compilation of the nine-segment gas schedule in
+                # `RoastingMachine` needed more than 4 GB with the chain present.
+                return chosen
+            return ir.IfExpr(simplify(condition), chosen, other)
         case _:
             return node
 
