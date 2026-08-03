@@ -1,5 +1,8 @@
 # Benchmarks: what "as good as the Fortran codes" has to mean
 
+!!! note "Tracked in the register"
+    The harness this page specifies is tracked in [`docs/issues`](https://gitlab.com/jorgeecardona/pymodelica/-/tree/main/docs/issues) as the work-precision harness, together with the reachability-and-agreement measurement that says how much of the language is reached at all. This page is the argument; the register is what is owed.
+
 A claim about solver performance is worthless without a fixed set of problems and a fixed
 way to measure. This page records which problems this project targets, and why the obvious
 metric is the wrong one.

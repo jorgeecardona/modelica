@@ -1,5 +1,8 @@
 # PDEs
 
+!!! note "Tracked in the register"
+    The two options this page endorses are tracked in [`docs/issues`](https://gitlab.com/jorgeecardona/pymodelica/-/tree/main/docs/issues): arrays and `for` equations, which make a hand-written method of lines expressible, and `spatialDistribution()` as a builtin. The third option is deliberately not tracked -- it is a position, not a plan.
+
 Every few years somebody proposes partial differential equations for Modelica. It has
 happened since 2000. Nothing has landed.
 

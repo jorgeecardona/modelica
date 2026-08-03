@@ -1,5 +1,8 @@
 # Verifying the discrete half
 
+!!! note "Tracked in the register"
+    What is left after the four targets is tracked in [`docs/issues`](https://gitlab.com/jorgeecardona/pymodelica/-/tree/main/docs/issues): property-based testing for causalization, partial-order reduction, and chattering across instants. This page is the argument; the register is what is owed.
+
 A simulation engine is two machines glued together.
 
 One is continuous. It is a stiff integrator with an error norm, a step-size controller and a

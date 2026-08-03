@@ -95,20 +95,26 @@ cabildo issues show <slug>
 | [`replaceable` and `redeclare` are refused, and the standard library is built on them](03-08-2026-replaceable-and-redeclare-are-refused.md) | lang | story | L | test | open | — |
 | [`import`, `enumeration` and `inner`/`outer` — the three small refusals](03-08-2026-the-three-small-refusals.md) | lang | story | M | test | open | — |
 | [A C emitter — the second backend, and the one FMU export needs](03-08-2026-a-c-emitter.md) | sim | story | L | test | open | — |
+| [Nothing caches a compiled kernel, though the content hash that would key it exists](03-08-2026-compiled-kernels-are-not-cached.md) | sim | story | M | test | open | — |
 | [Detecting charge and drop from the bean probe — the models are fine, the decision layer is wrong](03-08-2026-detecting-charge-and-drop-from-the-bean-probe.md) | sim | idea | L | probe | open | — |
 | [Differential debugging is the argument for two tiers, and there is no tool that does it](03-08-2026-differential-debugging-has-no-tool.md) | sim | story | M | test | open | ir-nodes-carry-no-source-span |
 | [RoastingMachine's moisture is assumed, and Cropster has it measured per lot](03-08-2026-green-moisture-as-a-measurement.md) | sim | idea | S | probe | open | — |
 | [JAX gives the ensemble what Vulkan was being asked for, in double precision, today](03-08-2026-jax-is-the-ensemble-vehicle.md) | sim | idea | M | probe | open | the-ensemble-driver |
+| [The method-of-lines path is the one GPU coupling with a working precedent](03-08-2026-method-of-lines-on-the-device.md) | sim | idea | L | probe | open | arrays-and-for-equations-are-refused |
+| [Parameters are always an argument, and burning them in as literals is the other half](03-08-2026-parameters-as-constants-or-as-arguments.md) | sim | story | S | probe | open | — |
 | [A phase-change kinetics example — the reachable half of the welding animation](03-08-2026-phase-change-kinetics-example.md) | sim | idea | M | test | open | — |
 | [`spatialDistribution()` — the one PDE the Association standardized, and we do not have it](03-08-2026-spatialdistribution.md) | sim | story | M | test | open | — |
 | [Spike: can an emitted SPIR-V kernel run an ensemble on compute-ml at all?](03-08-2026-spike-a-spirv-emitter-against-compute-ml.md) | sim | spike | L | probe | open | the-ensemble-driver |
 | [The ensemble driver — one compiled model over a matrix of parameters](03-08-2026-the-ensemble-driver.md) | sim | story | M | test | open | — |
+| [The Jacobian is emitted dense, though matching already knows where the zeros are](03-08-2026-the-jacobian-is-emitted-dense.md) | sim | story | L | probe | open | — |
 | [The JIT compiles the kernel, not the step — the integrator loop is still Python](03-08-2026-the-jit-compiles-the-kernel-not-the-step.md) | sim | story | L | probe | open | work-precision-harness |
 | [No work-precision harness, so every speed claim in the docs is unmeasured](03-08-2026-work-precision-harness.md) | sim | story | L | probe | open | — |
 | [A Result is readable only by this package, and the whole field reads one `.mat` format](03-08-2026-write-results-other-tools-can-read.md) | sim | story | M | test | open | — |
+| [A fixed-step co-simulation schedule never branches, so it could be recorded once](03-08-2026-replay-a-fixed-step-cosimulation-schedule.md) | ssp | idea | M | probe | open | ssp-read-the-archive-and-run-the-master |
 | [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
+| [Chattering across instants is watched by a counter, and the checker cannot see it](03-08-2026-chattering-across-instants.md) | verify | idea | M | probe | open | — |
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_29 open — 29 open; 3 done. Generated; edit the files, then `cabildo issues reindex`._
+_35 open — 35 open; 3 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

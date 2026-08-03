@@ -1,5 +1,8 @@
 # What else exists in Python
 
+!!! note "Tracked in the register"
+    What came out of this survey is tracked in [`docs/issues`](https://gitlab.com/jorgeecardona/pymodelica/-/tree/main/docs/issues): the README sentence, a reachability-and-agreement measurement, a result writer other tools can read, and JAX as an ensemble backend. This page is the evidence; the register is what is owed.
+
 This project says in its README that Python has two halves of a Modelica toolchain and not
 the middle. That is a claim about other people's software, so it should be checked, and
 checked again as they keep working. This page is the check, made in August 2026, and it is
