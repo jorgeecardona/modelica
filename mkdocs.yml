@@ -28,6 +28,12 @@ theme:
         icon: material/weather-sunny
         name: Switch to light mode
 
+# nbconvert's HTML is laid out for JupyterLab, not for a page in a phone. Left alone it
+# spends 76 px on an `In [1]:` gutter and clips every code line past 237 px with no way to
+# scroll to the rest. This puts that right; see the file for what and why.
+extra_css:
+  - stylesheets/notebooks.css
+
 markdown_extensions:
   - admonition
   - tables

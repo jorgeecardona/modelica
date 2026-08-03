@@ -1,0 +1,134 @@
+/*
+ * Making the executed notebooks readable on a phone.
+ *
+ * mkdocs-material's own layout is already responsive; what is not is the notebook HTML
+ * nbconvert emits inside it. That markup was designed for JupyterLab, where a cell sits in
+ * a wide editor pane, and it carries two things a 390 px screen cannot afford:
+ *
+ *   1. a 76 px prompt gutter, holding `In [1]:` -- a fifth of the screen, spent on a label
+ *      that tells a reader of a *page* nothing they need;
+ *   2. four levels of nested cell padding, which take another 40 px between the article
+ *      and the code.
+ *
+ * Together those leave a line of Python 237 px to live in, and since the input blocks are
+ * `overflow-x: visible` with `white-space: pre`, everything past that width is not merely
+ * cramped -- it is clipped, with no way to scroll to it. A notebook whose code cannot be
+ * read is not documentation.
+ *
+ * Everything here is inside a `max-width` query, so the desktop rendering -- which is
+ * fine, and which is what the prompts were designed for -- is untouched.
+ */
+
+/* ------------------------------------------------------------------------------------ *
+ * Every width, every screen: content wider than its column must scroll inside itself
+ * rather than be cut off. This is the rule that was missing, not a mobile special case.
+ * ------------------------------------------------------------------------------------ */
+
+.jupyter-wrapper .highlight pre,
+.jupyter-wrapper .jp-InputArea-editor pre,
+.jupyter-wrapper .jp-RenderedText pre {
+  overflow-x: auto;
+}
+
+/* A figure is a picture: it scales. matplotlib writes an intrinsic width in points, and
+   without this the SVG keeps it and overflows on anything narrow. */
+.jupyter-wrapper .jp-OutputArea img,
+.jupyter-wrapper .jp-OutputArea svg,
+.jupyter-wrapper .jp-RenderedImage img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Tables in notebook output get the same treatment the theme gives markdown tables. */
+.jupyter-wrapper .jp-OutputArea table,
+.jupyter-wrapper .jp-RenderedHTMLCommon table {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Sliders declare a fixed pixel width and will hang off the right edge below it. */
+.jupyter-wrapper .jupyter-widgets,
+.jupyter-wrapper .widget-slider,
+.jupyter-wrapper .widget-hslider,
+.jupyter-wrapper .widget-hbox,
+.jupyter-wrapper .widget-vbox {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* ------------------------------------------------------------------------------------ *
+ * Phones and small tablets
+ * ------------------------------------------------------------------------------------ */
+
+@media screen and (max-width: 76.1875em) {
+  /* The prompt gutter. `In [1]:` is a JupyterLab affordance; on a page it is 76 px of
+     nothing. Hidden rather than narrowed, because a narrower one is still a column. */
+  .jupyter-wrapper .jp-InputPrompt,
+  .jupyter-wrapper .jp-OutputPrompt {
+    display: none !important;
+  }
+
+  /* With the gutter gone the flex rows should simply fill the width. */
+  .jupyter-wrapper .jp-InputArea,
+  .jupyter-wrapper .jp-OutputArea-child {
+    flex-direction: column;
+  }
+
+  .jupyter-wrapper .jp-InputArea-editor,
+  .jupyter-wrapper .jp-OutputArea-output {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* Reclaim the nested padding: four wrappers each inset the one inside it, which is
+     invisible on a desktop and a tenth of the screen here. */
+  .jupyter-wrapper .jp-Notebook,
+  .jupyter-wrapper .jp-Cell,
+  .jupyter-wrapper .jp-Cell-inputWrapper,
+  .jupyter-wrapper .jp-Cell-outputWrapper,
+  .jupyter-wrapper .jp-OutputArea-child {
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .jupyter-wrapper .jp-Cell {
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+  }
+
+  /* Code at 12 px fits about 40 characters across a phone. Below that it stops being
+     readable in exchange for fitting lines that will still need scrolling anyway. */
+  .jupyter-wrapper .jp-InputArea-editor pre,
+  .jupyter-wrapper .highlight pre,
+  .jupyter-wrapper .jp-RenderedText pre {
+    font-size: 0.72rem;
+    line-height: 1.45;
+  }
+
+  /* Printed output -- parameter tables, the `.mo` source, the per-batch numbers -- is
+     column-aligned text whose meaning IS the alignment. nbconvert ships it as `pre-wrap`,
+     which on a narrow screen folds a 58-character row of a table into two and destroys the
+     columns; the reader sees numbers under the wrong headings, which is worse than seeing
+     none. So it must not wrap: it scrolls instead, which the rule above now allows.
+     `!important` because the theme's own rule is more specific than any selector that does
+     not use it.
+
+     The cost is real and worth stating: prose printed by a cell has to be swiped too.
+     That is the right way round -- a sentence read by swiping is inconvenient, a table
+     read with its columns shuffled is wrong. */
+  .jupyter-wrapper .jp-RenderedText pre,
+  .jupyter-wrapper .jp-OutputArea-output pre {
+    white-space: pre !important;
+  }
+
+  /* A figure drawn 8.4 in wide has axis labels sized for 8.4 in. Letting it use the full
+     column is the difference between legible and not. */
+  .jupyter-wrapper .jp-OutputArea img,
+  .jupyter-wrapper .jp-OutputArea svg {
+    width: 100%;
+  }
+}
