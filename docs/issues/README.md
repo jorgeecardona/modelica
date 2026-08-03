@@ -32,6 +32,7 @@ create it.
 ---
 title: One line — the finding, not the fix
 status: open          # open | in-progress (name an owner) | blocked | done (needs fixed_in)
+kind: story           # bug | story | idea | spike — see below
 scope: M              # XS | S | M | L | ?
 owner: null           # a handle, or null when unowned
 filed: 2026-08-03     # when it was filed; it never changes
@@ -41,6 +42,19 @@ blocked_by: null      # slug(s) of issues that must close first
 fixed_in: null        # the sha on the mainline; required once status is done
 ---
 ```
+
+**`kind` is what claim the issue makes,** and the four close differently.
+
+| | The claim | What closes it |
+| --- | --- | --- |
+| `bug` | the code is wrong today | the behaviour changed, and a test holds it |
+| `story` | a named capability is missing | the capability is there and is exercised |
+| `idea` | this direction is worth taking | it became a story, or it was refused *in writing* |
+| `spike` | a question is unanswered | the answer, yes **or** no. A spike that returns "no" has succeeded |
+
+An `idea` that cannot say what would turn it into a story is not an idea; it is a wish, and it
+belongs in `docs/ideas/` where the argument has room. A `spike` states its question as a
+question, and names the measurement that answers it.
 
 **`blocked_by` is what makes the board honest.** `status: blocked` names a *person* who can unblock
 something; `blocked_by` names the *work* it waits on. Only the second can be computed, which is why
@@ -64,5 +78,36 @@ cabildo issues show <slug>
 ## Open now
 
 <!-- BEGIN GENERATED INDEX — `cabildo issues reindex` -->
-_No open follow-ups._
+| Issue | Area | Kind | Scope | Verify | Status | Waiting on |
+|---|---|---|---|---|---|---|
+| [The EKF results live in a log and a deleted scratch file, not in the documentation](03-08-2026-an-estimation-notebook.md) | docs | story | M | inspect | open | no-output-jacobian |
+| [The Association has not been told this exists, and the trademark note assumes they will be](03-08-2026-tell-the-modelica-association.md) | docs | idea | XS | inspect | open | — |
+| [FMI 3.0 export — a System as an FMU, and the two routes disagree in the docs](03-08-2026-fmi-export.md) | fmi | story | L | test | open | — |
+| [FMI 3.0 import — the mode table exists, the FMU reader does not](03-08-2026-fmi-import.md) | fmi | story | L | test | open | — |
+| [The IR nodes were made hashable for CSE, and no stage does CSE](03-08-2026-common-subexpression-elimination.md) | ir | story | M | test | open | — |
+| [IR nodes carry no source span, so no error below the parser can point at the equation](03-08-2026-ir-nodes-carry-no-source-span.md) | ir | bug | M | test | open | — |
+| [Library twins are compared as normalised text, because a library has no flat model](03-08-2026-library-twins-are-only-compared-as-text.md) | ir | story | M | test | open | — |
+| [Tearing is priced in by three documents and implemented by none](03-08-2026-tearing-is-priced-in-by-three-documents-and-implemented-by-none.md) | ir | story | L | test | open | — |
+| [No corpus model reduces the index across a rotational constraint](03-08-2026-two-inertias-rigidly-connected.md) | ir | story | M | test | open | — |
+| [`algorithm` sections are refused, and with them `while`, `break` and `return`](03-08-2026-algorithm-sections-are-refused.md) | lang | story | L | test | open | — |
+| [Arrays and `for` equations are refused, and the distributed-model workaround needs them](03-08-2026-arrays-and-for-equations-are-refused.md) | lang | story | L | test | open | — |
+| [`replaceable` and `redeclare` are refused, and the standard library is built on them](03-08-2026-replaceable-and-redeclare-are-refused.md) | lang | story | L | test | open | — |
+| [`import`, `enumeration` and `inner`/`outer` — the three small refusals](03-08-2026-the-three-small-refusals.md) | lang | story | M | test | open | — |
+| [A C emitter — the second backend, and the one FMU export needs](03-08-2026-a-c-emitter.md) | sim | story | L | test | open | — |
+| [Detecting charge and drop from the bean probe — the models are fine, the decision layer is wrong](03-08-2026-detecting-charge-and-drop-from-the-bean-probe.md) | sim | idea | L | probe | open | no-output-jacobian |
+| [Differential debugging is the argument for two tiers, and there is no tool that does it](03-08-2026-differential-debugging-has-no-tool.md) | sim | story | M | test | open | ir-nodes-carry-no-source-span |
+| [RoastingMachine's moisture is assumed, and Cropster has it measured per lot](03-08-2026-green-moisture-as-a-measurement.md) | sim | idea | S | probe | open | — |
+| [There is no output Jacobian, so every estimator finite-differences H by hand](03-08-2026-no-output-jacobian.md) | sim | story | S | test | open | — |
+| [Numba's recursive CFG walk runs out of frames on RoastingMachine, at about 975 of 1000](03-08-2026-numba-cfg-walk-runs-out-of-frames.md) | sim | bug | XS | probe | open | — |
+| [A phase-change kinetics example — the reachable half of the welding animation](03-08-2026-phase-change-kinetics-example.md) | sim | idea | M | test | open | — |
+| [`spatialDistribution()` — the one PDE the Association standardized, and we do not have it](03-08-2026-spatialdistribution.md) | sim | story | M | test | open | — |
+| [Spike: can an emitted SPIR-V kernel run an ensemble on compute-ml at all?](03-08-2026-spike-a-spirv-emitter-against-compute-ml.md) | sim | spike | L | probe | open | the-ensemble-driver |
+| [The ensemble driver — one compiled model over a matrix of parameters](03-08-2026-the-ensemble-driver.md) | sim | story | M | test | open | — |
+| [The JIT compiles the kernel, not the step — the integrator loop is still Python](03-08-2026-the-jit-compiles-the-kernel-not-the-step.md) | sim | story | L | probe | open | work-precision-harness |
+| [No work-precision harness, so every speed claim in the docs is unmeasured](03-08-2026-work-precision-harness.md) | sim | story | L | probe | open | — |
+| [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
+| [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
+| [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
+
+_28 open — 28 open. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

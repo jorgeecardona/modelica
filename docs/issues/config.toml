@@ -5,10 +5,18 @@
 
 date_style = "DMY"          # 03-08-2026-short-kebab-summary.md
 index = true                # the generated table in README.md
-index_fields = ["scope", "verify"]
+index_fields = ["kind", "scope", "verify"]
 
 # The one vocabulary that cannot be guessed from outside this repo.
 areas = ["lang", "ir", "sim", "fmi", "ssp", "diagram", "verify", "ci", "docs"]
+
+# What kind of claim the issue makes, because they close differently. A bug says the code is
+# wrong today; a story says a named capability is missing; an idea says a direction is worth
+# taking and is not yet scoped enough to be a story; a spike buys information and closes when
+# the question is answered, whether the answer is yes or no.
+[fields.kind]
+required = true
+values = ["bug", "story", "idea", "spike"]
 
 [fields.scope]
 required = true
