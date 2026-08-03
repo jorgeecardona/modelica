@@ -78,7 +78,7 @@ class _Transition(Protocol):
 
 @dataclass(frozen=True)
 class Kernel:
-    """The compiled model: eight functions and the shapes of the arrays they expect."""
+    """The compiled model: nine functions and the shapes of the arrays they expect."""
 
     code: Code
     parameters: _Prepare
@@ -87,6 +87,7 @@ class Kernel:
     rhs: _Evaluate
     jacobian: _Evaluate
     observe: _Evaluate
+    observe_jacobian: _Evaluate
     indicators: _Evaluate
     transition: _Transition
 
@@ -133,6 +134,7 @@ def build(model: System | Code, *, jit: bool = False) -> Kernel:
         rhs=namespace["rhs"],
         jacobian=namespace["jacobian"],
         observe=namespace["observe"],
+        observe_jacobian=namespace["observe_jacobian"],
         indicators=namespace["indicators"],
         transition=namespace["transition"],
     )

@@ -344,6 +344,29 @@ def test_the_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
     as a state that is on it. Asking at ``1e-6`` rather than the ``1e-10`` some specs demand
     costs this check nothing and saves the corpus's stiffest models a great deal.
     """
+    _agrees_with_a_difference_quotient(model, "rhs", "jacobian")
+
+
+@pytest.mark.parametrize("model", MODEL_FILES, ids=_ids(MODEL_FILES))
+def test_the_output_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
+    """``observe_jacobian`` against a difference quotient of ``observe`` -- the claim for H.
+
+    Everything the test above says applies here unchanged; only the pair of functions moves.
+    It is worth having separately rather than folding into that one, because the two reach
+    different code. ``jacobian`` stops at the state derivatives, so a variable that no state
+    derivative depends on is never differentiated at all. ``observe_jacobian`` reads off
+    *every* variable of the model, aliases included -- and the aliases are differentiated
+    nowhere else, because causalization eliminated them before the solver ever saw them.
+
+    An alias is also exactly what a model is usually measured through: a probe temperature,
+    a branch current, a lag. So the row that an estimator actually needs is the row this
+    test is the only one to check.
+    """
+    _agrees_with_a_difference_quotient(model, "observe", "observe_jacobian")
+
+
+def _agrees_with_a_difference_quotient(model: Path, value: str, derivative: str) -> None:
+    """One emitted derivative against a crude one, at points a real run visits."""
     spec = _spec(model).get("simulate")
     if spec is None:
         pytest.skip("no simulate section")
@@ -365,24 +388,30 @@ def test_the_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
     trajectory = np.stack([result[name] for name in system.states])
 
     p, _, w = kernel.start()
+    rows = kernel.observed if value == "observe" else kernel.states
     checked, t = 0, 0.0
 
-    def rhs(state: Any) -> Any:
-        return kernel.rhs(t, state, p, w, np.empty(len(state))).copy()
+    def evaluate(state: Any) -> Any:
+        # A copy of the workspace per call, because ``observe`` writes its answers back into
+        # it: shared, each perturbation would be asked from the previous one's leftovers and
+        # the quotient would be of two different functions.
+        return getattr(kernel, value)(t, state, p, w.copy(), np.empty(rows)).copy()
 
     for index in np.unique(np.linspace(0, len(result) - 1, 12).astype(int)):
         t = float(result.time[index])
         y = np.ascontiguousarray(trajectory[:, index])
         kernel.latch(t, y, p, w)
-        exact = kernel.jacobian(t, y, p, w, np.zeros((len(y), len(y)))).copy()
-        crude, doubt = _difference(rhs, y, np)
+        emitted = getattr(kernel, derivative)
+        exact = emitted(t, y, p, w.copy(), np.zeros((rows, len(y)))).copy()
+        crude, doubt = _difference(evaluate, y, np)
         if not np.all(np.isfinite(crude)) or not np.all(np.isfinite(exact)):
             continue
         checked += 1
         scale = max(1.0, float(np.max(np.abs(crude))))
         slack = 1e-6 * scale + 4.0 * doubt
         assert np.all(np.abs(exact - crude) <= 1e-4 * np.abs(crude) + slack), (
-            f"t = {t:.6g}\nemitted:\n{exact}\ndifferenced:\n{crude}\nits own doubt:\n{doubt}"
+            f"{model.stem} {derivative} at t = {t:.6g}\n"
+            f"emitted:\n{exact}\ndifferenced:\n{crude}\nits own doubt:\n{doubt}"
         )
     assert checked, "every sample was skipped -- the check never ran"
 

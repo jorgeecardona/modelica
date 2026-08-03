@@ -135,6 +135,9 @@ def test_the_compiled_kernel_answers_what_the_interpreted_one_answers(stem: str)
         "rhs": lambda k, w: k.rhs(0.0, y, p, w, np.empty(states)),
         "jacobian": lambda k, w: k.jacobian(0.0, y, p, w, np.zeros((states, states))),
         "observe": lambda k, w: k.observe(0.0, y, p, w, np.empty(observed)),
+        "observe_jacobian": lambda k, w: k.observe_jacobian(
+            0.0, y, p, w, np.zeros((observed, states))
+        ),
         "indicators": lambda k, w: k.indicators(0.0, y, p, w, np.empty(events)),
     }
     for name, call in calls.items():

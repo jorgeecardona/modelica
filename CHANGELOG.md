@@ -6,6 +6,15 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `modelica.sim.emit`: **`observe_jacobian`** — `d(observed)/dy`, exact, by the same forward
+  mode that writes `jacobian`. This is what a state estimator calls `H`, and until now every
+  caller had to finite-difference it: one extra `observe` per state, and truncation error
+  injected straight into the Kalman gain. It reaches code `jacobian` does not — the aliases,
+  which causalization eliminates before the solver sees them and which are exactly what a
+  model is usually measured *through* (a probe temperature, a branch current, a lag). Named
+  `observe_jacobian` rather than `sensitivity` deliberately: *sensitivity* means the
+  derivative with respect to a **parameter** in this field, that is the same transformation
+  with a different seed, and it will want the name.
 - `modelica.ir.derive`: **a conditional whose two answers are the same is folded away**, and
   that one line is what makes a *schedule* compilable. A chain of constant segments has
   derivative zero on every segment, so differentiating it produced

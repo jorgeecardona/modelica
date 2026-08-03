@@ -1,8 +1,8 @@
 ---
 title: There is no output Jacobian, so every estimator finite-differences H by hand
-status: open
+status: in-progress
 area: sim
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-03
 kind: story
 scope: S
@@ -45,6 +45,25 @@ caller of an existing pass has to be written.
   corpus model, at the tolerance `tests/test_examples.py:384` already uses for the exact-versus
   -differenced comparison of `jacobian`.
 - `tests/test_jit.py` covers it for the compiled path.
+
+## What landed, and the two things worth knowing
+
+The forward-mode walk in `emit.differentiate` was split into `emit.tangent`, which propagates
+tangents through the blocks and returns what it reached; `jacobian` reads it off at the state
+derivatives and `observe_jacobian` reads it off at the variables. One transformation, two
+readings, so there is no second implementation to keep in step. 28 difference-quotient checks
+pass across the corpus (14 models x 2 derivatives), and `moon run :test-jit` compares it
+compiled against interpreted on five models.
+
+1. **The aliases had to be differentiated here.** `jacobian` never touches them — causalization
+   eliminates an alias before the solver sees it — but `observe` writes every one, and an alias
+   is exactly what a model is usually measured *through*. So `observe_jacobian` differentiates
+   `system.aliases` after the blocks, and `test_the_output_jacobian_agrees_with_a_difference_quotient`
+   is the only check in the suite that covers those rows at all.
+2. **Named `observe_jacobian`, not `sensitivity`.** *Sensitivity* has an owner in this field:
+   the derivative with respect to a **parameter**, which identification and uncertainty
+   propagation ask for. That is this same transformation with a different seed, it will want
+   the name, and spending it here would have cost more than the shorter word is worth.
 
 ## Deliberately not done
 

@@ -8,7 +8,7 @@ compiler will run as-is and Numba will compile to machine code without leaving n
 mode. The same emitter, pointed at a different set of templates, is what will produce C
 for FMU export.
 
-The generated module holds eight functions, all of them filling a caller-supplied array
+The generated module holds nine functions, all of them filling a caller-supplied array
 rather than returning a new one, so that the step loop allocates as little as it can:
 
 ``parameters(p)``
@@ -23,6 +23,8 @@ rather than returning a new one, so that the step loop allocates as little as it
     ``d(dy)/dy``, exactly -- the same blocks differentiated, not sampled.
 ``observe(t, y, p, w, out)``
     Every variable of the model, aliases included -- what a result is read from.
+``observe_jacobian(t, y, p, w, out)``
+    ``d(observed)/dy``, exactly -- what a state estimator calls ``H``.
 ``indicators(t, y, p, w, z)``
     One zero-crossing function per event, so the integrator can stop at it.
 ``transition(event, t, y, p, w, out)``
@@ -812,8 +814,8 @@ class _Emitter:
             lines.append(f"{row} = _D[{position}]")
         return lines
 
-    def differentiate(self, mode: Mode) -> list[str]:
-        """``d(dy)/dy`` by forward mode over the very blocks the right-hand side runs.
+    def tangent(self, mode: Mode) -> tuple[list[str], dict[str, str]]:
+        """Forward mode over the very blocks the right-hand side runs, and what it reached.
 
         One row vector per variable rather than one scalar per (variable, state) pair. The
         scalars are quicker for the two-state models in the corpus -- no array to allocate --
@@ -825,6 +827,11 @@ class _Emitter:
         so the only arrays this allocates are the tangents it actually computes. A state
         whose derivative is another state costs nothing at all: its row *is* a row of the
         identity, and it is handed straight to ``out``.
+
+        The mapping that comes back says which variables have a tangent at all. A name that
+        is missing from it is structurally independent of every state, which is a different
+        thing from having a tangent that happens to be zero, and the two callers below both
+        turn it into the shared zero row rather than into an allocation.
         """
         width = len(mode.states)
         lines = list(self.unpack(mode))
@@ -838,9 +845,45 @@ class _Emitter:
                 lines.extend(self.chain(block.unknowns[0], block.assignment, carried))
             else:
                 lines.extend(self.implicit(block, carried, width))
+        return lines, carried
+
+    def differentiate(self, mode: Mode) -> list[str]:
+        """``d(dy)/dy`` -- the Jacobian every implicit solver wants."""
+        lines, carried = self.tangent(mode)
         lines.extend(
             f"out[{slot}] = {carried.get(mode.derivative[state]) or '_null'}"
             for slot, state in enumerate(mode.states)
+        )
+        return [*lines, "return out"]
+
+    def differentiate_observed(self, mode: Mode) -> list[str]:
+        """``d(observed)/dy`` -- the same walk, read off at the variables instead.
+
+        An estimator needs this and cannot compute it: ``H`` is what maps a state to what a
+        sensor sees, and differencing ``observe`` costs one extra evaluation per state and
+        injects truncation error straight into the Kalman gain. It is the same forward mode
+        as :meth:`differentiate` and it stops one step earlier -- at the variables rather
+        than at their derivatives -- so there is no second transformation to keep in step.
+
+        Emitted as ``observe_jacobian`` and not as ``sensitivity``. The word *sensitivity*
+        has an owner in this field: it is the derivative with respect to a **parameter**,
+        which is what identification and uncertainty propagation ask for. That is the same
+        transformation again with a different seed, it will want the name, and taking it
+        here for a different derivative would cost more than the shorter word is worth.
+
+        The aliases are differentiated here and not in :meth:`differentiate`, because they
+        are exactly what a model is usually observed *through*: ``i``, ``v``, ``lag`` and the
+        rest are eliminated before the solver sees them, so a row for them exists nowhere
+        else. Their values are emitted beside their tangents, in the order
+        :meth:`observe` writes them, so an alias defined over an earlier one still reads.
+        """
+        lines, carried = self.tangent(mode)
+        for name, node in self.system.aliases.items():
+            lines.append(f"{self.symbols[name]} = {self.expr(node)}")
+            lines.extend(self.chain(name, node, carried))
+        lines.extend(
+            f"out[{slot}] = {carried.get(name) or '_null'}"
+            for slot, name in enumerate(self.observed)
         )
         return [*lines, "return out"]
 
@@ -1016,6 +1059,11 @@ class _Emitter:
             self.dispatch("rhs", "t, y, p, w, dy", [self.rhs(m) for m in modes]),
             self.dispatch("jacobian", "t, y, p, w, out", [self.differentiate(m) for m in modes]),
             self.dispatch("observe", "t, y, p, w, out", [self.observe(m) for m in modes]),
+            self.dispatch(
+                "observe_jacobian",
+                "t, y, p, w, out",
+                [self.differentiate_observed(m) for m in modes],
+            ),
             self.dispatch(
                 "indicators",
                 "t, y, p, w, z",
