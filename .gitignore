@@ -9,6 +9,10 @@ public/
 .pytest_cache/
 .coverage
 logs/
+# Claude Code's permission allowlist. It is per-machine by nature -- it accumulates
+# absolute paths from wherever the checkout happens to live -- so it belongs in the
+# `.local` file, which is the one meant to stay out of git.
+.claude/settings.local.json
 .cache/
 # What `examples/animate.py` writes. The scenes are in the specs and the renderer is in
 # the tree, so the videos are reproducible in a command -- committing tens of megabytes of
