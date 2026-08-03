@@ -317,6 +317,17 @@ def _rank(work: _Work, name: str) -> tuple[int, int, int]:
 
 def _permits(work: _Work, victim: str, other: str, ratio: float, shift: ir.Expr) -> bool:
     """Whether ``victim`` may be replaced by ``ratio * other + shift``."""
+    # Nothing may be defined in terms of its own derivative, or a derivative in terms of the
+    # thing it differentiates. `der(x) = -x` is an affine relation between two unknowns like
+    # any other, and read as one it invites `x := -der_x` -- which does not eliminate a
+    # variable, it deletes the equation of motion and leaves `x` to be found from a
+    # derivative that is now defined by nothing. Index reduction then differentiates in
+    # search of the missing equation and reports the model as structurally singular, which
+    # is a true statement about what alias elimination left behind and a false one about the
+    # model. The `fixed` guard below used to hide this: the corpus writes `fixed = true` on
+    # every state, and that alone was refusing the substitution for an unrelated reason.
+    if work.derivative.get(victim) == other or work.integral.get(victim) == other:
+        return False
     if work.variables[victim].fixed:
         return False
     if victim in work.integral:
