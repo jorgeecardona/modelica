@@ -1,9 +1,10 @@
 ---
 title: No corpus model reduces the index across a rotational constraint
-status: in-progress
+status: done
 area: ir
 owner: quiet-tars-187f2
 filed: 2026-08-03
+fixed_in: 7d2db72
 kind: story
 scope: M
 verify: test
