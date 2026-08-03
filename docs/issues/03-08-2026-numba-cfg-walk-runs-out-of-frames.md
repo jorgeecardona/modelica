@@ -1,9 +1,10 @@
 ---
-title: Numba's recursive CFG walk runs out of frames on RoastingMachine, at about 975 of 1000
-status: open
+title: "RoastingMachine did not compile: a derivative chain of zeros, not the recursion limit"
+status: done
 area: sim
 owner: quiet-tars-187f2
 filed: 2026-08-03
+fixed_in: 71dfaaf
 kind: bug
 scope: XS
 verify: probe

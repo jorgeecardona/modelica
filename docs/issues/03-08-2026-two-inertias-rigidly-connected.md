@@ -1,8 +1,8 @@
 ---
 title: No corpus model reduces the index across a rotational constraint
-status: open
+status: in-progress
 area: ir
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-03
 kind: story
 scope: M
@@ -48,7 +48,38 @@ test.
 - If the symmetric tie above turns out to be real, the tie-breaking rule is written down in
   `modelica.ir.causalize` where the choice is made, not left to dictionary order.
 
+## What landed, and the tie was real
+
+`examples/models/TwoInertias.{mo,py,toml}`. Causalization answers:
+
+    index:      3
+    states:     ('big.phi', 'big.w')
+    candidates: (('big.phi', 'big.w'), ('small.phi', 'small.w'))
+
+The inference above was that a symmetric model would produce two candidate sets with no
+reason to prefer either, and that the selection code had never been asked what it does then.
+That is what happened, and the answer is that **nothing weighs them**: `_states` takes
+whatever the matching left free, which follows `work.order`, which is declaration order. So
+`big` wins by being written first. Deterministic, and not a judgement.
+
+That rule is now written into `_states`' docstring, where the choice is made, instead of
+being available only to somebody who reads the matching. And `candidates` is a new key in
+the spec format — ordered, chosen set first — so it pins both which sets are admissible and
+which one was taken. `test_selects_the_specified_states` asserts it, and
+`test_flatten_section_is_well_formed` checks that a spec giving both `candidates` and
+`states` does not contradict itself.
+
+The numbers are a closed form rather than another integration: one rigid body of J = 2.5
+against a viscous brake gives `w(t) = 10 exp(-t/10)`, and `2.5 w + 0.25 phi` is conserved
+exactly (`d/dt (J w + d phi) = -d w + d w = 0`), so it is asserted flat at 25 over the whole
+run. The constraint and both of its derivatives are asserted separately, and the second one
+exists nowhere in the model text because Pantelides wrote it.
+
 ## Deliberately not done
+
+The tie-break was **documented, not changed**. Writing a rule that prefers the larger inertia,
+or the alphabetically first name, would be inventing a preference the model does not express,
+and it would move `Pendulum` too. What was missing was not a better rule but a written one.
 
 `DCMotor` stays index 1. It is the two-domain example and the first whose component holds
 components; making it high-index as well would give one model two jobs and make a failure

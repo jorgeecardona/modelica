@@ -1,9 +1,10 @@
 ---
 title: There is no output Jacobian, so every estimator finite-differences H by hand
-status: in-progress
+status: done
 area: sim
 owner: quiet-tars-187f2
 filed: 2026-08-03
+fixed_in: 4686cd1
 kind: story
 scope: S
 verify: test
