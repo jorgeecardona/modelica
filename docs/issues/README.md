@@ -91,7 +91,6 @@ cabildo issues show <slug>
 | [Library twins are compared as normalised text, because a library has no flat model](03-08-2026-library-twins-are-only-compared-as-text.md) | ir | story | M | test | open | — |
 | [Tearing is priced in by three documents and implemented by none](03-08-2026-tearing-is-priced-in-by-three-documents-and-implemented-by-none.md) | ir | story | L | test | open | — |
 | [`algorithm` sections are refused, and with them `while`, `break` and `return`](03-08-2026-algorithm-sections-are-refused.md) | lang | story | L | test | open | — |
-| [Arrays and `for` equations are refused, and the distributed-model workaround needs them](03-08-2026-arrays-and-for-equations-are-refused.md) | lang | story | L | test | in-progress · @quiet-tars-187f2 | — |
 | [`replaceable` and `redeclare` are refused, and the standard library is built on them](03-08-2026-replaceable-and-redeclare-are-refused.md) | lang | story | L | test | open | — |
 | [`import`, `enumeration` and `inner`/`outer` — the three small refusals](03-08-2026-the-three-small-refusals.md) | lang | story | M | test | open | — |
 | [A C emitter — the second backend, and the one FMU export needs](03-08-2026-a-c-emitter.md) | sim | story | L | test | open | — |
@@ -100,7 +99,7 @@ cabildo issues show <slug>
 | [Differential debugging is the argument for two tiers, and there is no tool that does it](03-08-2026-differential-debugging-has-no-tool.md) | sim | story | M | test | open | ir-nodes-carry-no-source-span |
 | [RoastingMachine's moisture is assumed, and Cropster has it measured per lot](03-08-2026-green-moisture-as-a-measurement.md) | sim | idea | S | probe | open | — |
 | [JAX gives the ensemble what Vulkan was being asked for, in double precision, today](03-08-2026-jax-is-the-ensemble-vehicle.md) | sim | idea | M | probe | open | the-ensemble-driver |
-| [The method-of-lines path is the one GPU coupling with a working precedent](03-08-2026-method-of-lines-on-the-device.md) | sim | idea | L | probe | open | arrays-and-for-equations-are-refused |
+| [The method-of-lines path is the one GPU coupling with a working precedent](03-08-2026-method-of-lines-on-the-device.md) | sim | idea | L | probe | open | — |
 | [Parameters are always an argument, and burning them in as literals is the other half](03-08-2026-parameters-as-constants-or-as-arguments.md) | sim | story | S | probe | open | — |
 | [A phase-change kinetics example — the reachable half of the welding animation](03-08-2026-phase-change-kinetics-example.md) | sim | idea | M | test | open | — |
 | [`spatialDistribution()` — the one PDE the Association standardized, and we do not have it](03-08-2026-spatialdistribution.md) | sim | story | M | test | open | — |
@@ -117,5 +116,5 @@ cabildo issues show <slug>
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_36 open — 35 open, 1 in-progress; 3 done. Generated; edit the files, then `cabildo issues reindex`._
+_35 open — 35 open; 4 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

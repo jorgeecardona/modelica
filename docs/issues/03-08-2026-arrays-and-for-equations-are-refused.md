@@ -1,9 +1,10 @@
 ---
 title: Arrays and `for` equations are refused, and the distributed-model workaround needs them
-status: in-progress
+status: done
 area: lang
 owner: quiet-tars-187f2
 filed: 2026-08-03
+fixed_in: 92e77e4
 kind: story
 scope: L
 verify: test
