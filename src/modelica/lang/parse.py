@@ -460,11 +460,23 @@ class _Parser:
     def _connect(self) -> ir.Connect:
         self._expect(Kind.KEYWORD, "connect")
         self._expect(Kind.OP, "(")
-        a = self._reference()
+        a = self._endpoint()
         self._expect(Kind.OP, ",")
-        b = self._reference()
+        b = self._endpoint()
         self._expect(Kind.OP, ")")
         return ir.Connect(a, b, self._terminate())
+
+    def _endpoint(self) -> ir.Ref:
+        """One side of a ``connect``, which is a component and not an expression.
+
+        A subscripted endpoint -- ``connect(p[k], q)`` -- is an array of connectors, and it
+        is refused here by name. Without this the bracket meets a parser expecting a comma
+        and the model is blamed for a syntax error it does not have.
+        """
+        reference = self._reference()
+        if self._check(Kind.OP, "["):
+            raise self._error("arrays of connectors are not supported yet")
+        return reference
 
     def _when(self) -> ir.When:
         opening = self.token

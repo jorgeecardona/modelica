@@ -30,13 +30,26 @@ not build. They resolve names and merge classes. They produce no equations.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from itertools import pairwise
-from typing import Literal
+from itertools import pairwise, product
+from typing import TYPE_CHECKING, Literal
 
 from modelica.ir import nodes as ir
+from modelica.ir.evaluate import EvaluationError, evaluate
 from modelica.ir.flat import BaseType, FlatModel, FlatVariable
 
-__all__ = ["Effective", "FlattenError", "Found", "Member", "Scope", "effective", "flatten"]
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+__all__ = [
+    "Effective",
+    "FlattenError",
+    "Found",
+    "Member",
+    "Scope",
+    "effective",
+    "element",
+    "flatten",
+]
 
 _PREDEFINED: frozenset[BaseType] = frozenset(("Real", "Integer", "Boolean", "String"))
 
@@ -247,11 +260,43 @@ def _fold(node: ir.Expr | None) -> ir.Expr | None:
             return node
 
 
-def _prefix_expr(
-    node: ir.Expr, prefix: _Path, local: frozenset[str], *, strict: bool = True
+def element(name: str, indices: Sequence[int]) -> str:
+    """The scalar name of one element: ``T`` and ``(3,)`` give ``T[3]``.
+
+    Public because three places have to agree on it -- the declaration that creates the
+    variable, the subscript that reads it, and anything later that wants to recognise an
+    element by its name. A second spelling of this would be a bug nobody could see.
+    """
+    return f"{name}[{', '.join(str(i) for i in indices)}]"
+
+
+def _integer(node: ir.Expr, values: Mapping[str, float], what: str) -> int:
+    """Evaluate ``node`` to a positive integer, or say why it is not one.
+
+    A shape and a subscript are both structural: they decide how many equations exist, so
+    they have to be known here and not at run time. That is what makes a parameter used as
+    a dimension a *structural* parameter, and the error message says so rather than leaving
+    the reader to work out why a parameter was not allowed.
+    """
+    try:
+        value = evaluate(node, values)
+    except EvaluationError as failure:
+        raise FlattenError(f"{what} must be known when the model is flattened: {failure}") from None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value):
+        raise FlattenError(f"{what} must be a whole number, and this one is {value!r}")
+    return int(value)
+
+
+def _prefix_expr(  # noqa: PLR0911 -- one case per node type
+    node: ir.Expr,
+    prefix: _Path,
+    local: frozenset[str],
+    *,
+    strict: bool = True,
+    values: Mapping[str, float] | None = None,
 ) -> ir.Expr:
     def go(inner: ir.Expr) -> ir.Expr:
-        return _prefix_expr(inner, prefix, local, strict=strict)
+        return _prefix_expr(inner, prefix, local, strict=strict, values=values)
 
     match node:
         case ir.Ref():
@@ -264,15 +309,93 @@ def _prefix_expr(
             return ir.Call(name, tuple(go(a) for a in args))
         case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
             return ir.IfExpr(go(condition), go(then), go(otherwise))
-        case ir.Subscript():
-            # Named rather than passed through by the fallback below. A subscript that
-            # reaches here unexpanded would keep its *unprefixed* base and then resolve
-            # against nothing, which is the quiet kind of wrong.
-            raise FlattenError("subscripted references are not expanded yet")
+        case ir.Subscript(base=base, indices=indices):
+            # The base is prefixed the ordinary way and then *renamed*: `T[3]` becomes the
+            # scalar variable the declaration created. Everything below this module sees a
+            # name, never an index -- which is the whole point of scalarising here.
+            if values is None:
+                raise FlattenError("subscripted references are not expanded here")
+            path = _prefix_ref(base, prefix, local, strict=strict).parts
+            resolved = [_integer(go(i), values, f"the subscript of {base.name!r}") for i in indices]
+            return ir.Ref((*path[:-1], element(path[-1], resolved)))
         case ir.Range():
             raise FlattenError("a range is read only in the header of a 'for' equation")
         case _:
             return node
+
+
+def _substitute(  # noqa: PLR0911 -- one case per node type
+    node: ir.Expr, values: Mapping[str, ir.Expr]
+) -> ir.Expr:
+    """Replace whole single-part references by name. Used to put a loop index into a body."""
+
+    def go(inner: ir.Expr) -> ir.Expr:
+        return _substitute(inner, values)
+
+    match node:
+        case ir.Ref(parts=(name,)) if name in values:
+            return values[name]
+        case ir.Subscript(base=base, indices=indices):
+            return ir.Subscript(base, tuple(go(i) for i in indices))
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, go(lhs), go(rhs))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, go(operand))
+        case ir.Call(name=name, args=args, named=named):
+            return ir.Call(name, tuple(go(a) for a in args), tuple((k, go(v)) for k, v in named))
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(go(condition), go(then), go(otherwise))
+        case ir.Array(elements=elements):
+            return ir.Array(tuple(go(e) for e in elements))
+        case ir.Range(start=start, stop=stop, step=step):
+            return ir.Range(go(start), go(stop), None if step is None else go(step))
+        case _:
+            return node
+
+
+def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir.Equation:
+    """The same substitution, over an equation and anything nested inside it."""
+
+    def go(inner: ir.Expr) -> ir.Expr:
+        return _substitute(inner, values)
+
+    match node:
+        case ir.Equal(lhs=lhs, rhs=rhs):
+            return ir.Equal(go(lhs), go(rhs))
+        case ir.Connect():
+            # A connection names components, and a loop index cannot be one of them: an
+            # array of connectors is indexed, which is a `Subscript` and not a bare `Ref`.
+            raise FlattenError("connect() inside a 'for' equation is not supported yet")
+        case ir.When(branches=branches):
+            return ir.When(
+                tuple(
+                    ir.WhenBranch(
+                        go(branch.condition),
+                        tuple(type(s)(s.target, go(s.value)) for s in branch.body),
+                    )
+                    for branch in branches
+                )
+            )
+        case ir.IfEquation(branches=branches, otherwise=otherwise):
+            return ir.IfEquation(
+                tuple(
+                    ir.IfBranch(
+                        go(branch.condition),
+                        tuple(_substitute_equation(e, values) for e in branch.body),
+                    )
+                    for branch in branches
+                ),
+                tuple(_substitute_equation(e, values) for e in otherwise),
+            )
+        case ir.ForEquation(index=index, over=over, body=body):
+            # A nested loop shadows the outer index if it reuses the name, which is what
+            # dropping the key here says.
+            inner_values = {k: v for k, v in values.items() if k != index}
+            return ir.ForEquation(
+                index,
+                go(over),
+                tuple(_substitute_equation(e, inner_values) for e in body),
+            )
 
 
 def _prefix_modification(
@@ -388,6 +511,13 @@ class _Flattener:
     initial_equations: list[ir.Equal] = field(default_factory=list[ir.Equal])
     connections: _Connections = field(default_factory=_Connections)
     connectors: dict[_Path, Found] = field(default_factory=dict[_Path, "Found"])
+    values: dict[str, float] = field(default_factory=dict[str, float])
+    """What every parameter and constant declared so far is worth, by flat name.
+
+    Filled as the declarations go past, and read by the two things that have to be numbers
+    before the model exists: an array's shape and a subscript. Nothing else uses it -- the
+    solver reads bindings from the variables themselves.
+    """
 
     # -- components -------------------------------------------------------------------
 
@@ -410,14 +540,7 @@ class _Flattener:
         for equation in merged.equations:
             self._equation(equation, prefix, local)
         for equation in merged.initial_equations:
-            if not isinstance(equation, ir.Equal):
-                raise FlattenError("only `a = b` equations may appear in initial equation")
-            self.initial_equations.append(
-                ir.Equal(
-                    _prefix_expr(equation.lhs, prefix, local),
-                    _prefix_expr(equation.rhs, prefix, local),
-                )
-            )
+            self._equation(equation, prefix, local, initial=True)
 
     def _component(
         self,
@@ -429,13 +552,8 @@ class _Flattener:
     ) -> None:
         component = member.component
         if component.dimensions:
-            # The parser reads a declared shape; expanding it into one scalar per element is
-            # the other half of the same issue. Refused by name, because the alternative is
-            # declaring `Real T[n]` as a single scalar `T` and simulating something the
-            # modeller did not write.
-            raise FlattenError(
-                f"{'.'.join(path)!r} is declared as an array, and arrays are not expanded yet"
-            )
+            self._array(member, path, outer, floor, local)
+            return
         # `outer` arrived from the enclosing class and was prefixed there. These two were
         # written *here*, so they are prefixed here, against the path of the class that
         # holds them -- everything in `path` except this component's own name.
@@ -452,6 +570,48 @@ class _Flattener:
             return
         base, attributes = _base_of(resolved, member.scope)
         self._leaf(component, path, _merge(attributes, total), base, variability)
+
+    def _array(
+        self,
+        member: Member,
+        path: _Path,
+        outer: ir.Modification,
+        floor: ir.Variability,
+        local: frozenset[str],
+    ) -> None:
+        """``Real T[n]`` becomes ``T[1] ... T[n]``, and nothing below sees a shape.
+
+        The elements are ordinary components, so this declares each one by handing it back
+        to :meth:`_component` with the shape removed and the element's own name. That keeps
+        every rule about modifications, attributes and nested classes in one place: an array
+        of connectors instantiates the same way an array of ``Real`` does, because neither
+        knows it is in an array.
+
+        The shape is evaluated *here*, against the parameters declared before this one. That
+        is what makes a parameter used as a dimension structural -- the number of equations
+        depends on it, so it cannot move once the model is built.
+        """
+        component = member.component
+        here = path[:-1]
+        sizes = [
+            _integer(
+                _prefix_expr(dimension, here, local, values=self.values),
+                self.values,
+                f"the shape of {'.'.join(path)!r}",
+            )
+            for dimension in component.dimensions
+        ]
+        if any(size < 0 for size in sizes):
+            raise FlattenError(f"{'.'.join(path)!r} has a negative dimension: {sizes}")
+        scalar = replace(component, dimensions=())
+        for indices in product(*(range(1, size + 1) for size in sizes)):
+            self._component(
+                replace(member, component=scalar),
+                (*here, element(component.name, indices)),
+                outer,
+                floor,
+                local,
+            )
 
     def _leaf(
         self,
@@ -493,18 +653,29 @@ class _Flattener:
             comment=component.comment,
         )
         self.variables.append(variable)
+        if variability in ("parameter", "constant") and isinstance(
+            binding, (ir.IntLiteral, ir.RealLiteral)
+        ):
+            self.values[name] = binding.value
         if binding is not None and variability not in ("parameter", "constant"):
             # A declaration equation on a non-constant is an ordinary equation.
             self.equations.append(ir.Equal(ir.Ref(path), binding))
 
     # -- equations --------------------------------------------------------------------
 
-    def _equation(self, equation: ir.Equation, prefix: _Path, local: frozenset[str]) -> None:
+    def _equation(
+        self, equation: ir.Equation, prefix: _Path, local: frozenset[str], *, initial: bool = False
+    ) -> None:
+        def carry(node: ir.Expr) -> ir.Expr:
+            return _prefix_expr(node, prefix, local, values=self.values)
+
+        if initial and not isinstance(equation, (ir.Equal, ir.ForEquation)):
+            raise FlattenError("only `a = b` equations may appear in initial equation")
+
         match equation:
             case ir.Equal(lhs=lhs, rhs=rhs):
-                self.equations.append(
-                    ir.Equal(_prefix_expr(lhs, prefix, local), _prefix_expr(rhs, prefix, local))
-                )
+                sink = self.initial_equations if initial else self.equations
+                sink.append(ir.Equal(carry(lhs), carry(rhs)))
             case ir.Connect(a=a, b=b):
                 self.connections.join(
                     self._endpoint(a, prefix, local), self._endpoint(b, prefix, local)
@@ -514,7 +685,7 @@ class _Flattener:
                     ir.When(
                         tuple(
                             ir.WhenBranch(
-                                _prefix_expr(branch.condition, prefix, local),
+                                carry(branch.condition),
                                 tuple(_prefix_statement(s, prefix, local) for s in branch.body),
                             )
                             for branch in branches
@@ -524,10 +695,45 @@ class _Flattener:
             case ir.IfEquation():
                 raise FlattenError("if-equations are not supported yet")
             case ir.ForEquation():
-                # The parser reads one; expanding it is the other half of the same issue.
-                # Refused here rather than dropped, so a model with one in it fails loudly
-                # instead of simulating the equations it happens to have kept.
-                raise FlattenError("'for' equations are not expanded yet")
+                self._unroll(equation, prefix, local, initial=initial)
+
+    def _unroll(
+        self,
+        loop: ir.ForEquation,
+        prefix: _Path,
+        local: frozenset[str],
+        *,
+        initial: bool = False,
+    ) -> None:
+        """Write the body once per value of the index, with the index a literal.
+
+        The substitution happens *before* the prefixing, which is what keeps the index out of
+        the model: by the time an equation reaches :func:`_prefix_expr` its `i` is a number,
+        so nothing has to teach name resolution about a name that is not a component.
+
+        A range whose bounds are not known here is refused rather than deferred. How many
+        equations a model has is not something a solver can be told later.
+        """
+        index, over = loop.index, loop.over
+        if not isinstance(over, ir.Range):
+            raise FlattenError(f"the range of 'for {index}' must be written 'a:b' or 'a:s:b'")
+        bounds = [
+            _integer(
+                _prefix_expr(part, prefix, local, values=self.values),
+                self.values,
+                f"the range of 'for {index}'",
+            )
+            for part in (over.start, over.stop, over.step or ir.IntLiteral(1))
+        ]
+        start, stop, step = bounds
+        if step == 0:
+            raise FlattenError(f"the range of 'for {index}' steps by zero")
+        for value in range(start, stop + (1 if step > 0 else -1), step):
+            replacement = {index: ir.IntLiteral(value)}
+            for inner in loop.body:
+                self._equation(
+                    _substitute_equation(inner, replacement), prefix, local, initial=initial
+                )
 
     def _endpoint(self, ref: ir.Ref, prefix: _Path, local: frozenset[str]) -> _Endpoint:
         path = _prefix_ref(ref, prefix, local).parts
