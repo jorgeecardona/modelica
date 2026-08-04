@@ -77,8 +77,6 @@ class Resistor(OnePort):
             ],
         ),
         shape("Line", points=[(52, 0), (90, 0)]),
-        shape("Ellipse", extent=PIN, fillPattern=SOLID),
-        shape("Ellipse", extent=[(86, 4), (94, -4)], fillPattern=SOLID),
         shape("Text", extent=NAME, textString="%name"),
     )
 
@@ -96,8 +94,6 @@ class Capacitor(OnePort):
         shape("Line", points=[(12, 0), (90, 0)]),
         shape("Line", points=[(-12, 34), (-12, -34)]),
         shape("Line", points=[(12, 34), (12, -34)]),
-        shape("Ellipse", extent=PIN, fillPattern=SOLID),
-        shape("Ellipse", extent=[(86, 4), (94, -4)], fillPattern=SOLID),
         shape("Text", extent=NAME, textString="%name"),
     )
 
@@ -117,8 +113,6 @@ class Inductor(OnePort):
         shape("Line", points=[(0, 0), (0, 14), (15, 22), (30, 14), (30, 0)]),
         shape("Line", points=[(30, 0), (30, 14), (45, 22), (60, 14), (60, 0)]),
         shape("Line", points=[(60, 0), (90, 0)]),
-        shape("Ellipse", extent=PIN, fillPattern=SOLID),
-        shape("Ellipse", extent=[(86, 4), (94, -4)], fillPattern=SOLID),
         shape("Text", extent=NAME, textString="%name"),
     )
 
@@ -138,8 +132,6 @@ class ConstantVoltage(OnePort):
         shape("Line", points=[(-16, 0), (-4, 0)]),
         shape("Line", points=[(-10, -6), (-10, 6)]),
         shape("Line", points=[(4, 0), (16, 0)]),
-        shape("Ellipse", extent=PIN, fillPattern=SOLID),
-        shape("Ellipse", extent=[(86, 4), (94, -4)], fillPattern=SOLID),
         shape("Text", extent=NAME, textString="%name"),
     )
 
@@ -157,7 +149,6 @@ class Ground(Model):
         shape("Line", points=[(-46, 20), (46, 20)]),
         shape("Line", points=[(-28, 2), (28, 2)]),
         shape("Line", points=[(-11, -16), (11, -16)]),
-        shape("Ellipse", extent=[(-4, 94), (4, 86)], fillPattern=SOLID),
         shape("Text", extent=[(-100, -30), (100, -52)], textString="%name"),
     )
 

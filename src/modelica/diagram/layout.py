@@ -181,8 +181,19 @@ def _junctions(graph: Graph, boxes: dict[str, Box]) -> None:
             if far is not None and far in boxes
         ]
         if reached:
-            box.x = sum(x for x, _ in reached) / len(reached)
-            box.y = sum(y for _, y in reached) / len(reached)
+            # The median, not the mean. A set of three is usually two wires meeting at one
+            # terminal, and the median lands *on* that terminal while the mean floats off it
+            # and makes both wires stair-step to reach the dot.
+            box.x = _median([x for x, _ in reached])
+            box.y = _median([y for _, y in reached])
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
 
 
 def _pin_at(box: Box, port: str) -> tuple[float, float]:

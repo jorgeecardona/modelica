@@ -165,16 +165,42 @@ def _route(
     a, a_horizontal = _stub(start, source)
     b, b_horizontal = _stub(end, target)
     if a_horizontal and b_horizontal:
-        middle = (a[0] + b[0]) / 2
+        middle = _clear((a[0] + b[0]) / 2, a[0], b[0], source, target, vertical=True)
         points = [start, a, (middle, a[1]), (middle, b[1]), b, end]
     elif not a_horizontal and not b_horizontal:
-        middle = (a[1] + b[1]) / 2
+        middle = _clear((a[1] + b[1]) / 2, a[1], b[1], source, target, vertical=False)
         points = [start, a, (a[0], middle), (b[0], middle), b, end]
     elif a_horizontal:
         points = [start, a, (b[0], a[1]), b, end]
     else:
         points = [start, a, (a[0], b[1]), b, end]
     return _path(_straighten(points))
+
+
+def _clear(  # noqa: PLR0913 - a midline, its two ends, and what it must miss
+    middle: float,
+    first: float,
+    second: float,
+    source: Box | None,
+    target: Box | None,
+    *,
+    vertical: bool,
+) -> float:
+    """Move the Z's middle line off any component it would otherwise cross.
+
+    Two pins facing the same way put the midpoint *behind* one of them, so the wire runs
+    back across the symbol it just left before turning. Pushing the line past that symbol
+    is what the pin's own stub was for; this is the same intent, applied to the corner.
+    """
+    for box in (source, target):
+        if box is None:
+            continue
+        low = (box.left if vertical else box.top) - 6
+        high = low + (box.width if vertical else box.height) + 12
+        if low < middle < high:
+            beyond = max(first, second)
+            middle = high if beyond >= (low + high) / 2 else low
+    return middle
 
 
 def _straighten(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
