@@ -264,6 +264,13 @@ def _prefix_expr(
             return ir.Call(name, tuple(go(a) for a in args))
         case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
             return ir.IfExpr(go(condition), go(then), go(otherwise))
+        case ir.Subscript():
+            # Named rather than passed through by the fallback below. A subscript that
+            # reaches here unexpanded would keep its *unprefixed* base and then resolve
+            # against nothing, which is the quiet kind of wrong.
+            raise FlattenError("subscripted references are not expanded yet")
+        case ir.Range():
+            raise FlattenError("a range is read only in the header of a 'for' equation")
         case _:
             return node
 
@@ -421,6 +428,14 @@ class _Flattener:
         local: frozenset[str],
     ) -> None:
         component = member.component
+        if component.dimensions:
+            # The parser reads a declared shape; expanding it into one scalar per element is
+            # the other half of the same issue. Refused by name, because the alternative is
+            # declaring `Real T[n]` as a single scalar `T` and simulating something the
+            # modeller did not write.
+            raise FlattenError(
+                f"{'.'.join(path)!r} is declared as an array, and arrays are not expanded yet"
+            )
         # `outer` arrived from the enclosing class and was prefixed there. These two were
         # written *here*, so they are prefixed here, against the path of the class that
         # holds them -- everything in `path` except this component's own name.
@@ -508,6 +523,11 @@ class _Flattener:
                 )
             case ir.IfEquation():
                 raise FlattenError("if-equations are not supported yet")
+            case ir.ForEquation():
+                # The parser reads one; expanding it is the other half of the same issue.
+                # Refused here rather than dropped, so a model with one in it fails loudly
+                # instead of simulating the equations it happens to have kept.
+                raise FlattenError("'for' equations are not expanded yet")
 
     def _endpoint(self, ref: ir.Ref, prefix: _Path, local: frozenset[str]) -> _Endpoint:
         path = _prefix_ref(ref, prefix, local).parts

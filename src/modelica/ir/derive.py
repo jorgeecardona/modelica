@@ -275,7 +275,7 @@ def _derive(node: ir.Expr, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:
             return leaf(node)
         case ir.RealLiteral() | ir.IntLiteral() | ir.BoolLiteral() | ir.StringLiteral():
             return ZERO
-        case ir.Array():
+        case ir.Array() | ir.Subscript() | ir.Range():
             raise DerivativeError("array equations are not supported yet")
         case ir.Binary():
             return _binary(node, leaf)

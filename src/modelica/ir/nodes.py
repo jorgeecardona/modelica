@@ -42,18 +42,21 @@ __all__ = [
     "Equation",
     "Expr",
     "Extends",
+    "ForEquation",
     "IfBranch",
     "IfEquation",
     "IfExpr",
     "IntLiteral",
     "Modification",
     "Program",
+    "Range",
     "RealLiteral",
     "Ref",
     "Reinit",
     "Restriction",
     "Statement",
     "StringLiteral",
+    "Subscript",
     "Unary",
     "UnaryOp",
     "Variability",
@@ -118,6 +121,30 @@ class Array:
 
 
 @dataclass(frozen=True, slots=True)
+class Subscript:
+    """``T[i]``, ``A[i, j]`` -- a reference with indices, before flattening scalarises it.
+
+    A separate node rather than indices on :class:`Ref`, because it is a *temporary* shape.
+    Flattening expands an array declaration into one scalar variable per element and rewrites
+    each subscript to the name of the element it selects, so nothing below
+    :mod:`modelica.ir.flatten` ever sees one. Putting the indices on ``Ref`` would have made
+    every later stage carry a field that is always empty by the time it looks.
+    """
+
+    base: Ref
+    indices: tuple[Expr, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Range:
+    """``1:n``, and ``1:2:n`` when a step is given -- the step is the *middle* term."""
+
+    start: Expr
+    stop: Expr
+    step: Expr | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Binary:
     op: BinaryOp
     lhs: Expr
@@ -163,6 +190,8 @@ type Expr = (
     | BoolLiteral
     | StringLiteral
     | Array
+    | Subscript
+    | Range
     | Binary
     | Unary
     | Call
@@ -271,7 +300,22 @@ class IfEquation:
     otherwise: tuple[Equation, ...] = ()
 
 
-type Equation = Equal | Connect | When | IfEquation
+@dataclass(frozen=True, slots=True)
+class ForEquation:
+    """``for i in 1:n loop ... end for;`` -- one index, one range, a body of equations.
+
+    The index is a name and not a declaration: it exists only inside the body, it is an
+    ``Integer``, and no component clause introduces it. Flattening evaluates the range,
+    substitutes each value for the index, and emits the body once per value -- so this node,
+    like :class:`Subscript`, does not survive into a :class:`~modelica.ir.flat.FlatModel`.
+    """
+
+    index: str
+    over: Expr
+    body: tuple[Equation, ...]
+
+
+type Equation = Equal | Connect | When | IfEquation | ForEquation
 
 
 # --------------------------------------------------------------------------------------
@@ -297,6 +341,14 @@ class Component:
     comment: str = ""
     annotation: Modification = EMPTY
     """Where the component sits in the enclosing diagram: ``Placement(transformation(...))``."""
+    dimensions: tuple[Expr, ...] = ()
+    """``Real T[n]`` is ``dimensions=(Ref(("n",)),)``. Empty for a scalar, which is most of them.
+
+    The shape is an *expression* rather than a number because Modelica writes it as one, and
+    it is usually a parameter. Flattening is what evaluates it, which is also what makes such
+    a parameter structural: the number of equations depends on it, so it cannot change after
+    the model is built.
+    """
 
 
 @dataclass(frozen=True)

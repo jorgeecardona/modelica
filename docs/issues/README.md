@@ -91,7 +91,7 @@ cabildo issues show <slug>
 | [Library twins are compared as normalised text, because a library has no flat model](03-08-2026-library-twins-are-only-compared-as-text.md) | ir | story | M | test | open | — |
 | [Tearing is priced in by three documents and implemented by none](03-08-2026-tearing-is-priced-in-by-three-documents-and-implemented-by-none.md) | ir | story | L | test | open | — |
 | [`algorithm` sections are refused, and with them `while`, `break` and `return`](03-08-2026-algorithm-sections-are-refused.md) | lang | story | L | test | open | — |
-| [Arrays and `for` equations are refused, and the distributed-model workaround needs them](03-08-2026-arrays-and-for-equations-are-refused.md) | lang | story | L | test | open | — |
+| [Arrays and `for` equations are refused, and the distributed-model workaround needs them](03-08-2026-arrays-and-for-equations-are-refused.md) | lang | story | L | test | in-progress · @quiet-tars-187f2 | — |
 | [`replaceable` and `redeclare` are refused, and the standard library is built on them](03-08-2026-replaceable-and-redeclare-are-refused.md) | lang | story | L | test | open | — |
 | [`import`, `enumeration` and `inner`/`outer` — the three small refusals](03-08-2026-the-three-small-refusals.md) | lang | story | M | test | open | — |
 | [A C emitter — the second backend, and the one FMU export needs](03-08-2026-a-c-emitter.md) | sim | story | L | test | open | — |
@@ -116,5 +116,5 @@ cabildo issues show <slug>
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_35 open — 35 open; 3 done. Generated; edit the files, then `cabildo issues reindex`._
+_35 open — 34 open, 1 in-progress; 3 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

@@ -150,7 +150,7 @@ def evaluate(node: ir.Expr, env: Mapping[str, Value]) -> Value:
             | ir.StringLiteral(value=value)
         ):
             return value
-        case ir.Array():
+        case ir.Array() | ir.Subscript() | ir.Range():
             raise EvaluationError("array equations are not supported yet")
         case ir.Binary():
             return _binary(node, env)

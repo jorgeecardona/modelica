@@ -46,7 +46,7 @@ def unparse_expr(node: ir.Expr, *, minimum: int = IF) -> str:
     return f"({text})" if _precedence(node) < minimum else text
 
 
-def _render_expr(node: ir.Expr) -> str:  # noqa: C901, PLR0911 -- one case per node type
+def _render_expr(node: ir.Expr) -> str:  # noqa: C901, PLR0911, PLR0912 -- one per node type
     match node:
         case ir.Ref(parts=parts):
             return ".".join(parts)
@@ -69,6 +69,13 @@ def _render_expr(node: ir.Expr) -> str:  # noqa: C901, PLR0911 -- one case per n
             return f"{op}{unparse_expr(operand, minimum=UNARY_SIGN)}"
         case ir.Array(elements=elements):
             return f"{{{', '.join(unparse_expr(e) for e in elements)}}}"
+        case ir.Subscript(base=base, indices=indices):
+            return f"{base.name}[{', '.join(unparse_expr(i) for i in indices)}]"
+        case ir.Range(start=start, stop=stop, step=step):
+            # The step is the middle term, which is the one thing about `a:s:b` that
+            # everybody gets wrong once.
+            parts = [start, stop] if step is None else [start, step, stop]
+            return ":".join(unparse_expr(p, minimum=IF + 1) for p in parts)
         case ir.Call(name=name, args=args, named=named):
             written = [unparse_expr(a) for a in args]
             written += [f"{key} = {unparse_expr(value)}" for key, value in named]
@@ -147,19 +154,36 @@ def unparse_equation(node: ir.Equation, indent: int = 0) -> list[str]:
                 lines += [f"{pad}  {_statement(s)}" for s in branch.body]
             lines.append(f"{pad}end when;")
             return lines
-        case ir.IfEquation(branches=branches, otherwise=otherwise):
-            lines = []
-            for position, branch in enumerate(branches):
-                keyword = "if" if position == 0 else "elseif"
-                lines.append(f"{pad}{keyword} {unparse_expr(branch.condition)} then")
-                for equation in branch.body:
-                    lines += unparse_equation(equation, indent + 1)
-            if otherwise:
-                lines.append(f"{pad}else")
-                for equation in otherwise:
-                    lines += unparse_equation(equation, indent + 1)
-            lines.append(f"{pad}end if;")
-            return lines
+        case ir.ForEquation(index=index, over=over, body=body):
+            return [
+                f"{pad}for {index} in {unparse_expr(over)} loop",
+                *_body(body, indent + 1),
+                f"{pad}end for;",
+            ]
+        case ir.IfEquation():
+            return _if_equation(node, indent)
+
+
+def _body(equations: tuple[ir.Equation, ...], indent: int) -> list[str]:
+    """A run of equations, each rendered at ``indent``."""
+    lines: list[str] = []
+    for equation in equations:
+        lines += unparse_equation(equation, indent)
+    return lines
+
+
+def _if_equation(node: ir.IfEquation, indent: int) -> list[str]:
+    pad = "  " * indent
+    lines: list[str] = []
+    for position, branch in enumerate(node.branches):
+        keyword = "if" if position == 0 else "elseif"
+        lines.append(f"{pad}{keyword} {unparse_expr(branch.condition)} then")
+        lines += _body(branch.body, indent + 1)
+    if node.otherwise:
+        lines.append(f"{pad}else")
+        lines += _body(node.otherwise, indent + 1)
+    lines.append(f"{pad}end if;")
+    return lines
 
 
 def _component(component: ir.Component) -> str:
@@ -172,10 +196,17 @@ def _component(component: ir.Component) -> str:
         prefix += f"{component.connector} "
     if component.causality != "none":
         prefix += f"{component.causality} "
+    shape = (
+        f"[{', '.join(unparse_expr(d) for d in component.dimensions)}]"
+        if component.dimensions
+        else ""
+    )
     modification = _modification(component.modification)
     comment = _comment(component.comment)
     annotation = _annotation(component.annotation)
-    return f"{prefix}{component.type_name} {component.name}{modification}{comment}{annotation};"
+    return (
+        f"{prefix}{component.type_name} {component.name}{shape}{modification}{comment}{annotation};"
+    )
 
 
 def _is_short_definition(node: ir.Class) -> bool:

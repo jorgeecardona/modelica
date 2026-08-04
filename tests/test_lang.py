@@ -304,7 +304,6 @@ def test_extends_and_connect() -> None:
 # --------------------------------------------------------------------------------------
 
 UNSUPPORTED = [
-    ("for", "model M\nequation\n  for i in 1:3 loop\n  end for;\nend M;\n"),
     ("algorithm", "model M\nalgorithm\n  x := 1;\nend M;\n"),
     ("import", "model M\n  import Modelica.Constants;\nend M;\n"),
     ("redeclare", "model M\n  redeclare Real x;\nend M;\n"),
@@ -333,10 +332,64 @@ def test_an_array_literal_is_read() -> None:
     assert len(nested.elements) == 2
 
 
-def test_array_declarations_are_still_refused() -> None:
-    """Reading `{1, 2}` is not solving `x[3]`. The declaration is the unimplemented half."""
-    with pytest.raises(ModelicaSyntaxError, match=r"[Aa]rray"):
-        parse("model M\n  Real x[3];\nend M;\n")
+def test_a_declared_shape_is_read() -> None:
+    """`Real T[n]` carries its shape as an expression, because Modelica writes it as one."""
+    (cls,) = parse("model M\n  parameter Integer n = 3;\n  Real T[n];\nend M;\n").classes
+    shaped = next(c for c in cls.components if c.name == "T")
+    assert shaped.dimensions == (ir.Ref(("n",)),)
+    scalar = next(c for c in cls.components if c.name == "n")
+    assert scalar.dimensions == ()
+
+
+def test_a_subscript_is_a_reference_with_indices() -> None:
+    assert parse_expression("T[i]") == ir.Subscript(ir.Ref(("T",)), (ir.Ref(("i",)),))
+    assert parse_expression("A[i, j + 1]") == ir.Subscript(
+        ir.Ref(("A",)),
+        (ir.Ref(("i",)), ir.Binary("+", ir.Ref(("j",)), ir.IntLiteral(1))),
+    )
+
+
+def test_a_for_equation_carries_its_index_and_its_range() -> None:
+    source = (
+        "model M\n"
+        "  parameter Integer n = 3;\n"
+        "  Real T[n];\n"
+        "equation\n"
+        "  for i in 1:n loop\n"
+        "    T[i] = 0;\n"
+        "  end for;\n"
+        "end M;\n"
+    )
+    (cls,) = parse(source).classes
+    (equation,) = cls.equations
+    assert isinstance(equation, ir.ForEquation)
+    assert equation.index == "i"
+    assert equation.over == ir.Range(ir.IntLiteral(1), ir.Ref(("n",)))
+    assert len(equation.body) == 1
+
+
+def test_the_step_of_a_range_is_the_middle_term() -> None:
+    """`1:2:n` steps by 2 up to n. Reading it as `start:stop:step` is the classic error."""
+    source = "model M\nequation\n  for i in 1:2:n loop\n    x = i;\n  end for;\nend M;\n"
+    (cls,) = parse(source).classes
+    (equation,) = cls.equations
+    assert isinstance(equation, ir.ForEquation)
+    assert equation.over == ir.Range(ir.IntLiteral(1), ir.Ref(("n",)), ir.IntLiteral(2))
+
+
+ARRAY_REFUSALS = [
+    ("comprehension", "{i for i in 1:3}"),
+    ("several indices", "model M\nequation\n  for i, j in 1:3 loop\n  end for;\nend M;\n"),
+    ("inner subscript", "a[1].b"),
+]
+
+
+@pytest.mark.parametrize(("what", "source"), ARRAY_REFUSALS, ids=[w for w, _ in ARRAY_REFUSALS])
+def test_the_array_syntax_not_implemented_is_refused_by_name(what: str, source: str) -> None:
+    """What arrived with arrays, and what did not. Silence here would be a misread model."""
+    reader = parse if source.startswith("model") else parse_expression
+    with pytest.raises(ModelicaSyntaxError, match="not supported yet"):
+        reader(source)
 
 
 def test_named_function_arguments_are_read() -> None:

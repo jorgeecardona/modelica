@@ -274,7 +274,7 @@ def _render(node: ir.Expr, symbols: Mapping[str, str]) -> str:  # noqa: C901, PL
             return "True" if value else "False"
         case ir.StringLiteral(value=value):
             return repr(value)
-        case ir.Array():
+        case ir.Array() | ir.Subscript() | ir.Range():
             raise EmitError("array equations are not supported yet")
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             symbol, level = _BINARY[op]

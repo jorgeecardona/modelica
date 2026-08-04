@@ -65,6 +65,9 @@ from modelica.ir.nodes import (
     Extends as Extends,
 )
 from modelica.ir.nodes import (
+    ForEquation as ForEquation,
+)
+from modelica.ir.nodes import (
     IfBranch as IfBranch,
 )
 from modelica.ir.nodes import (
@@ -83,6 +86,9 @@ from modelica.ir.nodes import (
     Program as Program,
 )
 from modelica.ir.nodes import (
+    Range as Range,
+)
+from modelica.ir.nodes import (
     RealLiteral as RealLiteral,
 )
 from modelica.ir.nodes import (
@@ -99,6 +105,9 @@ from modelica.ir.nodes import (
 )
 from modelica.ir.nodes import (
     StringLiteral as StringLiteral,
+)
+from modelica.ir.nodes import (
+    Subscript as Subscript,
 )
 from modelica.ir.nodes import (
     Unary as Unary,
@@ -133,18 +142,21 @@ __all__ = [
     "Equation",
     "Expr",
     "Extends",
+    "ForEquation",
     "IfBranch",
     "IfEquation",
     "IfExpr",
     "IntLiteral",
     "Modification",
     "Program",
+    "Range",
     "RealLiteral",
     "Ref",
     "Reinit",
     "Restriction",
     "Statement",
     "StringLiteral",
+    "Subscript",
     "Unary",
     "UnaryOp",
     "Variability",

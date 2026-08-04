@@ -86,7 +86,6 @@ _UNSUPPORTED: Final[dict[str, str]] = {
     "break": "'break' is not supported yet",
     "enumeration": "enumerations are not supported yet",
     "external": "external functions are not supported yet",
-    "for": "'for' loops and array equations are not supported yet",
     "import": "'import' is not supported yet; refer to classes by their full name",
     "inner": "'inner'/'outer' elements are not supported yet",
     "operator": "operator overloading is not supported yet",
@@ -267,7 +266,7 @@ class _Parser:
             return ir.Unary(_SIGN[token.text], self._binary(UNARY_SIGN))
         return self._primary()
 
-    def _primary(self) -> ir.Expr:  # noqa: C901, PLR0911 -- one case per token
+    def _primary(self) -> ir.Expr:  # noqa: C901, PLR0911, PLR0912 -- one case per token
         token = self.token
         match token.kind:
             case Kind.INT:
@@ -302,7 +301,12 @@ class _Parser:
                 if self._check(Kind.OP, "("):
                     args, named = self._arguments()
                     return ir.Call(".".join(parts), args, named)
-                return ir.Ref(parts)
+                indices = self._bracketed()
+                if not indices:
+                    return ir.Ref(parts)
+                if self._check(Kind.OP, "."):
+                    raise self._error("a subscript on an inner component is not supported yet")
+                return ir.Subscript(ir.Ref(parts), indices)
             case _:
                 self._refuse_unsupported()
         raise self._error(f"expected an expression, found {token.describe()}")
@@ -313,10 +317,26 @@ class _Parser:
         if self._accept(Kind.OP, "}"):
             return ir.Array(())
         elements: list[ir.Expr] = [self.expression()]
+        if self._keyword("for"):
+            raise self._error("array comprehensions are not supported yet")
         while self._accept(Kind.OP, ","):
             elements.append(self.expression())
         self._expect(Kind.OP, "}")
         return ir.Array(tuple(elements))
+
+    def _bracketed(self) -> tuple[ir.Expr, ...]:
+        """``[n]`` or ``[i, j]`` -- a declared shape after a name, or a subscript after one.
+
+        The same syntax in both places, which is why it is one function. Empty when the next
+        token is not a bracket, so a caller can use the result to decide which node to build.
+        """
+        if not self._accept(Kind.OP, "["):
+            return ()
+        found = [self.expression()]
+        while self._accept(Kind.OP, ","):
+            found.append(self.expression())
+        self._expect(Kind.OP, "]")
+        return tuple(found)
 
     def _arguments(self) -> tuple[tuple[ir.Expr, ...], tuple[tuple[str, ir.Expr], ...]]:
         """The arguments of a call, positional first and then the ones given by name.
@@ -387,6 +407,8 @@ class _Parser:
                     return self._when()
                 case "if":
                     return self._if_equation()
+                case "for":
+                    return self._for_equation()
                 case _:
                     self._refuse_unsupported()
         lhs = self.expression()
@@ -394,6 +416,46 @@ class _Parser:
         rhs = self.expression()
         self._terminate()
         return ir.Equal(lhs, rhs)
+
+    def _for_equation(self) -> ir.ForEquation:
+        """``for i in 1:n loop ... end for;`` -- read one, with one index.
+
+        One index and one range, which is the shape a method of lines is written in. Modelica
+        allows several indices in one header; that is refused by name here rather than read as
+        the first of them.
+        """
+        self._expect(Kind.KEYWORD, "for")
+        index = self._expect(Kind.NAME).text
+        if self._check(Kind.OP, ","):
+            raise self._error("a 'for' over several indices is not supported yet")
+        self._expect(Kind.KEYWORD, "in")
+        over = self._range()
+        self._expect(Kind.KEYWORD, "loop")
+        body: list[ir.Equation] = []
+        while not self._keyword("end"):
+            if self._check(Kind.END):
+                raise self._error("unterminated 'for' equation: expected 'end for;'")
+            body.append(self.equation())
+        self._expect(Kind.KEYWORD, "end")
+        self._expect(Kind.KEYWORD, "for")
+        self._terminate()
+        return ir.ForEquation(index, over, tuple(body))
+
+    def _range(self) -> ir.Expr:
+        """``a:b``, and ``a:s:b`` where the *step* is the middle term.
+
+        Read only where a range is expected, which today is the header of a ``for``. The
+        colon is deliberately not in the precedence table: putting it there would give every
+        expression in the language a new operator to be parenthesised against, for one
+        construct that knows exactly where it is.
+        """
+        first = self.expression()
+        if not self._accept(Kind.OP, ":"):
+            return first
+        second = self.expression()
+        if self._accept(Kind.OP, ":"):
+            return ir.Range(first, self.expression(), second)
+        return ir.Range(first, second)
 
     def _connect(self) -> ir.Connect:
         self._expect(Kind.KEYWORD, "connect")
@@ -488,12 +550,12 @@ class _Parser:
         declared: list[ir.Component] = []
         while True:
             name = self._expect(Kind.NAME).text
-            if self._check(Kind.OP, "["):
-                raise self._error("arrays are not supported yet")
+            dimensions = self._bracketed()
             declared.append(
                 ir.Component(
                     name=name,
                     type_name=type_name,
+                    dimensions=dimensions,
                     modification=self._modification(),
                     variability=variability,
                     causality=causality,
