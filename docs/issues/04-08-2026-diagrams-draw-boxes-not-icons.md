@@ -30,6 +30,34 @@ verify: inspect
   `examples/animate.py`, which is Python. Every library and model here was written by hand
   without graphics.
 
+## Measured again, from the rendered DCMotor
+
+Read off `docs/notebooks/drawing.ipynb`'s own output and confirmed in
+`src/modelica/diagram/render.py`. Icons are not the only thing wrong, and the other two are
+ours to fix whether or not any icon ever exists:
+
+- **Wires are straight lines from centre to centre**, clipped at each box's border by
+  `_corner` (`render.py:64`). Nothing avoids anything: the motor-to-ground wire runs across
+  the picture and past whatever is in its way. A real schematic is *orthogonal* — segments
+  meet at right angles and turn around components.
+- **Port labels collide.** `_port_label` (`render.py:119`) puts the connector name 13 px along
+  the wire and 6 px to the side, with no awareness of any other label. When two connectors
+  leave one component in nearly the same direction — the motor's `p` and `n` both heading to
+  the supply — the two names land on top of each other, which is the `p p` overlap in the
+  picture, and `flange` sits half on top of the friction box.
+- **A connection set of three or more gets a centroid node** (`render.py:143`,
+  `node.kind == "junction"`), drawn as a bare dot in open space with wires radiating from it.
+  It is *true* — three connectors do share one node — but with nothing else at that point it
+  reads as a stray mark rather than as a junction.
+
+The third item is worth keeping and drawing better rather than removing: a junction is real
+electrical structure. The first two are defects.
+
+One observation about the reference pictures that decides part of the design: **they have no
+port labels at all.** A resistor's pins are visible because the icon draws them, so the wire
+simply arrives at a place that already means something. Our labels exist to make up for the
+boxes. Where an icon supplies the pin, the label should go.
+
 ## Inferred
 
 The thing worth understanding before starting: **OpenModelica and Dymola do not generate
