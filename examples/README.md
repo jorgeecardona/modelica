@@ -183,6 +183,7 @@ above it needed, plus exactly one new capability.
 | `RoastingMachine` | `time` in an equation, which makes time events *and* a state event; a parameter bound to other parameters; a model of the sensor | **a real machine** |
 | `Pendulum` | a constraint equation, which makes index 3: Pantelides and dummy derivatives | scipy |
 | `TwoInertias` | index 3 again, but the two candidate state sets are the same shape, so the choice is a tie-break | analytic |
+| `HeatBar` | a declared shape, a `for` equation and subscripts: the method of lines, written by hand | matrix exponential |
 | `AtwoodPendulum` | five coupled degrees of freedom, which leave a 4×4 implicit block | scipy and energy |
 | `Robertson` | stiffness: a stiff solver is mandatory, and explicit Runge-Kutta dies | scipy |
 | `VanDerPol` | a relaxation limit cycle: step size control over three orders of magnitude | scipy |

@@ -1,0 +1,78 @@
+summary = "A rod split into eight cells, hot at one end and insulated at the other: the method of lines, which is arrays and a `for` equation and nothing else."
+teaches = ["a declared shape", "a `for` equation", "subscripts", "a structural parameter"]
+requires = []
+
+[parse]
+classes = ["HeatBar"]
+
+[flatten]
+model = "HeatBar"
+index = 1
+balanced = true
+# Eight cells, and `n` is what says so. The shape is evaluated when the model is flattened,
+# so `n` is a *structural* parameter: changing it changes how many equations there are, and
+# the model has to be built again rather than re-run.
+states = ["T[1]", "T[2]", "T[3]", "T[4]", "T[5]", "T[6]", "T[7]", "T[8]"]
+
+# The heat equation, discretised in space by hand and left continuous in time -- which is
+# what `docs/ideas/pdes.md` recommends instead of a `pder` operator, because the
+# discretisation stays visible in the model where the modeller can change it.
+#
+# The result is linear, `dT/dt = A T + b`, so the reference is not another integration: it
+# is `T(t) = Ts + expm(A t) (T(0) - Ts)` with `Ts = -A^-1 b`, computed with
+# `scipy.linalg.expm`. A matrix exponential and a Radau run share no code and no method,
+# which is what makes the agreement mean something.
+[simulate]
+stop = 40.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 2.0
+values = { "T[1]" = 54.213240988988915, "T[2]" = 30.32843096960768, "T[4]" = 20.425435541806323, "T[8]" = 20.000093428633164 }
+rtol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { "T[1]" = 77.79407862581444, "T[2]" = 58.27105934683756, "T[4]" = 32.76962722838665, "T[8]" = 20.667336523899394 }
+rtol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 40.0
+values = { "T[1]" = 89.03239045644796, "T[2]" = 78.47662031993825, "T[4]" = 60.09910378065997, "T[8]" = 41.612664415415054 }
+rtol = 1e-8
+source = "reference"
+
+# Heat arrives from the left and nothing else touches the rod, so the profile can only fall
+# from left to right, at every instant. Three of the seven gaps are asserted; a stencil
+# written with the wrong sign, or an index off by one, breaks this long before it breaks a
+# reference point.
+[[simulate.invariant]]
+expr = "T[1] - T[2]"
+min = 0.0
+
+[[simulate.invariant]]
+expr = "T[4] - T[5]"
+min = 0.0
+
+[[simulate.invariant]]
+expr = "T[7] - T[8]"
+min = 0.0
+
+# Nothing in the rod can be colder than it started or hotter than the end that is heating
+# it. This is the maximum principle, and it is the one statement about the *physics* here
+# that does not depend on the discretisation being any good.
+[[simulate.invariant]]
+expr = "T[1]"
+min = 20.0
+max = 100.0
+
+[[simulate.invariant]]
+expr = "T[8]"
+min = 20.0
+max = 100.0
+
+# The far end is insulated, so it is the last to move -- the reference point at t = 2 says
+# it has risen by 9.3e-5 K and no more, which is a sharper statement than any band here
+# could make, so there is no invariant for it.

@@ -88,6 +88,7 @@ __all__ = [
     "discrete",
     "exp",
     "flow",
+    "for_",
     "if_",
     "input_",
     "log",
@@ -98,6 +99,7 @@ __all__ = [
     "package",
     "parameter",
     "pre",
+    "range_",
     "ref",
     "reinit",
     "sign",
@@ -168,6 +170,18 @@ class Expression:
             # Must stay AttributeError: anything else breaks getattr/hasattr protocol.
             raise AttributeError(f"{self!r} has no member {name!r}")  # noqa: TRY004
         return Expression(ir.Ref((*base.parts, name)))
+
+    def __getitem__(self, index: Operand | tuple[Operand, ...]) -> Expression:
+        """``self.T[i]`` and ``self.A[i, j]`` -- a subscript, the same node the parser builds.
+
+        Only a plain reference can be subscripted, which is also true in Modelica: the index
+        goes on a component, not on the result of an expression.
+        """
+        base = self.node
+        if not isinstance(base, ir.Ref):
+            raise TypeError(f"{self!r} is not a component, so it cannot be subscripted")
+        indices = index if isinstance(index, tuple) else (index,)
+        return Expression(ir.Subscript(base, tuple(_lift(i) for i in indices)))
 
     # Defining `__eq__` would otherwise set `__hash__` to None. Identity is the only
     # sensible hash here, since `==` does not answer "are these the same expression?".
@@ -290,6 +304,22 @@ def not_equal(a: Operand, b: Operand) -> Expression:
     return Expression(ir.Binary("<>", _lift(a), _lift(b)))
 
 
+def range_(start: Operand, stop: Operand, step: Operand | None = None) -> Expression:
+    """``a:b``, and ``a:s:b`` when a step is given -- the header of a :func:`for_`."""
+    return Expression(ir.Range(_lift(start), _lift(stop), None if step is None else _lift(step)))
+
+
+def for_(index: str, over: Operand, *body: ir.Equation) -> ir.ForEquation:
+    """``for i in 1:n loop ... end for;`` -- one index, one range.
+
+    The index is named as a string and referred to with :func:`ref`, because it is not a
+    component: no declaration introduces it and ``self`` cannot answer for it. Writing the
+    loop out in Python instead would produce the same *flat* model and a different `.mo`,
+    and the corpus holds both front ends to the same text.
+    """
+    return ir.ForEquation(index, _lift(over), body)
+
+
 def if_(condition: Operand, then: Operand, otherwise: Operand) -> Expression:
     """A conditional *expression*.
 
@@ -371,6 +401,14 @@ def _modification(attributes: Mapping[str, object], value: object = None) -> ir.
     return ir.Modification(value=None if value is None else _lift(value), entries=entries)
 
 
+def _shape(shape: object) -> tuple[ir.Expr, ...]:
+    """``shape=n`` and ``shape=(2, 3)`` both give the dimensions of a declaration."""
+    if shape is None:
+        return ()
+    dimensions: tuple[object, ...] = shape if isinstance(shape, tuple) else (shape,)  # pyright: ignore[reportUnknownVariableType]
+    return tuple(_lift(d) for d in dimensions)
+
+
 def mod(**attributes: object) -> Modifier:
     """Modify a nested component: ``Capacitor(C=0.01, v=mod(start=0, fixed=True))``.
 
@@ -400,6 +438,7 @@ class Declaration:
     causality: ir.Causality = "none"
     connector: ir.ConnectorKind = "none"
     name: str = ""
+    dimensions: tuple[ir.Expr, ...] = ()
 
     def __set_name__(self, owner: type, name: str) -> None:
         # The one mutation in the module, and it is unavoidable: a descriptor learns its
@@ -428,6 +467,7 @@ class Declaration:
         return ir.Component(
             name=self.name,
             type_name=_qualified(self.type_ref, within),
+            dimensions=self.dimensions,
             modification=self.modification,
             variability=self.variability,
             causality=self.causality,
@@ -495,8 +535,10 @@ class Type:
     def __repr__(self) -> str:
         return f"<Type {self.name}>"
 
-    def __call__(self, doc: str = "", **attributes: object) -> Declaration:
-        return Declaration(self, doc=doc, modification=_modification(attributes))
+    def __call__(self, doc: str = "", *, shape: object = None, **attributes: object) -> Declaration:
+        return Declaration(
+            self, doc=doc, modification=_modification(attributes), dimensions=_shape(shape)
+        )
 
 
 Real = Type("Real")
@@ -562,8 +604,12 @@ class _ClassMeta(type):
         del restriction, partial
         super().__init__(name, bases, namespace)
 
-    def __call__(cls, doc: str = "", **modifications: object) -> Declaration:  # pyright: ignore[reportIncompatibleMethodOverride]
-        return Declaration(cls, doc=doc, modification=_modification(modifications))
+    def __call__(  # pyright: ignore[reportIncompatibleMethodOverride]
+        cls, doc: str = "", *, shape: object = None, **modifications: object
+    ) -> Declaration:
+        return Declaration(
+            cls, doc=doc, modification=_modification(modifications), dimensions=_shape(shape)
+        )
 
 
 class Model(metaclass=_ClassMeta, restriction="model"):

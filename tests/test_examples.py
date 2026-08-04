@@ -30,7 +30,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from modelica import ir
 from modelica.build import Model, Package, to_modelica
+from modelica.ir.evaluate import evaluate
+from modelica.ir.flatten import element
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -443,13 +446,41 @@ def _simulations() -> list[Any]:
     ]
 
 
+def _scalarise(node: ir.Expr) -> ir.Expr:
+    """Rewrite ``T[1]`` into the flat variable named ``T[1]``.
+
+    An invariant is written against the *model*, where a cell is subscripted, and read from
+    a result, where every variable is a scalar with the index in its name. Flattening does
+    exactly this rewrite for the equations, and it exports `element` so that this second
+    reader spells the name the same way rather than inventing a parallel convention.
+    """
+
+    def go(inner: ir.Expr) -> ir.Expr:
+        match inner:
+            case ir.Subscript(base=base, indices=indices):
+                resolved = [int(evaluate(go(i), {})) for i in indices]
+                return ir.Ref((*base.parts[:-1], element(base.parts[-1], resolved)))
+            case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+                return ir.Binary(op, go(lhs), go(rhs))
+            case ir.Unary(op=op, operand=operand):
+                return ir.Unary(op, go(operand))
+            case ir.Call(name=name, args=args):
+                return ir.Call(name, tuple(go(a) for a in args))
+            case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+                return ir.IfExpr(go(condition), go(then), go(otherwise))
+            case _:
+                return inner
+
+    return go(node)
+
+
 def _reader(expr: str, names: tuple[str, ...]) -> Callable[[Any], float]:
     """Compile a Modelica expression into something callable on a column of the result."""
     parse_expression = _require("modelica.lang", "parse_expression")
     emit_expr = _require("modelica.sim", "emit_expr")
 
     symbols = {name: f"v[{index}]" for index, name in enumerate(names)}
-    source = emit_expr(parse_expression(expr), symbols)
+    source = emit_expr(_scalarise(parse_expression(expr)), symbols)
     code = compile(source, f"<invariant:{expr}>", "eval")
     numpy = _module("numpy")
 
