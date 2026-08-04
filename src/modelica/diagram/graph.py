@@ -22,6 +22,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+from modelica.diagram.icon import Frame
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
@@ -61,6 +63,12 @@ class Port:
     causality: ir.Causality = "none"
     """``"none"`` for a physical connector. A signal connector is an input or an output."""
     comment: str = ""
+    at: tuple[float, float] | None = None
+    """Where the connector sits in the owner's icon frame, when the model says so.
+
+    ``None`` when no ``Placement`` was written, and then a wire aims at the middle of the
+    box like it always did.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +86,19 @@ class Node:
     """Lines to show under the label: parameter values, an equation, the unknowns."""
     parent: str = ""
     """The id of the node that contains this one. Empty at the top level."""
+    at: tuple[float, float] | None = None
+    """Where the model says this instance sits, from its own ``Placement`` annotation.
+
+    A diagram coordinate, not an icon one. When every component of a model has this, the
+    picture is the one the modeller arranged; when none does, the layout works it out.
+    """
+    icon: Frame = field(default_factory=Frame)
+    """What the component's class draws for itself, from its ``Icon`` annotation.
+
+    Empty for anything that has none, and then the renderer falls back to a labelled box.
+    A picture that invents a shape for a component would be a drawing of a model nobody
+    wrote, so there is no other fallback than the box.
+    """
 
 
 @dataclass(frozen=True, slots=True)

@@ -19,6 +19,7 @@ from __future__ import annotations
 import html
 from typing import TYPE_CHECKING
 
+from modelica.diagram.icon import FRAME, Disc, Label, Stroke
 from modelica.diagram.layout import LINE, PAD, place
 
 if TYPE_CHECKING:
@@ -53,6 +54,7 @@ _STYLE = """
 .mdg .link { stroke: currentColor; stroke-opacity: .65; stroke-width: 1.4; fill: none; }
 .mdg .weak { stroke-opacity: .3; stroke-width: 1; }
 .mdg .dot { fill: currentColor; }
+.mdg .mark { stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
 .mdg .name { font-weight: 600; }
 .mdg .type, .mdg .small { font-size: 10.5px; opacity: .62; }
 .mdg .title { font-size: 14px; font-weight: 600; }
@@ -105,17 +107,105 @@ def _edge_svg(edge: Edge, layout: Layout, kind: str) -> list[str]:
         path = f"M {x1:.1f} {y1:.1f} C {x1:.1f} {y1 + bend:.1f} {x2:.1f} {y2 - bend:.1f} {x2:.1f} {y2:.1f}"
         return [f'<path class="link{weak}" d="{path}"{marker} />']
 
-    x1, y1 = _corner(source, target.x, target.y)
-    x2, y2 = _corner(target, source.x, source.y)
-    parts = [
-        (
-            f'<line class="link{weak}" x1="{x1:.1f}" y1="{y1:.1f}" '
-            f'x2="{x2:.1f}" y2="{y2:.1f}"{marker} />'
-        )
-    ]
-    parts.extend(_port_label(edge.source_port, x1, y1, source, target))
-    parts.extend(_port_label(edge.target_port, x2, y2, target, source))
+    start = _pin(source, edge.source_port)
+    end = _pin(target, edge.target_port)
+    x1, y1 = start or _corner(source, target.x, target.y)
+    x2, y2 = end or _corner(target, source.x, source.y)
+    path = _route((x1, y1), (x2, y2), source if start else None, target if end else None)
+    parts = [f'<path class="link{weak}" d="{path}" fill="none"{marker} />']
+    # A drawn pin needs no name beside it: the icon already says where the wire attaches,
+    # and the label was only ever standing in for a pin nobody could see.
+    if start is None:
+        parts.extend(_port_label(edge.source_port, x1, y1, source, target))
+    if end is None:
+        parts.extend(_port_label(edge.target_port, x2, y2, target, source))
     return parts
+
+
+def _pin(box: Box, port: str) -> tuple[float, float] | None:
+    """Where a named connector sits on ``box``, when its own model says so."""
+    if not box.node.icon:
+        return None
+    found = next((p for p in box.node.ports if p.name == port and p.at), None)
+    if found is None or found.at is None:
+        return None
+    scale = box.width / (2 * FRAME)
+    return box.x + found.at[0] * scale, box.y - found.at[1] * scale
+
+
+def _stub(point: tuple[float, float], box: Box | None) -> tuple[tuple[float, float], bool]:
+    """A short segment straight out of a pin, along whichever axis it faces.
+
+    A wire that leaves a resistor sideways and a wire that leaves it downward mean the same
+    thing to the equations and different things to a reader. Leaving along the pin's own
+    axis is what makes the drawing agree with the symbol.
+    """
+    if box is None:
+        return point, True
+    x, y = point
+    dx, dy = x - box.x, y - box.y
+    reach = box.width * 0.16
+    if abs(dx) >= abs(dy):
+        return (x + reach if dx > 0 else x - reach, y), True
+    return (x, y + reach if dy > 0 else y - reach), False
+
+
+def _route(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    source: Box | None,
+    target: Box | None,
+) -> str:
+    """An orthogonal wire: out of each pin along its own axis, then a Z between the stubs.
+
+    Two corners rather than one. A single corner has to pick an axis, and when it picks the
+    one a stub already points along, the wire doubles back over itself -- which is what a
+    reader sees as a line running past a component and stopping in mid-air.
+    """
+    a, a_horizontal = _stub(start, source)
+    b, b_horizontal = _stub(end, target)
+    if a_horizontal and b_horizontal:
+        middle = (a[0] + b[0]) / 2
+        points = [start, a, (middle, a[1]), (middle, b[1]), b, end]
+    elif not a_horizontal and not b_horizontal:
+        middle = (a[1] + b[1]) / 2
+        points = [start, a, (a[0], middle), (b[0], middle), b, end]
+    elif a_horizontal:
+        points = [start, a, (b[0], a[1]), b, end]
+    else:
+        points = [start, a, (a[0], b[1]), b, end]
+    return _path(_straighten(points))
+
+
+def _straighten(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Drop repeats, and drop any point the wire immediately turns back from.
+
+    A pin's stub points *out* of its component, which is right when the wire leaves that
+    way and wrong when the wire arrives from that side: the path then runs past the pin and
+    returns along itself, which a reader sees as a line ending in mid-air. Removing the
+    reversal is better than never stubbing, because the stub is what keeps a wire from
+    emerging out of the middle of a symbol.
+    """
+    kept: list[tuple[float, float]] = []
+    for point in points:
+        if kept and point == kept[-1]:
+            continue
+        if len(kept) >= 2:  # noqa: PLR2004 - a reversal needs two points behind it
+            (ax, ay), (bx, by) = kept[-2], kept[-1]
+            first = (bx - ax, by - ay)
+            second = (point[0] - bx, point[1] - by)
+            if first[0] * second[0] + first[1] * second[1] < 0:
+                kept.pop()
+                if kept and point == kept[-1]:
+                    continue
+        kept.append(point)
+    return kept
+
+
+def _path(points: list[tuple[float, float]]) -> str:
+    return " ".join(
+        f"{'M' if index == 0 else 'L'} {x:.1f} {y:.1f}" for index, (x, y) in enumerate(points)
+    )
 
 
 def _port_label(name: str, x: float, y: float, near: Box, far: Box) -> list[str]:
@@ -138,10 +228,60 @@ def _port_label(name: str, x: float, y: float, near: Box, far: Box) -> list[str]
     ]
 
 
+def _icon_svg(box: Box) -> list[str]:
+    """Draw a component's own icon, mapped from its -100..100 frame into the box.
+
+    The y axis flips: Modelica draws with y up and SVG with y down. Nothing here names a
+    colour -- every stroke is ``currentColor`` -- so one file reads on a light page and a
+    dark one, which an icon that hard-coded ``{0,0,0}`` could not.
+    """
+    scale = box.width / (2 * FRAME)
+
+    def at(x: float, y: float) -> tuple[float, float]:
+        return box.x + x * scale, box.y - y * scale
+
+    parts = [f'<g class="{box.node.kind} icon">']
+    for drawn in box.node.icon.shapes:
+        stroke = (
+            f' stroke-width="{max(drawn.thickness * scale, 0.6):.2f}"'
+            if not isinstance(drawn, Label)
+            else ""
+        )
+        fill = ' fill="currentColor"' if getattr(drawn, "filled", False) else ' fill="none"'
+        match drawn:
+            case Stroke(points=points, closed=closed):
+                path = " ".join(
+                    f"{'M' if index == 0 else 'L'} {x:.1f} {y:.1f}"
+                    for index, (x, y) in enumerate(at(px, py) for px, py in points)
+                )
+                parts.append(
+                    f'<path class="mark" d="{path}{" Z" if closed else ""}"{stroke}{fill} />'
+                )
+            case Disc(x=x, y=y, rx=rx, ry=ry):
+                cx, cy = at(x, y)
+                parts.append(
+                    f'<ellipse class="mark" cx="{cx:.1f}" cy="{cy:.1f}" '
+                    f'rx="{rx * scale:.1f}" ry="{ry * scale:.1f}"{stroke}{fill} />'
+                )
+            case Label(x=x, y=y, text=text, size=size):
+                tx, ty = at(x, y)
+                shown = text.replace("%name", box.node.label)
+                parts.append(
+                    f'<text class="name" x="{tx:.1f}" y="{ty + size * scale * 0.35:.1f}" '
+                    f'text-anchor="middle">{_escape(shown)}</text>'
+                )
+    if box.node.comment:
+        parts.append(f"<title>{_escape(box.node.comment)}</title>")
+    parts.append("</g>")
+    return parts
+
+
 def _box_svg(box: Box) -> list[str]:
     node = box.node
     if node.kind == "junction":
         return [f'<circle class="dot" cx="{box.x:.1f}" cy="{box.y:.1f}" r="{box.width / 2:.1f}" />']
+    if node.icon:
+        return _icon_svg(box)
     dashed = " port" if node.kind == "port" else ""
     heavy = " solve" if node.kind == "block" and node.type_name != "assignment" else ""
     parts = [

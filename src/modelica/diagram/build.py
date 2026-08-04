@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from modelica.diagram.graph import Edge, Graph, Node, Port
+from modelica.diagram.icon import placement, shapes
 from modelica.ir import nodes as ir
 from modelica.ir.flatten import FlattenError, Found, Scope, effective
 from modelica.ir.source import to_program
@@ -105,6 +106,7 @@ def _ports(found: Found, scope: Scope) -> tuple[Port, ...]:
             type_name=member.component.type_name,
             causality=_causality(_found_of(member), member.scope),
             comment=member.component.comment,
+            at=placement(member.component.annotation),
         )
         for member in _members(found, scope)
         if member.is_connector
@@ -194,6 +196,8 @@ class _Schematic:
                 ports=_ports(inner, member.scope),
                 detail=_settings(member),
                 parent=path,
+                at=placement(member.component.annotation),
+                icon=shapes(inner.cls.annotation),
             )
         )
         if expand:

@@ -111,10 +111,23 @@ def _lines(node: Node) -> tuple[str, ...]:
     return tuple(lines)
 
 
+ICON = 76.0
+"""How wide a component that draws itself is, in the picture.
+
+Square, because an icon's own frame is square and squeezing it would misdraw every
+proportion the author chose. 76 keeps a 4-unit stroke at about 1.5 px, which is a line
+rather than the grey smear a hairline becomes.
+"""
+
+
 def _sized(node: Node) -> Box:
     lines = _lines(node)
     if node.kind == "junction":
         return Box(node=node, width=JUNCTION, height=JUNCTION, lines=())
+    if node.icon:
+        # The name is part of the drawing -- an icon says where it wants it -- so the box
+        # carries no text lines of its own.
+        return Box(node=node, width=ICON, height=ICON, lines=())
     longest = max((len(line) for line in lines), default=1)
     width = max(longest * CHAR + 2 * PAD, 44.0)
     height = max(len(lines), 1) * LINE + 2 * PAD
@@ -124,6 +137,25 @@ def _sized(node: Node) -> Box:
 # --------------------------------------------------------------------------------------
 # The force layout, for schematics
 # --------------------------------------------------------------------------------------
+
+
+def _placed(boxes: dict[str, Box]) -> bool:
+    """Whether the model arranged itself. All or nothing: a half-placed model is a mess."""
+    drawn = [b for b in boxes.values() if b.node.kind == "component"]
+    return bool(drawn) and all(b.node.at is not None for b in drawn)
+
+
+def _from_model(boxes: dict[str, Box], spread: float = 1.6) -> None:
+    """Put every box where the model said, in the diagram's own -100..100 coordinates.
+
+    This is what a Modelica tool does and it is why two tools draw the same model the same
+    way. ``spread`` converts those coordinates to pixels; it is the one number here that is
+    taste rather than data.
+    """
+    for box in boxes.values():
+        if box.node.at is not None:
+            box.x, box.y = box.node.at[0] * spread, -box.node.at[1] * spread
+
 
 STEPS = 400
 """Iterations of the force layout. Enough to settle every model in the corpus."""
@@ -310,7 +342,7 @@ def place(graph: Graph) -> Layout:
         return Layout(width=2 * MARGIN, height=2 * MARGIN)
 
     if graph.kind == "schematic":
-        _force(graph, boxes)
+        _from_model(boxes) if _placed(boxes) else _force(graph, boxes)
     else:
         _layered(graph, boxes)
 

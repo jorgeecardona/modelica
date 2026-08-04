@@ -5,7 +5,28 @@ the module *is* the package -- ``Electrical.Resistor(R=100)`` reads exactly like
 Modelica it stands for.
 """
 
-from modelica.build import Connector, Model, Real, alias, der, flow, package, parameter, to_modelica
+from modelica.build import (
+    Connector,
+    Model,
+    Real,
+    alias,
+    der,
+    flow,
+    icon,
+    package,
+    parameter,
+    place,
+    shape,
+    to_modelica,
+)
+
+PIN = [(-94.0, 4.0), (-86.0, -4.0)]
+SOLID = "FillPattern.Solid"
+NAME = [(-100.0, 62.0), (100.0, 40.0)]
+PIN_LEFT = place([(-94.0, -4.0), (-86.0, 4.0)])
+PIN_RIGHT = place([(86.0, -4.0), (94.0, 4.0)])
+PIN_TOP = place([(-4.0, 86.0), (4.0, 94.0)])
+
 
 Voltage = alias("Voltage", Real, unit="V")
 Current = alias("Current", Real, unit="A")
@@ -24,8 +45,8 @@ class Pin(Connector):
 class OnePort(Model, partial=True):
     """A component with two pins carrying the same current"""
 
-    p = Pin("Positive pin")
-    n = Pin("Negative pin")
+    p = Pin("Positive pin", annotation=PIN_LEFT)
+    n = Pin("Negative pin", annotation=PIN_RIGHT)
     v = Voltage("Voltage drop from p to n")
     i = Current("Current flowing from p to n")
 
@@ -40,6 +61,27 @@ class Resistor(OnePort):
 
     R = parameter(Resistance, 1, doc="Resistance")
 
+    ICON = icon(
+        shape("Line", points=[(-90, 0), (-52, 0)]),
+        shape(
+            "Line",
+            points=[
+                (-52, 0),
+                (-42, 22),
+                (-22, -22),
+                (-2, 22),
+                (18, -22),
+                (38, 22),
+                (48, 0),
+                (52, 0),
+            ],
+        ),
+        shape("Line", points=[(52, 0), (90, 0)]),
+        shape("Ellipse", extent=PIN, fillPattern=SOLID),
+        shape("Ellipse", extent=[(86, 4), (94, -4)], fillPattern=SOLID),
+        shape("Text", extent=NAME, textString="%name"),
+    )
+
     def equations(self):
         yield self.v == self.R * self.i
 
@@ -48,6 +90,16 @@ class Capacitor(OnePort):
     """i = C*der(v) -- introduces one state, v"""
 
     C = parameter(Capacitance, 1, doc="Capacitance")
+
+    ICON = icon(
+        shape("Line", points=[(-90, 0), (-12, 0)]),
+        shape("Line", points=[(12, 0), (90, 0)]),
+        shape("Line", points=[(-12, 34), (-12, -34)]),
+        shape("Line", points=[(12, 34), (12, -34)]),
+        shape("Ellipse", extent=PIN, fillPattern=SOLID),
+        shape("Ellipse", extent=[(86, 4), (94, -4)], fillPattern=SOLID),
+        shape("Text", extent=NAME, textString="%name"),
+    )
 
     def equations(self):
         yield self.i == self.C * der(self.v)
@@ -58,6 +110,18 @@ class Inductor(OnePort):
 
     L = parameter(Inductance, 1, doc="Inductance")
 
+    ICON = icon(
+        shape("Line", points=[(-90, 0), (-60, 0)]),
+        shape("Line", points=[(-60, 0), (-60, 14), (-45, 22), (-30, 14), (-30, 0)]),
+        shape("Line", points=[(-30, 0), (-30, 14), (-15, 22), (0, 14), (0, 0)]),
+        shape("Line", points=[(0, 0), (0, 14), (15, 22), (30, 14), (30, 0)]),
+        shape("Line", points=[(30, 0), (30, 14), (45, 22), (60, 14), (60, 0)]),
+        shape("Line", points=[(60, 0), (90, 0)]),
+        shape("Ellipse", extent=PIN, fillPattern=SOLID),
+        shape("Ellipse", extent=[(86, 4), (94, -4)], fillPattern=SOLID),
+        shape("Text", extent=NAME, textString="%name"),
+    )
+
     def equations(self):
         yield self.v == self.L * der(self.i)
 
@@ -67,6 +131,18 @@ class ConstantVoltage(OnePort):
 
     V = parameter(Voltage, 1, doc="Source voltage")
 
+    ICON = icon(
+        shape("Line", points=[(-90, 0), (-30, 0)]),
+        shape("Line", points=[(30, 0), (90, 0)]),
+        shape("Ellipse", extent=[(-30, 30), (30, -30)]),
+        shape("Line", points=[(-16, 0), (-4, 0)]),
+        shape("Line", points=[(-10, -6), (-10, 6)]),
+        shape("Line", points=[(4, 0), (16, 0)]),
+        shape("Ellipse", extent=PIN, fillPattern=SOLID),
+        shape("Ellipse", extent=[(86, 4), (94, -4)], fillPattern=SOLID),
+        shape("Text", extent=NAME, textString="%name"),
+    )
+
     def equations(self):
         yield self.v == self.V
 
@@ -74,7 +150,16 @@ class ConstantVoltage(OnePort):
 class Ground(Model):
     """Reference potential; every circuit needs exactly one"""
 
-    p = Pin()
+    p = Pin(annotation=PIN_TOP)
+
+    ICON = icon(
+        shape("Line", points=[(0, 90), (0, 20)]),
+        shape("Line", points=[(-46, 20), (46, 20)]),
+        shape("Line", points=[(-28, 2), (28, 2)]),
+        shape("Line", points=[(-11, -16), (11, -16)]),
+        shape("Ellipse", extent=[(-4, 94), (4, 86)], fillPattern=SOLID),
+        shape("Text", extent=[(-100, -30), (100, -52)], textString="%name"),
+    )
 
     def equations(self):
         yield self.p.v == 0

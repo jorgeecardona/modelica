@@ -8,17 +8,21 @@ sys.path.append(str(Path(__file__).resolve().parent.parent / "library"))
 
 import Electrical
 
-from modelica.build import Model, connect, mod, to_modelica
+from modelica.build import Model, connect, mod, place, to_modelica
 
 
 class RLCCircuit(Model):
     """A series RLC circuit stepped with 1 V -- damped oscillation, two states"""
 
-    source = Electrical.ConstantVoltage(V=1)
-    r = Electrical.Resistor(R=1)
-    l = Electrical.Inductor(L=1, i=mod(start=0, fixed=True))
-    c = Electrical.Capacitor(C=1, v=mod(start=0, fixed=True))
-    ground = Electrical.Ground()
+    source = Electrical.ConstantVoltage(V=1, annotation=place([(-18, -64), (18, -28)]))
+    r = Electrical.Resistor(R=1, annotation=place([(-80, 16), (-44, 52)]))
+    l = Electrical.Inductor(
+        L=1, i=mod(start=0, fixed=True), annotation=place([(-18, 16), (18, 52)])
+    )
+    c = Electrical.Capacitor(
+        C=1, v=mod(start=0, fixed=True), annotation=place([(44, 16), (80, 52)])
+    )
+    ground = Electrical.Ground(annotation=place([(-18, -114), (18, -78)]))
 
     def equations(self):
         yield connect(self.source.p, self.r.p)

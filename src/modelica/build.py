@@ -89,6 +89,7 @@ __all__ = [
     "exp",
     "flow",
     "for_",
+    "icon",
     "if_",
     "input_",
     "log",
@@ -98,10 +99,12 @@ __all__ = [
     "output",
     "package",
     "parameter",
+    "place",
     "pre",
     "range_",
     "ref",
     "reinit",
+    "shape",
     "sign",
     "sin",
     "sqrt",
@@ -418,6 +421,55 @@ def mod(**attributes: object) -> Modifier:
 
 
 # --------------------------------------------------------------------------------------
+# Graphics -- what a component looks like
+# --------------------------------------------------------------------------------------
+
+
+def _coordinates(points: Iterable[tuple[float, float]]) -> ir.Array:
+    """``{{x, y}, ...}`` -- a point list in the icon's own -100..100 frame."""
+    return ir.Array(tuple(ir.Array((_lift(x), _lift(y))) for x, y in points))
+
+
+def shape(name: str, **arguments: object) -> Expression:
+    """One graphical primitive: ``shape("Line", points=[(-90, 0), (90, 0)])``.
+
+    A thin wrapper on purpose. The Modelica graphics language has dozens of attributes and
+    they are all ordinary named arguments, so spelling them out here would be a second,
+    smaller, drifting copy of the specification. ``points`` and ``extent`` are the only ones
+    given special treatment, because a list of pairs is what a person wants to write and
+    ``{{-90, 0}, {90, 0}}`` is what Modelica reads.
+    """
+    named: list[tuple[str, ir.Expr]] = []
+    for key, value in arguments.items():
+        if key in ("points", "extent") and isinstance(value, list):
+            named.append((key, _coordinates(cast("list[tuple[float, float]]", value))))
+        elif isinstance(value, str) and key.endswith(("Pattern", "Style", "Color")):
+            # `FillPattern.Solid` is a reference, not the string "FillPattern.Solid".
+            named.append((key, ir.Ref(tuple(value.split(".")))))
+        else:
+            named.append((key, _lift(value)))
+    return Expression(ir.Call(name, (), tuple(named)))
+
+
+def place(extent: list[tuple[float, float]]) -> ir.Modification:
+    """``annotation(Placement(transformation(extent = {{...}, {...}})))``.
+
+    Where a connector sits in its owner's icon frame. Without it a diagram has to guess
+    where a wire should attach, and every tool guesses differently.
+    """
+    inner = ir.Modification(entries={"extent": ir.Modification(value=_coordinates(extent))})
+    return ir.Modification(
+        entries={"Placement": ir.Modification(entries={"transformation": inner})}
+    )
+
+
+def icon(*shapes: Expression) -> ir.Modification:
+    """``annotation(Icon(graphics = {...}))`` -- assign it to ``ICON`` in a model body."""
+    graphics = ir.Modification(value=ir.Array(tuple(s.node for s in shapes)))
+    return ir.Modification(entries={"Icon": ir.Modification(entries={"graphics": graphics})})
+
+
+# --------------------------------------------------------------------------------------
 # Declarations
 # --------------------------------------------------------------------------------------
 
@@ -439,6 +491,7 @@ class Declaration:
     connector: ir.ConnectorKind = "none"
     name: str = ""
     dimensions: tuple[ir.Expr, ...] = ()
+    annotation: ir.Modification = ir.EMPTY
 
     def __set_name__(self, owner: type, name: str) -> None:
         # The one mutation in the module, and it is unavoidable: a descriptor learns its
@@ -468,6 +521,7 @@ class Declaration:
             name=self.name,
             type_name=_qualified(self.type_ref, within),
             dimensions=self.dimensions,
+            annotation=self.annotation,
             modification=self.modification,
             variability=self.variability,
             causality=self.causality,
@@ -605,10 +659,19 @@ class _ClassMeta(type):
         super().__init__(name, bases, namespace)
 
     def __call__(  # pyright: ignore[reportIncompatibleMethodOverride]
-        cls, doc: str = "", *, shape: object = None, **modifications: object
+        cls,
+        doc: str = "",
+        *,
+        shape: object = None,
+        annotation: ir.Modification = ir.EMPTY,
+        **modifications: object,
     ) -> Declaration:
         return Declaration(
-            cls, doc=doc, modification=_modification(modifications), dimensions=_shape(shape)
+            cls,
+            doc=doc,
+            modification=_modification(modifications),
+            dimensions=_shape(shape),
+            annotation=annotation,
         )
 
 
@@ -751,6 +814,7 @@ def _class_to_ir(target: _ClassMeta, within: str) -> ir.Class:
         components=components,
         equations=_section(target, "equations"),
         initial_equations=_section(target, "initial_equations"),
+        annotation=cast("ir.Modification", own.get("ICON", ir.EMPTY)),
     )
 
 
