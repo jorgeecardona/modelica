@@ -145,7 +145,7 @@ def _placed(boxes: dict[str, Box]) -> bool:
     return bool(drawn) and all(b.node.at is not None for b in drawn)
 
 
-def _from_model(boxes: dict[str, Box], spread: float = 1.6) -> None:
+def _from_model(graph: Graph, boxes: dict[str, Box], spread: float = 1.6) -> None:
     """Put every box where the model said, in the diagram's own -100..100 coordinates.
 
     This is what a Modelica tool does and it is why two tools draw the same model the same
@@ -155,6 +155,43 @@ def _from_model(boxes: dict[str, Box], spread: float = 1.6) -> None:
     for box in boxes.values():
         if box.node.at is not None:
             box.x, box.y = box.node.at[0] * spread, -box.node.at[1] * spread
+    _junctions(graph, boxes)
+
+
+def _junctions(graph: Graph, boxes: dict[str, Box]) -> None:
+    """A junction has no place of its own, so it goes to the middle of what it joins.
+
+    The pins, not the components. A node joining three pins that all face the same way
+    belongs beside them; put it at the centre of the *boxes* instead and every wire has to
+    wrap around its own component to reach it.
+    """
+    for box in boxes.values():
+        if box.node.kind != "junction":
+            continue
+        reached = [
+            _pin_at(boxes[far], port)
+            for edge in graph.edges
+            for far, port in (
+                (edge.target, edge.target_port)
+                if edge.source == box.node.id
+                else (edge.source, edge.source_port)
+                if edge.target == box.node.id
+                else (None, ""),
+            )
+            if far is not None and far in boxes
+        ]
+        if reached:
+            box.x = sum(x for x, _ in reached) / len(reached)
+            box.y = sum(y for _, y in reached) / len(reached)
+
+
+def _pin_at(box: Box, port: str) -> tuple[float, float]:
+    """Where a connector sits on a box, or the box's middle when the model does not say."""
+    found = next((p for p in box.node.ports if p.name == port and p.at), None)
+    if found is None or found.at is None:
+        return box.x, box.y
+    scale = box.width / 200.0
+    return box.x + found.at[0] * scale, box.y - found.at[1] * scale
 
 
 STEPS = 400
@@ -342,7 +379,7 @@ def place(graph: Graph) -> Layout:
         return Layout(width=2 * MARGIN, height=2 * MARGIN)
 
     if graph.kind == "schematic":
-        _from_model(boxes) if _placed(boxes) else _force(graph, boxes)
+        _from_model(graph, boxes) if _placed(boxes) else _force(graph, boxes)
     else:
         _layered(graph, boxes)
 

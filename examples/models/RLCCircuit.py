@@ -22,7 +22,7 @@ class RLCCircuit(Model):
     c = Electrical.Capacitor(
         C=1, v=mod(start=0, fixed=True), annotation=place([(44, 16), (80, 52)])
     )
-    ground = Electrical.Ground(annotation=place([(-18, -114), (18, -78)]))
+    ground = Electrical.Ground(annotation=place([(3, -114), (39, -78)]))
 
     def equations(self):
         yield connect(self.source.p, self.r.p)
