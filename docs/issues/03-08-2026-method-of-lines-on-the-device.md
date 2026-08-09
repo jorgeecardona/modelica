@@ -6,6 +6,7 @@ owner: cute-replicant-6e76d
 filed: 2026-08-03
 blocked_by:
   - arrays-and-for-equations-are-refused
+fixed_in: 9658594
 kind: idea
 scope: L
 verify: probe
