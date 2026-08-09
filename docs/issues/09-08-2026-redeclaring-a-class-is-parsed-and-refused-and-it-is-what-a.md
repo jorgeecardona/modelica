@@ -1,9 +1,10 @@
 ---
 title: Redeclaring a class is parsed and refused, and it is what a medium package is
-status: in-progress
+status: done
 area: ir
 owner: cute-replicant-6e76d
 filed: 2026-08-09
+fixed_in: b6a76fd
 kind: story
 scope: L
 verify: test
@@ -62,3 +63,42 @@ gate on the rest. pymoca tests it as `RedeclareClass`.
 - No `inner`/`outer`. The MSL uses them together with replaceable media and they are their own
   issue.
 - No claim about reading `Modelica.Fluid`. This is necessary for it and far from sufficient.
+
+## What landed
+
+`b6a76fd`. 913 tests pass.
+
+The inferred shape was right: a per-instance type environment on `Scope`. `Scope.bindings` is
+a pair list of the names an instance has had replaced, consulted **before** the lexical chain
+— a redeclaration replaces a declaration, so it has to beat the class that declared it — and
+carried down by `inside()`, because the binding belongs to the instance and not to the class.
+`_rebind` applies them before `effective` runs, which matters: the members an `extends` brings
+in resolve their type names through it too.
+
+The observation that closes it:
+
+    a.element.R      <- `Rig` with its declared default, a resistor
+    b.element.C      <- the same `Rig`, with a capacitor redeclared into it
+
+Two instances of one class, one flat model, different classes inside. That is what a lexical
+scope cannot say and what this was for.
+
+Two scopes again, and the same way to get it wrong that the component version had. The
+replacement was written by whoever instantiated, so it resolves one level out; the
+`constrainedby` was written inside the class that owns the slot, so it resolves there. The
+first attempt got the second one backwards and failed on `Water` not being in scope where
+`P.Water` is.
+
+## Deliberately not done, found while doing it
+
+- **A package constant is still out of reach, and it is the real gate on `Modelica.Fluid`.**
+  `Media.Water.rho` in an equation does not resolve — with or without a redeclaration, so it
+  is not a gap in this feature. A dotted reference to a constant declared inside a package is
+  a lookup the flattener does not do at all. A medium package is mostly constants, so
+  redeclaring one is not yet *useful* even though it now works; the tests parameterise a
+  component's type instead, and `tests/test_redeclare_class.py` records the limit where
+  somebody will meet it. That lookup is the next issue for anyone heading toward the fluid
+  libraries.
+- No corpus entry. The Done list allowed a test-only library, and the corpus has no model
+  that wants a swappable class today — `Electrical.Probe` already covers a swappable
+  *component*, which is the shape a reader of the corpus will meet first.
