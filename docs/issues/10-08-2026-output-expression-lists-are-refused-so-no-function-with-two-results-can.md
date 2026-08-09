@@ -6,6 +6,7 @@ owner: cute-replicant-6e76d
 filed: 2026-08-10
 scope: M
 verify: test
+fixed_in: eae1a19
 kind: story
 ---
 
