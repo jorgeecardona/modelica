@@ -1,9 +1,10 @@
 ---
 title: A model with no Placement is drawn by a force layout, and a force layout knows no conventions
-status: in-progress
+status: done
 area: diagram
 owner: cute-replicant-6e76d
 filed: 2026-08-09
+fixed_in: b54ce31
 kind: bug
 scope: L
 verify: inspect
@@ -67,3 +68,45 @@ to fall back to what exists rather than to guess.
   own and to test, and `docs/architecture.md:222` already constrains what the output may say.
 - No change to `_from_model`. A model that carries placements is drawn where the modeller put
   things, which is what every Modelica tool does and is why two tools agree.
+
+## What landed
+
+`b54ce31`, on top of `7780e61` which made rotation possible. 913 tests pass.
+
+`modelica.diagram.layout._loop` places a single-cycle model on a rectangle. Which models
+take it, measured over the corpus:
+
+| layout | models |
+| --- | --- |
+| loop | `RCCircuit`, `ProbeRC`, `ProbeLC`, `PIControl` |
+| placed | `RLCCircuit` |
+| force | `BumpStop`, `DCMotor`, `MassSpringDamper`, `TwoBodyHeat`, `TwoFalls`, `TwoInertias` |
+
+`verify: inspect`, and the artifact is the built page: `site/notebooks/drawing/index.html`
+renders `RLCCircuit` as a rectangle — source vertical on the left with `+` at the top, `r`
+and `l` along the top rail, `c` vertical on the right, ground below the junction, values on
+every part. Looked at, not inferred from element counts.
+
+Three things had to be right and each was wrong once first, which is the useful part:
+
+1. **A junction is a node, not a shortcut.** Walking *through* one makes every pair of pins
+   meeting at a dot adjacent, so a ground on a three-way node comes out with degree two and
+   looks like part of the loop — and then no model is ever a simple cycle.
+2. **Which part takes the left edge** is decided by the model text: one of the two parts
+   meeting the grounded node, and of those the one declared first. Not a guess about which
+   is a source.
+3. **Which way round the loop is walked.** Current leaves a source at the terminal the
+   ground is *not* on. The other direction puts the loop's last part on the top rail and
+   crosses every wire.
+
+## Deliberately not done, found while doing it
+
+- **`MassSpringDamper` does not take the loop layout**, and its picture is fine anyway. Its
+  spring and damper are parallel between two nodes, so after the stubs are removed the cycle
+  has only two *components* in it and the guard rejects it. Two parallel parts between two
+  nodes is a real shape and a second convention — spring above, damper below, wall left, mass
+  right — and it is not this one.
+- **`DCMotor` is still poor**, and it is the honest remaining gap. It branches and it nests,
+  so it is neither a loop nor one level, and the force layout does what a force layout does.
+  Whoever takes that needs a layout for hierarchy, not for loops.
+- No orthogonal router with obstacle avoidance, as planned.
