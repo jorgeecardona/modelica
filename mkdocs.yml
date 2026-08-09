@@ -84,6 +84,7 @@ nav:
   - Home: index.md
   - Architecture: architecture.md
   - Examples: examples.md
+  - Finding where two tiers disagree: diverging.md
   - Notebooks:
       - Simulating a model: notebooks/simulating.py
       - Drawing a model: notebooks/drawing.ipynb

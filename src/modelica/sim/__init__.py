@@ -8,6 +8,7 @@ into the two verbs that matter:
 * :func:`causalize` -- flat model in, :class:`~modelica.ir.system.System` out: states and
   the blocks to evaluate, in the order to evaluate them;
 * :func:`emit` and :func:`build` -- system in, generated source and callables out;
+* :func:`diverges` -- two tiers of one model in, the first block they disagree on out;
 * :func:`simulate` -- system in, a :class:`~modelica.sim.result.Result` out.
 
 Numerics live behind the ``sim`` extra. Importing this module does not pull in SciPy;
@@ -25,6 +26,8 @@ from modelica.ir.source import flatten as flatten
 from modelica.ir.source import to_program as to_program
 from modelica.ir.system import Block as Block
 from modelica.ir.system import System as System
+from modelica.sim.compare import Divergence as Divergence
+from modelica.sim.compare import diverges as diverges
 from modelica.sim.emit import Code as Code
 from modelica.sim.emit import EmitError as EmitError
 from modelica.sim.emit import Trigger as Trigger
@@ -44,6 +47,7 @@ __all__ = [
     "Block",
     "CausalizationError",
     "Code",
+    "Divergence",
     "EmitError",
     "Event",
     "Kernel",
@@ -55,6 +59,7 @@ __all__ = [
     "View",
     "build",
     "causalize",
+    "diverges",
     "emit",
     "emit_expr",
     "flatten",

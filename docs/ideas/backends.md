@@ -33,6 +33,10 @@ there.
 * It gives **differential debugging**. When a compiled run disagrees with an interpreted
   run, step both and find the first equation where they diverge. You cannot even ask that
   question of a generated-C pipeline, because there is nothing to compare against.
+
+  Built: `modelica.sim.diverges`. It compares one state in two tiers and names the first
+  block they disagree on, with the equation and the line it was written on. See
+  [Finding where two tiers disagree](../diverging.md).
 * It runs when the compiler is absent. `pip install modelica` with no Numba still
   simulates. It is only slow.
 

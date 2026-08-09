@@ -97,8 +97,11 @@ def _unique(items: Iterable[str]) -> Iterator[str]:
 
 
 def _apply_to(equation: ir.Equal, mapping: Mapping[str, ir.Expr]) -> ir.Equal:
+    """Alias elimination, which rewrites what an equation *says* but not which one it is."""
     return ir.Equal(
-        simplify(substitute(equation.lhs, mapping)), simplify(substitute(equation.rhs, mapping))
+        simplify(substitute(equation.lhs, mapping)),
+        simplify(substitute(equation.rhs, mapping)),
+        equation.span,
     )
 
 
@@ -220,7 +223,11 @@ def _name_derivatives(node: ir.Expr, work: _Work) -> ir.Expr:
 
 
 def _named(equation: ir.Equal, work: _Work) -> ir.Equal:
-    return ir.Equal(_name_derivatives(equation.lhs, work), _name_derivatives(equation.rhs, work))
+    return ir.Equal(
+        _name_derivatives(equation.lhs, work),
+        _name_derivatives(equation.rhs, work),
+        equation.span,
+    )
 
 
 def _start(flat: FlatModel) -> _Work:
@@ -711,7 +718,10 @@ def _tear(unknowns: tuple[str, ...], equations: tuple[ir.Equal, ...]) -> Block:
         folded.append((name, value))
     left_over = tuple(equations[index] for index in sorted(unused))
     torn_equations = tuple(
-        ir.Equal(simplify(substitute(residual(equation), table)), ZERO) for equation in left_over
+        # Rewritten as a residual and folded, and still the same equation to a reader --
+        # so it keeps the span. Where it came from is what a divergence report needs.
+        ir.Equal(simplify(substitute(residual(equation), table)), ZERO, equation.span)
+        for equation in left_over
     )
     return Block(tuple(torn), torn_equations, torn=tuple(folded))
 

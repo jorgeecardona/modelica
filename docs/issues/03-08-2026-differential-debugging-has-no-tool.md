@@ -1,14 +1,14 @@
 ---
 title: Differential debugging is the argument for two tiers, and there is no tool that does it
-status: open
+status: done
 area: sim
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
+blocked_by:
+  - ir-nodes-carry-no-source-span
 kind: story
 scope: M
 verify: test
-blocked_by:
-  - ir-nodes-carry-no-source-span
 ---
 
 ## Measured
@@ -61,3 +61,78 @@ one needs this to be diagnosable when it disagrees.
 No stepping through *time*. This compares one evaluation at one state, which is where a
 divergence starts. Following a trajectory until the two runs separate is a different and larger
 tool, and it should not be attempted before the single-instant one is trusted.
+
+## What landed
+
+`modelica.sim.compare`, exported as `modelica.sim.diverges`. `tests/test_compare.py`, nine
+tests. `docs/diverging.md`, in the nav, and `docs/ideas/backends.md` now points at it instead
+of only promising it. 1054 tests pass; `mkdocs build --strict` is clean.
+
+Each Done bullet:
+
+- **The driver.** `diverges(system, left, right, *, t, y, p, w, absolute, relative)` returns
+  a `Divergence` or `None`. It carries the block index, the variables that differ, both
+  tiers' numbers, the block's equations unparsed back to Modelica, and the span.
+- **Any pair of tiers.** The two arguments are *observers* — anything with the emitted
+  `observe` signature — not two kernels. A `Kernel` passes itself; a C unit passes a ctypes
+  wrapper; an FMU will pass whatever wraps an FMU. There is a test that passes a plain
+  closure, because the interpreter is not privileged and the pairs that will matter (C
+  against interpreter, fused-step against per-block, FMU against its model) do not all
+  contain it.
+- **The planted-divergence test.** Three models, planted one block at a time, asserting the
+  driver names *that* block and no other. The second half is the hard one and is not taken on
+  trust: `_spread` counts how many blocks the wrong value actually reached, and the
+  propagation test fails if the answer is one — otherwise it would be testing an easy case
+  dressed as a hard one.
+- **The page.** `docs/diverging.md`, with the workflow, a real report, and the two "why"
+  sections: why the first block and not all of them, and why one state and not a run.
+
+### How it reads the two tiers, which was the design question
+
+Neither tier has an instrumentation hook, and one that grew one would no longer be the tier
+that ships. So nothing is instrumented. Both are asked for `observe`, which writes **every**
+variable the model has, and the block schedule attributes each variable to the block that
+computes it.
+
+That works because of a fact worth measuring rather than assuming: over the corpus, every
+name in every `Block.solved`, in every mode, is in `Code.observed` — 0 missing. The
+block-level picture is already inside a value both tiers agree to produce.
+
+### The blocker was closed and the span still did not arrive
+
+This waited on `ir-nodes-carry-no-source-span`, which landed. Measured at the start of this
+work: **0 of 86** block equations in the corpus carried a span. `ir.Equal` has the field and
+the parser fills it; every rewrite between the parser and the block dropped it.
+
+Five one-line changes, each of them a place where an equation is rewritten but is still the
+same equation to a reader:
+
+| where | what it does |
+| --- | --- |
+| `flatten.py:511` | the `for`-equation expansion |
+| `flatten.py:1339` | the prefixing walk that flattens a component's equations |
+| `causalize.py:_named` | naming derivatives |
+| `causalize.py:_apply_to` | alias elimination |
+| `causalize.py` torn residuals | rewriting a torn block as a residual |
+
+After them: **77 of 86**. The nine without one are equations nobody wrote — connection
+equations and equations index reduction differentiated — and they should not have a line.
+
+## Deliberately not done, found while doing it
+
+- **No stepping through time**, as the entry planned. `diverges` takes the state; finding the
+  instant is the caller's.
+- **A connection equation could carry the span of its `connect(...)`** and does not. That is
+  most of the remaining nine, and it is a change in `flatten`'s connection expansion rather
+  than a one-liner, because one `connect` becomes several equations.
+- **An alias divergence has no block**, and is reported with `position` of `None` rather than
+  passed over. Aliases are recovered after the schedule runs, so two tiers can agree on every
+  block and still disagree on a variable a user reads. There is a test.
+- **The comparison is over `observe`, so it is as fine-grained as the block schedule and no
+  finer.** A block that solves five variables simultaneously is named as a block; which of
+  the five equations inside it is wrong is not answered. For a 1x1 block, which is most of
+  them, the two are the same thing.
+- **Scaling a value plants nothing where the value is zero**, which at a start point is most
+  of them. `DCMotor` starts at rest, so the first version of the test multiplied `0.0` by
+  `1.001` and passed by finding no divergence at all. The planting is additive now, and the
+  reason is in the helper's docstring.

@@ -507,8 +507,8 @@ def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir
         return _substitute(inner, values)
 
     match node:
-        case ir.Equal(lhs=lhs, rhs=rhs):
-            return ir.Equal(go(lhs), go(rhs))
+        case ir.Equal(lhs=lhs, rhs=rhs, span=span):
+            return ir.Equal(go(lhs), go(rhs), span)
         case ir.Connect():
             # A connection names components, and a loop index cannot be one of them: an
             # array of connectors is indexed, which is a `Subscript` and not a bare `Ref`.
@@ -1334,9 +1334,12 @@ class _Flattener:
             raise FlattenError("only `a = b` equations may appear in initial equation")
 
         match equation:
-            case ir.Equal(lhs=lhs, rhs=rhs):
+            case ir.Equal(lhs=lhs, rhs=rhs, span=span):
                 sink = self.initial_equations if initial else self.equations
-                sink.append(ir.Equal(carry(lhs), carry(rhs)))
+                # The span rides along. Flattening rewrites *names*, so the equation a block
+                # holds is still the one the modeller wrote, and saying where it was written
+                # is the difference between "block 7" and a line a reader can open.
+                sink.append(ir.Equal(carry(lhs), carry(rhs), span))
             case ir.Connect(a=a, b=b):
                 self.connections.join(
                     self._endpoint(a, prefix, local), self._endpoint(b, prefix, local)
