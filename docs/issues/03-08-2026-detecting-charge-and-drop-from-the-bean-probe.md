@@ -6,6 +6,7 @@ owner: cute-replicant-6e76d
 filed: 2026-08-03
 blocked_by:
   - no-output-jacobian
+fixed_in: dd4d769
 kind: idea
 scope: L
 verify: probe
