@@ -264,6 +264,8 @@ def _component(component: ir.Component) -> str:
         prefix += f"{component.variability} "
     elif component.variability == "discrete":
         prefix += "discrete "
+    if component.scoping != "none":
+        prefix += f"{component.scoping} "
     if component.connector != "none":
         prefix += f"{component.connector} "
     if component.causality != "none":

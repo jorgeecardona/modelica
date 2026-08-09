@@ -1,0 +1,51 @@
+summary = "Two bodies in free fall from different heights, reaching one shared gravity through inner/outer rather than through a wire."
+teaches = ["inner/outer", "a shared environment", "equal acceleration"]
+requires = ["Translational"]
+
+[parse]
+classes = ["TwoFalls"]
+
+[flatten]
+model = "TwoFalls"
+# Four states and *one* gravity. `environment.g` appears once even though two bodies read
+# it: an `outer` declares nothing, so there is no `high.environment` to be found here. That
+# absence is the whole feature, and this list is where it is checked.
+states = ["high.s", "high.v", "low.s", "low.v"]
+index = 1
+balanced = true
+
+# s(t) = s0 - g*t^2/2 with g = 9.81, exactly.
+[simulate]
+stop = 4.0
+tolerance = 1e-11
+
+[[simulate.point]]
+t = 1.0
+values = { "high.s" = 95.095, "low.s" = 15.095, "high.v" = -9.81 }
+rtol = 1e-9
+source = "analytic"
+
+[[simulate.point]]
+t = 2.0
+values = { "high.s" = 80.38, "low.s" = 0.38, "high.v" = -19.62 }
+rtol = 1e-9
+source = "analytic"
+
+[[simulate.point]]
+t = 4.0
+values = { "high.s" = 21.52, "low.s" = -58.48, "high.v" = -39.24 }
+rtol = 1e-9
+source = "analytic"
+
+# The physical point, and the check that both bodies really did read the same number:
+# equal acceleration means the distance between them never changes.
+[[simulate.invariant]]
+expr = "gap"
+value = 80.0
+atol = 1e-9
+
+# Both fall; neither rises.
+[[simulate.invariant]]
+expr = "high.v"
+min = -39.24
+max = 0.0

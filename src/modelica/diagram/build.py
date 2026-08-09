@@ -74,8 +74,18 @@ class _Drawn:
 
 
 def _members(found: Found, scope: Scope) -> Iterator[_Drawn]:
-    """Every component of ``found``, with the ``extends`` chain already folded in."""
+    """Every component of ``found``, with the ``extends`` chain already folded in.
+
+    An ``outer`` component is skipped, and that is the one exclusion. It declares nothing:
+    it is a name for a declaration further out, and :mod:`modelica.ir.flatten` resolves
+    every reference to it back to the matching ``inner``. Drawing it would put a box in the
+    picture for an instance the flattener never creates -- the same class in three places
+    would show three environments where the model has one -- which is precisely the way
+    ``docs/architecture.md:217`` says a diagram starts lying about its model.
+    """
     for name, member in effective(found, scope).members.items():
+        if member.component.scoping == "outer":
+            continue
         resolved = member.scope.resolve(member.component.type_name)
         cls = resolved.cls if isinstance(resolved, Found) else None
         yield _Drawn(name, member.component, member.scope, cls)

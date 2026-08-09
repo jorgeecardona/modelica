@@ -274,9 +274,24 @@ def _base_of(found: Found | BaseType, scope: Scope) -> tuple[BaseType, ir.Modifi
 
 
 def _prefix_ref(
-    ref: ir.Ref, prefix: _Path, local: frozenset[str], *, strict: bool = True
+    ref: ir.Ref,
+    prefix: _Path,
+    local: frozenset[str],
+    *,
+    strict: bool = True,
+    outer: Mapping[str, _Path] | None = None,
 ) -> ir.Ref:
-    if ref.parts[0] in local:
+    """The flat name of a written one: qualified by the instance path that holds it.
+
+    ``outer`` is checked first and is the exception to the rule. An ``outer`` component is
+    a *name* for a declaration somewhere further out, so it does not take this instance's
+    prefix -- it takes the path the matching ``inner`` was declared at, whole. Checking it
+    after ``local`` would qualify it into a variable that no declaration ever created.
+    """
+    head = ref.parts[0]
+    if outer and head in outer:
+        return ir.Ref((*outer[head], *ref.parts[1:]))
+    if head in local:
         return ir.Ref((*prefix, *ref.parts))
     if ref.parts == ("time",) or not strict:
         return ref
@@ -347,20 +362,21 @@ def _integer(node: ir.Expr, values: Mapping[str, float], what: str) -> int:
     return int(value)
 
 
-def _prefix_expr(  # noqa: PLR0911 -- one case per node type
+def _prefix_expr(  # noqa: PLR0911, PLR0913 -- one case per node type, one flag per rule
     node: ir.Expr,
     prefix: _Path,
     local: frozenset[str],
     *,
     strict: bool = True,
     values: Mapping[str, float] | None = None,
+    outer: Mapping[str, _Path] | None = None,
 ) -> ir.Expr:
     def go(inner: ir.Expr) -> ir.Expr:
-        return _prefix_expr(inner, prefix, local, strict=strict, values=values)
+        return _prefix_expr(inner, prefix, local, strict=strict, values=values, outer=outer)
 
     match node:
         case ir.Ref():
-            return _prefix_ref(node, prefix, local, strict=strict)
+            return _prefix_ref(node, prefix, local, strict=strict, outer=outer)
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             return ir.Binary(op, go(lhs), go(rhs))
         case ir.Unary(op=op, operand=operand):
@@ -375,7 +391,7 @@ def _prefix_expr(  # noqa: PLR0911 -- one case per node type
             # name, never an index -- which is the whole point of scalarising here.
             if values is None:
                 raise FlattenError("subscripted references are not expanded here")
-            path = _prefix_ref(base, prefix, local, strict=strict).parts
+            path = _prefix_ref(base, prefix, local, strict=strict, outer=outer).parts
             resolved = [_integer(go(i), values, f"the subscript of {base.name!r}") for i in indices]
             return ir.Ref((*path[:-1], element(path[-1], resolved)))
         case ir.Range():
@@ -969,16 +985,20 @@ class _Flattener:
 
     # -- components -------------------------------------------------------------------
 
-    def instantiate(
+    def instantiate(  # noqa: C901, PLR0913, PLR0917 -- one pass over one class, and the
+        # `inner` declarations it can see have to travel with it: they are a property of
+        # where the instance *sits*, which no other argument carries.
         self,
         found: Found,
         scope: Scope,
         prefix: _Path,
         outer: ir.Modification,
         floor: ir.Variability,
+        inners: Mapping[str, _Path] | None = None,
     ) -> None:
         merged = effective(found, scope)
         local = frozenset(merged.members)
+        visible, resolved_outer = self._scoping(merged, prefix, inners or {})
         if outer.value is not None:
             raise FlattenError(f"{'.'.join(prefix)}: a composite component cannot have a value")
         inner = scope.inside(found)
@@ -996,6 +1016,10 @@ class _Flattener:
                 )
             raise FlattenError(f"{found.cls.name} has no component {name!r} to redeclare")
         for name, member in merged.members.items():
+            if member.component.scoping == "outer":
+                # An `outer` declares nothing. It named something further out, `_scoping`
+                # found what, and every reference to it now resolves there instead.
+                continue
             self._component(
                 member,
                 (*prefix, name),
@@ -1003,14 +1027,45 @@ class _Flattener:
                 floor,
                 local,
                 writer=scope,
+                inners=visible,
             )
         for equation in merged.equations:
-            self._equation(equation, prefix, local, scope=inner)
+            self._equation(equation, prefix, local, scope=inner, outer=resolved_outer)
         for equation in merged.initial_equations:
-            self._equation(equation, prefix, local, scope=inner, initial=True)
+            self._equation(
+                equation, prefix, local, scope=inner, outer=resolved_outer, initial=True
+            )
         for section in found.cls.algorithms:
             for equation in _section_equations(section, found.cls.name):
-                self._equation(equation, prefix, local, scope=inner)
+                self._equation(equation, prefix, local, scope=inner, outer=resolved_outer)
+
+    def _scoping(
+        self, merged: Effective, prefix: _Path, inherited: Mapping[str, _Path]
+    ) -> tuple[dict[str, _Path], dict[str, _Path]]:
+        """What this instance publishes as ``inner``, and where its ``outer`` names point.
+
+        The two are computed together and in this order because a class may declare an
+        ``inner`` and use an ``outer`` of a *different* name in the same body, and because
+        an ``inner`` declared here shadows one further out for everything below it. Nothing
+        binds an ``outer`` to an ``inner`` in the same class -- that is what `inner outer`
+        is for, and it is refused in the parser.
+        """
+        visible = dict(inherited)
+        for name, member in merged.members.items():
+            if member.component.scoping == "inner":
+                visible[name] = (*prefix, name)
+        resolved: dict[str, _Path] = {}
+        for name, member in merged.members.items():
+            if member.component.scoping != "outer":
+                continue
+            target = inherited.get(name)
+            if target is None:
+                raise FlattenError(
+                    f"{'.'.join((*prefix, name))} is `outer` and no enclosing class declares"
+                    f" an `inner {name}`"
+                )
+            resolved[name] = target
+        return visible, resolved
 
     def _component(  # noqa: PLR0913 -- the writer's scope is what resolves a redeclaration
         self,
@@ -1021,13 +1076,14 @@ class _Flattener:
         local: frozenset[str],
         *,
         writer: Scope,
+        inners: Mapping[str, _Path] | None = None,
     ) -> None:
         if outer.redeclare is not None:
             member = _redeclared(member, outer, writer, path)
             outer = replace(outer, redeclare=None)
         component = member.component
         if component.dimensions:
-            self._array(member, path, outer, floor, local, writer=writer)
+            self._array(member, path, outer, floor, local, writer=writer, inners=inners)
             return
         # `outer` arrived from the enclosing class and was prefixed there. These two were
         # written *here*, so they are prefixed here, against the path of the class that
@@ -1042,7 +1098,7 @@ class _Flattener:
         if isinstance(resolved, Found) and resolved.cls.restriction != "type":
             if resolved.cls.restriction == "connector":
                 self.connectors[path] = resolved
-            self.instantiate(resolved, member.scope, path, total, variability)
+            self.instantiate(resolved, member.scope, path, total, variability, inners)
             return
         base, attributes = _base_of(resolved, member.scope)
         self._leaf(component, path, _merge(attributes, total), base, variability)
@@ -1056,6 +1112,7 @@ class _Flattener:
         local: frozenset[str],
         *,
         writer: Scope,
+        inners: Mapping[str, _Path] | None = None,
     ) -> None:
         """``Real T[n]`` becomes ``T[1] ... T[n]``, and nothing below sees a shape.
 
@@ -1090,6 +1147,7 @@ class _Flattener:
                 floor,
                 local,
                 writer=writer,
+                inners=inners,
             )
 
     def _leaf(
@@ -1142,13 +1200,14 @@ class _Flattener:
 
     # -- equations --------------------------------------------------------------------
 
-    def _equation(
+    def _equation(  # noqa: PLR0913 -- the scope resolves a call, the outer map a name
         self,
         equation: ir.Equation,
         prefix: _Path,
         local: frozenset[str],
         *,
         scope: Scope,
+        outer: Mapping[str, _Path] | None = None,
         initial: bool = False,
     ) -> None:
         def carry(node: ir.Expr) -> ir.Expr:
@@ -1159,7 +1218,7 @@ class _Flattener:
             # which is exactly what prefixing then qualifies.
             written = _literals(node, scope, local)
             return _prefix_expr(
-                _inline_calls(written, scope), prefix, local, values=self.values
+                _inline_calls(written, scope), prefix, local, values=self.values, outer=outer
             )
 
         if initial and not isinstance(equation, (ir.Equal, ir.ForEquation)):
@@ -1188,15 +1247,16 @@ class _Flattener:
             case ir.IfEquation():
                 raise FlattenError("if-equations are not supported yet")
             case ir.ForEquation():
-                self._unroll(equation, prefix, local, scope=scope, initial=initial)
+                self._unroll(equation, prefix, local, scope=scope, outer=outer, initial=initial)
 
-    def _unroll(
+    def _unroll(  # noqa: PLR0913 -- everything `_equation` needs, plus the loop
         self,
         loop: ir.ForEquation,
         prefix: _Path,
         local: frozenset[str],
         *,
         scope: Scope,
+        outer: Mapping[str, _Path] | None = None,
         initial: bool = False,
     ) -> None:
         """Write the body once per value of the index, with the index a literal.
@@ -1230,6 +1290,7 @@ class _Flattener:
                     prefix,
                     local,
                     scope=scope,
+                    outer=outer,
                     initial=initial,
                 )
 

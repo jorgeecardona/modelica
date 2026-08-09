@@ -55,6 +55,7 @@ _VARIABILITY: Final[dict[str, ir.Variability]] = {
 }
 _CAUSALITY: Final[dict[str, ir.Causality]] = {"input": "input", "output": "output"}
 _CONNECTOR: Final[dict[str, ir.ConnectorKind]] = {"flow": "flow", "stream": "stream"}
+_SCOPING: Final[dict[str, ir.Scoping]] = {"inner": "inner", "outer": "outer"}
 
 # Infix operators, spelled the way the IR spells them. The levels come from the shared
 # table; this map exists only so the operator reaches `ir.Binary` as a literal type.
@@ -89,9 +90,7 @@ _CLOSE: Final = frozenset(")]}")
 # Said plainly and early, rather than misparsed and blamed on the solver later.
 _UNSUPPORTED: Final[dict[str, str]] = {
     "external": "external functions are not supported yet",
-    "inner": "'inner'/'outer' elements are not supported yet",
     "operator": "operator overloading is not supported yet",
-    "outer": "'inner'/'outer' elements are not supported yet",
 }
 
 # Keywords that end a list of statements. The same set as `_SECTION_END` plus the words
@@ -772,6 +771,7 @@ class _Parser:
         variability: ir.Variability = "continuous"
         causality: ir.Causality = "none"
         connector: ir.ConnectorKind = "none"
+        scoping: ir.Scoping = "none"
         while (token := self.token).kind is Kind.KEYWORD:
             if token.text in _VARIABILITY:
                 variability = _VARIABILITY[token.text]
@@ -779,6 +779,12 @@ class _Parser:
                 causality = _CAUSALITY[token.text]
             elif token.text in _CONNECTOR:
                 connector = _CONNECTOR[token.text]
+            elif token.text in _SCOPING:
+                if scoping != "none":
+                    # `inner outer` declares one *and* refers to another, which is a third
+                    # rule rather than the two together. Refused rather than half-read.
+                    raise self._error("'inner outer' is not supported yet")
+                scoping = _SCOPING[token.text]
             else:
                 break
             self.at += 1
@@ -803,6 +809,7 @@ class _Parser:
                     variability=variability,
                     causality=causality,
                     connector=connector,
+                    scoping=scoping,
                     replaceable=replaceable,
                     constraining=constraining,
                     comment=self._string_comment(),

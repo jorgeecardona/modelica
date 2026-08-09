@@ -116,6 +116,9 @@ from modelica.ir.nodes import (
     Return as Return,
 )
 from modelica.ir.nodes import (
+    Scoping as Scoping,
+)
+from modelica.ir.nodes import (
     Statement as Statement,
 )
 from modelica.ir.nodes import (
@@ -180,6 +183,7 @@ __all__ = [
     "Reinit",
     "Restriction",
     "Return",
+    "Scoping",
     "Statement",
     "StatementBranch",
     "StringLiteral",

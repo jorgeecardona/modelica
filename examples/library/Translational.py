@@ -12,6 +12,7 @@ from modelica.build import (
     flow,
     if_statement,
     input_,
+    outer,
     output,
     package,
     parameter,
@@ -119,6 +120,24 @@ class Stop(Compliant):
 
     def equations(self):
         yield self.f == call("contactForce", self.s_rel, self.gap, self.k)
+
+
+class Environment(Model):
+    """One gravity, shared by every body in the scene"""
+
+    g = parameter(Acceleration, 9.81, doc="Gravity, positive downward")
+
+
+class FallingBody(Model):
+    """A point mass in free fall, asking the scene how hard gravity pulls"""
+
+    environment = outer(Environment())
+    s = Position("Height above the datum")
+    v = Velocity()
+
+    def equations(self):
+        yield self.v == der(self.s)
+        yield der(self.v) == -self.environment.g
 
 
 class Fixed(Model):

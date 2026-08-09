@@ -99,11 +99,13 @@ __all__ = [
     "if_",
     "if_statement",
     "import_",
+    "inner",
     "input_",
     "log",
     "mod",
     "no_event",
     "not_equal",
+    "outer",
     "output",
     "package",
     "parameter",
@@ -498,6 +500,20 @@ def _shape(shape: object) -> tuple[ir.Expr, ...]:
     return tuple(_lift(d) for d in dimensions)
 
 
+def inner(declaration: Declaration) -> Declaration:
+    """``inner Environment environment;`` -- the one every ``outer`` below this will find."""
+    return replace(declaration, scoping="inner")
+
+
+def outer(declaration: Declaration) -> Declaration:
+    """``outer Environment environment;`` -- a name for the ``inner`` further out.
+
+    Declares nothing. The declaration handed in supplies only the *type*, which is what
+    Modelica asks for and what the match is checked against.
+    """
+    return replace(declaration, scoping="outer")
+
+
 def replaceable(declaration: Declaration, constrainedby: TypeRef | None = None) -> Declaration:
     """Offer this component's class as a slot: ``replaceable Resistor e constrainedby OnePort``.
 
@@ -598,6 +614,7 @@ class Declaration:
     name: str = ""
     dimensions: tuple[ir.Expr, ...] = ()
     annotation: ir.Modification = ir.EMPTY
+    scoping: ir.Scoping = "none"
     replaceable: bool = False
     constrainedby: TypeRef | None = None
     """Held as the class itself, not as its name, because a name depends on who is asking.
@@ -640,6 +657,7 @@ class Declaration:
             variability=self.variability,
             causality=self.causality,
             connector=self.connector,
+            scoping=self.scoping,
             replaceable=self.replaceable,
             constraining=(
                 "" if self.constrainedby is None else _qualified(self.constrainedby, within)

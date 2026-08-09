@@ -83,6 +83,19 @@ package Translational "Minimal 1-D translational mechanics, after Modelica.Mecha
     f = contactForce(s_rel, gap, k);
   end Stop;
 
+  model Environment "One gravity, shared by every body in the scene"
+    parameter Acceleration g = 9.81 "Gravity, positive downward";
+  end Environment;
+
+  model FallingBody "A point mass in free fall, asking the scene how hard gravity pulls"
+    outer Environment environment;
+    Position s "Height above the datum";
+    Velocity v;
+  equation
+    v = der(s);
+    der(v) = -environment.g;
+  end FallingBody;
+
   model Fixed "Immovable ground point"
     parameter Position s0 = 0 "Position it is fixed at";
     Flange flange;

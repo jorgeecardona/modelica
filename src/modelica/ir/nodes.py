@@ -59,6 +59,7 @@ __all__ = [
     "Reinit",
     "Restriction",
     "Return",
+    "Scoping",
     "Statement",
     "StatementBranch",
     "StringLiteral",
@@ -399,6 +400,7 @@ type Equation = Equal | Connect | When | IfEquation | ForEquation
 
 type Variability = Literal["continuous", "discrete", "parameter", "constant"]
 type Causality = Literal["none", "input", "output"]
+type Scoping = Literal["none", "inner", "outer"]
 type ConnectorKind = Literal["none", "flow", "stream"]
 type Restriction = Literal["model", "connector", "package", "record", "block", "type", "function"]
 
@@ -413,6 +415,13 @@ class Component:
     variability: Variability = "continuous"
     causality: Causality = "none"
     connector: ConnectorKind = "none"
+    scoping: Scoping = "none"
+    """``inner`` declares the one everybody shares; ``outer`` refers to it.
+
+    An ``outer`` component declares no variable of its own. It is a *name* for a declaration
+    further out -- the ``World`` object, the ambient conditions -- and flattening resolves it
+    to the nearest enclosing ``inner`` of the same name.
+    """
     comment: str = ""
     annotation: Modification = EMPTY
     """Where the component sits in the enclosing diagram: ``Placement(transformation(...))``."""
