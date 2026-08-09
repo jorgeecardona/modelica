@@ -164,6 +164,39 @@ def test_the_c_indicators_answer_what_the_python_ones_answer(model: Path, tmp_pa
 
 
 @needs_cc
+@pytest.mark.parametrize("model", MODELS, ids=[m.stem for m in MODELS])
+def test_the_c_transition_answers_what_the_python_one_answers(model: Path, tmp_path: Path) -> None:
+    """Every event of every model, taken from the start point, compared state by state.
+
+    Taking an event the model is not actually at is the point rather than a flaw: the
+    function is a pure map from (event, state) to a new state, and the two implementations
+    have to agree on it everywhere, not only where the solver would call it.
+    """
+    numpy = pytest.importorskip("numpy")
+    build = pytest.importorskip("modelica.sim.kernel").build
+    system = _system(model)
+    kernel = build(system)
+    if not kernel.code.events:
+        pytest.skip(f"{model.stem} has no events")
+    library = _library(system, tmp_path)
+    for event in range(len(kernel.code.events)):
+        parameters, states, workspace = kernel.start(0.0)
+        wanted = numpy.zeros(len(states))
+        kernel.transition(event, 0.0, states, parameters, workspace, wanted)
+        parameters, states, workspace = kernel.start(0.0)
+        found = numpy.zeros(len(states))
+        library.transition(
+            ctypes.c_int(event),
+            ctypes.c_double(0.0),
+            states.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            parameters.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            workspace.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            found.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        )
+        assert found == pytest.approx(wanted, rel=1e-12, abs=1e-12), f"event {event}"
+
+
+@needs_cc
 def test_the_c_observation_answers_what_the_python_one_answers(tmp_path: Path) -> None:
     """One model is enough for `observe`: it is `rhs` plus the aliases, in the same order.
 

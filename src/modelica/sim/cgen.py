@@ -52,7 +52,7 @@ argument it reads from.
 """
 
 
-FUNCTIONS: Final = ("rhs", "observe", "indicators")
+FUNCTIONS: Final = ("rhs", "observe", "indicators", "transition")
 """The entry points a generated unit defines, in the order this module writes them."""
 
 
@@ -160,15 +160,38 @@ def _function(name: str, arguments: str, body: list[str], candidates: list[str])
     return [
         f"void {name}({arguments}) {{",
         *(f"    double {local};" for local in used),
-        *(f"    {line};" for line in body),
+        *(f"    {_ended(line)}" for line in body),
         "}",
         "",
     ]
 
 
+def _ended(line: str) -> str:
+    """A statement takes a semicolon; a brace does not.
+
+    ``if (event == 0) {;`` and ``};`` are both legal C -- an empty statement is a statement --
+    which is why the stray punctuation was invisible until somebody read the output.
+    Generated code is read when something has gone wrong, and that is the worst moment to be
+    explaining it.
+
+    A closing brace is not enough to go on, though, and the first attempt at this rule broke
+    the build: ``double _b[2] = {0}`` ends in a brace and is a declaration that very much
+    needs its semicolon. So the test is what the line *is* -- an opening brace, a bare
+    closing one, or one of the two braced forms this module writes -- and not what it ends
+    with.
+    """
+    text = line.strip()
+    block = (
+        text.endswith("{")
+        or text == "}"
+        or (text.endswith("}") and text.startswith(("if (", "for (")))
+    )
+    return line if block or text.endswith(";") else f"{line};"
+
+
 def _bodies(
     emitter: Emitter, system: System, mode: Mode, position: int
-) -> tuple[list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str], list[str]]:
     """Each entry point for one state set, pruned to what it actually reads."""
     rhs_rest = [
         *_blocks(emitter, mode),
@@ -201,10 +224,30 @@ def _bodies(
             for k, event in enumerate(events)
         ),
     ]
+    slots = {name: slot for slot, name in enumerate(mode.states)}
+    transition_rest: list[str] = [
+        *(_blocks(emitter, mode) if events else []),
+        # `out[:] = y` in Python. Written out because C has no slice assignment, and written
+        # *before* the branches because an event that reinitialises one state must leave the
+        # others exactly where they were.
+        *(f"out[{slot}] = y[{slot}]" for slot in range(len(mode.states))),
+    ]
+    for k, event in enumerate(events):
+        taken = [emitter.statement(statement, slots) for statement in event.body]
+        if event.latch is not None:
+            taken.append(f"    w[{event.latch}] = 1.0 - w[{event.latch}]")
+        moving = event.trigger.switch
+        if moving is not None and event.origin == position:
+            taken.extend(emitter.rebase(system.modes[moving]))
+            taken.append(f"    w[{emitter.switching}] = {float(moving)}")
+        transition_rest.append(f"if (event == {k}) {{")
+        transition_rest.extend(taken)
+        transition_rest.append("}")
     return (
         _live([*emitter.unpack(mode), *rhs_rest]),
         _live([*emitter.unpack(mode), *observe_rest]),
         _live([*emitter.unpack(mode), *indicator_rest]),
+        _live([*emitter.unpack(mode), *transition_rest]),
     )
 
 
@@ -247,8 +290,16 @@ def unit(system: System) -> str:
         "rhs": "double t, const double *y, const double *p, double *w, double *dy",
         "observe": "double t, const double *y, const double *p, double *w, double *out",
         "indicators": "double t, const double *y, const double *p, double *w, double *z",
+        "transition": (
+            "int event, double t, const double *y, const double *p, double *w, double *out"
+        ),
     }
-    calls = {"rhs": "t, y, p, w, dy", "observe": "t, y, p, w, out", "indicators": "t, y, p, w, z"}
+    calls = {
+        "rhs": "t, y, p, w, dy",
+        "observe": "t, y, p, w, out",
+        "indicators": "t, y, p, w, z",
+        "transition": "event, t, y, p, w, out",
+    }
 
     written: list[str] = []
     for position, name in enumerate(FUNCTIONS):
