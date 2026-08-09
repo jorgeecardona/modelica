@@ -105,7 +105,7 @@ if TYPE_CHECKING:
     from modelica.ir.flat import FlatVariable
     from modelica.ir.system import Block, Mode, System
 
-__all__ = ["HELD", "Code", "EmitError", "Trigger", "emit"]
+__all__ = ["HELD", "Code", "EmitError", "Emitter", "Trigger", "emit"]
 
 _ITERATIONS: Final = 50
 """Newton iterations before an implicit block gives up and returns what it has."""
@@ -262,7 +262,7 @@ def _render(  # noqa: C901, PLR0911, PLR0912 - one case per node type, two of th
         case ir.RealLiteral(value=value):
             return _real(value)
         case ir.IntLiteral(value=value):
-            return str(value)
+            return dialect.integer(value)
         case ir.BoolLiteral(value=value):
             return dialect.true if value else dialect.false
         case ir.StringLiteral(value=value):
@@ -568,7 +568,10 @@ def _function(name: str, arguments: str, body: Iterable[str]) -> str:
 
 
 @dataclass
-class _Emitter:
+class Emitter:
+    # Public since the C backend arrived. It was `_Emitter` while one module used it, and
+    # renaming it is the honest half of that change: a second dialect asks it for the same
+    # lines, and a leading underscore would have said the opposite.
     system: System
     symbols: dict[str, str] = field(default_factory=dict[str, str])
     slots: dict[str, int] = field(default_factory=dict[str, int])
@@ -591,6 +594,9 @@ class _Emitter:
 
     prefix: str = "_s"
     """What a named subexpression is called, chosen so it cannot collide with a variable."""
+
+    dialect: Dialect = PYTHON
+    """Which language the expressions come out in. The *decisions* are the same either way."""
 
     def __post_init__(self) -> None:
         self.observed = (
@@ -633,7 +639,7 @@ class _Emitter:
             self.collecting.append(node)
         if self.shared:
             node = substituted(node, self.shared)
-        return emit_expr(node, self.symbols, minimum=minimum)
+        return emit_expr(node, self.symbols, minimum=minimum, dialect=self.dialect)
 
     def sharing(self, body: Callable[[], list[str]]) -> list[str]:
         """Emit ``body`` with every twice-written subexpression named once.
@@ -1203,4 +1209,4 @@ class _Emitter:
 
 def emit(system: System) -> Code:
     """Write ``system`` out as a Python module, ready to be compiled."""
-    return _Emitter(system).code()
+    return Emitter(system).code()

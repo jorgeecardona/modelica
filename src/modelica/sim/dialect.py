@@ -71,6 +71,16 @@ class Dialect:
     """``^`` when it is a call rather than an operator. ``None`` to use :attr:`binary`."""
     truncate: str = "np.trunc"
     """The function Modelica's integer division rounds with."""
+    integer: Callable[[int], str] = str
+    """How a whole number is written, which is not a formatting question in C.
+
+    Modelica's ``/`` is always real division. C's ``/`` on two ints is integer division, so
+    ``burner / 100`` with a literal ``100`` and an int-valued expression computes zero and
+    compiles without a word. Every value in the generated workspace is a ``double`` anyway,
+    so the C dialect writes whole numbers with a decimal point and the question does not
+    arise. Found by `RoastingMachine`, whose gas schedule is a chain of whole percentages
+    divided by a hundred, and which came out 23% wrong rather than failing.
+    """
     preamble: tuple[str, ...] = ()
     """Lines a translation unit needs before anything this dialect emits will compile."""
     clarify: Mapping[str, frozenset[str]] = field(
@@ -207,6 +217,7 @@ C: Final = Dialect(
     negation="!",
     conditional=lambda condition, then, otherwise: f"{condition} ? {then} : {otherwise}",
     negation_level=SIGN,
+    integer=lambda value: f"{value}.0",
     power=lambda base, exponent: f"pow({base}, {exponent})",
     truncate="trunc",
     preamble=C_PREAMBLE,
