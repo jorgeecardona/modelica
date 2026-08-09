@@ -1,9 +1,10 @@
 ---
 title: `algorithm` sections are refused, and with them `while`, `break` and `return`
-status: in-progress
+status: done
 area: lang
 owner: cute-replicant-6e76d
 filed: 2026-08-03
+fixed_in: 8fe9bbe
 kind: story
 scope: L
 verify: test
@@ -62,3 +63,37 @@ here has yet needed it.
   Keeping it in `_UNSUPPORTED` when the other four leave is deliberate, and this note is why.
 - No attempt to differentiate through a statement sequence. A model whose derivative depends
   on an algorithm section should say so and fall back, loudly, not silently.
+
+## What landed, and the Done bullet that was refused instead
+
+Four commits: `dbf0599` the language, `2193a9c` the function inliner, `f5f78b2` the corpus
+model, `8fe9bbe` sections in a model. 721 tests pass.
+
+**The third Done bullet was not built, and this is the reason.** It asked `modelica.ir.causalize`
+to treat a section as one node matching all of its outputs, with the grouping recorded in the
+incidence structure. What was built instead is *symbolic execution at flatten time*: a section
+becomes one equation per variable it assigns, and a call to a `function` becomes the expression
+its body computes. Straight-line assignment is substitution; an `if` is a merge, each arm run
+against its own copy and the disagreements becoming an `ir.IfExpr` over the branch conditions.
+
+The argument for the change is this issue's own Inferred section, point 2. A section carried
+down to causalization as a node is a node `modelica.ir.derive` cannot differentiate, so any
+model whose state derivative passed through one would lose its analytic Jacobian and fall back
+to difference quotients — which `docs/architecture.md:120` says this compiler does not do, and
+which the last "deliberately not done" above forbids doing silently. Converting at flatten time
+means the node never exists: causalization, the BLT sort, the differentiator and the emitter all
+meet ordinary expressions, and `emit` needed no control flow at all.
+
+The price is the subset, and it is stated where it is enforced rather than here. `for`, `while`,
+`break` and `return` cannot become expressions and are refused by name, in the words the modeller
+wrote. A grouped node is what would be needed to accept them, so if a model in this corpus ever
+needs a loop in a section, that bullet comes back as its own issue with a real instance behind
+it — which it does not have today.
+
+One refusal was added that the issue did not anticipate: `y := y + 1`, where the same section
+assigns `y`, reads a value that does not exist. A continuous variable has no previous value.
+Emitted literally it is `y = y + 1`, which has no solution and which the solver would be blamed
+for.
+
+`external` stayed refused as planned, so four entries left `_UNSUPPORTED`, not five. The Done
+bullet says five and the note above it says why one stays; the note is the correct half.
