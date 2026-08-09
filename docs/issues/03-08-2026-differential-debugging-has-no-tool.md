@@ -6,6 +6,7 @@ owner: cute-replicant-6e76d
 filed: 2026-08-03
 blocked_by:
   - ir-nodes-carry-no-source-span
+fixed_in: 608a185
 kind: story
 scope: M
 verify: test
