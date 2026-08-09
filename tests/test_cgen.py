@@ -135,6 +135,35 @@ def test_the_c_right_hand_side_answers_what_the_python_one_answers(
 
 
 @needs_cc
+@pytest.mark.parametrize("model", MODELS, ids=[m.stem for m in MODELS])
+def test_the_c_indicators_answer_what_the_python_ones_answer(model: Path, tmp_path: Path) -> None:
+    """Every zero-crossing function, at the model's start point.
+
+    A model with no events has an empty array and the check is that both agree it is empty,
+    which is worth running: an emitter that wrote one indicator too many would pass every
+    other test in this file.
+    """
+    numpy = pytest.importorskip("numpy")
+    build = pytest.importorskip("modelica.sim.kernel").build
+    system = _system(model)
+    kernel = build(system)
+    parameters, states, workspace = kernel.start(0.0)
+
+    wanted = numpy.zeros(len(kernel.code.events))
+    kernel.indicators(0.0, states, parameters, workspace, wanted)
+    found = numpy.zeros_like(wanted)
+    library = _library(system, tmp_path)
+    library.indicators(
+        ctypes.c_double(0.0),
+        states.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        parameters.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        workspace.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        found.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+    )
+    assert found == pytest.approx(wanted, rel=1e-12, abs=1e-12)
+
+
+@needs_cc
 def test_the_c_observation_answers_what_the_python_one_answers(tmp_path: Path) -> None:
     """One model is enough for `observe`: it is `rhs` plus the aliases, in the same order.
 

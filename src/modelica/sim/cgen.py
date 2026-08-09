@@ -52,7 +52,7 @@ argument it reads from.
 """
 
 
-FUNCTIONS: Final = ("rhs", "observe")
+FUNCTIONS: Final = ("rhs", "observe", "indicators")
 """The entry points a generated unit defines, in the order this module writes them."""
 
 
@@ -166,8 +166,10 @@ def _function(name: str, arguments: str, body: list[str], candidates: list[str])
     ]
 
 
-def _bodies(emitter: Emitter, system: System, mode: Mode) -> tuple[list[str], list[str]]:
-    """``rhs`` and ``observe`` for one state set, each pruned to what it actually reads."""
+def _bodies(
+    emitter: Emitter, system: System, mode: Mode, position: int
+) -> tuple[list[str], list[str], list[str]]:
+    """Each entry point for one state set, pruned to what it actually reads."""
     rhs_rest = [
         *_blocks(emitter, mode),
         *(
@@ -183,9 +185,26 @@ def _bodies(emitter: Emitter, system: System, mode: Mode) -> tuple[list[str], li
         ),
         *(f"out[{slot}] = {emitter.symbols[name]}" for slot, name in enumerate(emitter.observed)),
     ]
+    events = emitter.events()
+    indicator_rest = [
+        *(_blocks(emitter, mode) if events else []),
+        *(
+            f"z[{k}] = "
+            + (
+                emitter.expr(event.indicator)
+                if event.origin in (None, position)
+                # An event belonging to another state set is held negative so its root finder
+                # has nothing to find, which is what `emit` does and for the same reason: the
+                # solver watches one array whichever set is in use.
+                else "-1.0"
+            )
+            for k, event in enumerate(events)
+        ),
+    ]
     return (
         _live([*emitter.unpack(mode), *rhs_rest]),
         _live([*emitter.unpack(mode), *observe_rest]),
+        _live([*emitter.unpack(mode), *indicator_rest]),
     )
 
 
@@ -227,12 +246,15 @@ def unit(system: System) -> str:
     signatures = {
         "rhs": "double t, const double *y, const double *p, double *w, double *dy",
         "observe": "double t, const double *y, const double *p, double *w, double *out",
+        "indicators": "double t, const double *y, const double *p, double *w, double *z",
     }
-    calls = {"rhs": "t, y, p, w, dy", "observe": "t, y, p, w, out"}
+    calls = {"rhs": "t, y, p, w, dy", "observe": "t, y, p, w, out", "indicators": "t, y, p, w, z"}
 
     written: list[str] = []
     for position, name in enumerate(FUNCTIONS):
-        bodies = [_bodies(emitter, system, mode)[position] for mode in system.modes]
+        bodies = [
+            _bodies(emitter, system, mode, k)[position] for k, mode in enumerate(system.modes)
+        ]
         if len(bodies) == 1:
             written += _function(name, signatures[name], bodies[0], declared)
             continue
