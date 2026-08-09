@@ -57,3 +57,21 @@ before.
   here is the pattern, which nobody else can compute for us.
 - No colouring heuristics for finite differences. This project has the exact derivative;
   colouring is what a black-box integrator needs precisely because it does not.
+
+## The model it was waiting for exists, 2026-08-09
+
+This entry says the cost "is inference: a method-of-lines model with `n` in the thousands,
+which is what the arrays work opens up ... it should be picked up when those models exist
+rather than before". Measured while answering
+[`method-of-lines-on-the-device`](03-08-2026-method-of-lines-on-the-device.md):
+
+- A 1D heat bar with a three-point stencil builds at `n = 10000` in 5.6 s. The model exists.
+- `jacobian` at that size would fill **0.80 GB** of output for a matrix with three non-zeros
+  per row.
+- `_seed = np.eye(n)` is a module-level constant of the generated source, so the same 0.80 GB
+  is allocated on `exec` *whether or not anyone calls `jacobian`*. Measured peak RSS across
+  the build goes 0.09 to 0.78 GB and the seed accounts for essentially all of it.
+
+That last one is worth separating from the rest of this entry, because it is much smaller: the
+seed is read one row at a time and `_seed[k]` is a basis vector. Removing the matrix does not
+require a sparse Jacobian, a sparse factorisation, or any decision about storage format.
