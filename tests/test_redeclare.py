@@ -22,7 +22,7 @@ import pytest
 if TYPE_CHECKING:
     from modelica.ir.flat import FlatModel
 
-from modelica import ir
+from modelica import build, ir
 from modelica.ir.flatten import FlattenError
 from modelica.ir.source import flatten
 from modelica.lang import parse
@@ -140,10 +140,67 @@ def test_a_replaceable_class_still_prints_as_a_package() -> None:
     assert "  replaceable package Medium = Water constrainedby Water;" in printed.splitlines()
 
 
-def test_a_redeclare_element_in_a_class_body_is_refused_by_name() -> None:
-    """Legal Modelica and a different feature: it modifies what an ``extends`` brought in."""
-    with pytest.raises(ModelicaSyntaxError, match="'redeclare' element in a class body"):
-        parse("model M\n  extends Base;\n  redeclare Capacitor element;\nend M;\n")
+def test_redeclaring_a_class_as_an_element_is_refused_by_name() -> None:
+    """The component spelling of this works; the class spelling is the other open issue."""
+    with pytest.raises(ModelicaSyntaxError, match="redeclaring a class as an element"):
+        parse("model M\n  extends Base;\n  redeclare package Medium = Water;\nend M;\n")
+
+
+# --------------------------------------------------------------------------------------
+# The other spelling: an element under an `extends`, meaning the same thing
+# --------------------------------------------------------------------------------------
+
+BY_ELEMENT = """\
+model Specialised "The extends spelling of the same choice"
+  extends Parts.Rig;
+  redeclare Parts.Capacitor element(C = 0.01);
+end Specialised;
+
+model ByElement
+  Specialised rig;
+end ByElement;
+"""
+
+BY_MODIFICATION = """\
+model ByModification
+  Parts.Rig rig(redeclare Parts.Capacitor element(C = 0.01));
+end ByModification;
+"""
+
+
+def test_an_element_redeclaration_is_kept_apart_from_the_components() -> None:
+    """It declares nothing new, so filing it with the components would add a member."""
+    specialised = parse(BY_ELEMENT).classes[0]
+    assert specialised.components == ()
+    assert [c.type_name for c in specialised.redeclarations] == ["Parts.Capacitor"]
+
+
+def test_the_element_spelling_round_trips() -> None:
+    program = parse(BY_ELEMENT)
+    assert parse(unparse(program)) == program
+    assert unparse(program) == BY_ELEMENT
+
+
+def test_the_two_spellings_flatten_to_the_same_model() -> None:
+    """Two spellings of one meaning, which is a claim that can be checked rather than said."""
+    by_element = _flat(BY_ELEMENT, "ByElement")
+    by_modification = _flat(BY_MODIFICATION, "ByModification")
+    assert [v.name for v in by_element.variables] == [v.name for v in by_modification.variables]
+    assert by_element.equations == by_modification.equations
+
+
+def test_redeclaring_something_the_class_does_not_inherit_is_refused() -> None:
+    """The mirror of the check the modification spelling already makes."""
+    extra = "model X\n  extends Parts.Rig;\n  redeclare Parts.Capacitor absent;\nend X;\n"
+    with pytest.raises(FlattenError, match="redeclares 'absent', which it does not inherit"):
+        _flat(extra, "X")
+
+
+def test_the_constraining_clause_is_checked_here_too() -> None:
+    """One rule, reached from two places: both spellings end in the same check."""
+    extra = "model Y\n  extends Parts.Rig;\n  redeclare Parts.Rig element;\nend Y;\n"
+    with pytest.raises(FlattenError, match="does not satisfy 'Element'"):
+        _flat(extra, "Y")
 
 
 # --------------------------------------------------------------------------------------
@@ -203,3 +260,15 @@ def test_redeclaring_a_class_is_refused_by_name() -> None:
     )
     with pytest.raises(FlattenError, match="redeclaring a class is not supported yet"):
         flatten(parse(source), "M")
+
+
+def test_the_python_front_end_writes_an_element_redeclaration() -> None:
+    """``redeclared`` files a declaration under the class's redeclarations, not its components.
+
+    Built here rather than as a class body, because the ``.mo`` twin's base lives in a
+    ``.mo``-only package -- what is being checked is where the declaration lands, which is
+    the part `_class_to_ir` decides.
+    """
+    declaration = build.redeclared(build.Real(start=1))
+    assert declaration.redeclaring
+    assert not build.Real(start=1).redeclaring

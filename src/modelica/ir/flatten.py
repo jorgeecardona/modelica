@@ -226,6 +226,19 @@ def effective(found: Found, scope: Scope) -> Effective:
             )
         result.equations += base_effective.equations
         result.initial_equations += base_effective.initial_equations
+    for replacement in found.cls.redeclarations:
+        # Applied here and nowhere else: this is the first moment the base chain is folded,
+        # so it is the first moment there is an inherited member to replace. The other
+        # spelling waits until instantiation because a modification is written by whoever
+        # instantiates -- but both end in `_redeclared`, so there is one rule and not two.
+        member = result.members.get(replacement.name)
+        if member is None:
+            raise FlattenError(
+                f"{found.cls.name} redeclares {replacement.name!r}, which it does not inherit"
+            )
+        result.members[replacement.name] = _redeclared(
+            member, ir.Modification(redeclare=replacement), inner, (replacement.name,)
+        )
     for component in found.cls.components:
         if component.name in result.members:
             raise FlattenError(f"{found.cls.name} declares {component.name!r} twice")

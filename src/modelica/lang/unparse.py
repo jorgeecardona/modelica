@@ -302,6 +302,7 @@ def _is_short_definition(node: ir.Class) -> bool:
         and not node.algorithms
         and not node.classes
         and not node.imports
+        and not node.redeclarations
     )
 
 
@@ -330,6 +331,8 @@ def _members(node: ir.Class, indent: int) -> list[str]:
         f"{pad}  extends {base.type_name}{_modification(base.modification)};"
         for base in node.extends
     ]
+    # After the `extends` that brought them in, which is the only order that reads.
+    lines += [f"{pad}  redeclare {_component(c)}" for c in node.redeclarations]
     lines += [f"{pad}  {_component(component)}" for component in node.components]
     return lines
 

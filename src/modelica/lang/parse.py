@@ -393,6 +393,29 @@ class _Parser:
             value = self.expression()
         return ir.Modification(value, entries)
 
+    def _redeclared_element(self) -> ir.Component:
+        """``redeclare Capacitor element;`` standing on its own in a class body.
+
+        The same words as a redeclaration inside a modification and a different place, so
+        the same reading with a semicolon at the end. It is returned as a declaration rather
+        than filed with the components, because it declares nothing: it says an inherited
+        component is now a different class, and `ir.Class.redeclarations` is where that
+        lives.
+        """
+        self._expect(Kind.KEYWORD, "redeclare")
+        self._accept(Kind.KEYWORD, "each")
+        self._accept(Kind.KEYWORD, "final")
+        again = self._accept(Kind.KEYWORD, "replaceable") is not None
+        if self._looks_like_class():
+            raise self._error(
+                "redeclaring a class as an element is not supported yet; "
+                "only a component can be replaced"
+            )
+        component = self._one_component(replaceable=again)
+        self._annotation()
+        self._expect(Kind.OP, ";")
+        return component
+
     def _redeclaration(self) -> tuple[str, ir.Modification]:
         """``redeclare Capacitor element(C = 0.01)``, or ``redeclare package M = Water``.
 
@@ -884,6 +907,7 @@ class _Parser:
         nested: list[ir.Class] = []
         imports: list[ir.Import] = []
         extends: list[ir.Extends] = []
+        redeclarations: list[ir.Component] = []
         components: list[ir.Component] = []
         equations: list[ir.Equation] = []
         initial_equations: list[ir.Equation] = []
@@ -926,13 +950,8 @@ class _Parser:
                 self._terminate()
                 continue
             if self._check(Kind.KEYWORD, "redeclare"):
-                # Legal Modelica, and a different feature: a redeclaration written as an
-                # element modifies something an `extends` brought in, which needs the base
-                # class merged before this loop runs. Named rather than misread.
-                raise self._error(
-                    "a 'redeclare' element in a class body is not supported yet; "
-                    "redeclare in a modification instead"
-                )
+                redeclarations.append(self._redeclared_element())
+                continue
             if self._accept(Kind.KEYWORD, "replaceable"):
                 definition, declared = self._replaceable()
                 if definition is not None:
@@ -957,6 +976,7 @@ class _Parser:
             comment=comment,
             imports=tuple(imports),
             extends=tuple(extends),
+            redeclarations=tuple(redeclarations),
             components=tuple(components),
             equations=tuple(equations),
             initial_equations=tuple(initial_equations),

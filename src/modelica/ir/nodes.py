@@ -507,6 +507,19 @@ class Class:
     defines a new type rather than renaming one.
     """
     extends: tuple[Extends, ...] = ()
+    redeclarations: tuple[Component, ...] = ()
+    """``redeclare Capacitor element;`` written as an element, under an ``extends``.
+
+    Kept apart from :attr:`components` because it declares nothing new: it says that a
+    component an ``extends`` brought in is now a different class. Filed with the components
+    it would be indistinguishable from one, and the class would gain a member the base
+    already has.
+
+    The other spelling of the same idea rides on a modification
+    (:attr:`Modification.redeclare`), and the two mean exactly the same thing. They differ
+    only in *when* they can be applied: a modification at instantiation, this one as soon as
+    the ``extends`` chain is folded.
+    """
     components: tuple[Component, ...] = ()
     equations: tuple[Equation, ...] = ()
     initial_equations: tuple[Equation, ...] = ()

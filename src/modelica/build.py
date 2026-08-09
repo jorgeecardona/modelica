@@ -113,6 +113,7 @@ __all__ = [
     "pre",
     "range_",
     "redeclare",
+    "redeclared",
     "ref",
     "reinit",
     "replaceable",
@@ -500,6 +501,17 @@ def _shape(shape: object) -> tuple[ir.Expr, ...]:
     return tuple(_lift(d) for d in dimensions)
 
 
+def redeclared(declaration: Declaration) -> Declaration:
+    """``redeclare Capacitor element;`` -- an inherited component is now a different class.
+
+    Distinct from :func:`redeclare`, and the difference is where it is written rather than
+    what it means. :func:`redeclare` goes inside a modification, as an argument to the
+    component that owns the slot; this one stands in the class body of a subclass, under the
+    ``extends`` that brought the slot in. Both end at the same rule in the flattener.
+    """
+    return replace(declaration, redeclaring=True)
+
+
 def inner(declaration: Declaration) -> Declaration:
     """``inner Environment environment;`` -- the one every ``outer`` below this will find."""
     return replace(declaration, scoping="inner")
@@ -615,6 +627,8 @@ class Declaration:
     dimensions: tuple[ir.Expr, ...] = ()
     annotation: ir.Modification = ir.EMPTY
     scoping: ir.Scoping = "none"
+    redeclaring: bool = False
+    """Set by :func:`redeclared`. Files this under a class's redeclarations, not its components."""
     replaceable: bool = False
     constrainedby: TypeRef | None = None
     """Held as the class itself, not as its name, because a name depends on who is asking.
@@ -989,11 +1003,13 @@ def _type_to_ir(target: Type, within: str) -> ir.Class:
 def _class_to_ir(target: _ClassMeta, within: str) -> ir.Class:
     own = target.__dict__
     imports = tuple(cast("Iterable[ir.Import]", own.get("IMPORTS", ())))
-    declared = [value.component(within) for value in own.values() if isinstance(value, Declaration)]
-    components = tuple(
-        replace(component, type_name=_shorten(component.type_name, imports))
-        for component in declared
-    )
+    declared = [
+        (value.redeclaring, replace(value.component(within), type_name=_shorten(value.component(within).type_name, imports)))
+        for value in own.values()
+        if isinstance(value, Declaration)
+    ]
+    components = tuple(component for redeclaring, component in declared if not redeclaring)
+    redeclarations = tuple(component for redeclaring, component in declared if redeclaring)
     # `Model`/`Connector`/... are how Python spells the restriction, not superclasses to
     # extend; every other base is a real Modelica `extends`.
     extends = tuple(
@@ -1008,6 +1024,7 @@ def _class_to_ir(target: _ClassMeta, within: str) -> ir.Class:
         comment=_docstring(cast("str | None", own.get("__doc__"))),
         imports=imports,
         extends=extends,
+        redeclarations=redeclarations,
         components=components,
         equations=_section(target, "equations"),
         initial_equations=_section(target, "initial_equations"),

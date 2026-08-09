@@ -1,8 +1,8 @@
 ---
 title: A `redeclare` written as a class element is refused, and that is how a base class is specialised
-status: open
+status: in-progress
 area: lang
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-09
 kind: story
 scope: M
