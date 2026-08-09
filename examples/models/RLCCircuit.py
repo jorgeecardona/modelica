@@ -16,15 +16,15 @@ class RLCCircuit(Model):
 
     IMPORTS = (import_("Electrical", "E"),)
 
-    source = Electrical.ConstantVoltage(V=1, annotation=place([(-18, -64), (18, -28)]))
-    r = Electrical.Resistor(R=1, annotation=place([(-80, 16), (-44, 52)]))
+    source = Electrical.ConstantVoltage(V=1, annotation=place([(-92, -18), (-56, 18)], -90))
+    r = Electrical.Resistor(R=1, annotation=place([(-38, 42), (-2, 78)]))
     l = Electrical.Inductor(
-        L=1, i=mod(start=0, fixed=True), annotation=place([(-18, 16), (18, 52)])
+        L=1, i=mod(start=0, fixed=True), annotation=place([(16, 42), (52, 78)])
     )
     c = Electrical.Capacitor(
-        C=1, v=mod(start=0, fixed=True), annotation=place([(44, 16), (80, 52)])
+        C=1, v=mod(start=0, fixed=True), annotation=place([(56, -18), (92, 18)], -90)
     )
-    ground = Electrical.Ground(annotation=place([(3, -114), (39, -78)]))
+    ground = Electrical.Ground(annotation=place([(-18, -96), (18, -60)]))
 
     def equations(self):
         yield connect(self.source.p, self.r.p)

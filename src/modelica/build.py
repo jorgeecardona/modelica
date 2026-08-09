@@ -595,13 +595,20 @@ def shape(name: str, **arguments: object) -> Expression:
     return Expression(ir.Call(name, (), tuple(named)))
 
 
-def place(extent: list[tuple[float, float]]) -> ir.Modification:
+def place(extent: list[tuple[float, float]], rotation: float = 0.0) -> ir.Modification:
     """``annotation(Placement(transformation(extent = {{...}, {...}})))``.
 
-    Where a connector sits in its owner's icon frame. Without it a diagram has to guess
-    where a wire should attach, and every tool guesses differently.
+    Where a component or a connector sits, in the frame that holds it. Without it a diagram
+    has to guess where a wire should attach, and every tool guesses differently.
+
+    ``rotation`` turns the instance, counter-clockwise, in degrees -- how a component ends
+    up standing on the vertical side of a loop. Omitted when it is zero, because that is
+    what the parser reads back and the two front ends are compared as text.
     """
-    inner = ir.Modification(entries={"extent": ir.Modification(value=_coordinates(extent))})
+    entries = {"extent": ir.Modification(value=_coordinates(extent))}
+    if rotation:
+        entries["rotation"] = ir.Modification(value=_lift(rotation))
+    inner = ir.Modification(entries=entries)
     return ir.Modification(
         entries={"Placement": ir.Modification(entries={"transformation": inner})}
     )

@@ -130,7 +130,10 @@ def _pin(box: Box, port: str) -> tuple[float, float] | None:
     if found is None or found.at is None:
         return None
     scale = box.width / (2 * FRAME)
-    return box.x + found.at[0] * scale, box.y - found.at[1] * scale
+    # Turned with the symbol. A pin that stays put while its icon rotates is a wire that
+    # arrives where the pin used to be, which is the one way rotation can be worse than none.
+    x, y = box.turned(*found.at)
+    return box.x + x * scale, box.y - y * scale
 
 
 def _stub(point: tuple[float, float], box: Box | None) -> tuple[tuple[float, float], bool]:
@@ -254,6 +257,34 @@ def _port_label(name: str, x: float, y: float, near: Box, far: Box) -> list[str]
     ]
 
 
+def _caption(box: Box, name: str, label: Label, scale: float) -> list[str]:
+    """A component's name, and the settings written at the instance under it.
+
+    ``R = 1`` belongs on the picture for the same reason the name does: a schematic without
+    values is a topology, and the question a reader brings to one is usually numeric.
+    """
+    shown = list(box.node.detail[:2])
+    step = label.size * scale * 1.15
+    if box.rotation:
+        # Beside a turned component, reading down: the space above it is a lead.
+        left, anchor = box.x + FRAME * scale + 6, "start"
+        first = box.y - label.size * scale * 0.6
+    else:
+        # Above an upright one, and the *stack* grows upward so the last line clears the
+        # symbol. Putting the name where the icon asked and the values below it writes them
+        # straight across the drawing, which is what the first attempt did.
+        left, anchor = box.x + label.x * scale, "middle"
+        first = box.y - label.y * scale + label.size * scale * 0.35 - step * len(shown)
+    head = f'<text class="name" x="{left:.1f}" y="{first:.1f}" text-anchor="{anchor}">'
+    written = [f"{head}{_escape(name)}</text>"]
+    written += [
+        f'<text class="small" x="{left:.1f}" y="{first + step * (index + 1):.1f}" '
+        f'text-anchor="{anchor}">{_escape(detail)}</text>'
+        for index, detail in enumerate(shown)
+    ]
+    return written
+
+
 def _icon_svg(box: Box) -> list[str]:
     """Draw a component's own icon, mapped from its -100..100 frame into the box.
 
@@ -264,7 +295,8 @@ def _icon_svg(box: Box) -> list[str]:
     scale = box.width / (2 * FRAME)
 
     def at(x: float, y: float) -> tuple[float, float]:
-        return box.x + x * scale, box.y - y * scale
+        turned_x, turned_y = box.turned(x, y)
+        return box.x + turned_x * scale, box.y - turned_y * scale
 
     parts = [f'<g class="{box.node.kind} icon">']
     for drawn in box.node.icon.shapes:
@@ -289,13 +321,14 @@ def _icon_svg(box: Box) -> list[str]:
                     f'<ellipse class="mark" cx="{cx:.1f}" cy="{cy:.1f}" '
                     f'rx="{rx * scale:.1f}" ry="{ry * scale:.1f}"{stroke}{fill} />'
                 )
-            case Label(x=x, y=y, text=text, size=size):
-                tx, ty = at(x, y)
+            case Label(text=text):
+                # A name is read, not drawn: it never turns with the symbol. A rotated
+                # component with its label on its side is how a schematic stops being
+                # readable at exactly the moment it gets tidy. Where the icon wanted it --
+                # usually above -- is where a lead now runs, so a turned component takes its
+                # name beside it instead, which is where a schematic puts it anyway.
                 shown = text.replace("%name", box.node.label)
-                parts.append(
-                    f'<text class="name" x="{tx:.1f}" y="{ty + size * scale * 0.35:.1f}" '
-                    f'text-anchor="middle">{_escape(shown)}</text>'
-                )
+                parts.extend(_caption(box, shown, drawn, scale))
     if box.node.comment:
         parts.append(f"<title>{_escape(box.node.comment)}</title>")
     parts.append("</g>")

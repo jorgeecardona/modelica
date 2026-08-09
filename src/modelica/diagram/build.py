@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from modelica.diagram.graph import Edge, Graph, Node, Port
-from modelica.diagram.icon import placement, shapes
+from modelica.diagram.icon import placement, rotation, shapes
 from modelica.ir import nodes as ir
 from modelica.ir.flatten import FlattenError, Found, Scope, effective
 from modelica.ir.source import to_program
@@ -207,6 +207,7 @@ class _Schematic:
                 detail=_settings(member),
                 parent=path,
                 at=placement(member.component.annotation),
+                rotation=rotation(member.component.annotation),
                 icon=shapes(inner.cls.annotation),
             )
         )

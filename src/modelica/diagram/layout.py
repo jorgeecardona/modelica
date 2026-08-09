@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from math import cos, radians, sin
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -58,6 +59,20 @@ class Box:
     height: float = 0.0
     lines: tuple[str, ...] = ()
     """The text to draw, first line is the label."""
+    rotation: float = 0.0
+    """Degrees counter-clockwise, carried from the node so the icon and its pins agree."""
+
+    def turned(self, x: float, y: float) -> tuple[float, float]:
+        """A point of the icon's own frame, rotated by this box's rotation.
+
+        One place, used by both the pin positions and the drawing, because a pin that turns
+        with the symbol and a symbol that turns without its pins are the same bug seen twice.
+        """
+        if not self.rotation:
+            return x, y
+        angle = radians(self.rotation)
+        cosine, sine = cos(angle), sin(angle)
+        return x * cosine - y * sine, x * sine + y * cosine
 
     @property
     def left(self) -> float:
@@ -127,7 +142,7 @@ def _sized(node: Node) -> Box:
     if node.icon:
         # The name is part of the drawing -- an icon says where it wants it -- so the box
         # carries no text lines of its own.
-        return Box(node=node, width=ICON, height=ICON, lines=())
+        return Box(node=node, width=ICON, height=ICON, lines=(), rotation=node.rotation)
     longest = max((len(line) for line in lines), default=1)
     width = max(longest * CHAR + 2 * PAD, 44.0)
     height = max(len(lines), 1) * LINE + 2 * PAD
@@ -202,7 +217,8 @@ def _pin_at(box: Box, port: str) -> tuple[float, float]:
     if found is None or found.at is None:
         return box.x, box.y
     scale = box.width / 200.0
-    return box.x + found.at[0] * scale, box.y - found.at[1] * scale
+    x, y = box.turned(*found.at)
+    return box.x + x * scale, box.y - y * scale
 
 
 STEPS = 400

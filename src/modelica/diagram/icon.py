@@ -200,6 +200,26 @@ def _extent(node: ir.Expr | None) -> tuple[tuple[float, float], tuple[float, flo
     return (points[0], points[1]) if len(points) == 2 else None  # noqa: PLR2004 - two corners
 
 
+def rotation(annotation: ir.Modification) -> float:
+    """``Placement(transformation(rotation = 90))`` -- how far the instance is turned.
+
+    Degrees, counter-clockwise, in the diagram's own frame. Zero when nothing was written,
+    which is most components: a resistor drawn lying down is a resistor lying down, and only
+    the ones on the vertical sides of a loop ask to be stood up.
+    """
+    place = annotation.entries.get("Placement") if annotation else None
+    transformation = place.entries.get("transformation") if place else None
+    entry = transformation.entries.get("rotation") if transformation else None
+    value = entry.value if entry is not None else None
+    match value:
+        case ir.RealLiteral(value=found) | ir.IntLiteral(value=found):
+            return float(found)
+        case ir.Unary(op="-", operand=ir.RealLiteral(value=found) | ir.IntLiteral(value=found)):
+            return -float(found)
+        case _:
+            return 0.0
+
+
 def placement(annotation: ir.Modification) -> tuple[float, float] | None:
     """Where a connector sits, from ``annotation(Placement(transformation(extent = ...)))``.
 

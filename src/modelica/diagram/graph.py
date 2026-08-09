@@ -92,6 +92,13 @@ class Node:
     A diagram coordinate, not an icon one. When every component of a model has this, the
     picture is the one the modeller arranged; when none does, the layout works it out.
     """
+    rotation: float = 0.0
+    """Degrees counter-clockwise, from ``Placement(transformation(rotation = ...))``.
+
+    A component on the vertical side of a loop is the same drawing stood up, not a second
+    drawing. The pins turn with it, which is the part that has to be right: a wire that
+    arrives where the pin *was* is a wire that misses.
+    """
     icon: Frame = field(default_factory=Frame)
     """What the component's class draws for itself, from its ``Icon`` annotation.
 
