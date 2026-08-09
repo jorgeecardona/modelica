@@ -105,12 +105,23 @@ if TYPE_CHECKING:
     from modelica.ir.flat import FlatVariable
     from modelica.ir.system import Block, Mode, System
 
-__all__ = ["HELD", "Code", "EmitError", "Emitter", "Trigger", "emit", "iterated"]
+__all__ = [
+    "HELD",
+    "ITERATIONS",
+    "TOLERANCE",
+    "Code",
+    "EmitError",
+    "Emitter",
+    "Trigger",
+    "block_jacobian",
+    "emit",
+    "iterated",
+]
 
-_ITERATIONS: Final = 50
+ITERATIONS: Final = 50
 """Newton iterations before an implicit block gives up and returns what it has."""
 
-_TOLERANCE: Final = 1e-12
+TOLERANCE: Final = 1e-12
 """Step size below which a Newton iteration counts as converged."""
 
 
@@ -406,7 +417,7 @@ def _better(destination: Mode, origin: Mode) -> ir.Expr:
     return simplify(sub(ahead, mul(ir.RealLiteral(_HYSTERESIS), behind)))
 
 
-def _jacobian(block: Block) -> list[list[ir.Expr]]:
+def block_jacobian(block: Block) -> list[list[ir.Expr]]:
     """``d residual / d unknown``, one row per equation."""
     return [
         [simplify(d_dx(residual(equation), unknown)) for unknown in block.unknowns]
@@ -424,7 +435,7 @@ def iterated(block: Block) -> bool:
     """
     return block.assignment is None and any(
         contains(entry, unknown)
-        for row in _jacobian(block)
+        for row in block_jacobian(block)
         for entry in row
         for unknown in block.unknowns
     )
@@ -738,7 +749,7 @@ class Emitter:
         if block.assignment is not None:
             return [f"{self.symbols[block.unknowns[0]]} = {self.expr(block.assignment)}"]
         residuals = [residual(equation) for equation in block.equations]
-        jacobian = _jacobian(block)
+        jacobian = block_jacobian(block)
         lines = (
             self.newton(block, jacobian)
             if iterated(block)
@@ -800,14 +811,14 @@ class Emitter:
     def iteration(self, block: Block, jacobian: list[list[ir.Expr]]) -> list[str]:
         residuals = [residual(equation) for equation in block.equations]
         negated = [ir.Unary("-", r) for r in residuals]
-        header = f"for _ in range({_ITERATIONS}):"
+        header = f"for _ in range({ITERATIONS}):"
         if len(block.unknowns) == 1:
             name = self.symbols[block.unknowns[0]]
             return [
                 header,
                 f"    _step = {self.expr(negated[0])} / ({self.expr(jacobian[0][0])})",
                 f"    {name} = {name} + _step",
-                f"    if abs(_step) < {_TOLERANCE}:",
+                f"    if abs(_step) < {TOLERANCE}:",
                 "        break",
             ]
         lines = [header, *self.system_lines(block, jacobian, negated, indent="    ")]
@@ -815,7 +826,7 @@ class Emitter:
             f"    {self.symbols[u]} = {self.symbols[u]} + _x[{position}]"
             for position, u in enumerate(block.unknowns)
         )
-        lines.append(f"    if np.max(np.abs(_x)) < {_TOLERANCE}:")
+        lines.append(f"    if np.max(np.abs(_x)) < {TOLERANCE}:")
         lines.append("        break")
         return lines
 
@@ -894,7 +905,7 @@ class Emitter:
             for unknown in block.solved:
                 carried.pop(unknown, None)
             return []
-        jacobian = _jacobian(block)
+        jacobian = block_jacobian(block)
         if len(block.unknowns) == 1:
             carried[block.unknowns[0]] = row = self.tangents[block.unknowns[0]]
             single = f"{row} = -({rows[0]}) / ({self.expr(jacobian[0][0])})"

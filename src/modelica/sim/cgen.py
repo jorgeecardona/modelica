@@ -27,11 +27,20 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Final
 
+from modelica.ir import nodes as ir
+from modelica.ir.rewrite import residual
 from modelica.sim.dialect import C
-from modelica.sim.emit import EmitError, Emitter, iterated
+from modelica.sim.emit import (
+    ITERATIONS,
+    TOLERANCE,
+    EmitError,
+    Emitter,
+    block_jacobian,
+    iterated,
+)
 
 if TYPE_CHECKING:
-    from modelica.ir.system import Mode, System
+    from modelica.ir.system import Block, Mode, System
 
 __all__ = ["FUNCTIONS", "unit"]
 
@@ -47,22 +56,67 @@ FUNCTIONS: Final = ("rhs", "observe")
 """The entry points a generated unit defines, in the order this module writes them."""
 
 
-def _refuse(system: System) -> None:
-    """What this cannot write yet, named rather than left out.
+def _newton(emitter: Emitter, block: Block) -> list[str]:
+    """The iteration, written here rather than shaped by the dialect, and here is why.
 
-    The one refusal left is about code that does not exist rather than about any model: a
-    block that has to be iterated on needs Newton, and Newton needs a loop this does not
-    write. A unit that quietly left such a block out would compile and give wrong answers,
-    which is the one outcome worth ruling out.
+    Everything else C has needed is a *spelling* -- an operator, a library name, how a matrix
+    entry is addressed -- and it fits in `Dialect` because the emitter's line structure is
+    the same in both languages. An iteration is not a spelling. It is a loop, a mutable step
+    and an early exit, and Python writes those with indentation where C writes braces, so a
+    `Dialect` able to express it would have to describe statements rather than expressions:
+    a second emitter wearing a table's clothes.
+
+    So the six lines live here. What they are *made of* still comes from `emit` -- the same
+    residuals, the same block Jacobian, the same iteration count and tolerance -- which is
+    the part that must not be duplicated, because those are decisions and this is only shape.
     """
-    newton = [
-        block
-        for mode in system.modes
-        for block in mode.blocks
-        if block.assignment is None and iterated(block)
+    unknowns = block.unknowns
+    jacobian = block_jacobian(block)
+    negated = [ir.Unary("-", residual(equation)) for equation in block.equations]
+    guess = [f"{emitter.symbols[u]} = w[{emitter.slots[u]}]" for u in unknowns]
+    keep = [f"w[{emitter.slots[u]}] = {emitter.symbols[u]}" for u in unknowns]
+
+    if len(unknowns) == 1:
+        name = emitter.symbols[unknowns[0]]
+        body = [
+            f"double _step = {emitter.expr(negated[0])} / ({emitter.expr(jacobian[0][0])})",
+            f"{name} = {name} + _step",
+            f"if (fabs(_step) < {TOLERANCE}) {{ break; }}",
+        ]
+    else:
+        size = len(unknowns)
+        body = [*emitter.system_lines(block, jacobian, negated)]
+        body += [
+            f"{emitter.symbols[u]} = {emitter.symbols[u]} + _x[{position}]"
+            for position, u in enumerate(unknowns)
+        ]
+        body.append("double _worst = 0.0")
+        body += [f"if (fabs(_x[{k}]) > _worst) {{ _worst = fabs(_x[{k}]); }}" for k in range(size)]
+        body.append(f"if (_worst < {TOLERANCE}) {{ break; }}")
+
+    return [
+        *guess,
+        f"for (int _i = 0; _i < {ITERATIONS}; ++_i) {{",
+        *(f"    {line}" for line in body),
+        "}",
+        *keep,
     ]
-    if newton:
-        raise EmitError(f"C: {len(newton)} block(s) need Newton, and the iteration has no C yet")
+
+
+def _blocks(emitter: Emitter, mode: Mode) -> list[str]:
+    """Every block of a state set, with the iterated ones written the C way.
+
+    `Emitter.solve` handles the rest unchanged -- an assignment, a linear solve -- because
+    those are the same lines in both languages once the dialect has spelled the arithmetic.
+    """
+    lines: list[str] = []
+    for block in mode.blocks:
+        if block.assignment is None and iterated(block):
+            lines += _newton(emitter, block)
+            lines += [f"{emitter.symbols[n]} = {emitter.expr(v)}" for n, v in block.torn]
+        else:
+            lines += emitter.solve(block)
+    return lines
 
 
 def _used(name: str, text: str) -> bool:
@@ -73,23 +127,22 @@ def _live(body: list[str]) -> list[str]:
     """The lines whose result something later actually reads.
 
     Straight-line dead-code elimination, and it is not an optimisation -- it is what makes
-    the unit compile. Every line here is ``target = expression`` with no side effect, so a
-    line whose target is never read again can go; in Python that line costs a microsecond,
-    and in C, under ``-Werror=unused-but-set-variable``, it costs the build.
+    the unit compile. Every plain assignment here has no side effect, so one whose target is
+    never read again can go; in Python that line costs a microsecond, and in C, under
+    ``-Werror=unused-but-set-variable``, it costs the build.
 
-    Two kinds of line always stay: a store into ``dy``, ``out`` or ``w`` is the function's
-    whole purpose, and a target that is not a plain name is one of those.
+    Anything that is not a plain ``name = expression`` stays: a store into ``dy``, ``out`` or
+    ``w`` is the function's whole purpose, and so is every line of a Newton loop, whose
+    targets are indented or declared or braces.
 
-    Why the sequence has dead lines at all is worth knowing. `emit` computes every block
-    because `observe` needs every variable; `rhs` needs the ones the derivatives depend on
-    and no others. The Python emitter writes one body and both callers use it. C gets two
-    bodies, and each is pruned to what it is for.
+    Why there are dead lines at all: `emit` computes every block because `observe` needs
+    every variable, while `rhs` needs only what the derivatives depend on. One body in
+    Python serves both; C gets two, each pruned to what it is for.
     """
     keep: list[str] = []
     for line in reversed(body):
         target = line.split(" = ", 1)[0]
-        later = "\n".join(keep)
-        if not _LOCAL.match(target) or _used(target, later):
+        if not _LOCAL.match(target) or _used(target, "\n".join(keep)):
             keep.insert(0, line)
     return keep
 
@@ -116,14 +169,14 @@ def _function(name: str, arguments: str, body: list[str], candidates: list[str])
 def _bodies(emitter: Emitter, system: System, mode: Mode) -> tuple[list[str], list[str]]:
     """``rhs`` and ``observe`` for one state set, each pruned to what it actually reads."""
     rhs_rest = [
-        *emitter.blocks(mode),
+        *_blocks(emitter, mode),
         *(
             f"dy[{slot}] = {emitter.symbols[mode.derivative[state]]}"
             for slot, state in enumerate(mode.states)
         ),
     ]
     observe_rest = [
-        *emitter.blocks(mode),
+        *_blocks(emitter, mode),
         *(
             f"{emitter.symbols[name]} = {emitter.expr(node)}"
             for name, node in system.aliases.items()
@@ -167,7 +220,6 @@ def unit(system: System) -> str:
     then the latches, then the state set in use. A second backend that laid its arrays out
     differently would need its own reader, its own tests and its own bugs.
     """
-    _refuse(system)
     emitter = Emitter(system, dialect=C)
     declared = sorted(
         {symbol for symbol in emitter.symbols.values() if _LOCAL.match(symbol) and symbol != "t"}
