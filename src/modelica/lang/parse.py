@@ -8,13 +8,15 @@ sentence, not like a shift/reduce conflict.
 The target is not "whatever Modelica allows" but **exactly what**
 :mod:`modelica.lang.unparse` **can emit**. That is a checkable specification -- every tree
 the printer can produce must parse back to itself -- and it keeps the surface honest.
-Constructs outside it (``redeclare``, ``import``, ``enumeration``, ``external``) raise a
+Constructs outside it (``import``, ``enumeration``, ``inner``/``outer``, ``external``)
+raise a
 "not supported yet" error rather than being quietly misread; a parser that shrugs at syntax
 it does not implement produces a model that silently means something else.
 
-Reading a construct is not the same as running it. An ``algorithm`` section parses here and
-:mod:`modelica.ir.flatten` refuses it by name, which is the same two-step the arrays went
-through: the language first, so the shape exists to be tested, then the semantics.
+Reading a construct is not the same as running it. A ``redeclare`` of a *class* parses here
+and :mod:`modelica.ir.flatten` refuses it by name, the same two-step the arrays and the
+algorithm sections went through: the language first, so the shape exists to be tested, then
+the semantics.
 
 Two things are deliberately accepted and discarded: a ``within`` clause, because the IR is
 a flat list of classes and nothing downstream asks which package a file came from, and
@@ -407,7 +409,7 @@ class _Parser:
         self._accept(Kind.KEYWORD, "final")
         again = self._accept(Kind.KEYWORD, "replaceable") is not None
         if self._looks_like_class():
-            replacement = self.class_definition()
+            replacement = self.class_definition(terminated=False)
             if again:
                 replacement = replace(replacement, replaceable=True)
             return replacement.name, ir.Modification(redeclare=replacement)
@@ -769,8 +771,13 @@ class _Parser:
         token = self._ahead(offset)
         return token.kind is Kind.KEYWORD and token.text in _RESTRICTIONS
 
-    def class_definition(self) -> ir.Class:
-        """Parse one class, short form or long form."""
+    def class_definition(self, *, terminated: bool = True) -> ir.Class:
+        """Parse one class, short form or long form.
+
+        ``terminated`` is false inside a class-modification, where a redeclaration is an
+        element of a comma-separated list and the semicolon that ends a declaration in a
+        class body has no place.
+        """
         self._accept(Kind.KEYWORD, "encapsulated")
         self._accept(Kind.KEYWORD, "final")
         partial = self._accept(Kind.KEYWORD, "partial") is not None
@@ -787,7 +794,8 @@ class _Parser:
             constraining = self._constraining()
             comment = self._string_comment()
             annotation = self._annotation()
-            self._expect(Kind.OP, ";")
+            if terminated:
+                self._expect(Kind.OP, ";")
             return ir.Class(
                 name=name,
                 restriction=restriction,

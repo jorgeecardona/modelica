@@ -10,12 +10,15 @@ from modelica.build import (
     Model,
     Real,
     alias,
+    connect,
     der,
     flow,
     icon,
+    mod,
     package,
     parameter,
     place,
+    replaceable,
     shape,
     to_modelica,
 )
@@ -154,6 +157,23 @@ class Ground(Model):
 
     def equations(self):
         yield self.p.v == 0
+
+
+class Probe(Model):
+    """A 1 V source charging a capacitor through one swappable element"""
+
+    element = replaceable(
+        Resistor(R=100, doc="The component under test"), constrainedby=OnePort
+    )
+    source = ConstantVoltage(V=1)
+    c = Capacitor(C=0.01, v=mod(start=0, fixed=True))
+    ground = Ground()
+
+    def equations(self):
+        yield connect(self.source.p, self.element.p)
+        yield connect(self.element.n, self.c.p)
+        yield connect(self.c.n, self.source.n)
+        yield connect(self.source.n, self.ground.p)
 
 
 PACKAGE = package(

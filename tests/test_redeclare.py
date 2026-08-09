@@ -8,18 +8,26 @@ redeclaration plus a binding.
 
 What this file pins is that both halves survive the text: the declaration that offers the
 slot (``replaceable``, with the ``constrainedby`` that says what fits) and the modification
-that fills it. Flattening does not apply them yet, and the round trip is what has to hold
-first -- a redeclaration read as something else would be applied to the wrong component.
+that fills it. The round trip had to hold before flattening could apply anything: a redeclaration read
+as something else would be applied to the wrong component. The second half of the file is
+the application -- one slot, two classes, two different flat models.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
+if TYPE_CHECKING:
+    from modelica.ir.flat import FlatModel
+
 from modelica import ir
+from modelica.ir.flatten import FlattenError
+from modelica.ir.source import flatten
 from modelica.lang import parse
 from modelica.lang.lexer import ModelicaSyntaxError
-from modelica.lang.unparse import unparse
+from modelica.lang.unparse import unparse, unparse_equation
 
 LIBRARY = """\
 package Parts "Two things that fit the same slot, and the slot"
@@ -136,3 +144,62 @@ def test_a_redeclare_element_in_a_class_body_is_refused_by_name() -> None:
     """Legal Modelica and a different feature: it modifies what an ``extends`` brought in."""
     with pytest.raises(ModelicaSyntaxError, match="'redeclare' element in a class body"):
         parse("model M\n  extends Base;\n  redeclare Capacitor element;\nend M;\n")
+
+
+# --------------------------------------------------------------------------------------
+# Flattening applies it: the same slot, two different models
+# --------------------------------------------------------------------------------------
+
+DEFAULT = "model A\n  Parts.Rig rig;\nend A;\n"
+SWAPPED = "model B\n  Parts.Rig rig(redeclare Parts.Capacitor element(C = 0.01));\nend B;\n"
+
+
+def _flat(extra: str, model: str) -> FlatModel:
+    return flatten(parse(LIBRARY + extra), model)
+
+
+def test_without_a_redeclaration_the_declared_class_is_used() -> None:
+    flat = _flat(DEFAULT, "A")
+    assert [v.name for v in flat.variables] == ["rig.element.v", "rig.element.i", "rig.element.R"]
+
+
+def test_a_redeclaration_instantiates_the_replacement_instead() -> None:
+    """Not a coefficient: a different class, so a different parameter and equation."""
+    flat = _flat(SWAPPED, "B")
+    assert [v.name for v in flat.variables] == ["rig.element.v", "rig.element.i", "rig.element.C"]
+    assert unparse_equation(flat.equations[0])[0] == "rig.element.i = rig.element.C * der(rig.element.v);"
+
+
+def test_the_replacement_brings_its_own_modification_and_not_the_old_one() -> None:
+    """``R = 100`` describes a resistor; carrying it onto a capacitor would set nothing."""
+    binding = {v.name: v.binding for v in _flat(SWAPPED, "B").variables}
+    assert binding["rig.element.C"] == ir.RealLiteral(0.01)
+
+
+def test_a_replacement_that_does_not_satisfy_the_constraint_names_both_classes() -> None:
+    extra = "model D\n  Real q;\nend D;\n\nmodel C\n  Parts.Rig rig(redeclare D element);\nend C;\n"
+    with pytest.raises(FlattenError, match="'D' does not satisfy 'Element'"):
+        _flat(extra, "C")
+
+
+def test_a_component_that_is_not_replaceable_cannot_be_redeclared() -> None:
+    extra = (
+        "model E\n  Parts.Resistor fixed;\nend E;\n\n"
+        "model F\n  E e(redeclare Parts.Capacitor fixed);\nend F;\n"
+    )
+    with pytest.raises(FlattenError, match="not declared `replaceable`"):
+        _flat(extra, "F")
+
+
+def test_redeclaring_a_class_is_refused_by_name() -> None:
+    """Parsed, and not applied: a replaceable *class* is a second feature, not this one."""
+    source = (
+        "package P\n"
+        "  model Water\n    Real rho;\n  end Water;\n\n"
+        "  model Rig\n    replaceable package Medium = Water constrainedby Water;\n"
+        "    Real x;\n  end Rig;\n"
+        "end P;\n\n"
+        "model M\n  P.Rig rig(redeclare package Medium = P.Water);\nend M;\n"
+    )
+    with pytest.raises(FlattenError, match="redeclaring a class is not supported yet"):
+        flatten(parse(source), "M")

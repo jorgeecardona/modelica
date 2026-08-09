@@ -77,6 +77,7 @@ __all__ = [
     "Package",
     "Real",
     "Record",
+    "Redeclaration",
     "String",
     "Type",
     "alias",
@@ -106,8 +107,10 @@ __all__ = [
     "place",
     "pre",
     "range_",
+    "redeclare",
     "ref",
     "reinit",
+    "replaceable",
     "return_",
     "shape",
     "sign",
@@ -444,13 +447,33 @@ class Modifier:
     modification: ir.Modification
 
 
+@dataclass(frozen=True, slots=True)
+class Redeclaration:
+    """The result of :func:`redeclare` -- a replacement waiting for the name it replaces.
+
+    A redeclaration is written as a keyword argument, so the component it replaces is the
+    *key*, and a value cannot see its own key. :func:`_modification` fills the name in when
+    it files the entry, which is the only place both halves are in hand at once.
+    """
+
+    type_name: str
+    modification: ir.Modification
+
+
+def _entry(name: str, attribute: object) -> ir.Modification:
+    if isinstance(attribute, Redeclaration):
+        return ir.Modification(
+            redeclare=ir.Component(
+                name=name, type_name=attribute.type_name, modification=attribute.modification
+            )
+        )
+    if isinstance(attribute, Modifier):
+        return attribute.modification
+    return ir.Modification(value=_lift(attribute))
+
+
 def _modification(attributes: Mapping[str, object], value: object = None) -> ir.Modification:
-    entries = {
-        name: attribute.modification
-        if isinstance(attribute, Modifier)
-        else ir.Modification(value=_lift(attribute))
-        for name, attribute in attributes.items()
-    }
+    entries = {name: _entry(name, attribute) for name, attribute in attributes.items()}
     return ir.Modification(value=None if value is None else _lift(value), entries=entries)
 
 
@@ -460,6 +483,26 @@ def _shape(shape: object) -> tuple[ir.Expr, ...]:
         return ()
     dimensions: tuple[object, ...] = shape if isinstance(shape, tuple) else (shape,)  # pyright: ignore[reportUnknownVariableType]
     return tuple(_lift(d) for d in dimensions)
+
+
+def replaceable(declaration: Declaration, constrainedby: TypeRef | None = None) -> Declaration:
+    """Offer this component's class as a slot: ``replaceable Resistor e constrainedby OnePort``.
+
+    Without a constraint the declared class is its own, which is what Modelica means by a
+    bare ``replaceable``: the slot takes a resistor and nothing else.
+    """
+    return replace(declaration, replaceable=True, constrainedby=constrainedby)
+
+
+def redeclare(type_ref: TypeRef, **modifications: object) -> Redeclaration:
+    """Fill a slot with a different class: ``rig(redeclare Capacitor element(C = 0.01))``.
+
+    The replacement is named as it is seen from *outside* its package, because a
+    redeclaration is written by whoever instantiates the slot and that is nearly always
+    somewhere else. A model inside the same package as its replacement would want the bare
+    name; none exists here, and this is where to look when one does.
+    """
+    return Redeclaration(_qualified(type_ref, ""), _modification(modifications))
 
 
 def mod(**attributes: object) -> Modifier:
@@ -542,6 +585,14 @@ class Declaration:
     name: str = ""
     dimensions: tuple[ir.Expr, ...] = ()
     annotation: ir.Modification = ir.EMPTY
+    replaceable: bool = False
+    constrainedby: TypeRef | None = None
+    """Held as the class itself, not as its name, because a name depends on who is asking.
+
+    ``constrainedby OnePort`` inside the electrical package and ``constrainedby
+    Electrical.OnePort`` outside it are the same constraint, and only
+    :meth:`component` knows which is being written.
+    """
 
     def __set_name__(self, owner: type, name: str) -> None:
         # The one mutation in the module, and it is unavoidable: a descriptor learns its
@@ -576,6 +627,10 @@ class Declaration:
             variability=self.variability,
             causality=self.causality,
             connector=self.connector,
+            replaceable=self.replaceable,
+            constraining=(
+                "" if self.constrainedby is None else _qualified(self.constrainedby, within)
+            ),
             comment=self.doc,
         )
 

@@ -61,4 +61,16 @@ package Electrical "Minimal analog electrical components, after Modelica.Electri
     annotation(Icon(graphics = {Line(points = {{0, 90}, {0, 20}}), Line(points = {{-46, 20}, {46, 20}}), Line(points = {{-28, 2}, {28, 2}}), Line(points = {{-11, -16}, {11, -16}}), Text(extent = {{-100, -30}, {100, -52}}, textString = "%name")}));
   end Ground;
 
+  model Probe "A 1 V source charging a capacitor through one swappable element"
+    replaceable Resistor element(R = 100) constrainedby OnePort "The component under test";
+    ConstantVoltage source(V = 1);
+    Capacitor c(C = 0.01, v(start = 0, fixed = true));
+    Ground ground;
+  equation
+    connect(source.p, element.p);
+    connect(element.n, c.p);
+    connect(c.n, source.n);
+    connect(source.n, ground.p);
+  end Probe;
+
 end Electrical;

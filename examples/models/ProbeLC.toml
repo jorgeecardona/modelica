@@ -1,0 +1,57 @@
+summary = "The same Electrical.Probe rig with an inductor redeclared into the slot: one modification turns a first-order charge into a second-order oscillation."
+teaches = ["redeclare", "a constraining clause", "one model text, two circuits"]
+requires = ["Electrical"]
+
+[parse]
+classes = ["ProbeLC"]
+
+[flatten]
+model = "ProbeLC"
+# Two states where `ProbeRC` has one. That difference is the whole point of the pair: the
+# redeclaration changes the order of the system, not merely a coefficient.
+states = ["probe.element.i", "probe.c.v"]
+index = 1
+balanced = true
+
+# L = 0.5, C = 0.01 -> omega = 1/sqrt(LC) = 14.142135623730951 rad/s, and a series LC
+# driven by a step settles into v(t) = 1 - cos(omega t), i(t) = C*omega*sin(omega t).
+[simulate]
+stop = 5.0
+tolerance = 1e-11
+
+[[simulate.point]]
+t = 0.1
+values = { "probe.c.v" = 0.844056305235, "probe.element.i" = 0.139691199727 }
+rtol = 1e-9
+source = "analytic"
+
+[[simulate.point]]
+t = 0.3
+values = { "probe.c.v" = 1.452661857292, "probe.element.i" = -0.126102913761 }
+rtol = 1e-9
+source = "analytic"
+
+[[simulate.point]]
+t = 0.7
+values = { "probe.c.v" = 1.889422123833, "probe.element.i" = -0.064641826341 }
+rtol = 1e-9
+source = "analytic"
+
+[[simulate.point]]
+t = 1.0
+values = { "probe.c.v" = 1.004968662133, "probe.element.i" = 0.141419610549 }
+rtol = 1e-9
+source = "analytic"
+
+# Nothing dissipates, so the oscillator's energy about the driven equilibrium is a constant
+# of the motion: 0.5*L*i^2 + 0.5*C*(v - V)^2 = 0.5*C*V^2 = 0.005 J.
+[[simulate.invariant]]
+expr = "0.5 * probe.element.L * probe.element.i ^ 2 + 0.5 * probe.c.C * (probe.c.v - 1.0) ^ 2"
+value = 0.005
+atol = 1e-9
+
+# It swings between the source voltage and twice it, and never past either.
+[[simulate.invariant]]
+expr = "probe.c.v"
+min = 0.0
+max = 2.0

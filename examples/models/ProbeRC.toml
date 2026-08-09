@@ -1,0 +1,49 @@
+summary = "The Electrical.Probe rig with the element it declares by default -- a resistor, so the capacitor charges on an RC curve."
+teaches = ["replaceable", "a default element", "one model text, two circuits"]
+requires = ["Electrical"]
+
+[parse]
+classes = ["ProbeRC"]
+
+[flatten]
+model = "ProbeRC"
+states = ["probe.c.v"]
+index = 1
+balanced = true
+
+# R = 100, C = 0.01 -> tau = 1 s exactly, so v(t) = 1 - exp(-t).
+# `ProbeLC.toml` is the same rig with an inductor redeclared into the same slot; the two
+# specs differ because the models do, and the model *text* differs by one modification.
+[simulate]
+stop = 5.0
+tolerance = 1e-11
+
+[[simulate.point]]
+t = 0.5
+values = { "probe.c.v" = 0.393469340287 }
+rtol = 1e-9
+source = "analytic"
+
+[[simulate.point]]
+t = 1.0
+values = { "probe.c.v" = 0.632120558829 }
+rtol = 1e-9
+source = "analytic"
+
+[[simulate.point]]
+t = 3.0
+values = { "probe.c.v" = 0.950212931632 }
+rtol = 1e-9
+source = "analytic"
+
+[[simulate.point]]
+t = 5.0
+values = { "probe.c.v" = 0.993262053001 }
+rtol = 1e-9
+source = "analytic"
+
+# A first-order charge from zero toward the source: monotone, and it never overshoots.
+[[simulate.invariant]]
+expr = "probe.c.v"
+min = 0.0
+max = 1.0

@@ -658,6 +658,88 @@ def _section_equations(section: Sequence[ir.Statement], owner: str) -> list[ir.E
     return equations
 
 
+# --------------------------------------------------------------------------------------
+# Redeclaration
+# --------------------------------------------------------------------------------------
+
+
+def _redeclared(member: Member, outer: ir.Modification, writer: Scope, path: _Path) -> Member:
+    """The member a ``redeclare`` leaves behind: a new class, resolved where it was written.
+
+    Two scopes meet here and confusing them is the whole difficulty. The *declaration* was
+    written inside the class that owns the slot, and its ``constrainedby`` resolves there.
+    The *redeclaration* was written by whoever instantiated that class, one level out, and
+    its replacement type resolves there. Handing both to the same scope would find the
+    wrong class, or fail to find one at all, in any model whose parts are packaged.
+
+    The replacement's modification replaces the declaration's own rather than merging with
+    it, because they describe different classes: ``replaceable Resistor e(R = 100)`` says
+    nothing about the capacitor that arrives in its place, and carrying ``R = 100`` over
+    would set an attribute that no longer exists.
+    """
+    name = ".".join(path)
+    replacement = outer.redeclare
+    original = member.component
+    if isinstance(replacement, ir.Class):
+        raise FlattenError(
+            f"{name}: redeclaring a class is not supported yet; only a component can be replaced"
+        )
+    if replacement is None:  # pragma: no cover - the caller checks before it calls
+        return member
+    if not original.replaceable:
+        raise FlattenError(
+            f"{name} is not declared `replaceable`, so {replacement.type_name!r} cannot"
+            f" replace {original.type_name!r} here"
+        )
+    _check_constraint(name, original, replacement, member.scope, writer)
+    return Member(
+        component=replace(
+            original,
+            type_name=replacement.type_name,
+            modification=replacement.modification,
+            dimensions=replacement.dimensions or original.dimensions,
+        ),
+        scope=writer,
+        mods=(),
+    )
+
+
+def _check_constraint(
+    name: str, original: ir.Component, replacement: ir.Component, declared: Scope, writer: Scope
+) -> None:
+    """The replacement has to provide what the constraining clause promises.
+
+    Structural, and deliberately shallow: every member the constraint declares must exist
+    in the replacement under the same name. That is enough to catch the mistake this check
+    is for -- an inertia dropped into an electrical slot -- and it does not pretend to be
+    Modelica's full subtype relation, which also compares variability, causality and the
+    flow prefix. What it does *not* do is checked nowhere else, so it is said here rather
+    than implied by a passing test.
+
+    With no ``constrainedby``, the declared type is its own constraint: that is what
+    ``replaceable Resistor e`` means, and it is why a plain replaceable slot still refuses
+    a capacitor.
+    """
+    wanted = original.constraining or original.type_name
+    constraint = declared.resolve(wanted)
+    provided = writer.resolve(replacement.type_name)
+    if isinstance(constraint, str) or isinstance(provided, str):
+        # A predefined type constrains by identity: `constrainedby Real` takes a Real.
+        if constraint != provided:
+            raise FlattenError(
+                f"{name}: {replacement.type_name!r} does not satisfy {wanted!r}"
+            )
+        return
+    required = set(effective(constraint, declared.inside(constraint)).members)
+    offered = set(effective(provided, writer.inside(provided)).members)
+    missing = sorted(required - offered)
+    if missing:
+        raise FlattenError(
+            f"{name}: {replacement.type_name!r} does not satisfy {wanted!r} --"
+            f" it has no {', '.join(repr(m) for m in missing)}"
+        )
+
+
 def _prefix_modification(
     mod: ir.Modification, prefix: _Path, local: frozenset[str]
 ) -> ir.Modification:
@@ -805,9 +887,27 @@ class _Flattener:
         if outer.value is not None:
             raise FlattenError(f"{'.'.join(prefix)}: a composite component cannot have a value")
         inner = scope.inside(found)
+        for name, entry in outer.entries.items():
+            # A redeclaration is applied where the component is instantiated, below. One
+            # that names no component would never be reached there, and the model would run
+            # as though it had never been written -- so the unmatched ones are caught here,
+            # before anything else happens. A redeclared *class* always lands here, which is
+            # where that refusal comes from: no component carries its name.
+            if entry.redeclare is None or name in merged.members:
+                continue
+            if isinstance(entry.redeclare, ir.Class):
+                raise FlattenError(
+                    f"{'.'.join((*prefix, name))}: redeclaring a class is not supported yet"
+                )
+            raise FlattenError(f"{found.cls.name} has no component {name!r} to redeclare")
         for name, member in merged.members.items():
             self._component(
-                member, (*prefix, name), outer.entries.get(name, ir.EMPTY), floor, local
+                member,
+                (*prefix, name),
+                outer.entries.get(name, ir.EMPTY),
+                floor,
+                local,
+                writer=scope,
             )
         for equation in merged.equations:
             self._equation(equation, prefix, local, scope=inner)
@@ -817,17 +917,22 @@ class _Flattener:
             for equation in _section_equations(section, found.cls.name):
                 self._equation(equation, prefix, local, scope=inner)
 
-    def _component(
+    def _component(  # noqa: PLR0913 -- the writer's scope is what resolves a redeclaration
         self,
         member: Member,
         path: _Path,
         outer: ir.Modification,
         floor: ir.Variability,
         local: frozenset[str],
+        *,
+        writer: Scope,
     ) -> None:
+        if outer.redeclare is not None:
+            member = _redeclared(member, outer, writer, path)
+            outer = replace(outer, redeclare=None)
         component = member.component
         if component.dimensions:
-            self._array(member, path, outer, floor, local)
+            self._array(member, path, outer, floor, local, writer=writer)
             return
         # `outer` arrived from the enclosing class and was prefixed there. These two were
         # written *here*, so they are prefixed here, against the path of the class that
@@ -846,13 +951,15 @@ class _Flattener:
         base, attributes = _base_of(resolved, member.scope)
         self._leaf(component, path, _merge(attributes, total), base, variability)
 
-    def _array(
+    def _array(  # noqa: PLR0913 -- the writer's scope travels with every component
         self,
         member: Member,
         path: _Path,
         outer: ir.Modification,
         floor: ir.Variability,
         local: frozenset[str],
+        *,
+        writer: Scope,
     ) -> None:
         """``Real T[n]`` becomes ``T[1] ... T[n]``, and nothing below sees a shape.
 
@@ -886,6 +993,7 @@ class _Flattener:
                 outer,
                 floor,
                 local,
+                writer=writer,
             )
 
     def _leaf(
