@@ -1,8 +1,8 @@
 ---
 title: The IR nodes were made hashable for CSE, and no stage does CSE
-status: open
+status: in-progress
 area: ir
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
 kind: story
 scope: M
