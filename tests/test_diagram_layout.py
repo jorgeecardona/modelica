@@ -51,6 +51,7 @@ FLAT = {
     "HeatBar",
     "NewtonCooling",
     "Pendulum",
+    "PhaseChange",
     "RoastingMachine",
     "Robertson",
     "Setback",

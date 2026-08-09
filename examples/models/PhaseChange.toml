@@ -1,0 +1,176 @@
+summary = "A steel bar heated, held and quenched: JMAK and Koistinen-Marburger kinetics, with the latent heat of transformation feeding back into the temperature that drives it."
+teaches = [
+  "phase-transformation kinetics",
+  "fractions that must sum to one",
+  "a rate that depends on the derivative it drives",
+  "a simultaneous block that came from the physics",
+  "a prescribed schedule with state events",
+]
+requires = []
+
+[parse]
+classes = ["PhaseChange"]
+
+[flatten]
+model = "PhaseChange"
+states = ["T", "x_body", "x_aust", "x_pear", "x_mart", "tau_aust", "tau_pear"]
+equations = 15
+index = 1
+balanced = true
+
+# The one example here that is metallurgy, and it is in the corpus for a Modelica reason
+# rather than a metallurgy one: the same toolchain that reads a DC motor reads a steel
+# transformation, and both end at the same `FlatModel`.
+#
+# A 1 kg bar goes into a furnace, comes out at t = 520 s, cools in air, and is quenched in
+# oil at t = 700 s. Four phases:
+#
+#   x_body   ferrite and pearlite, as delivered
+#   x_aust   austenite, formed above Ac1
+#   x_pear   pearlite, formed on cooling in the window between Ps and Ms
+#   x_mart   martensite, formed below Ms
+#
+# Two kinetic laws, both named in the post this example came from:
+#
+#   JMAK                    the diffusive reactions. ``x = 1 - exp(-(k tau)^n)`` in rate
+#                           form is ``dx/dt = n k^n tau^(n-1) (1 - x)``, where ``tau`` is the
+#                           time the reaction has spent in its own window. That clock is a
+#                           state, and it is why there is no singularity at x = 0: the rate
+#                           starts at zero and grows, which is the incubation the law
+#                           describes. The usual ``[-ln(1-x)]^((n-1)/n)`` form is the same
+#                           law with the clock eliminated, and it cannot start from zero.
+#
+#   Koistinen-Marburger     the martensitic one, and it is not a rate law at all. It says
+#                           ``x_m = 1 - exp(-alpha (Ms - T))``: a fraction fixed by how far
+#                           below Ms you have got, with no time in it. Differentiated
+#                           against the austenite still available, that is
+#                           ``dx_m/dt = -alpha x_aust dT/dt``.
+#
+# THE MARTENSITE RATE READS THE TEMPERATURE'S OWN DERIVATIVE, and that is the interesting
+# part of this model. `r_mart` depends on `der(T)`; the energy balance depends on `r_mart`
+# through the latent heat; so the two are one simultaneous block, which causalization finds
+# and solves as a 2x2. It is linear in both unknowns, so no iteration is needed. The corpus
+# had no block that came from the *physics* rather than from a loop of components.
+#
+# WHY L_mart IS 21 kJ/kg AND NOT 60. Solve that block by hand: it comes out
+# ``der(T) = -UA (T - T_amb) / (m (cp - L_mart alpha x_aust))``. The denominator changes sign
+# when ``L_mart * alpha`` exceeds ``cp``, and then cooling the bar heats it -- the model runs
+# away rather than merely being wrong. With ``alpha = 0.011`` the ceiling is
+# ``cp_body / alpha = 44.5 kJ/kg``. Real values for a medium-carbon steel run from about 20
+# to 80, so this constraint is not an artefact of the model: above the ceiling the
+# transformation releases heat faster than the quench removes it, which is recalescence, and
+# representing it needs the KM law in its own form (a function of the *lowest* temperature
+# reached) rather than differentiated. 21 kJ/kg is inside the physical range and below the
+# ceiling with a factor of two to spare.
+#
+# WHAT THE BAR COMES OUT AT. It reaches 759 degC, austenitises fully during the hold, forms
+# 38 % pearlite while it cools in air, and quenches to 60 % martensite -- leaving 2.4 %
+# retained austenite, which is a real feature of an incomplete quench and not a numerical
+# residue. Hardness ends at 520 HV.
+[simulate]
+stop = 1200.0
+tolerance = 1e-10
+
+# --------------------------------------------------------------------------------------
+# Against scipy at rtol = atol = 1e-12, at the four instants that decide the answer.
+# `atol` is carried beside `rtol` because two of these fractions are legitimately zero to
+# within a picogram, and a relative tolerance on zero asks for agreement no float has.
+# --------------------------------------------------------------------------------------
+
+[[simulate.point]]
+t = 200.0
+values = { "T" = 760.372023153103, "x_body" = 1.0, "x_aust" = 0.0 }
+rtol = 1e-8
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 520.0
+values = { "T" = 1032.512571249737, "x_body" = 0.012846066779, "x_aust" = 0.987153933221, "x_pear" = 0.0 }
+rtol = 1e-8
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 700.0
+values = { "T" = 827.733696891981, "x_aust" = 0.658102287244, "x_pear" = 0.341897712256, "x_mart" = 0.0 }
+rtol = 1e-8
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 1200.0
+values = { "T" = 300.000000000001, "x_aust" = 0.024001930602, "x_pear" = 0.377256779541, "x_mart" = 0.598741289857, "hardness" = 520.090702847 }
+rtol = 1e-8
+atol = 1e-9
+source = "reference"
+
+# Koistinen-Marburger, checked against its own closed form rather than against the
+# integrator. The law says the martensite fraction is fixed by the lowest temperature
+# reached, not by the path: ``x_mart = x_aust(Ms) * (1 - exp(-alpha (Ms - T_end)))``. The
+# austenite present when the bar crossed Ms is 0.6261, alpha is 0.011 and the bar ends at
+# 300 K, so ``0.6261 * (1 - exp(-0.011 * 296)) = 0.6020``. The model gives 0.5987.
+#
+# The 0.55 % gap is not error and is worth naming: the closed form assumes no other reaction
+# competes below Ms, and here the pearlite window closes exactly *at* Ms, so a little
+# austenite is still going to pearlite as the bar crosses. The two agree to the size of that
+# overlap, which is the strongest statement this cross-check can make.
+[[simulate.point]]
+t = 1200.0
+values = { "x_mart" = 0.602 }
+atol = 0.004
+source = "analytic"
+
+# --------------------------------------------------------------------------------------
+# What the physics says, rather than what this integration happened to produce.
+# --------------------------------------------------------------------------------------
+
+# The one invariant that is not a modelling choice. Every rate in the model is written as a
+# transfer -- what leaves one phase arrives in another -- so the four derivatives sum to
+# zero by construction and the fractions sum to one for the whole run. A model that let this
+# drift would be one whose rates had stopped being transfers.
+[[simulate.invariant]]
+expr = "x_body + x_aust + x_pear + x_mart"
+value = 1.0
+atol = 1e-9
+
+# No fraction leaves [0, 1]. Weaker than the sum, and it fails differently: a rate with the
+# wrong sign shows up here first.
+[[simulate.invariant]]
+expr = "x_body"
+min = 0.0
+max = 1.0
+atol = 1e-9
+
+[[simulate.invariant]]
+expr = "x_aust"
+min = 0.0
+max = 1.0
+atol = 1e-9
+
+[[simulate.invariant]]
+expr = "x_mart"
+min = 0.0
+max = 1.0
+atol = 1e-9
+
+# Martensite only ever forms. Koistinen-Marburger differentiated would run backwards if the
+# bar ever warmed below Ms, which is exactly the recalescence the latent heat ceiling above
+# keeps out of reach -- so this invariant is the ceiling, checked along the trajectory.
+[[simulate.invariant]]
+expr = "r_mart"
+min = 0.0
+max = 0.1
+
+# The furnace takes the bar past Ac1 and nowhere near melting.
+[[simulate.invariant]]
+expr = "celsius"
+min = 26.0
+max = 760.0
+
+# Hardness is a weighted sum over the fractions, so it is bounded by the softest and hardest
+# phase whatever the cycle does.
+[[simulate.invariant]]
+expr = "hardness"
+min = 170.0
+max = 720.0

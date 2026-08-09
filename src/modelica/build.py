@@ -81,6 +81,7 @@ __all__ = [
     "String",
     "Type",
     "alias",
+    "and_",
     "assign",
     "break_",
     "call",
@@ -104,7 +105,9 @@ __all__ = [
     "log",
     "mod",
     "no_event",
+    "not_",
     "not_equal",
+    "or_",
     "outer",
     "output",
     "package",
@@ -340,6 +343,38 @@ def equal(a: Operand, b: Operand) -> Expression:
     spelling, and it is the mirror of :func:`not_equal`.
     """
     return Expression(ir.Binary("==", _lift(a), _lift(b)))
+
+
+def and_(a: Operand, *rest: Operand) -> Expression:
+    """``a and b and ...``.
+
+    A function and not an operator, because Python's ``and`` cannot be overloaded: it
+    short-circuits on the *truth* of its left side, so it would ask an `Expression` whether
+    it is true and answer with one of the two operands rather than with a conjunction.
+    ``&`` was the other candidate and is not taken -- it reads as bitwise, and a model that
+    says ``x & y`` when it means ``x and y`` is a model that has to be decoded.
+
+    Found missing by `PhaseChange`, whose pearlite reaction runs in a temperature *window*.
+    """
+    return _chain("and", a, rest)
+
+
+def or_(a: Operand, *rest: Operand) -> Expression:
+    """``a or b or ...``. See :func:`and_` for why this is not an operator."""
+    return _chain("or", a, rest)
+
+
+def not_(a: Operand) -> Expression:
+    """``not a``. Python's ``not`` cannot be overloaded either, for the same reason."""
+    return Expression(ir.Unary("not", _lift(a)))
+
+
+def _chain(operator: ir.BinaryOp, first: Operand, rest: tuple[Operand, ...]) -> Expression:
+    """Fold left, so ``and_(a, b, c)`` is ``(a and b) and c`` -- what the parser builds."""
+    node = _lift(first)
+    for other in rest:
+        node = ir.Binary(operator, node, _lift(other))
+    return Expression(node)
 
 
 def range_(start: Operand, stop: Operand, step: Operand | None = None) -> Expression:
