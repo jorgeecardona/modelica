@@ -91,8 +91,9 @@ cabildo issues show <slug>
 | [IR nodes carry no source span, so no error below the parser can point at the equation](03-08-2026-ir-nodes-carry-no-source-span.md) | ir | bug | M | test | open | — |
 | [Library twins are compared as normalised text, because a library has no flat model](03-08-2026-library-twins-are-only-compared-as-text.md) | ir | story | M | test | open | — |
 | [Tearing is priced in by three documents and implemented by none](03-08-2026-tearing-is-priced-in-by-three-documents-and-implemented-by-none.md) | ir | story | L | test | open | — |
-| [`replaceable` and `redeclare` are refused, and the standard library is built on them](03-08-2026-replaceable-and-redeclare-are-refused.md) | lang | story | L | test | in-progress · @cute-replicant-6e76d | — |
+| [Redeclaring a class is parsed and refused, and it is what a medium package is](09-08-2026-redeclaring-a-class-is-parsed-and-refused-and-it-is-what-a.md) | ir | story | L | test | open | — |
 | [`import`, `enumeration` and `inner`/`outer` — the three small refusals](03-08-2026-the-three-small-refusals.md) | lang | story | M | test | open | — |
+| [A `redeclare` written as a class element is refused, and that is how a base class is specialised](09-08-2026-a-redeclare-written-as-a-class-element-is-refused-and-that-is.md) | lang | story | M | test | open | — |
 | [A C emitter — the second backend, and the one FMU export needs](03-08-2026-a-c-emitter.md) | sim | story | L | test | open | — |
 | [Nothing caches a compiled kernel, though the content hash that would key it exists](03-08-2026-compiled-kernels-are-not-cached.md) | sim | story | M | test | open | — |
 | [Detecting charge and drop from the bean probe — the models are fine, the decision layer is wrong](03-08-2026-detecting-charge-and-drop-from-the-bean-probe.md) | sim | idea | L | probe | open | — |
@@ -121,5 +122,5 @@ cabildo issues show <slug>
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_40 open — 39 open, 1 in-progress; 5 done. Generated; edit the files, then `cabildo issues reindex`._
+_41 open — 41 open; 6 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

@@ -1,9 +1,10 @@
 ---
 title: `replaceable` and `redeclare` are refused, and the standard library is built on them
-status: in-progress
+status: done
 area: lang
 owner: cute-replicant-6e76d
 filed: 2026-08-03
+fixed_in: f28baf2
 kind: story
 scope: L
 verify: test
@@ -66,3 +67,40 @@ this issue. BSD licensed. See `docs/ideas/landscape.md`.
 - No claim about reading the MSL. Redeclaration is *necessary* for that and is nowhere near
   sufficient — arrays, algorithm sections and enumerations all stand in the way too. Anybody
   closing this should resist writing "the MSL now parses" in the changelog.
+
+## What landed
+
+Two commits: `5a033e4` the language, `f28baf2` the application. 777 tests pass.
+
+Every Done bullet is met. The corpus entry is a pair rather than one file, because a model
+file holds exactly one class here (`tests/test_examples.py:_twin_text`): the slot is
+`Electrical.Probe`, and `ProbeRC` takes its default resistor while `ProbeLC` writes
+`redeclare Electrical.Inductor element(L = 0.5, ...)`. One state against two, an exponential
+charge against an oscillation, both with analytic reference points. The redeclaration changes
+the *order of the system*, which is a stronger observation than the resistor-and-capacitor
+pair this issue suggested.
+
+Against the pymoca cases named above: `RedeclareComponents` and `RedeclareTypeCompatibility`
+are done. The other two are refused by name and are recorded below rather than left silent.
+
+**The constraint check is structural and shallow, on purpose.** Every member the constraining
+class declares must exist in the replacement under the same name — enough to catch an inertia
+dropped into an electrical slot, and not Modelica's subtype relation, which also compares
+variability, causality and the flow prefix. It is stated in `_check_constraint`'s docstring
+because nothing else checks it, so a passing test would otherwise be the only description.
+
+## Deliberately not done, found while doing it
+
+- **Redeclaring a class** — `rig(redeclare package Medium = Water)` — parses and carries, and
+  flattening refuses it by name. Applying one needs a per-instance *type* environment: the
+  same class instantiated twice would resolve `Medium` to two different classes, and `Scope`
+  resolves names against the program and the lexical chain only. That is a real piece of work
+  and it is what `Modelica.Fluid` is built on, so it is the next issue for anyone heading
+  toward the MSL.
+- **`redeclare` as a class element** — `model M extends Base; redeclare Capacitor element;` —
+  is refused in the parser. It modifies something an `extends` brought in, which needs the base
+  merged before the element loop runs, so it is a different feature in a different place.
+  pymoca calls this `RedeclareInExtends`.
+- No `constrainedby` modification. Modelica lets the constraining clause carry defaults for the
+  replacement; the parser reads them and drops them, which is what keeps it from misreading the
+  text that follows. Nothing here uses them.
