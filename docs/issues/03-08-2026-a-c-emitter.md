@@ -1,9 +1,10 @@
 ---
 title: A C emitter — the second backend, and the one FMU export needs
-status: in-progress
+status: done
 area: sim
 owner: cute-replicant-6e76d
 filed: 2026-08-03
+fixed_in: a0d8cca 6dc0b21 8e1e4b3 4eeb442
 kind: story
 scope: L
 verify: test
@@ -68,3 +69,69 @@ emitting source at all. See `docs/ideas/landscape.md`.
   `tests/test_jit.py:32` skips without Numba.
 - No decision here about which of the two FMU export routes wins. That belongs to the export
   issue; this one only makes the second route possible.
+
+## What landed
+
+Five commits, in the order the functions came out: `a0d8cca` the dialect and `rhs`,
+`6dc0b21` the linear solve and the mode dispatcher, `8e1e4b3` `observe` and `indicators`,
+`4eeb442` `transition`, and this one `jacobian`. 1037 tests pass.
+
+All four Done bullets, measured:
+
+| bullet | evidence |
+| --- | --- |
+| five functions, same `System`, same workspace | `modelica.sim.cgen.FUNCTIONS`, and `unit` writes all five for all 21 corpus models |
+| compiles under `-std=c11 -O2 -Wall -Werror`, libm only | `tests/test_cgen.py:_library`, every model, every test |
+| differential against the interpreter | four point tests over the whole corpus at 1e-12, plus the dialect's own 26 expression cases |
+| reachable from Python, corpus simulations run through it | `test_the_corpus_simulates_through_the_compiled_unit` -- `simulate` driving the shared object |
+
+The split the issue guessed at held. `modelica.sim.dialect` is *spelling* -- operators, the
+names of built-ins, how a conditional is written -- and it is data, two values in one file,
+so every disagreement between the languages is visible in one place. `modelica.sim.cgen` is
+*structure*: semicolons, declarations, and the three things that are loops in C and are not
+loops in numpy. Nothing about what a block solves for, what order blocks run in, which
+relations are latched, or what a tangent differentiates against moved out of
+`modelica.sim.emit`. That is the claim `docs/ideas/backends.md:88` makes, and it survived.
+
+Where it did *not* hold is worth as much: three of the five functions needed structure that
+no template can carry.
+
+1. **The Newton loop.** A fixed trip count and a convergence break are statements.
+2. **The dense solve.** `np.linalg.solve` is one call; C got `md_solve`, thirty lines of LU
+   with partial pivoting in the preamble, because a BLAS dependency for a two-by-two would
+   be a build system in exchange for nothing.
+3. **The Jacobian.** This is the only place the two backends differ in *data layout* rather
+   than in wording. A tangent row is a numpy vector in Python -- `_seed[k]`, whole-row
+   assignment, `_null` for a structurally zero row -- and a `double[n]` here, so every
+   assignment to one becomes a loop, and the right-hand side of an implicit block grew a
+   column per state and is solved one column at a time.
+
+Five bugs the differential tests found, each of which had compiled and run:
+
+- **Integer division.** `burner / 100` in C with an `int` literal is integer division.
+  `RoastingMachine` came out 23% wrong and silent. `Dialect.integer` now writes `100.0`.
+- **`!` binds tighter than a comparison.** `!a > 0.0` is `(!a) > 0.0`. Fixed per dialect
+  with `negation_level`, because Python's `not` binds the other way.
+- **`&&` inside `||`** is unambiguous and `-Wall` warns anyway, so under `-Werror` the unit
+  did not build. `Dialect.clarify` adds the brackets rather than the flag coming out.
+- **Dead stores.** `-Werror=unused-but-set-variable` turns a line Python spends a
+  microsecond on into a failed build, so `_live` and `_reached` prune -- the second by
+  group, because a tangent row is four lines and cannot be pruned one line at a time.
+- **Semicolons, wrong in both directions.** Appending one to every line wrote `};`, legal
+  and ugly; skipping one for any line ending in a brace broke `double _b[2] = {0}`. The rule
+  now asks what the line *is*.
+
+## Deliberately not done, found while doing it
+
+- **`parameters`, `initial`, `latch` and `observe_jacobian` are not in the unit.** Four of
+  the nine `Kernel` holds. Three are start-up and the fourth is an output Jacobian nothing
+  in this repo calls; the end-to-end test names them where it substitutes the other five.
+  An FMU needs `initial` at least, and that is the export issue's to take.
+- **No CSE in the C bodies.** `Emitter.sharing` is used by the Python emitter and not here,
+  so a repeated subexpression is written out repeatedly. `-O2` is very good at exactly this
+  and the generated source is more readable without it, but that is a judgement made on
+  reading rather than on measuring.
+- **One start point per model.** Every point test takes the model's own initial state. A
+  random vector would compare two functions outside the domain either was written for, and
+  a *sweep* of valid states would be better than either -- that is a property-test shape and
+  a separate piece of work.

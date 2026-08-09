@@ -1,25 +1,31 @@
 """A C translation unit for a model, from the same emitter that writes the Python one.
 
 What `docs/ideas/backends.md:42` asks for: "one translation unit -- FMU export, where a
-shared library is the deliverable". This is the first half of it, and the half worth having
-first, because it is the one that says whether the claim underneath the whole backends page
-is true. That claim is that the emitters are *consequences* of the IR and adding one is
-mechanical.
+shared library is the deliverable". All five entry points the Python kernel has are here,
+for every model in the corpus, which is what says whether the claim underneath the whole
+backends page is true. That claim is that the emitters are *consequences* of the IR and
+adding one is mechanical.
 
-Measured against that claim, this module is 120 lines and it makes no decisions. It does not
-choose what a block solves for, what order the blocks run in, which relations are latched, or
-where a torn variable comes from -- `modelica.sim.emit` decides all of that once, and this
-asks it for the same lines with :data:`modelica.sim.dialect.C` selected. What is left over
-is what genuinely differs between the two languages:
+Measured against it, this module makes no modelling decisions. It does not choose what a
+block solves for, what order the blocks run in, which relations are latched, where a torn
+variable comes from, or what a block's tangent is differentiated against --
+`modelica.sim.emit` decides all of that once, and this asks it for the same lines with
+:data:`modelica.sim.dialect.C` selected.
 
-* a statement ends in a semicolon;
-* a local has to be declared, and its type named;
-* the arrays arrive as pointers with a signature that says so.
+What is left over is of two kinds, and the difference is the interesting part of the file.
+Most of it is *spelling*, and that lives in the dialect: an operator, a built-in's name, a
+conditional. The rest is *structure*, which a template cannot hold and which is therefore
+written here:
 
-The subset is stated rather than discovered. A model whose blocks are all explicit
-assignments comes out; anything with a simultaneous block or more than one state set is
-refused by name, because `np.linalg.solve` and the mode dispatcher have no C written for
-them yet and emitting something that merely compiles would be worse than saying so.
+* a statement ends in a semicolon and a local is declared with its type;
+* a loop is a loop -- the Newton iteration, and the column-at-a-time linear solve;
+* a Jacobian row is a numpy vector in Python and a ``double[n]`` here, so every assignment
+  to one becomes a loop over the row. This is the only place the two backends differ in
+  *data layout* rather than in wording, and it is why `_tangent` walks the blocks itself
+  instead of asking `Emitter.tangent` for lines.
+
+Nothing is refused. A model that cannot be written would raise `EmitError` naming what is
+missing, because emitting something that merely compiles would be worse than saying so.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ import re
 from typing import TYPE_CHECKING, Final
 
 from modelica.ir import nodes as ir
+from modelica.ir.derive import ZERO
 from modelica.ir.rewrite import residual
 from modelica.sim.dialect import C
 from modelica.sim.emit import (
@@ -40,6 +47,8 @@ from modelica.sim.emit import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from modelica.ir.system import Block, Mode, System
 
 __all__ = ["FUNCTIONS", "unit"]
@@ -52,7 +61,7 @@ argument it reads from.
 """
 
 
-FUNCTIONS: Final = ("rhs", "observe", "indicators", "transition")
+FUNCTIONS: Final = ("rhs", "observe", "indicators", "transition", "jacobian")
 """The entry points a generated unit defines, in the order this module writes them."""
 
 
@@ -103,20 +112,183 @@ def _newton(emitter: Emitter, block: Block) -> list[str]:
     ]
 
 
-def _blocks(emitter: Emitter, mode: Mode) -> list[str]:
-    """Every block of a state set, with the iterated ones written the C way.
+def _rows(text: str, tangents: Iterable[str]) -> str:
+    """A vector expression, read one element at a time.
 
-    `Emitter.solve` handles the rest unchanged -- an assignment, a linear solve -- because
-    those are the same lines in both languages once the dialect has spelled the arithmetic.
+    `Emitter.combination` returns ``a * _d_u + _d_v`` -- scalar partials multiplying whole
+    *rows*, which is numpy's arithmetic and not C's. Subscripting every row name by the loop
+    index makes the same expression elementwise, which is what the row form meant all along.
+
+    Textual, and safe to be: a row name is `_identifier` applied to ``$d_<name>``, so it is an
+    ordinary identifier that appears nowhere in an expression except as a row.
     """
-    lines: list[str] = []
+    for row in tangents:
+        text = re.sub(rf"\b{re.escape(row)}\b", f"{row}[_k]", text)
+    return text
+
+
+def _reached(groups: list[tuple[str | None, list[str]]]) -> list[str]:
+    """The rows something downstream actually reads, and nothing else.
+
+    A row is several lines -- a declaration, a loop header, the body, a brace -- so it cannot
+    be pruned a line at a time the way `_live` prunes assignments. It is pruned as a group,
+    and the group knows which row it defines.
+
+    Not an optimisation: `BouncingBall` seeds a row for ``h`` that nothing reads, because
+    ``der(h)`` is ``v`` and ``v``'s row is handed straight to the output. Under
+    ``-Werror=unused-but-set-variable`` that unread row is a failed build.
+    """
+    keep: list[str] = []
+    for name, lines in reversed(groups):
+        if name is None or _used(name, "\n".join(keep)):
+            keep[:0] = lines
+    return keep
+
+
+def _one(emitter: Emitter, block: Block) -> list[str]:
+    """One block, solved. The Newton loop is C's; everything else is `Emitter.solve` unchanged.
+
+    An assignment and a linear solve are the same lines in both languages once the dialect
+    has spelled the arithmetic. An iterated block is not: its loop is a statement, and a
+    statement is structure rather than spelling.
+    """
+    if block.assignment is None and iterated(block):
+        return [
+            *_newton(emitter, block),
+            *(f"{emitter.symbols[name]} = {emitter.expr(value)}" for name, value in block.torn),
+        ]
+    return emitter.solve(block)
+
+
+def _blocks(emitter: Emitter, mode: Mode) -> list[str]:
+    """Every block of a state set, in schedule order."""
+    return [line for block in mode.blocks for line in _one(emitter, block)]
+
+
+def _tangent(emitter: Emitter, mode: Mode, width: int) -> list[tuple[str | None, list[str]]]:
+    """Forward mode over the very blocks the right-hand side runs, a row at a time.
+
+    This is `Emitter.tangent` in C, and it is the one function where the two languages differ
+    in *data layout* rather than in spelling. A row of the Jacobian is a numpy vector there
+    and a ``double[n]`` here, so every assignment to one becomes a loop -- structure, which
+    is this module's business, and not a template, which would be the dialect's.
+
+    The decisions stay in `emit` where the other four functions left them: which variables
+    have a tangent at all is `combination` returning ``None``, and the matrix a solved block
+    differentiates against is `block_jacobian`. A structurally independent variable gets no
+    row rather than a row of zeros, so the sums downstream get shorter instead of longer --
+    that sparsity is the only thing keeping the emitted source proportional to the model.
+    """
+    rows = list(emitter.tangents.values())
+    groups: list[tuple[str | None, list[str]]] = []
+    carried: dict[str, str] = {}
+    for slot, state in enumerate(mode.states):
+        carried[state] = row = emitter.tangents[state]
+        groups.append((row, [f"double {row}[{width}] = {{0}}", f"{row}[{slot}] = 1.0"]))
+
+    def elementwise(name: str, total: str | None) -> list[str]:
+        """``d name = <combination>``, which in C is a loop over the row."""
+        if total is None:
+            carried.pop(name, None)
+            return []
+        carried[name] = row = emitter.tangents[name]
+        return [
+            f"double {row}[{width}] = {{0}}",
+            f"for (int _k = 0; _k < {width}; ++_k) {{",
+            f"    {row}[_k] = {_rows(total, rows)}",
+            "}",
+        ]
+
     for block in mode.blocks:
-        if block.assignment is None and iterated(block):
-            lines += _newton(emitter, block)
-            lines += [f"{emitter.symbols[n]} = {emitter.expr(v)}" for n, v in block.torn]
-        else:
-            lines += emitter.solve(block)
-    return lines
+        groups.append((None, _one(emitter, block)))
+        if block.assignment is not None:
+            unknown = block.unknowns[0]
+            groups.append(
+                (
+                    emitter.tangents[unknown],
+                    elementwise(unknown, emitter.combination(block.assignment, carried)),
+                )
+            )
+            continue
+        groups.extend(_implicit(emitter, block, carried, width, rows))
+        for name, value in block.torn:
+            groups.append(
+                (emitter.tangents[name], elementwise(name, emitter.combination(value, carried)))
+            )
+
+    for slot, state in enumerate(mode.states):
+        row = carried.get(mode.derivative[state])
+        groups.append(
+            (
+                None,
+                [
+                    f"for (int _k = 0; _k < {width}; ++_k) {{",
+                    f"    out[{slot} * {width} + _k] = " + (f"{row}[_k]" if row else "0.0"),
+                    "}",
+                ],
+            )
+        )
+    return groups
+
+
+def _implicit(
+    emitter: Emitter, block: Block, carried: dict[str, str], width: int, rows: list[str]
+) -> list[tuple[str | None, list[str]]]:
+    """The tangent of a solved block, without solving it again.
+
+    ``g(u, v) = 0`` differentiates to ``(dg/du) u' = -(dg/dv) v'``, so the tangent is one
+    solve against the matrix the block was solved with, evaluated at the answer -- exact
+    where a difference quotient over the same block could not be. `Emitter.implicit` says
+    the same thing in numpy; what differs here is that the right-hand side has a column per
+    state and C's solver takes one column at a time.
+    """
+    residuals = [emitter.combination(residual(e), carried) for e in block.equations]
+    if all(term is None for term in residuals):
+        for unknown in block.solved:
+            carried.pop(unknown, None)
+        return []
+    jacobian = block_jacobian(block)
+    if len(block.unknowns) == 1:
+        carried[block.unknowns[0]] = row = emitter.tangents[block.unknowns[0]]
+        return [
+            (
+                row,
+                [
+                    f"double {row}[{width}] = {{0}}",
+                    f"for (int _k = 0; _k < {width}; ++_k) {{",
+                    (
+                        f"    {row}[_k] = -({_rows(residuals[0] or '0.0', rows)})"
+                        f" / ({emitter.expr(jacobian[0][0])})"
+                    ),
+                    "}",
+                ],
+            )
+        ]
+    size = len(block.unknowns)
+    # One group: the columns are solved together, so no unknown of this block can be dropped
+    # without the others. Named for the first, which is enough to keep the group alive as
+    # long as any of its rows is read -- they are all read or none is.
+    lines = [f"double {emitter.tangents[unknown]}[{width}] = {{0}}" for unknown in block.unknowns]
+    # One column of the tangent per pass. `md_solve` factors in place, so the matrix is
+    # rebuilt each time; at the sizes tearing leaves -- two and three square -- that is
+    # cheaper than carrying a factorisation around, and it keeps one solver rather than two.
+    lines.append(f"for (int _k = 0; _k < {width}; ++_k) {{")
+    lines += [f"    double _M[{size * size}] = {{0}}", f"    double _R[{size}] = {{0}}"]
+    for position, entries in enumerate(jacobian):
+        lines += [
+            f"    _M[{position * size + column}] = {emitter.expr(entry)}"
+            for column, entry in enumerate(entries)
+            if entry != ZERO
+        ]
+        term = residuals[position]
+        if term is not None:
+            lines.append(f"    _R[{position}] = -({_rows(term, rows)})")
+    lines += [f"    double _D[{size}] = {{0}}", f"    md_solve({size}, _M, _R, _D)"]
+    for position, unknown in enumerate(block.unknowns):
+        carried[unknown] = row = emitter.tangents[unknown]
+        lines.append(f"    {row}[_k] = _D[{position}]")
+    lines.append("}")
+    return [(None, lines)]
 
 
 def _used(name: str, text: str) -> bool:
@@ -191,7 +363,7 @@ def _ended(line: str) -> str:
 
 def _bodies(
     emitter: Emitter, system: System, mode: Mode, position: int
-) -> tuple[list[str], list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
     """Each entry point for one state set, pruned to what it actually reads."""
     rhs_rest = [
         *_blocks(emitter, mode),
@@ -248,6 +420,10 @@ def _bodies(
         _live([*emitter.unpack(mode), *observe_rest]),
         _live([*emitter.unpack(mode), *indicator_rest]),
         _live([*emitter.unpack(mode), *transition_rest]),
+        # Two passes, because there are two kinds of dead line here: a row nothing reads,
+        # which `_reached` drops as a group, and then the block values that only that row
+        # read, which `_live` drops one at a time once the row is gone.
+        _live([*emitter.unpack(mode), *_reached(_tangent(emitter, mode, len(mode.states)))]),
     )
 
 
@@ -293,12 +469,14 @@ def unit(system: System) -> str:
         "transition": (
             "int event, double t, const double *y, const double *p, double *w, double *out"
         ),
+        "jacobian": "double t, const double *y, const double *p, double *w, double *out",
     }
     calls = {
         "rhs": "t, y, p, w, dy",
         "observe": "t, y, p, w, out",
         "indicators": "t, y, p, w, z",
         "transition": "event, t, y, p, w, out",
+        "jacobian": "t, y, p, w, out",
     }
 
     written: list[str] = []
