@@ -41,6 +41,9 @@ from modelica.ir.nodes import (
     Call as Call,
 )
 from modelica.ir.nodes import (
+    CallEquation as CallEquation,
+)
+from modelica.ir.nodes import (
     Causality as Causality,
 )
 from modelica.ir.nodes import (

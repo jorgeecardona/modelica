@@ -74,6 +74,7 @@ __all__ = [
     "Integer",
     "Model",
     "Modifier",
+    "Outputs",
     "Package",
     "Real",
     "Record",
@@ -120,6 +121,7 @@ __all__ = [
     "ref",
     "reinit",
     "replaceable",
+    "results",
     "return_",
     "shape",
     "sign",
@@ -375,6 +377,36 @@ def _chain(operator: ir.BinaryOp, first: Operand, rest: tuple[Operand, ...]) -> 
     for other in rest:
         node = ir.Binary(operator, node, _lift(other))
     return Expression(node)
+
+
+@dataclass(frozen=True)
+class Outputs:
+    """The left side of an output expression list, waiting for the call it reads.
+
+    ``==`` builds an equation everywhere else in this module, and it does here too -- the
+    difference is only which equation. `results(a, b) == call("split", x)` renders
+    ``(a, b) = split(x);``, which is the spelling `modelica.lang` parses.
+    """
+
+    targets: tuple[ir.Ref | None, ...]
+
+    def __eq__(self, other: object) -> ir.CallEquation:  # type: ignore[override]
+        node = _lift(other)  # pyright: ignore[reportArgumentType]
+        if not isinstance(node, ir.Call):
+            message = "an output list is assigned from a function call, not an expression"
+            raise TypeError(message)
+        return ir.CallEquation(self.targets, node)
+
+    def __hash__(self) -> int:
+        return hash(self.targets)
+
+
+def results(*targets: Operand | None) -> Outputs:
+    """``(a, b) = f(x)`` -- the only way to read a function that returns two things.
+
+    ``None`` for a result the caller does not want, which is Modelica's ``(, b) = f(x)``.
+    """
+    return Outputs(tuple(None if t is None else _as_ref(t) for t in targets))
 
 
 def range_(start: Operand, stop: Operand, step: Operand | None = None) -> Expression:

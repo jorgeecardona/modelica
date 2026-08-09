@@ -509,6 +509,15 @@ def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir
     match node:
         case ir.Equal(lhs=lhs, rhs=rhs, span=span):
             return ir.Equal(go(lhs), go(rhs), span)
+        case ir.CallEquation(targets=targets, call=call, span=span):
+            # The targets are names of the enclosing class and the loop index is not one of
+            # them, so only the arguments can carry it. A subscripted target -- `(a[i], b) =
+            # f(i)` -- would be the case that needs more, and the parser reads a target as a
+            # plain reference, so it cannot arise yet.
+            substituted = go(call)
+            if not isinstance(substituted, ir.Call):  # pragma: no cover - a call stays a call
+                raise FlattenError("an output list is assigned from a function call")
+            return ir.CallEquation(targets, substituted, span)
         case ir.Connect():
             # A connection names components, and a loop index cannot be one of them: an
             # array of connectors is indexed, which is a `Subscript` and not a bare `Ref`.
@@ -685,6 +694,47 @@ def _inline(found: Found, scope: Scope, call: ir.Call, depth: int) -> ir.Expr:
         raise FlattenError(f"function {name!r} never assigns its output {outputs[0].name!r}")
     # The body may itself call a function, and it resolves in the function's own scope.
     return _inline_calls(result, inner, depth + 1)
+
+
+def _inline_all(found: Found, scope: Scope, call: ir.Call, depth: int) -> dict[str, ir.Expr]:
+    """One call, as an expression per output -- what an output expression list needs.
+
+    The same symbolic run of the body as `_inline`, read out more than once. That it is *one*
+    run is the point: two outputs of one call are two views of one computation, and running
+    the body twice would compute the shared work twice and, for a body with a branch, could
+    read two different arms.
+
+    Kept beside `_inline` rather than replacing it. The single-output path is every call in
+    every expression in the corpus and it returns an expression, not a mapping; making it go
+    through here would put a dictionary lookup and a name in the middle of the hottest path
+    in flattening to serve a form that appears at the top of an equation.
+    """
+    name = found.cls.name
+    if depth >= _INLINE_DEPTH:
+        raise FlattenError(f"{name!r} is called more than {_INLINE_DEPTH} deep; is it recursive?")
+    inner = scope.inside(found)
+    merged = effective(found, inner)
+    if merged.equations or merged.initial_equations:
+        raise FlattenError(f"function {name!r} has an equation section; a function has a body")
+    if len(found.cls.algorithms) != 1:
+        raise FlattenError(
+            f"function {name!r} needs exactly one algorithm section, not {len(found.cls.algorithms)}"
+        )
+    components = [m.component for m in merged.members.values()]
+    inputs = [c for c in components if c.causality == "input"]
+    outputs = [c for c in components if c.causality == "output"]
+    environment = _bind(name, inputs, call)
+    for component in components:
+        if component.causality != "input" and component.modification.value is not None:
+            environment[component.name] = component.modification.value
+    environment = _sequence(found.cls.algorithms[0], environment, f"function {name!r}")
+    written: dict[str, ir.Expr] = {}
+    for component in outputs:
+        value = environment.get(component.name)
+        if value is None:
+            raise FlattenError(f"function {name!r} never assigns its output {component.name!r}")
+        written[component.name] = _inline_calls(value, inner, depth + 1)
+    return written
 
 
 def _bind(name: str, inputs: Sequence[ir.Component], call: ir.Call) -> dict[str, ir.Expr]:
@@ -1309,6 +1359,48 @@ class _Flattener:
 
     # -- equations --------------------------------------------------------------------
 
+    def _results(  # noqa: PLR0913, PLR0917 -- the targets, the call, and what a name needs
+        self,
+        targets: tuple[ir.Ref | None, ...],
+        call: ir.Call,
+        scope: Scope,
+        prefix: _Path,
+        local: frozenset[str],
+        outer: Mapping[str, _Path] | None,
+        span: ir.Span | None,
+    ) -> list[ir.Equal]:
+        """``(a, b) = f(x)`` as one ordinary equation per wanted output.
+
+        The body is run **once** and read out per output. That is not an optimisation: two
+        results of one call are two views of one computation, and a body with a branch run
+        twice could take a different arm each time and return a pair that never existed.
+        """
+        resolved = _literals(call, scope, local)
+        if not isinstance(resolved, ir.Call):  # pragma: no cover - the parser refuses this
+            raise FlattenError("an output list is assigned from a function call")
+        found = scope.function(resolved.name)
+        if found is None:
+            raise FlattenError(
+                f"{resolved.name!r} is not a function this model can see; an output list needs one"
+            )
+        written = _inline_all(found, scope, resolved, 0)
+        declared = list(written)
+        if len(targets) > len(declared):
+            raise FlattenError(
+                f"{resolved.name!r} returns {len(declared)} value(s)"
+                f" and {len(targets)} were asked for"
+            )
+
+        def qualified(node: ir.Expr) -> ir.Expr:
+            return _prefix_expr(node, prefix, local, values=self.values, outer=outer)
+
+        return [
+            ir.Equal(qualified(target), qualified(written[output]), span)
+            # `None` is a result the writer said they do not want: `(, b) = f(x)`.
+            for target, output in zip(targets, declared, strict=False)
+            if target is not None
+        ]
+
     def _equation(  # noqa: PLR0913 -- the scope resolves a call, the outer map a name
         self,
         equation: ir.Equation,
@@ -1330,10 +1422,16 @@ class _Flattener:
                 _inline_calls(written, scope), prefix, local, values=self.values, outer=outer
             )
 
-        if initial and not isinstance(equation, (ir.Equal, ir.ForEquation)):
+        if initial and not isinstance(equation, (ir.Equal, ir.CallEquation, ir.ForEquation)):
             raise FlattenError("only `a = b` equations may appear in initial equation")
 
         match equation:
+            case ir.CallEquation(targets=targets, call=call, span=span):
+                # One equation in, one equation per wanted output out. Everything after
+                # flattening then sees the shape it already knows -- one equation, one
+                # unknown -- and causalization needs no idea that a call can return a pair.
+                sink = self.initial_equations if initial else self.equations
+                sink.extend(self._results(targets, call, scope, prefix, local, outer, span))
             case ir.Equal(lhs=lhs, rhs=rhs, span=span):
                 sink = self.initial_equations if initial else self.equations
                 # The span rides along. Flattening rewrites *names*, so the equation a block

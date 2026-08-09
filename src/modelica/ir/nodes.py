@@ -34,6 +34,7 @@ __all__ = [
     "BoolLiteral",
     "Break",
     "Call",
+    "CallEquation",
     "Causality",
     "Class",
     "Component",
@@ -369,6 +370,24 @@ class Equal:
 
 
 @dataclass(frozen=True, slots=True)
+class CallEquation:
+    """``(a, b) = f(x)`` -- specification 8.3.1, the only way to read two results.
+
+    Its own node rather than an `Equal` with a tuple on the left, because there is no tuple
+    *value* in this IR and adding one would reach every expression walker in the project to
+    serve a form that only ever appears at the top of an equation. A function with two
+    results is a fact about the equation, not a new kind of expression.
+
+    ``targets`` may hold ``None`` where the source skipped an output -- ``(, b) = f(x)`` is
+    legal, and it means the first result is not wanted.
+    """
+
+    targets: tuple[Ref | None, ...]
+    call: Call
+    span: Span | None = field(default=None, compare=False, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class Connect:
     """``connect(a, b)``.
 
@@ -421,7 +440,7 @@ class ForEquation:
     body: tuple[Equation, ...]
 
 
-type Equation = Equal | Connect | When | IfEquation | ForEquation
+type Equation = Equal | CallEquation | Connect | When | IfEquation | ForEquation
 
 
 # --------------------------------------------------------------------------------------

@@ -290,7 +290,9 @@ class _Parser:
                 self.at += 1
                 inner = self.expression()
                 if self._check(Kind.OP, ","):
-                    raise self._error("output expression lists are not supported yet")
+                    # Reachable only where an output list cannot be: inside an expression.
+                    # `Parser.equation` reads the list itself before it gets here.
+                    raise self._error("an output list belongs at the head of an equation")
                 self._expect(Kind.OP, ")")
                 return inner
             case Kind.OP if token.text == "{":
@@ -567,11 +569,53 @@ class _Parser:
                 case _:
                     self._refuse_unsupported()
         where = self._at(self.token)
+        if self._check(Kind.OP, "("):
+            outputs = self._output_list()
+            if outputs is not None:
+                return self._call_equation(outputs, where)
         lhs = self.expression()
         self._expect(Kind.OP, "=")
         rhs = self.expression()
         self._terminate()
         return ir.Equal(lhs, rhs, where)
+
+    def _output_list(self) -> list[ir.Ref | None] | None:
+        """``(a, b)`` at the head of an equation, or ``None`` if this was a bracket.
+
+        An equation may open with a bracket for two reasons -- an output list, or an
+        expression the writer parenthesised -- and one token of lookahead does not separate
+        them. This reads the list and *rewinds* when what follows is not ``=``, which is the
+        only honest way round: ``(a + b) = c`` is a legal equation and must not be mistaken
+        for a list of one output.
+        """
+        mark = self.at
+        self.at += 1
+        outputs: list[ir.Ref | None] = []
+        while True:
+            if self._check(Kind.OP, ",") or self._check(Kind.OP, ")"):
+                outputs.append(None)  # a skipped result: `(, b) = f(x)`
+            elif self.token.kind is Kind.NAME:
+                where = self._at(self.token)
+                outputs.append(ir.Ref(self._dotted(), where))
+            else:
+                self.at = mark
+                return None
+            if self._accept(Kind.OP, ","):
+                continue
+            break
+        if not self._accept(Kind.OP, ")") or not self._check(Kind.OP, "="):
+            self.at = mark
+            return None
+        return outputs
+
+    def _call_equation(self, outputs: list[ir.Ref | None], where: ir.Span) -> ir.CallEquation:
+        """The right side has to be one call. Anything else is not this equation form."""
+        self._expect(Kind.OP, "=")
+        rhs = self.expression()
+        if not isinstance(rhs, ir.Call):
+            raise self._error("an output list is assigned from a function call, not an expression")
+        self._terminate()
+        return ir.CallEquation(tuple(outputs), rhs, where)
 
     def _for_equation(self) -> ir.ForEquation:
         """``for i in 1:n loop ... end for;`` -- read one, with one index.

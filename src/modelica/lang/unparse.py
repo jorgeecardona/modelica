@@ -215,6 +215,9 @@ def unparse_equation(node: ir.Equation, indent: int = 0) -> list[str]:
     match node:
         case ir.Equal(lhs=lhs, rhs=rhs):
             return [f"{pad}{unparse_expr(lhs)} = {unparse_expr(rhs)};"]
+        case ir.CallEquation(targets=targets, call=call):
+            named = ", ".join("" if t is None else t.name for t in targets)
+            return [f"{pad}({named}) = {unparse_expr(call)};"]
         case ir.Connect(a=a, b=b, annotation=annotation):
             return [f"{pad}connect({a.name}, {b.name}){_annotation(annotation)};"]
         case ir.When(branches=branches):
