@@ -226,15 +226,54 @@ def _pin_at(box: Box, port: str) -> tuple[float, float]:
 STEPS = 400
 """Iterations of the force layout. Enough to settle every model in the corpus."""
 
+GRAVITY = 0.6
+"""How hard every box is pulled toward the centre, per unit of distance from it.
 
-def _force(graph: Graph, boxes: dict[str, Box]) -> None:
-    """Push every box apart, pull connected boxes together, and cool down."""
-    ids = list(boxes)
-    count = len(ids)
-    if count < PAIR:
+Chosen by sweeping it over the corpus and reading the ink fraction, not by taste: below 0.2
+a sparse model still escapes, above 1.5 a connected one is squeezed until its wires bend.
+"""
+
+
+def _trivial(graph: Graph, boxes: dict[str, Box]) -> bool:
+    """Place the two shapes a force layout cannot, and say whether it did."""
+    if len(boxes) < PAIR:
         for box in boxes.values():
             box.x = box.y = 0.0
+        return True
+    if not any(edge.source in boxes and edge.target in boxes for edge in graph.edges):
+        _grid(boxes)
+        return True
+    return False
+
+
+def _grid(boxes: dict[str, Box]) -> None:
+    """A row, or rows, in declaration order. For a model whose components join nothing.
+
+    Springs need something to pull against and an edgeless graph gives them nothing: the
+    result is a scatter across a canvas whose size means nothing. `TwoFalls` is the case --
+    three components, no ``connect()`` anywhere, one equation reading two of them -- and a
+    reader of that picture wants to see three things listed, which is what this draws.
+    """
+    gap = 40.0
+    columns = max(1, math.ceil(math.sqrt(len(boxes))))
+    widest = max(box.width for box in boxes.values()) + gap
+    tallest = max(box.height for box in boxes.values()) + gap
+    for index, box in enumerate(boxes.values()):
+        box.x = (index % columns) * widest
+        box.y = (index // columns) * tallest
+
+
+def _force(graph: Graph, boxes: dict[str, Box]) -> None:
+    """Push every box apart, pull connected boxes together, and cool down.
+
+    Two shapes never reach the springs, and both are answered above rather than by letting
+    the loop deal with them: a single box goes at the origin, and a model with no edges at
+    all goes on a grid, because springs with nothing to pull against have no bound.
+    """
+    if _trivial(graph, boxes):
         return
+    ids = list(boxes)
+    count = len(ids)
 
     # A circle, not a random scatter: the same model must draw the same picture every
     # time, or every rebuild of the documentation site produces a diff.
@@ -256,6 +295,14 @@ def _force(graph: Graph, boxes: dict[str, Box]) -> None:
 
     ideal = span / math.sqrt(count)
     temperature = span / 4
+    # Every box is also pulled toward the centre, weakly. Without it the repulsion has
+    # nothing to work against when a model has few edges, and the picture has no bound:
+    # `TwoFalls` declares three components and connects none of them -- there is no
+    # `connect()` in it, only an equation reading two of them -- so 400 steps of pure
+    # repulsion drew it 3789 by 4306 pixels for three boxes, 0.1 per cent ink.
+    #
+    # It is the standard gravity term of a Fruchterman-Reingold layout and it does a second
+    # job here: a model whose edges are sparse comes out compact instead of merely finite.
     for _ in range(STEPS):
         shift = {node_id: [0.0, 0.0] for node_id in ids}
         for i, first in enumerate(ids):
@@ -279,6 +326,9 @@ def _force(graph: Graph, boxes: dict[str, Box]) -> None:
             shift[source][1] -= dy / distance * pull
             shift[target][0] += dx / distance * pull
             shift[target][1] += dy / distance * pull
+        for node_id in ids:
+            shift[node_id][0] -= boxes[node_id].x * GRAVITY
+            shift[node_id][1] -= boxes[node_id].y * GRAVITY
         for node_id in ids:
             dx, dy = shift[node_id]
             distance = max(math.hypot(dx, dy), 0.01)

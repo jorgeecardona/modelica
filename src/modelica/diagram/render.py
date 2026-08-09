@@ -17,10 +17,13 @@ correctly on a white page and on a dark page, and it needs no second copy and no
 from __future__ import annotations
 
 import html
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from modelica.diagram.icon import FRAME, Disc, Label, Stroke
 from modelica.diagram.layout import LINE, PAD, place
+
+_BOTH_LABELS: Final = 60.0
+"""How long a line has to be before two port names fit along it without touching."""
 
 if TYPE_CHECKING:
     from modelica.diagram.graph import Edge, Graph
@@ -117,9 +120,28 @@ def _edge_svg(edge: Edge, layout: Layout, kind: str) -> list[str]:
     # and the label was only ever standing in for a pin nobody could see.
     if start is None:
         parts.extend(_port_label(edge.source_port, x1, y1, source, target))
-    if end is None:
+    if end is None and _room(edge, (x1, y1), (x2, y2), near=start is None):
         parts.extend(_port_label(edge.target_port, x2, y2, target, source))
     return parts
+
+
+def _room(
+    edge: Edge, here: tuple[float, float], there: tuple[float, float], *, near: bool
+) -> bool:
+    """Whether the far end's name can be written without landing on the near end's.
+
+    Both names sit 13 px in from their own end, so a line shorter than about 60 px prints
+    them on top of each other. `DCMotor` did exactly that: ``flange`` over ``flange``,
+    twice, between the damper and the motor.
+
+    Two ends of one connection often carry the same word, and then one is enough however
+    long the line is -- the reader learns nothing from the second.
+    """
+    if not near:
+        return True
+    if edge.source_port == edge.target_port:
+        return False
+    return ((there[0] - here[0]) ** 2 + (there[1] - here[1]) ** 2) ** 0.5 > _BOTH_LABELS
 
 
 def _pin(box: Box, port: str) -> tuple[float, float] | None:
