@@ -248,18 +248,21 @@ def test_a_component_that_is_not_replaceable_cannot_be_redeclared() -> None:
         _flat(extra, "F")
 
 
-def test_redeclaring_a_class_is_refused_by_name() -> None:
-    """Parsed, and not applied: a replaceable *class* is a second feature, not this one."""
+def test_a_class_redeclaration_is_applied_and_lives_in_its_own_file() -> None:
+    """It parses and reaches the IR here; what it *means* is `tests/test_redeclare_class.py`.
+
+    The two spellings share this file's front-matter machinery and nothing else: a component
+    redeclaration is a value on a member, and a class redeclaration is a binding on a scope.
+    """
     source = (
         "package P\n"
         "  model Water\n    Real rho;\n  end Water;\n\n"
         "  model Rig\n    replaceable package Medium = Water constrainedby Water;\n"
-        "    Real x;\n  end Rig;\n"
+        "    Real x;\n  equation\n    x = 1.0;\n  end Rig;\n"
         "end P;\n\n"
         "model M\n  P.Rig rig(redeclare package Medium = P.Water);\nend M;\n"
     )
-    with pytest.raises(FlattenError, match="redeclaring a class is not supported yet"):
-        flatten(parse(source), "M")
+    assert [v.name for v in flatten(parse(source), "M").variables] == ["rig.x"]
 
 
 def test_the_python_front_end_writes_an_element_redeclaration() -> None:

@@ -80,6 +80,26 @@ class Found:
 class Scope:
     program: ir.Program
     chain: tuple[ir.Class, ...] = ()
+    bindings: tuple[tuple[str, Found], ...] = ()
+    """Class names this *instance* has had replaced, by ``redeclare package Medium = Water``.
+
+    Per-instance, which is the whole difficulty and the reason this lives on the scope rather
+    than on the class. A component redeclaration changes one declaration, and the instantiator
+    already holds it as a value. A class redeclaration changes what a name *means inside a
+    whole instance* -- every ``Medium.p``, at every depth -- and the same class instantiated
+    twice with different media has to resolve the name two ways at once. A lexical chain
+    cannot say that; a binding carried down the instantiation can.
+
+    A pair list and not a mapping so the scope stays a comparable value like everything else
+    here. There is never more than a handful.
+    """
+
+    def bound(self, extra: Mapping[str, Found]) -> Scope:
+        """The same scope with ``extra`` replacing class names inside it and everything below."""
+        if not extra:
+            return self
+        kept = tuple((name, found) for name, found in self.bindings if name not in extra)
+        return replace(self, bindings=(*kept, *extra.items()))
 
     def resolve(self, name: str) -> Found | BaseType:
         head, *rest = name.split(".")
@@ -96,6 +116,11 @@ class Scope:
         return found
 
     def _find_head(self, head: str) -> Found | None:
+        # A redeclaration replaces the declaration, so it is consulted before the class that
+        # declared the name it replaces -- otherwise the default would always win.
+        for name, target in self.bindings:
+            if name == head:
+                return target
         for depth, cls in enumerate(self.chain):
             for nested in cls.classes:
                 if nested.name == head:
@@ -119,6 +144,8 @@ class Scope:
         the lookup starts from an empty chain. That is the rule, and it is also what keeps
         this from recursing: the root scope has no imports to consult.
         """
+        # From the top, and with no bindings: an import is resolved against the program, and
+        # a class a redeclaration put in scope is not importable from anywhere else.
         root = Scope(self.program)
         for entry in cls.imports:
             target = f"{entry.path}.{head}" if entry.wildcard else entry.path
@@ -137,7 +164,13 @@ class Scope:
         return None
 
     def inside(self, found: Found) -> Scope:
-        return Scope(self.program, found.chain)
+        """Step into ``found``, carrying whatever this instance has had redeclared.
+
+        The bindings travel because they are a property of the *instance* being built, not of
+        the class: a medium redeclared at the top of a fluid model has to still mean the same
+        thing four components down.
+        """
+        return Scope(self.program, found.chain, self.bindings)
 
     def function(self, name: str) -> Found | None:
         """The ``function`` class this name refers to, or ``None`` if it is not one.
@@ -828,6 +861,75 @@ def _redeclared(member: Member, outer: ir.Modification, writer: Scope, path: _Pa
     )
 
 
+def _rebind(found: Found, scope: Scope, outer: ir.Modification, prefix: _Path) -> Scope:
+    """Apply this instance's class redeclarations, and hand back the scope they hold in.
+
+    ``rig(redeclare package Medium = Water)`` does not change a declaration; it changes what
+    the *name* ``Medium`` resolves to, everywhere inside this one instance. So it cannot be a
+    value on a member the way a component redeclaration is -- it is a binding on the scope,
+    and it travels down with the scope through every component the instance contains.
+
+    The replacement resolves in ``scope``, which is where it was written: one level out from
+    the class that owns the slot. Its own name, the one being replaced, is looked up in that
+    class, which is where the ``replaceable`` was declared. Same two scopes as a component
+    redeclaration, for the same reason.
+    """
+    replacements: dict[str, Found] = {}
+    for name, entry in outer.entries.items():
+        replacement = entry.redeclare
+        if not isinstance(replacement, ir.Class):
+            continue
+        here = ".".join((*prefix, name))
+        declared = next((c for c in found.cls.classes if c.name == name), None)
+        if declared is None:
+            raise FlattenError(f"{found.cls.name} has no class {name!r} to redeclare")
+        if not declared.replaceable:
+            raise FlattenError(
+                f"{here} is not declared `replaceable`, so no class can replace it"
+            )
+        if len(replacement.extends) != 1:
+            raise FlattenError(f"{here}: a class redeclaration must name one class")
+        target = scope.resolve(replacement.extends[0].type_name)
+        if not isinstance(target, Found):
+            raise FlattenError(
+                f"{here}: {replacement.extends[0].type_name!r} is a predefined type,"
+                f" and a class is wanted"
+            )
+        # The constraint is written inside the class that owns the slot, so it resolves
+        # there; the replacement was written one level out, so it resolves in `scope`. The
+        # same two scopes a component redeclaration meets, and the same way to get it wrong.
+        _check_class_constraint(here, declared, target, scope.inside(found), scope)
+        replacements[name] = target
+    return scope.bound(replacements)
+
+
+def _check_class_constraint(
+    where: str, declared: ir.Class, target: Found, declared_in: Scope, writer: Scope
+) -> None:
+    """The replacement class has to provide what the constraining clause promises.
+
+    The same structural, deliberately shallow rule a component redeclaration gets: every
+    member the constraint declares must exist in the replacement under the same name. With no
+    ``constrainedby``, the declared default is its own constraint.
+    """
+    wanted = declared.constraining or (
+        declared.extends[0].type_name if declared.extends else ""
+    )
+    if not wanted:
+        return
+    constraint = declared_in.resolve(wanted)
+    if not isinstance(constraint, Found):
+        return
+    required = set(effective(constraint, declared_in.inside(constraint)).members)
+    offered = set(effective(target, writer.inside(target)).members)
+    missing = sorted(required - offered)
+    if missing:
+        raise FlattenError(
+            f"{where}: {target.cls.name!r} does not satisfy {wanted!r} --"
+            f" it has no {', '.join(repr(m) for m in missing)}"
+        )
+
+
 def _check_constraint(
     name: str, original: ir.Component, replacement: ir.Component, declared: Scope, writer: Scope
 ) -> None:
@@ -1009,6 +1111,10 @@ class _Flattener:
         floor: ir.Variability,
         inners: Mapping[str, _Path] | None = None,
     ) -> None:
+        # Bound before anything is merged, because a redeclared class changes what the type
+        # names in this instance's own members resolve to -- including the ones an `extends`
+        # brings in, which `effective` is about to read.
+        scope = _rebind(found, scope, outer, prefix)
         merged = effective(found, scope)
         local = frozenset(merged.members)
         visible, resolved_outer = self._scoping(merged, prefix, inners or {})
@@ -1024,9 +1130,7 @@ class _Flattener:
             if entry.redeclare is None or name in merged.members:
                 continue
             if isinstance(entry.redeclare, ir.Class):
-                raise FlattenError(
-                    f"{'.'.join((*prefix, name))}: redeclaring a class is not supported yet"
-                )
+                continue  # a class redeclaration; `_rebind` above already applied it
             raise FlattenError(f"{found.cls.name} has no component {name!r} to redeclare")
         for name, member in merged.members.items():
             if member.component.scoping == "outer":
