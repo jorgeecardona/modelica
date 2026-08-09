@@ -39,12 +39,14 @@ needs_cc = pytest.mark.skipif(COMPILER is None, reason="no C compiler on this ma
 #: What `cgen` says it cannot write yet, and why. Listed here so that a model moving off it
 #: -- because somebody wrote the missing C -- fails this file and gets its check turned on,
 #: rather than staying quietly untested.
-REFUSED = {
-    "Pendulum": "state sets",
-    "TwoInertias": "state sets",
-}
-"""`AtwoodPendulum` left this list when the dense solve landed: its 4x4 tears to a 2x2 that
-is *linear*, so it needs `md_solve` and not Newton, and the check below now runs on it."""
+REFUSED = {"Pendulum": "need Newton"}
+"""One model left, and the reason is the last piece of C that is not written.
+
+`AtwoodPendulum` left this list when the dense solve landed -- its 4x4 tears to a 2x2 that
+is *linear*, so it wanted `md_solve` and not Newton. `TwoInertias` left it when the mode
+dispatcher did. `Pendulum` has both a second state set *and* a torn 1x1 that is nonlinear in
+the rod force, so it is the one model in the corpus that needs the iteration.
+"""
 
 
 def _system(model: Path) -> System:

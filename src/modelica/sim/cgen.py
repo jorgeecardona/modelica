@@ -47,21 +47,22 @@ FUNCTIONS: Final = ("rhs", "observe")
 """The entry points a generated unit defines, in the order this module writes them."""
 
 
-def _refuse(system: System) -> Mode:
-    """The one mode this can write, or a refusal that names what is missing.
+def _refuse(system: System) -> None:
+    """What this cannot write yet, named rather than left out.
 
-    Both refusals are about code that does not exist yet rather than about the model. A
-    simultaneous block needs a dense solve in C and a second state set needs the dispatcher
-    as a switch; until those are written, a unit that quietly left them out would compile
-    and give wrong answers, which is the one outcome worth ruling out.
+    The one refusal left is about code that does not exist rather than about any model: a
+    block that has to be iterated on needs Newton, and Newton needs a loop this does not
+    write. A unit that quietly left such a block out would compile and give wrong answers,
+    which is the one outcome worth ruling out.
     """
-    if len(system.modes) != 1:
-        raise EmitError(f"C: {len(system.modes)} state sets, and the mode dispatcher has no C yet")
-    (mode,) = system.modes
-    newton = [block for block in mode.blocks if block.assignment is None and iterated(block)]
+    newton = [
+        block
+        for mode in system.modes
+        for block in mode.blocks
+        if block.assignment is None and iterated(block)
+    ]
     if newton:
         raise EmitError(f"C: {len(newton)} block(s) need Newton, and the iteration has no C yet")
-    return mode
 
 
 def _used(name: str, text: str) -> bool:
@@ -112,20 +113,8 @@ def _function(name: str, arguments: str, body: list[str], candidates: list[str])
     ]
 
 
-def unit(system: System) -> str:
-    """``rhs`` and ``observe`` for ``system``, as one C translation unit.
-
-    The workspace layout is the Python one, unchanged and deliberately so: ``y`` the states,
-    ``p`` the parameters in `System.parameters` order, ``w`` one slot per observed variable
-    then the latches. A second backend that laid its arrays out differently would need its
-    own reader, its own tests and its own bugs.
-    """
-    mode = _refuse(system)
-    emitter = Emitter(system, dialect=C)
-    declared = sorted(
-        {symbol for symbol in emitter.symbols.values() if _LOCAL.match(symbol) and symbol != "t"}
-    )
-
+def _bodies(emitter: Emitter, system: System, mode: Mode) -> tuple[list[str], list[str]]:
+    """``rhs`` and ``observe`` for one state set, each pruned to what it actually reads."""
     rhs_rest = [
         *emitter.blocks(mode),
         *(
@@ -133,7 +122,6 @@ def unit(system: System) -> str:
             for slot, state in enumerate(mode.states)
         ),
     ]
-    rhs_body = _live([*emitter.unpack(mode), *rhs_rest])
     observe_rest = [
         *emitter.blocks(mode),
         *(
@@ -142,22 +130,70 @@ def unit(system: System) -> str:
         ),
         *(f"out[{slot}] = {emitter.symbols[name]}" for slot, name in enumerate(emitter.observed)),
     ]
-    observe_body = _live([*emitter.unpack(mode), *observe_rest])
+    return (
+        _live([*emitter.unpack(mode), *rhs_rest]),
+        _live([*emitter.unpack(mode), *observe_rest]),
+    )
+
+
+def _dispatch(name: str, arguments: str, call: str, count: int, switching: int) -> list[str]:
+    """The picker in front of one function per state set.
+
+    The same shape the Python emitter writes, and the same comparison: ``w`` is an array of
+    doubles, so the slot holding which set is in use is compared against ``k + 0.5`` rather
+    than converted to an integer. A C ``switch`` would need the conversion and would say no
+    more than this does.
+    """
+    body = [
+        line
+        for k in range(count - 1)
+        for line in (f"if (w[{switching}] < {k + 0.5}) {{ {name}_{k}({call}); return; }}",)
+    ]
+    body.append(f"{name}_{count - 1}({call})")
+    return [
+        f"void {name}({arguments}) {{",
+        *(f"    {line}" for line in body[:-1]),
+        f"    {body[-1]};",
+        "}",
+        "",
+    ]
+
+
+def unit(system: System) -> str:
+    """``rhs`` and ``observe`` for ``system``, as one C translation unit.
+
+    The workspace layout is the Python one, unchanged and deliberately so: ``y`` the states,
+    ``p`` the parameters in `System.parameters` order, ``w`` one slot per observed variable,
+    then the latches, then the state set in use. A second backend that laid its arrays out
+    differently would need its own reader, its own tests and its own bugs.
+    """
+    _refuse(system)
+    emitter = Emitter(system, dialect=C)
+    declared = sorted(
+        {symbol for symbol in emitter.symbols.values() if _LOCAL.match(symbol) and symbol != "t"}
+    )
+    signatures = {
+        "rhs": "double t, const double *y, const double *p, double *w, double *dy",
+        "observe": "double t, const double *y, const double *p, double *w, double *out",
+    }
+    calls = {"rhs": "t, y, p, w, dy", "observe": "t, y, p, w, out"}
+
+    written: list[str] = []
+    for position, name in enumerate(FUNCTIONS):
+        bodies = [_bodies(emitter, system, mode)[position] for mode in system.modes]
+        if len(bodies) == 1:
+            written += _function(name, signatures[name], bodies[0], declared)
+            continue
+        for k, body in enumerate(bodies):
+            written += _function(f"{name}_{k}", signatures[name], body, declared)
+        switching = emitter.switching
+        if switching is None:  # pragma: no cover - several bodies means several state sets
+            raise EmitError("C: several state sets and no slot saying which is in use")
+        written += _dispatch(name, signatures[name], calls[name], len(bodies), switching)
 
     lines = [
         f"/* Generated from {system.name} by modelica.sim.cgen. Do not edit. */",
         *C.preamble,
-        *_function(
-            "rhs",
-            "double t, const double *y, const double *p, double *w, double *dy",
-            rhs_body,
-            declared,
-        ),
-        *_function(
-            "observe",
-            "double t, const double *y, const double *p, double *w, double *out",
-            observe_body,
-            declared,
-        ),
+        *written,
     ]
     return "\n".join(lines) + "\n"
