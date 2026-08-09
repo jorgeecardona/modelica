@@ -1,9 +1,10 @@
 ---
 title: A `redeclare` written as a class element is refused, and that is how a base class is specialised
-status: in-progress
+status: done
 area: lang
 owner: cute-replicant-6e76d
 filed: 2026-08-09
+fixed_in: b54a1d0
 kind: story
 scope: M
 verify: test
@@ -57,3 +58,32 @@ reader that only takes the modification spelling reads half the idiom. pymoca te
 
 - No `redeclare replaceable`, which re-opens the slot for a further redeclaration down the
   chain. It parses today and would need a rule about which constraint then applies.
+
+## What landed
+
+`b54a1d0`. 851 tests pass.
+
+**The inferred shape held.** It went into `effective()`, at the line the Inferred section
+pointed at, and it is small: the parser files the declaration on `ir.Class.redeclarations`
+instead of among the components, and `effective()` hands it to the same `_redeclared` the
+modification spelling uses. One rule about what replaces what, one constraint check, and
+the test that says so is the Done bullet asked for — the two spellings flatten to the same
+variables and the same equations.
+
+Kept apart from `components` deliberately: an element redeclaration declares nothing new,
+and filed with the components it would be indistinguishable from one, so the class would
+gain a member the base already has.
+
+`modelica.build.redeclared` is the Python spelling, distinct from `redeclare`. The
+difference is *where* it is written and not what it means — `redeclare` is an argument to
+the component that owns the slot, `redeclared` stands in the body of a subclass.
+
+## Deliberately not done, found while doing it
+
+- **A class redeclared as an element** — `redeclare package Medium = Water;` in a class body
+  — is refused by name in the parser. It is the component half of
+  `redeclaring-a-class-is-parsed-and-refused` seen from the other spelling, and it wants the
+  same per-instance type environment. Whoever takes that issue should take this with it.
+- No corpus entry. The Done list did not ask for one, and the claim this feature makes is
+  "the same model as the other spelling", which is checked directly and would be checked no
+  better by simulating it twice.
