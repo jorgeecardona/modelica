@@ -1,9 +1,10 @@
 ---
 title: `import`, `enumeration` and `inner`/`outer` — the three small refusals
-status: in-progress
+status: done
 area: lang
 owner: cute-replicant-6e76d
 filed: 2026-08-03
+fixed_in: 3976eb4
 kind: story
 scope: M
 verify: test
@@ -60,3 +61,46 @@ type), then `inner`/`outer` (needs a scoping rule and a diagram check).
 These three are grouped for the register, not for the branch. Each closes on its own test and
 they can land in three commits; the grouping only says none of them is large enough to be
 worth its own entry here.
+
+## What landed
+
+Three commits, in the order this issue proposed: `f52f711` `import`, `91b2751`
+`enumeration`, `3976eb4` `inner`/`outer`. 845 tests pass. Every Done bullet is met, and
+`_UNSUPPORTED` is down to two entries — `external` and `operator` — from twelve when the
+register was filled.
+
+Three corpus entries, one per feature: `RLCCircuit` gained `import E = Electrical;`
+(it names five classes from one package, so an alias earns its place); `Setback` is new, a
+room whose setpoint an enumeration selects; `TwoFalls` is new, two bodies sharing one gravity.
+All three carry analytic reference points.
+
+**The `inner`/`outer` diagram check found the thing it was written to find.** The Inferred
+section above predicted it, and it was real: `modelica.diagram._members` walked every
+member, so a body declaring `outer Env env` drew an `env` box *inside itself* — an instance
+the flat model has no variable for, and two bodies would have shown two environments where
+the model has one. `_members` now skips an `outer`, and `tests/test_scoping.py` holds it
+there.
+
+Two findings worth carrying forward, neither predicted here:
+
+- **The Python front end had no `==`.** `Expression.__eq__` builds an equation, so a
+  *comparison* — `if schedule == Schedule.day` — had no operator left to spell it.
+  `modelica.build.equal` is the mirror of the `not_equal` that already existed for the same
+  reason, and `Setback` is the first model that needed it.
+- **A name written in Python is not always the name written in the `.mo`.** An alias, an
+  enumeration literal and a redeclared class are all named from *outside* their package by
+  the builder, and the `.mo` may write them shorter. `_shorten` applies a class's own imports
+  when building it, which is what keeps the twins equal; the enumeration and redeclare cases
+  carry a documented caveat instead, because no model in the corpus needs them shortened.
+
+## Deliberately not done, found while doing it
+
+- **`inner outer` on one declaration** is refused in the parser by name. It declares an inner
+  *and* refers to an outer, which is a third rule rather than the two together, and half-
+  reading it would give a model a shared object that is quietly not shared.
+- **An enumeration literal has no description string in the IR.** Modelica lets each literal
+  carry one; the parser reads them and drops them, because the printer has nowhere to put
+  them and the round trip is the contract.
+- No `String` or `Boolean` switch on an enumeration beyond `==` and `<>`. The ordering
+  operators (`<`, `>`) are defined on enumerations by the specification and nothing here
+  refuses them, but nothing tests them either.
