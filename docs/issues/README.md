@@ -83,7 +83,7 @@ cabildo issues show <slug>
 | [There is no honest number for how much Modelica this reads, because the corpus is ours](03-08-2026-reachability-and-agreement-against-a-reference-tool.md) | ci | story | L | probe | open | — |
 | [`make docs` serves a cached page and calls itself "same as CI", and the cache outlived the code](09-08-2026-make-docs-serves-a-cached-page-and-calls-itself-same-as-ci.md) | ci | bug | S | inspect | open | — |
 | [Diagrams draw boxes, and the icons that would make them read like circuits now survive parsing](04-08-2026-diagrams-draw-boxes-not-icons.md) | diagram | story | L | inspect | open | — |
-| [A block diagram is drawn by springs, so the signal flows backwards and the captions float](10-08-2026-a-block-diagram-is-drawn-by-springs-so-the-signal-flows-backwards.md) | diagram | story | L | inspect | open | — |
+| [A block diagram is drawn by springs, so the signal flows backwards and the captions float](10-08-2026-a-block-diagram-is-drawn-by-springs-so-the-signal-flows-backwards.md) | diagram | story | L | inspect | in-progress · @cute-replicant-6e76d | — |
 | [The EKF results live in a log and a deleted scratch file, not in the documentation](03-08-2026-an-estimation-notebook.md) | docs | story | M | inspect | open | — |
 | [The Association has not been told this exists, and the trademark note assumes they will be](03-08-2026-tell-the-modelica-association.md) | docs | idea | XS | inspect | open | — |
 | [The README says nothing in Python reaches a trajectory, and something does](03-08-2026-the-readme-claim-is-too-strong.md) | docs | bug | S | inspect | open | — |
@@ -113,5 +113,5 @@ cabildo issues show <slug>
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_32 open — 31 open, 1 blocked; 20 done. Generated; edit the files, then `cabildo issues reindex`._
+_32 open — 30 open, 1 in-progress, 1 blocked; 20 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

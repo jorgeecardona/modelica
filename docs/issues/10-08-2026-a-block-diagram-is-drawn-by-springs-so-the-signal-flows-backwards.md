@@ -1,8 +1,8 @@
 ---
 title: A block diagram is drawn by springs, so the signal flows backwards and the captions float
-status: open
+status: done
 area: diagram
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-10
 scope: L
 verify: inspect
@@ -72,3 +72,62 @@ The other three are local and probably independent of it.
   `_straighten` can already see it; a real router is a much larger thing to own and to test.
 - Nothing about hierarchy. `DCMotor` nests and branches, and a layout for hierarchy is its
   own problem — recorded in the entry named above and still open.
+
+## What landed
+
+1186 tests pass, `mkdocs build --strict` is clean, and `tests/test_diagram_layout.py` is 87
+tests. `verify: inspect` — the artifacts are the rendered images, looked at.
+
+Each Done bullet:
+
+- **`modelica.diagram.layout._signal`.** A schematic whose every connector is an input or an
+  output is placed left to right by signal flow: `_flow` points each connection from its
+  output end to its input end, `_forward` breaks the cycles with a depth-first walk,
+  `_ranked` gives the longest path, and each column is ordered by the median position of
+  what feeds it. `PIControl` now reads **setpoint, error, controller, plant**, and the
+  feedback leaves the plant's bottom, runs left under the row, and comes up into `error`
+  labelled `u2`. 473x410 at 11.9 % ink before; 548x198 at 21.3 % now.
+- **The fallback is stated.** `_signal` returns False for a physical network or a model with
+  no connectors, and `place` falls through to `_loop` and then to `_force`, in that order,
+  with the reason at each.
+- **A port name is not written over a component.** `_port_label` steps the word out along the
+  wire — 13, 18, 24, 31, 40 px — until it clears **both** boxes, and draws nothing when
+  nowhere on that wire is clear. `test_a_port_name_is_not_written_over_a_component` holds it
+  over the corpus.
+- **A caption sits beside its symbol.** `_reach` measures the icon's ink instead of using
+  `FRAME`. On `RLCCircuit` the word `source` was 82 px from the circle and is now 8 px past
+  its edge; `c` likewise. Side by side with the EDA drawing this entry was measured against,
+  it was the last visible difference.
+- **The ink floor is 9.5 %**, up from 8. The corpus minimum is `MassSpringDamper` at 10.9 %.
+
+### The two things that were wrong on the first attempt
+
+**Measuring the icon along its own axis changed nothing.** A component's leads run out to the
+frame edge on the icon's x-axis, so the widest ink is always 100 and `_reach` returned
+`FRAME` for every part. A turned component's caption goes *across* its axis, and across is
+where the symbol actually ends — the source's circle is radius 40 in a 200-wide square.
+
+**The feedback left the plant's left edge.** `_corner` aims a wire at the other box, which
+for a backward edge is the side facing backwards, so the line came out of the plant and
+immediately crossed it. A wire that goes under leaves and arrives at the *bottom*, and the
+corner is aimed at the dip rather than at the far box.
+
+## Deliberately not done, found while doing it
+
+- **`Layout.below` is a new field and the renderer reads it.** A feedback dip needs canvas
+  the bounds do not know about, since bounds are computed from boxes. It is zero for every
+  layout but the signal one, and `_under` refuses to dip into room that was not reserved.
+- **Port labels have their own CSS class now** (`port`, not `small`). They shared a class
+  with the values written *inside* a box, so the first version of the label test flagged
+  `k = 1` for being drawn on the box it belongs to. A test that cannot tell two things apart
+  is a test of neither.
+- **`DCMotor` is still the weak one**, and it is not this entry's. It nests and it branches,
+  so it is neither one loop nor causal and it falls to the springs. The staircase in its `n`
+  wire is also still there: `_route` knows the two boxes at the ends and nothing in between,
+  and a real router is a much larger thing to own. Both belong to
+  `03-08-2026-the-return-wire-is-routed-through-the-component-it-comes-back-to`, which
+  already records the hierarchy gap.
+- **No test asserts the *order* of a signal layout.** The geometric rules catch a diverged or
+  illegible picture; that `PIControl` reads setpoint-first is checked by looking at it, which
+  is what `verify: inspect` asks for. A test naming the expected column order would pin one
+  model's answer rather than the convention.

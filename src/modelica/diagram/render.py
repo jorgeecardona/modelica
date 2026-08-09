@@ -20,7 +20,7 @@ import html
 from typing import TYPE_CHECKING, Final
 
 from modelica.diagram.icon import FRAME, Disc, Label, Stroke
-from modelica.diagram.layout import LINE, PAD, place
+from modelica.diagram.layout import CHAR, LINE, PAD, place
 
 _BOTH_LABELS: Final = 60.0
 """How long a line has to be before two port names fit along it without touching."""
@@ -59,7 +59,7 @@ _STYLE = """
 .mdg .dot { fill: currentColor; }
 .mdg .mark { stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
 .mdg .name { font-weight: 600; }
-.mdg .type, .mdg .small { font-size: 10.5px; opacity: .62; }
+.mdg .type, .mdg .small, .mdg .port { font-size: 10.5px; opacity: .62; }
 .mdg .title { font-size: 14px; font-weight: 600; }
 """
 
@@ -112,9 +112,22 @@ def _edge_svg(edge: Edge, layout: Layout, kind: str) -> list[str]:
 
     start = _pin(source, edge.source_port)
     end = _pin(target, edge.target_port)
-    x1, y1 = start or _corner(source, target.x, target.y)
-    x2, y2 = end or _corner(target, source.x, source.y)
-    path = _route((x1, y1), (x2, y2), source if start else None, target if end else None)
+    under = _under(source, target, layout)
+    # A wire going under leaves and arrives at the *bottom*. Aiming it at the other box
+    # instead -- which is what a forward wire does -- puts it on the side facing backwards,
+    # so `PIControl`'s feedback came out of the plant's left edge and crossed the block it
+    # was leaving.
+    aim = (source.x, under) if under is not None else (target.x, target.y)
+    back = (target.x, under) if under is not None else (source.x, source.y)
+    x1, y1 = start or _corner(source, *aim)
+    x2, y2 = end or _corner(target, *back)
+    path = _route(
+        (x1, y1),
+        (x2, y2),
+        source if start else None,
+        target if end else None,
+        under=under,
+    )
     parts = [f'<path class="link{weak}" d="{path}" fill="none"{marker} />']
     # A drawn pin needs no name beside it: the icon already says where the wire attaches,
     # and the label was only ever standing in for a pin nobody could see.
@@ -125,9 +138,7 @@ def _edge_svg(edge: Edge, layout: Layout, kind: str) -> list[str]:
     return parts
 
 
-def _room(
-    edge: Edge, here: tuple[float, float], there: tuple[float, float], *, near: bool
-) -> bool:
+def _room(edge: Edge, here: tuple[float, float], there: tuple[float, float], *, near: bool) -> bool:
     """Whether the far end's name can be written without landing on the near end's.
 
     Both names sit 13 px in from their own end, so a line shorter than about 60 px prints
@@ -175,18 +186,43 @@ def _stub(point: tuple[float, float], box: Box | None) -> tuple[tuple[float, flo
     return (x, y + reach if dy > 0 else y - reach), False
 
 
+def _under(source: Box, target: Box, layout: Layout) -> float | None:
+    """The depth a backward wire runs at, or ``None`` when the wire goes forwards.
+
+    A feedback line leaves a block on the right and arrives at one on its left, so any route
+    between them crosses whatever is in between -- in `PIControl` that is the controller,
+    with the wire straight through it. Taking it under the whole row is what a control
+    diagram does, and the room for it was kept by `layout.place`.
+
+    Only where that room exists: `Layout.below` is zero for every layout but the signal one,
+    and a dip into a canvas that did not reserve it would be clipped.
+    """
+    if not layout.below or target.left + target.width >= source.left:
+        return None
+    return max(box.top + box.height for box in layout.boxes.values()) + layout.below / 2
+
+
 def _route(
     start: tuple[float, float],
     end: tuple[float, float],
     source: Box | None,
     target: Box | None,
+    *,
+    under: float | None = None,
 ) -> str:
     """An orthogonal wire: out of each pin along its own axis, then a Z between the stubs.
 
     Two corners rather than one. A single corner has to pick an axis, and when it picks the
     one a stub already points along, the wire doubles back over itself -- which is what a
     reader sees as a line running past a component and stopping in mid-air.
+
+    ``under`` overrides all of that with the one route a backward wire can take: down out of
+    the source, along below everything, and up into the target.
     """
+    a, _ = _stub(start, source)
+    b, _ = _stub(end, target)
+    if under is not None:
+        return _path(_straighten([start, (start[0], under), (end[0], under), end]))
     a, a_horizontal = _stub(start, source)
     b, b_horizontal = _stub(end, target)
     if a_horizontal and b_horizontal:
@@ -269,14 +305,72 @@ def _port_label(name: str, x: float, y: float, near: Box, far: Box) -> list[str]
         return []
     dx, dy = far.x - near.x, far.y - near.y
     length = max((dx * dx + dy * dy) ** 0.5, 0.01)
-    at_x = x + dx / length * 13 - dy / length * 6
-    at_y = y + dy / length * 13 + dx / length * 6 + 3.5
+    # Stepped out along the wire until the word clears the box it belongs to. One fixed
+    # offset was enough while every wire left sideways; a feedback line leaves downward, and
+    # 13 px down from a pin on the bottom edge is still inside the block -- `PIControl` put
+    # the plant's `y` on top of its own frame.
+    at_x = at_y = 0.0
+    clear = False
+    for reach in (13.0, 18.0, 24.0, 31.0, 40.0):
+        at_x = x + dx / length * reach - dy / length * 6
+        at_y = y + dy / length * reach + dx / length * 6 + 3.5
+        # Both boxes, not just the one it names: stepping out of its own component walks it
+        # toward the other, and a word on the wrong box is no more readable than a word on
+        # the right one.
+        clear = not _touching(at_x, at_y, name, near) and not _touching(at_x, at_y, name, far)
+        if clear:
+            break
+    if not clear:
+        # Nowhere along this wire is clear, which means the two boxes are close enough that
+        # the wire barely exists. The pin is visible; the word would only be a smudge.
+        return []
     return [
         (
-            f'<text class="small" x="{at_x:.1f}" y="{at_y:.1f}" '
+            f'<text class="port" x="{at_x:.1f}" y="{at_y:.1f}" '
             f'text-anchor="middle">{_escape(name)}</text>'
         )
     ]
+
+
+def _touching(x: float, y: float, name: str, box: Box) -> bool:
+    """Whether a name centred at ``x, y`` would be drawn over ``box``.
+
+    The word is measured, not guessed at: `text-anchor` is ``middle`` and the small face is
+    about four fifths of the body character, which is the same arithmetic
+    `tests/test_diagram_layout.py` uses to decide two labels have collided.
+    """
+    half = len(name) * CHAR * 0.8 / 2
+    return (
+        x - half < box.left + box.width
+        and x + half > box.left
+        and y - LINE / 2 < box.top + box.height
+        and y + LINE / 2 > box.top
+    )
+
+
+def _reach(box: Box) -> float:
+    """How far the icon's *ink* extends sideways, in icon coordinates.
+
+    Not `FRAME`, which is the 200 by 200 square every Modelica icon is drawn in and has
+    nothing to do with how big the drawing inside it is. A voltage source is a circle of
+    radius 40 in that square, so a caption placed at the frame's edge floats 60 units of
+    white away from the symbol it names -- which on `RLCCircuit` put the word ``source``
+    in the middle of the loop and ``c`` well to the right of the capacitor.
+
+    Measured **across** the icon and not along it. A component's leads run along its own
+    x-axis out to the frame edge, so the widest ink is always 100 and measuring that changed
+    nothing -- the first version of this did exactly that. The caption of a turned component
+    goes beside it, which is across its axis, and across is where the symbol actually ends.
+
+    Falls back to the frame for an icon that draws nothing, where there is no ink to measure.
+    """
+    far = 0.0
+    for shape in box.node.icon.shapes:
+        if isinstance(shape, Stroke):
+            far = max(far, *(abs(y) for _, y in shape.points))
+        elif isinstance(shape, Disc):
+            far = max(far, abs(shape.y) + shape.ry)
+    return far or FRAME
 
 
 def _caption(box: Box, name: str, label: Label, scale: float) -> list[str]:
@@ -292,7 +386,7 @@ def _caption(box: Box, name: str, label: Label, scale: float) -> list[str]:
         # is the layout's call -- a name written into the middle of a loop is worse than no
         # name -- and the default is the right, where a single component has room.
         outward = -1.0 if box.caption == "left" else 1.0
-        left = box.x + outward * (FRAME * scale + 6)
+        left = box.x + outward * (_reach(box) * scale + 8)
         anchor = "end" if box.caption == "left" else "start"
         first = box.y - label.size * scale * 0.6
     else:

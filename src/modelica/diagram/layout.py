@@ -92,6 +92,13 @@ class Layout:
     boxes: dict[str, Box] = field(default_factory=dict[str, Box])
     width: float = 0.0
     height: float = 0.0
+    below: float = 0.0
+    """Room kept under the boxes for wires that have to go around them.
+
+    A feedback line leaves a block on the right and arrives at one on its left, so it cannot
+    be drawn between them without crossing everything in between. It goes underneath, and
+    the canvas has to be told, because the bounds otherwise only know about boxes.
+    """
 
     def __getitem__(self, node_id: str) -> Box:
         return self.boxes[node_id]
@@ -449,6 +456,129 @@ def _layered(graph: Graph, boxes: dict[str, Box]) -> None:
 
 
 # --------------------------------------------------------------------------------------
+# The signal layout: what a person draws when they draw a control loop
+# --------------------------------------------------------------------------------------
+
+COLUMN = 56.0
+"""Space between two ranks of a block diagram. Wide enough for a name beside the wire."""
+
+FEEDBACK = 46.0
+"""How far under the row a backward wire runs, and the room the canvas keeps for it."""
+
+
+def _causal(graph: Graph, boxes: dict[str, Box]) -> bool:
+    """True when every connector in the picture is an input or an output.
+
+    That is what makes a schematic a *block diagram* rather than a network: signal flows one
+    way through it, so there is an order to draw it in. A physical connector has no
+    causality -- current can go either way through a resistor -- and for those there is no
+    left and no right, which is why `_loop` exists instead.
+    """
+    ports = [port for node_id in boxes for port in graph[node_id].ports]
+    return bool(ports) and all(port.causality in ("input", "output") for port in ports)
+
+
+def _flow(graph: Graph, boxes: dict[str, Box]) -> list[tuple[str, str]]:
+    """Every connection, pointed from the output end to the input end."""
+    arrows: list[tuple[str, str]] = []
+    for edge in graph.edges:
+        if edge.source not in boxes or edge.target not in boxes:
+            continue
+        out = {port.name: port.causality for port in graph[edge.source].ports}
+        arrows.append(
+            (edge.target, edge.source)
+            if out.get(edge.source_port) == "input"
+            else (edge.source, edge.target)
+        )
+    return arrows
+
+
+def _forward(arrows: list[tuple[str, str]], ids: list[str]) -> list[tuple[str, str]]:
+    """The arrows with the cycles broken, so the ranks below are a longest path.
+
+    A control loop is a cycle by construction -- that is what feedback *is* -- so ranking it
+    without breaking one would not terminate. The arrow removed is the one closing the
+    cycle, found by a depth-first walk, which is the one a reader also thinks of as the
+    feedback: everything else is the forward path.
+    """
+    after: dict[str, list[str]] = {node: [] for node in ids}
+    for source, target in arrows:
+        after[source].append(target)
+    back: set[tuple[str, str]] = set()
+    colour: dict[str, int] = dict.fromkeys(ids, 0)
+
+    def walk(node: str) -> None:
+        colour[node] = 1
+        for other in after[node]:
+            if colour[other] == 1:
+                back.add((node, other))
+            elif colour[other] == 0:
+                walk(other)
+        colour[node] = 2
+
+    for node in ids:
+        if colour[node] == 0:
+            walk(node)
+    return [arrow for arrow in arrows if arrow not in back]
+
+
+def _ranked(ids: list[str], forward: list[tuple[str, str]]) -> dict[int, list[str]]:
+    """Each node one column right of everything that feeds it: the longest path."""
+    rank = dict.fromkeys(ids, 0)
+    for _ in range(len(ids)):
+        moved = False
+        for source, target in forward:
+            if rank[target] < rank[source] + 1:
+                rank[target] = rank[source] + 1
+                moved = True
+        if not moved:
+            break
+    columns: dict[int, list[str]] = {}
+    for node_id in ids:
+        columns.setdefault(rank[node_id], []).append(node_id)
+    return columns
+
+
+def _signal(graph: Graph, boxes: dict[str, Box]) -> bool:
+    """A block diagram, left to right in the order the signal travels.
+
+    The convention every control diagram in every textbook follows, and the same kind of
+    thing `_loop` does for circuits: the picture is not a search for room, it is the shape
+    the reader already expects. `PIControl` comes out setpoint, error, controller, plant.
+
+    Returns False for a model this cannot claim -- a physical network, or one with no
+    connectors -- and then the caller falls back.
+    """
+    if not _causal(graph, boxes):
+        return False
+    ids = list(boxes)
+    arrows = _flow(graph, boxes)
+    if not arrows:
+        return False
+    forward = _forward(arrows, ids)
+    columns = _ranked(ids, forward)
+
+    # Each column is ordered by where the things feeding it sit, so the wires between two
+    # columns cross as little as the ranks allow.
+    x = 0.0
+    coming: dict[str, list[str]] = {node: [] for node in ids}
+    for source, target in forward:
+        coming[target].append(source)
+    for level in sorted(columns):
+        row = columns[level]
+        row.sort(key=lambda n: (_median([boxes[o].y for o in coming[n]] or [0.0]), n))
+        tallest = sum(boxes[n].height for n in row) + 24.0 * (len(row) - 1)
+        y = -tallest / 2
+        widest = max(boxes[n].width for n in row)
+        for node_id in row:
+            boxes[node_id].x = x + widest / 2
+            boxes[node_id].y = y + boxes[node_id].height / 2
+            y += boxes[node_id].height + 24.0
+        x += widest + COLUMN
+    return True
+
+
+# --------------------------------------------------------------------------------------
 # The loop layout: what a person draws when they draw a circuit
 # --------------------------------------------------------------------------------------
 
@@ -601,9 +731,12 @@ def place(graph: Graph) -> Layout:
     if not boxes:
         return Layout(width=2 * MARGIN, height=2 * MARGIN)
 
+    below = 0.0
     if graph.kind == "schematic":
         if _placed(boxes):
             _from_model(graph, boxes)
+        elif _signal(graph, boxes):
+            below = FEEDBACK + MARGIN
         elif not _loop(graph, boxes):
             # Not one loop with stubs, so there is no convention to apply and the springs
             # are still the best available answer. Said here rather than left to be found.
@@ -624,5 +757,5 @@ def place(graph: Graph) -> Layout:
         box.x += MARGIN - left
         box.y += MARGIN - top
     width = max(box.left + box.width for box in boxes.values()) + MARGIN + frame + after
-    height = max(box.top + box.height for box in boxes.values()) + MARGIN + frame
-    return Layout(boxes=boxes, width=width, height=height)
+    height = max(box.top + box.height for box in boxes.values()) + MARGIN + frame + below
+    return Layout(boxes=boxes, width=width, height=height, below=below)

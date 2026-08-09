@@ -121,14 +121,16 @@ def test_the_picture_is_not_mostly_empty(model: Path) -> None:
     components and connects none of them, so 400 steps of repulsion had nothing pulling
     back. A centring term and a grid for the edgeless case took it to 27 %.
 
-    8 % is the floor, and it is generous on purpose. A schematic is mostly wires and white,
-    and a rule tight enough to force a good layout would also forbid a correct one; this
-    catches the layout that has *diverged*, which is the failure that actually happened.
+    The floor is 9.5 %, raised from 8 when the signal layout landed. The corpus minimum is
+    `MassSpringDamper` at 10.9 %, so there is a point and a half of room -- enough that a
+    layout change does not trip it and little enough that a divergence does. A schematic is
+    mostly wires and white, and a rule tight enough to force a *good* layout would also
+    forbid a correct one; this catches the one that has run away.
     """
     _, layout = _layout(model)
     ink = sum(box.width * box.height for box in layout.boxes.values())
     fill = ink / (layout.width * layout.height) * 100
-    assert fill > 8.0, f"{model.stem}: {fill:.1f}% ink in {layout.width:.0f}x{layout.height:.0f}"
+    assert fill > 9.5, f"{model.stem}: {fill:.1f}% ink in {layout.width:.0f}x{layout.height:.0f}"
 
 
 @pytest.mark.parametrize("model", DRAWN, ids=[m.stem for m in DRAWN])
@@ -163,7 +165,7 @@ def test_a_connection_writes_each_port_name_once_and_legibly(model: Path) -> Non
 
     graph, _ = _layout(model)
     texts = re.findall(
-        r'<text class="small" x="([-\d.]+)" y="([-\d.]+)"[^>]*>([^<]*)</text>', svg(graph)
+        r'<text class="port" x="([-\d.]+)" y="([-\d.]+)"[^>]*>([^<]*)</text>', svg(graph)
     )
     placed: list[tuple[float, float, float, str]] = []
     for x, y, name in texts:
@@ -174,3 +176,29 @@ def test_a_connection_writes_each_port_name_once_and_legibly(model: Path) -> Non
             apart = here[0] > other[1] or here[1] < other[0] or abs(here[2] - other[2]) >= LINE
             assert apart, f"{model.stem}: {name!r} and {other[3]!r} overlap at {x},{y}"
         placed.append(here)
+
+
+@pytest.mark.parametrize("model", DRAWN, ids=[m.stem for m in DRAWN])
+def test_a_port_name_is_not_written_over_a_component(model: Path) -> None:
+    """A word on top of a box is a word nobody reads and a box nobody trusts.
+
+    `PIControl`'s feedback leaves the plant downward, and 13 px down from a pin on the
+    bottom edge is still inside the block -- the plant's ``y`` was printed on its own frame.
+    The renderer steps the name out along the wire until it clears.
+    """
+    import re  # noqa: PLC0415 - one test reads the output text
+
+    graph, layout = _layout(model)
+    texts = re.findall(
+        r'<text class="port" x="([-\d.]+)" y="([-\d.]+)"[^>]*>([^<]*)</text>', svg(graph)
+    )
+    for x, y, name in texts:
+        half = len(name) * CHAR * 0.8 / 2
+        for node_id, box in layout.boxes.items():
+            over = (
+                float(x) - half < box.left + box.width
+                and float(x) + half > box.left
+                and float(y) - LINE / 2 < box.top + box.height
+                and float(y) + LINE / 2 > box.top
+            )
+            assert not over, f"{model.stem}: {name!r} is written over {node_id}"
