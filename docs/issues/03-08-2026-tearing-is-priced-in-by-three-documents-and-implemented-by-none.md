@@ -1,9 +1,10 @@
 ---
 title: Tearing is priced in by three documents and implemented by none
-status: in-progress
+status: done
 area: ir
 owner: cute-replicant-6e76d
 filed: 2026-08-03
+fixed_in: cdbbdcf
 kind: story
 scope: L
 verify: test
@@ -50,3 +51,38 @@ No heuristic tuning. Tearing quality is an NP-hard choice and the literature's u
 is a greedy heuristic; this issue asks for a *correct* torn form with any admissible choice,
 not the best one. Picking a better heuristic is a separate, measurable follow-up, and it
 needs the harness from the work-precision issue to be worth arguing about.
+
+## What landed
+
+`cdbbdcf`. 905 tests pass. Every corpus block that was simultaneous:
+
+| model | block | iterates on | recovered |
+| --- | --- | --- | --- |
+| `AtwoodPendulum` | 4x4 | 2 | `der_vr`, `der_om` |
+| `Pendulum` | 3x3 | 1 (`F`) | `der_vx`, `der_vy` |
+| `TwoInertias` | 3x3 | 1 | 2 |
+
+The Done bullet named `AtwoodPendulum` at "at most 2 torn unknowns"; it is exactly 2, and
+its reference points hold at the tolerance recorded before tearing existed. That equality —
+same trajectory, smaller system — is the whole test, and it comes free from the corpus.
+
+**The design decision is that the assignments are folded back into the residuals.** What
+`_tear` returns is an ordinary `Block` over the torn unknowns, so `emit` solves it with the
+`linear` and `newton` it already had and the only new code is recovering the substituted
+variables afterwards, plus their tangents, which are the chain rule an explicit assignment
+already gets. Nothing downstream had to learn what tearing is.
+
+## Deliberately not done, found while doing it
+
+- **It removed a compiled test's coverage, and that is restored in the same commit.**
+  `Pendulum` used to be the only model in `tests/test_jit.py::COVERED` emitting
+  `np.linalg.solve` with a 2-D right-hand side. Tearing reduced its block to one unknown, so
+  it stopped emitting the matrix path — and nothing else in that list ever did.
+  `AtwoodPendulum` tears to two and still emits it, so it joined the list. Worth recording as
+  a *shape*: a pass that makes generated code simpler can delete the only instance of a
+  construct a test was there to compile.
+- **No timing.** The issue's Inferred section says the saving is small at 4x4 and grows with
+  the model, and that remains unmeasured — `work-precision-harness` is what would settle it.
+  What is measured here is the size of the system, not the time it takes.
+- No heuristic tuning, as planned. The greedy choice is `sorted(pending)` broken by how many
+  unused equations want each unknown, which is admissible and arbitrary among ties.
