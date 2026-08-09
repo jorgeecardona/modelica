@@ -245,6 +245,18 @@ def _base_of(found: Found | BaseType, scope: Scope) -> tuple[BaseType, ir.Modifi
     collected = ir.EMPTY
     current = found
     while isinstance(current, Found):
+        if current.cls.literals:
+            # The specification says a literal *is* its position counted from one, so an
+            # enumeration is an Integer that has been told its range. Emitting it as such
+            # means nothing below here needs a fifth base type: `emit` puts every variable
+            # in a float workspace, and an ordinal survives that unchanged.
+            span = ir.Modification(
+                entries={
+                    "min": ir.Modification(ir.IntLiteral(1)),
+                    "max": ir.Modification(ir.IntLiteral(len(current.cls.literals))),
+                }
+            )
+            return "Integer", _merge(span, collected)
         if current.cls.restriction != "type":
             raise FlattenError(f"{current.cls.name!r} is not a type")
         if len(current.cls.extends) != 1 or current.cls.components:
@@ -469,6 +481,58 @@ def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir
                 go(over),
                 tuple(_substitute_equation(e, inner_values) for e in body),
             )
+
+
+def _literals(  # noqa: PLR0911 -- one case per node type, as its neighbours have
+    node: ir.Expr, scope: Scope, local: frozenset[str]
+) -> ir.Expr:
+    """``Mode.day`` becomes ``1`` -- an enumeration literal is its position, counted from one.
+
+    Done here, before prefixing, because ``Mode.day`` is not a component reference and
+    prefixing would qualify it into a variable that does not exist. A name that *is* a local
+    component is left alone whatever else it might resolve to, which is Modelica's rule and
+    also the only reading that cannot surprise anybody.
+    """
+
+    def go(inner: ir.Expr) -> ir.Expr:
+        return _literals(inner, scope, local)
+
+    match node:
+        case ir.Ref(parts=parts) if len(parts) > 1 and parts[0] not in local:
+            try:
+                found = scope.resolve(".".join(parts[:-1]))
+            except FlattenError:
+                return node
+            if isinstance(found, Found) and parts[-1] in found.cls.literals:
+                return ir.IntLiteral(found.cls.literals.index(parts[-1]) + 1)
+            return node
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, go(lhs), go(rhs))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, go(operand))
+        case ir.Call(name=name, args=args, named=named):
+            return ir.Call(name, tuple(go(a) for a in args), tuple((k, go(v)) for k, v in named))
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(go(condition), go(then), go(otherwise))
+        case ir.Array(elements=elements):
+            return ir.Array(tuple(go(e) for e in elements))
+        case _:
+            return node
+
+
+def _literal_modification(
+    mod: ir.Modification, scope: Scope, local: frozenset[str]
+) -> ir.Modification:
+    """The same rewrite over a modification, which is where ``parameter Mode m = Mode.night`` is."""
+    if not mod:
+        return mod
+    return ir.Modification(
+        value=None if mod.value is None else _literals(mod.value, scope, local),
+        entries={
+            name: _literal_modification(entry, scope, local) for name, entry in mod.entries.items()
+        },
+        redeclare=mod.redeclare,
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -969,7 +1033,8 @@ class _Flattener:
         # written *here*, so they are prefixed here, against the path of the class that
         # holds them -- everything in `path` except this component's own name.
         here = path[:-1]
-        own = _prefix_modification(component.modification, here, local)
+        resolved_literals = _literal_modification(component.modification, member.scope, local)
+        own = _prefix_modification(resolved_literals, here, local)
         inherited = tuple(_prefix_modification(mod, here, local) for mod in member.mods)
         total = _merged(own, *inherited, outer)
         resolved = member.scope.resolve(component.type_name)
@@ -1087,11 +1152,14 @@ class _Flattener:
         initial: bool = False,
     ) -> None:
         def carry(node: ir.Expr) -> ir.Expr:
-            # Inlining comes first: a call is resolved in the scope of the class that wrote
-            # it, and what comes back is an expression in that class's own names, which is
-            # exactly what prefixing then qualifies.
+            # Three rewrites, in the order their outputs feed each other. An enumeration
+            # literal becomes a number first, because it is not a reference and prefixing
+            # would turn it into one. Then a call is resolved in the scope of the class that
+            # wrote it, and what comes back is an expression in that class's own names --
+            # which is exactly what prefixing then qualifies.
+            written = _literals(node, scope, local)
             return _prefix_expr(
-                _inline_calls(node, scope), prefix, local, values=self.values
+                _inline_calls(written, scope), prefix, local, values=self.values
             )
 
         if initial and not isinstance(equation, (ir.Equal, ir.ForEquation)):

@@ -3,6 +3,8 @@ package Thermal "Minimal lumped thermal components, after Modelica.Thermal.HeatT
   type Temperature = Real(unit = "K");
   type HeatFlowRate = Real(unit = "W");
 
+  type Schedule = enumeration(day, night) "Which of two setpoints is in force";
+
   connector HeatPort "Thermal port: temperature is shared, heat flow sums to zero"
     Temperature T "Port temperature";
     flow HeatFlowRate Q_flow "Heat flowing into the port";

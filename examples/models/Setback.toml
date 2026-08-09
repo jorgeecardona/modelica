@@ -1,0 +1,57 @@
+summary = "A room following a two-position setpoint chosen by an enumeration: the clock picks day or night, and the room follows with one time constant."
+teaches = ["enumeration", "an ordinal encoding", "a state event on a schedule"]
+requires = ["Thermal"]
+
+[parse]
+classes = ["Setback"]
+
+[flatten]
+model = "Setback"
+states = ["T"]
+index = 1
+balanced = true
+
+# `Thermal.Schedule` is `enumeration(day, night)`, so `schedule` flattens to an Integer
+# holding 1 or 2 -- the specification says a literal is its position, counted from one.
+# The room starts at the day setpoint, so it does not move until the setback at t = 4;
+# after that T(t) = 16 + 5*exp(-k*(t - 4)) with k = 0.5.
+[simulate]
+stop = 20.0
+tolerance = 1e-11
+
+[[simulate.point]]
+t = 2.0
+values = { T = 21.0, schedule = 1.0 }
+rtol = 1e-9
+source = "analytic"
+
+[[simulate.point]]
+t = 6.0
+values = { T = 17.839397205857, schedule = 2.0 }
+rtol = 1e-9
+source = "analytic"
+
+[[simulate.point]]
+t = 10.0
+values = { T = 16.248935341839, schedule = 2.0 }
+rtol = 1e-9
+source = "analytic"
+
+[[simulate.point]]
+t = 20.0
+values = { T = 16.001677313140, schedule = 2.0 }
+rtol = 1e-9
+source = "analytic"
+
+# The ordinal encoding stated as behaviour: whatever else happens, the variable holds one
+# of the two positions the type declares and nothing between or beyond them.
+[[simulate.invariant]]
+expr = "schedule"
+min = 1.0
+max = 2.0
+
+# It never leaves the band its two setpoints define, and it never overshoots either.
+[[simulate.invariant]]
+expr = "T"
+min = 16.0
+max = 21.0

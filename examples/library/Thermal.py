@@ -1,9 +1,23 @@
 """The Python twin of ``Thermal.mo``."""
 
-from modelica.build import Connector, Model, Real, alias, der, flow, package, parameter, to_modelica
+from modelica.build import (
+    Connector,
+    Model,
+    Real,
+    alias,
+    der,
+    enumeration,
+    flow,
+    package,
+    parameter,
+    to_modelica,
+)
 
 Temperature = alias("Temperature", Real, unit="K")
 HeatFlowRate = alias("HeatFlowRate", Real, unit="W")
+Schedule = enumeration(
+    "Schedule", "day", "night", doc="Which of two setpoints is in force"
+)
 
 
 class HeatPort(Connector):

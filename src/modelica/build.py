@@ -89,6 +89,8 @@ __all__ = [
     "cos",
     "der",
     "discrete",
+    "enumeration",
+    "equal",
     "exp",
     "flow",
     "for_",
@@ -315,6 +317,16 @@ def not_equal(a: Operand, b: Operand) -> Expression:
     build an equation, and diverting only one of the pair is less surprising than both.
     """
     return Expression(ir.Binary("<>", _lift(a), _lift(b)))
+
+
+def equal(a: Operand, b: Operand) -> Expression:
+    """The comparison ``a == b``, which the operator itself cannot build here.
+
+    ``==`` builds an equation here, so a condition that asks whether two values are equal --
+    ``if schedule == Schedule.day then`` -- has no operator left to spell it. This is that
+    spelling, and it is the mirror of :func:`not_equal`.
+    """
+    return Expression(ir.Binary("==", _lift(a), _lift(b)))
 
 
 def range_(start: Operand, stop: Operand, step: Operand | None = None) -> Expression:
@@ -691,6 +703,23 @@ class Type:
     base: Type | None = None
     attributes: Mapping[str, object] = field(default_factory=dict[str, object])
     module: str = ""
+    doc: str = ""
+    literals: tuple[str, ...] = ()
+    """The literals of an enumeration, in order. Empty for every other kind of type."""
+
+    def __getattr__(self, literal: str) -> Expression:
+        """``Schedule.night`` -- a reference to one literal of this enumeration.
+
+        Only reached when ordinary lookup fails, so it shadows nothing. It answers with a
+        dotted reference rather than a number: flattening is what turns a literal into its
+        ordinal, and doing it here would put the same rule in two places.
+        """
+        if literal.startswith("_") or literal not in self.literals:
+            raise AttributeError(f"{self.name} has no literal {literal!r}")
+        # Named from outside its package, for the reason `redeclare` is: whoever writes
+        # `Schedule.night` is nearly always somewhere else, and only the class body being
+        # written knows whether it is. See :func:`redeclare` for the same caveat.
+        return Expression(ir.Ref((*_qualified(self, "").split("."), literal)))
 
     def __repr__(self) -> str:
         return f"<Type {self.name}>"
@@ -705,6 +734,20 @@ Real = Type("Real")
 Integer = Type("Integer")
 Boolean = Type("Boolean")
 String = Type("String")
+
+
+def enumeration(name: str, *literals: str, doc: str = "") -> Type:
+    """A new type whose values are names, written in Modelica as ``type Schedule = ...``.
+
+    Not an alias of anything -- an enumeration defines a type rather than renaming one, so
+    it has no base and no attributes. Its literals are reached as attributes,
+    ``Schedule.night``, which reads like the Modelica and, more usefully, fails loudly on a
+    literal that was never declared. A bare string would not.
+    """
+    caller = sys._getframe(1)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    return Type(
+        name, literals=literals, doc=doc, module=str(caller.f_globals["__name__"])
+    )
 
 
 def alias(name: str, base: Type, **attributes: object) -> Type:
@@ -909,6 +952,13 @@ def _qualified(target: TypeRef, within: str) -> str:
 
 
 def _type_to_ir(target: Type, within: str) -> ir.Class:
+    if target.literals:
+        return ir.Class(
+            name=target.name,
+            restriction="type",
+            comment=target.doc,
+            literals=target.literals,
+        )
     if target.base is None:
         raise ValueError(f"{target.name} is a predefined type and has no definition")
     return ir.Class(

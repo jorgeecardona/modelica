@@ -88,7 +88,6 @@ _CLOSE: Final = frozenset(")]}")
 
 # Said plainly and early, rather than misparsed and blamed on the solver later.
 _UNSUPPORTED: Final[dict[str, str]] = {
-    "enumeration": "enumerations are not supported yet",
     "external": "external functions are not supported yet",
     "inner": "'inner'/'outer' elements are not supported yet",
     "operator": "operator overloading is not supported yet",
@@ -430,6 +429,39 @@ class _Parser:
             replaceable=replaceable,
             constraining=constraining,
             comment=self._string_comment(),
+        )
+
+    def _enumeration(self, name: str, *, partial: bool, terminated: bool) -> ir.Class:
+        """``type Mode = enumeration(day, night) "comment";`` -- a new type, not an alias.
+
+        Read where a short class definition's base would be, because that is where Modelica
+        writes it, and returned as a ``type`` with no ``extends``: an enumeration renames
+        nothing. Each literal may carry its own description string, which is read and
+        dropped -- the printer has nowhere to put it, and the round trip is the contract.
+        """
+        self._expect(Kind.KEYWORD, "enumeration")
+        self._expect(Kind.OP, "(")
+        literals: list[str] = []
+        if not self._check(Kind.OP, ")"):
+            while True:
+                literals.append(self._expect(Kind.NAME).text)
+                self._string_comment()
+                if not self._accept(Kind.OP, ","):
+                    break
+        self._expect(Kind.OP, ")")
+        if not literals:
+            raise self._error(f"enumeration {name!r} has no literals")
+        comment = self._string_comment()
+        annotation = self._annotation()
+        if terminated:
+            self._expect(Kind.OP, ";")
+        return ir.Class(
+            name=name,
+            restriction="type",
+            partial=partial,
+            comment=comment,
+            annotation=annotation,
+            literals=tuple(literals),
         )
 
     def _import(self) -> ir.Import:
@@ -810,6 +842,8 @@ class _Parser:
         restriction = _RESTRICTIONS[keyword.text]
         name = self._expect(Kind.NAME).text
         if self._accept(Kind.OP, "="):
+            if self._check(Kind.KEYWORD, "enumeration"):
+                return self._enumeration(name, partial=partial, terminated=terminated)
             base = ir.Extends(self._type_name(), self._modification())
             # Read here rather than by the caller, because the short form owns its own
             # semicolon and the constraining clause sits in front of it.

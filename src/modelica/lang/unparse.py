@@ -363,6 +363,10 @@ def unparse_class(node: ir.Class, indent: int = 0) -> list[str]:
     pad = "  " * indent
     head = "replaceable " if node.replaceable else ""
     constraining = f" constrainedby {node.constraining}" if node.constraining else ""
+    if node.literals:
+        body = f"enumeration({', '.join(node.literals)})"
+        tail = f"{constraining}{_comment(node.comment)}{_annotation(node.annotation)}"
+        return [f"{pad}{head}type {node.name} = {body}{tail};"]
     if _is_short_definition(node):
         base = node.extends[0]
         keyword = "type" if not node.replaceable else node.restriction

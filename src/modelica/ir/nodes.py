@@ -487,6 +487,16 @@ class Class:
     comment: str = ""
     imports: tuple[Import, ...] = ()
     """``import`` elements, in the order written. They bind names and nothing else."""
+    literals: tuple[str, ...] = ()
+    """``type Mode = enumeration(day, night)`` -- the literals, in the order declared.
+
+    Order is the whole content of an enumeration beyond the names: the specification says a
+    literal *is* its position, counted from one, and that is what the flattener emits. So
+    this is a tuple and not a set, and reordering it changes the model.
+
+    Non-empty only on a ``type``, and mutually exclusive with ``extends``: an enumeration
+    defines a new type rather than renaming one.
+    """
     extends: tuple[Extends, ...] = ()
     components: tuple[Component, ...] = ()
     equations: tuple[Equation, ...] = ()
