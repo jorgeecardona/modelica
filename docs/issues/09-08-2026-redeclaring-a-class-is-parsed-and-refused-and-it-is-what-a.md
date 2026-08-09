@@ -1,8 +1,8 @@
 ---
 title: Redeclaring a class is parsed and refused, and it is what a medium package is
-status: open
+status: in-progress
 area: ir
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-09
 kind: story
 scope: L
