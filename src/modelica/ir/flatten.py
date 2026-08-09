@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from itertools import pairwise, product
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 from modelica.ir import nodes as ir
 from modelica.ir.evaluate import EvaluationError, evaluate
@@ -106,6 +106,22 @@ class Scope:
 
     def inside(self, found: Found) -> Scope:
         return Scope(self.program, found.chain)
+
+    def function(self, name: str) -> Found | None:
+        """The ``function`` class this name refers to, or ``None`` if it is not one.
+
+        Non-raising, unlike :meth:`resolve`, because the caller is asking a question about
+        a call it has already parsed: ``sqrt(x)`` and ``der(v)`` name no class and must not
+        become errors here. Whether an unresolved name is a built-in or a typo is settled
+        further down, by the emitter, which is the stage that knows the built-ins.
+        """
+        try:
+            found = self.resolve(name)
+        except FlattenError:
+            return None
+        if isinstance(found, str) or found.cls.restriction != "function":
+            return None
+        return found
 
 
 # --------------------------------------------------------------------------------------
@@ -182,13 +198,6 @@ def effective(found: Found, scope: Scope) -> Effective:
         if component.name in result.members:
             raise FlattenError(f"{found.cls.name} declares {component.name!r} twice")
         result.members[component.name] = Member(component, inner)
-    if found.cls.algorithms:
-        # The parser reads algorithm sections; this pass cannot yet instantiate one, and a
-        # section that were silently dropped would leave a model short of the equations its
-        # author wrote. Refused by name instead, at the class that carries it.
-        raise FlattenError(
-            f"{found.cls.name} has an algorithm section, which cannot be flattened yet"
-        )
     result.equations += found.cls.equations
     result.initial_equations += found.cls.initial_equations
     return result
@@ -424,6 +433,189 @@ def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir
             )
 
 
+# --------------------------------------------------------------------------------------
+# Function calls
+#
+# A user-written `function` is inlined here rather than emitted as a callable, and that is
+# the decision this section exists to record.
+#
+# The alternative -- keep the call, emit a Python function beside the model -- fails at
+# `modelica.ir.derive`, which differentiates expressions and cannot differentiate a
+# statement sequence. A model whose state derivative went through such a call would lose
+# its analytic Jacobian, which is the one thing `docs/architecture.md:120` says this
+# compiler does not give up. Inlining sidesteps that entirely: what comes back is an
+# ordinary expression, and every stage below already knows how to differentiate one.
+#
+# The price is that only the inlinable subset of Modelica's function bodies is accepted --
+# assignment and `if`, no loops, no early exit. Each refusal below says which one it hit.
+# --------------------------------------------------------------------------------------
+
+_INLINE_DEPTH: Final = 16
+
+_SPELLING: Final[dict[type, str]] = {
+    ir.ForStatement: "a 'for' loop",
+    ir.WhileStatement: "a 'while' loop",
+    ir.Break: "'break'",
+    ir.Return: "'return'",
+    ir.Reinit: "'reinit'",
+}
+
+
+def _inline_calls(  # noqa: PLR0911 -- one case per node type, as its neighbours have
+    node: ir.Expr, scope: Scope, depth: int = 0
+) -> ir.Expr:
+    """Replace every call to a user-written ``function`` with the expression it computes."""
+
+    def go(inner: ir.Expr) -> ir.Expr:
+        return _inline_calls(inner, scope, depth)
+
+    match node:
+        case ir.Call(name=name, args=args, named=named):
+            call = ir.Call(name, tuple(go(a) for a in args), tuple((k, go(v)) for k, v in named))
+            found = scope.function(name)
+            return call if found is None else _inline(found, scope, call, depth)
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, go(lhs), go(rhs))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, go(operand))
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(go(condition), go(then), go(otherwise))
+        case ir.Array(elements=elements):
+            return ir.Array(tuple(go(e) for e in elements))
+        case ir.Subscript(base=base, indices=indices):
+            return ir.Subscript(base, tuple(go(i) for i in indices))
+        case _:
+            return node
+
+
+def _inline(found: Found, scope: Scope, call: ir.Call, depth: int) -> ir.Expr:
+    """One call, replaced by the expression its body assigns to the output."""
+    name = found.cls.name
+    if depth >= _INLINE_DEPTH:
+        raise FlattenError(f"{name!r} is called more than {_INLINE_DEPTH} deep; is it recursive?")
+    inner = scope.inside(found)
+    merged = effective(found, inner)
+    if merged.equations or merged.initial_equations:
+        raise FlattenError(f"function {name!r} has an equation section; a function has a body")
+    if len(found.cls.algorithms) != 1:
+        raise FlattenError(
+            f"function {name!r} needs exactly one algorithm section, not {len(found.cls.algorithms)}"
+        )
+
+    components = [m.component for m in merged.members.values()]
+    inputs = [c for c in components if c.causality == "input"]
+    outputs = [c for c in components if c.causality == "output"]
+    if len(outputs) != 1:
+        raise FlattenError(
+            f"function {name!r} declares {len(outputs)} outputs; only one can be inlined"
+        )
+
+    environment = _bind(name, inputs, call)
+    for component in components:
+        if component.causality != "input" and component.modification.value is not None:
+            environment[component.name] = component.modification.value
+    for statement in found.cls.algorithms[0]:
+        environment = _run(statement, environment, name)
+
+    result = environment.get(outputs[0].name)
+    if result is None:
+        raise FlattenError(f"function {name!r} never assigns its output {outputs[0].name!r}")
+    # The body may itself call a function, and it resolves in the function's own scope.
+    return _inline_calls(result, inner, depth + 1)
+
+
+def _bind(name: str, inputs: Sequence[ir.Component], call: ir.Call) -> dict[str, ir.Expr]:
+    """Arguments to inputs -- positional first, then by name, then declared defaults."""
+    if len(call.args) > len(inputs):
+        raise FlattenError(
+            f"{name!r} takes {len(inputs)} argument(s), and {len(call.args)} were given"
+        )
+    given = dict(call.named)
+    known = {c.name for c in inputs}
+    for key in given:
+        if key not in known:
+            raise FlattenError(f"{name!r} has no input named {key!r}")
+    environment: dict[str, ir.Expr] = {}
+    for position, component in enumerate(inputs):
+        if position < len(call.args):
+            if component.name in given:
+                raise FlattenError(f"{name!r}: {component.name!r} is given twice")
+            environment[component.name] = call.args[position]
+        elif component.name in given:
+            environment[component.name] = given[component.name]
+        elif component.modification.value is not None:
+            environment[component.name] = component.modification.value
+        else:
+            raise FlattenError(f"{name!r}: no value for input {component.name!r}")
+    return environment
+
+
+def _run(
+    statement: ir.Statement, environment: Mapping[str, ir.Expr], name: str
+) -> dict[str, ir.Expr]:
+    """Execute one statement symbolically: an environment in, a new environment out.
+
+    "Execute" is exact rather than a metaphor. Straight-line assignment is substitution,
+    and an ``if`` is a *merge*: each branch runs against its own copy, and a variable the
+    branches disagree about becomes an :class:`~modelica.ir.IfExpr` over the conditions
+    that chose it. That is the whole trick, and it is also its own limit -- a loop has no
+    such merge unless its trip count is known, and an early exit has no merge at all.
+    """
+    match statement:
+        case ir.Assign(target=ir.Ref(parts=(target,)), value=value):
+            return {**environment, target: _substitute(value, environment)}
+        case ir.Assign(target=target):
+            raise FlattenError(f"{name!r} assigns {target.name!r}, which is not one of its own")
+        case ir.IfStatement(branches=branches, otherwise=otherwise):
+            return _merge_branches(branches, otherwise, environment, name)
+        case _:
+            # Named in Modelica's words rather than the node's: the reader wrote `while`,
+            # and `WhileStatement` is this toolchain's business, not theirs.
+            raise FlattenError(
+                f"{name!r} uses {_SPELLING[type(statement)]}, which cannot be inlined into an"
+                f" expression; a function body may assign and branch, and nothing else"
+            )
+
+
+def _merge_branches(
+    branches: Sequence[ir.StatementBranch],
+    otherwise: Sequence[ir.Statement],
+    environment: Mapping[str, ir.Expr],
+    name: str,
+) -> dict[str, ir.Expr]:
+    """Run every arm against its own copy, then reconcile what they disagree about."""
+    conditions = [_substitute(branch.condition, environment) for branch in branches]
+    arms: list[dict[str, ir.Expr]] = []
+    for branch in branches:
+        arm = dict(environment)
+        for statement in branch.body:
+            arm = _run(statement, arm, name)
+        arms.append(arm)
+    fallback = dict(environment)
+    for statement in otherwise:
+        fallback = _run(statement, fallback, name)
+
+    result = dict(environment)
+    touched = {key for arm in (*arms, fallback) for key in arm if arm[key] != environment.get(key)}
+    for key in touched:
+        value = fallback.get(key)
+        if value is None:
+            raise FlattenError(
+                f"{name!r} assigns {key!r} on some paths and not on others; a function that"
+                f" branches must give every branch, and the `else`, a value"
+            )
+        for condition, arm in reversed(list(zip(conditions, arms, strict=True))):
+            chosen = arm.get(key)
+            if chosen is None:
+                raise FlattenError(
+                    f"{name!r} assigns {key!r} on some paths and not on others; a function"
+                    f" that branches must give every branch, and the `else`, a value"
+                )
+            value = ir.IfExpr(condition, chosen, value)
+        result[key] = value
+    return result
+
+
 def _prefix_modification(
     mod: ir.Modification, prefix: _Path, local: frozenset[str]
 ) -> ir.Modification:
@@ -570,14 +762,24 @@ class _Flattener:
         local = frozenset(merged.members)
         if outer.value is not None:
             raise FlattenError(f"{'.'.join(prefix)}: a composite component cannot have a value")
+        if found.cls.algorithms:
+            # A `function` reaches this pass through `_inline` and never through here, so a
+            # section on an instantiated class is the case that has no implementation. It is
+            # refused by name: dropped silently it would leave the model short of the
+            # statements its author wrote, and nothing downstream would say so.
+            raise FlattenError(
+                f"{found.cls.name} has an algorithm section, which can only be flattened"
+                f" inside a function"
+            )
+        inner = scope.inside(found)
         for name, member in merged.members.items():
             self._component(
                 member, (*prefix, name), outer.entries.get(name, ir.EMPTY), floor, local
             )
         for equation in merged.equations:
-            self._equation(equation, prefix, local)
+            self._equation(equation, prefix, local, scope=inner)
         for equation in merged.initial_equations:
-            self._equation(equation, prefix, local, initial=True)
+            self._equation(equation, prefix, local, scope=inner, initial=True)
 
     def _component(
         self,
@@ -701,10 +903,21 @@ class _Flattener:
     # -- equations --------------------------------------------------------------------
 
     def _equation(
-        self, equation: ir.Equation, prefix: _Path, local: frozenset[str], *, initial: bool = False
+        self,
+        equation: ir.Equation,
+        prefix: _Path,
+        local: frozenset[str],
+        *,
+        scope: Scope,
+        initial: bool = False,
     ) -> None:
         def carry(node: ir.Expr) -> ir.Expr:
-            return _prefix_expr(node, prefix, local, values=self.values)
+            # Inlining comes first: a call is resolved in the scope of the class that wrote
+            # it, and what comes back is an expression in that class's own names, which is
+            # exactly what prefixing then qualifies.
+            return _prefix_expr(
+                _inline_calls(node, scope), prefix, local, values=self.values
+            )
 
         if initial and not isinstance(equation, (ir.Equal, ir.ForEquation)):
             raise FlattenError("only `a = b` equations may appear in initial equation")
@@ -732,7 +945,7 @@ class _Flattener:
             case ir.IfEquation():
                 raise FlattenError("if-equations are not supported yet")
             case ir.ForEquation():
-                self._unroll(equation, prefix, local, initial=initial)
+                self._unroll(equation, prefix, local, scope=scope, initial=initial)
 
     def _unroll(
         self,
@@ -740,6 +953,7 @@ class _Flattener:
         prefix: _Path,
         local: frozenset[str],
         *,
+        scope: Scope,
         initial: bool = False,
     ) -> None:
         """Write the body once per value of the index, with the index a literal.
@@ -769,7 +983,11 @@ class _Flattener:
             replacement = {index: ir.IntLiteral(value)}
             for inner in loop.body:
                 self._equation(
-                    _substitute_equation(inner, replacement), prefix, local, initial=initial
+                    _substitute_equation(inner, replacement),
+                    prefix,
+                    local,
+                    scope=scope,
+                    initial=initial,
                 )
 
     def _endpoint(self, ref: ir.Ref, prefix: _Path, local: frozenset[str]) -> _Endpoint:

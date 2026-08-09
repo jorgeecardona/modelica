@@ -22,7 +22,7 @@ from modelica.ir.flatten import FlattenError
 from modelica.ir.source import flatten
 from modelica.lang import parse
 from modelica.lang.lexer import ModelicaSyntaxError
-from modelica.lang.unparse import unparse
+from modelica.lang.unparse import unparse, unparse_equation
 
 CLIP = """\
 function clip "Hold a signal between two values"
@@ -173,8 +173,112 @@ def test_an_unterminated_loop_names_the_construct() -> None:
         parse("model M\nalgorithm\n  while true loop\n    x := 1.0;\nend M;\n")
 
 
-def test_flattening_refuses_a_section_rather_than_dropping_it() -> None:
-    """The whole point of the split: parsed is not the same as understood."""
+def test_flattening_refuses_a_section_on_an_instantiated_class() -> None:
+    """A section in a *model* has no implementation; only a function body is inlined."""
     program = parse(LOOPS)
     with pytest.raises(FlattenError, match="algorithm section"):
         flatten(program, "Loops")
+
+
+# --------------------------------------------------------------------------------------
+# Calls: a function is inlined into the expression it computes
+# --------------------------------------------------------------------------------------
+
+CALLER = """\
+function clip "Hold a signal between two values"
+  input Real u;
+  input Real lo = 0.0;
+  input Real hi;
+  output Real y;
+algorithm
+  y := u;
+  if y < lo then
+    y := lo;
+  elseif y > hi then
+    y := hi;
+  end if;
+end clip;
+
+function square
+  input Real a;
+  output Real b;
+algorithm
+  b := a * a;
+end square;
+
+model Clipped "A ramp squared and then clipped"
+  Real x(start = 0, fixed = true);
+  Real y;
+equation
+  der(x) = 1.0;
+  y = clip(square(x), hi = 4.0);
+end Clipped;
+"""
+
+
+def _equation_text(source: str, model: str) -> list[str]:
+    return [line for e in flatten(parse(source), model).equations for line in unparse_equation(e)]
+
+
+def test_a_call_becomes_the_expression_the_body_computes() -> None:
+    """Inlined, not called: what comes out is differentiable by the existing pass."""
+    assert _equation_text(CALLER, "Clipped") == [
+        "der(x) = 1.0;",
+        "y = if x * x < 0.0 then 0.0 elseif x * x > 4.0 then 4.0 else x * x;",
+    ]
+    # The `if` is a merge over the branch conditions, so `lo` reached it as its declared
+    # default and `hi` as a named argument, and `square(x)` was inlined before either.
+
+
+def _function(body: str, *, header: str = "  input Real u;\n  output Real y;\n") -> str:
+    return f"function f\n{header}algorithm\n{body}end f;\n\nmodel M\n  Real z;\nequation\n  z = f(1.0);\nend M;\n"
+
+
+REFUSALS = [
+    ("a 'while' loop", "  y := u;\n  while y < 2.0 loop\n    y := y * 2.0;\n  end while;\n"),
+    ("a 'for' loop", "  y := u;\n  for i in 1:3 loop\n    y := y + i;\n  end for;\n"),
+    ("'break'", "  y := u;\n  if y > 0.0 then\n    break;\n  else\n    y := 1.0;\n  end if;\n"),
+    ("never assigns its output", "  u := 1.0;\n"),
+]
+
+
+@pytest.mark.parametrize(("what", "body"), REFUSALS, ids=[w.strip("'").split()[-1] for w, _ in REFUSALS])
+def test_a_body_that_cannot_be_inlined_says_which_form_stopped_it(what: str, body: str) -> None:
+    with pytest.raises(FlattenError, match=what):
+        flatten(parse(_function(body)), "M")
+
+
+def test_a_variable_assigned_on_only_one_path_is_refused() -> None:
+    """Without an ``else`` there is no value to merge against, and no honest guess."""
+    with pytest.raises(FlattenError, match="on some paths and not on others"):
+        flatten(parse(_function("  if u > 0.0 then\n    y := 1.0;\n  end if;\n")), "M")
+
+
+def test_two_outputs_are_refused_because_an_expression_has_one_value() -> None:
+    header = "  input Real u;\n  output Real y;\n  output Real w;\n"
+    with pytest.raises(FlattenError, match="2 outputs"):
+        flatten(parse(_function("  y := u;\n  w := u;\n", header=header)), "M")
+
+
+def test_an_input_with_no_value_and_no_default_is_refused() -> None:
+    header = "  input Real u;\n  input Real v;\n  output Real y;\n"
+    with pytest.raises(FlattenError, match="no value for input 'v'"):
+        flatten(parse(_function("  y := u + v;\n", header=header)), "M")
+
+
+def test_an_unknown_named_argument_is_refused() -> None:
+    source = _function("  y := u;\n").replace("z = f(1.0);", "z = f(u = 1.0, q = 2.0);")
+    with pytest.raises(FlattenError, match="no input named 'q'"):
+        flatten(parse(source), "M")
+
+
+def test_a_recursive_function_is_stopped_rather_than_hanging() -> None:
+    source = _function("  y := f(u);\n")
+    with pytest.raises(FlattenError, match="recursive"):
+        flatten(parse(source), "M")
+
+
+def test_a_builtin_call_is_left_alone() -> None:
+    """``sqrt`` names no class, and asking the scope about it must not become an error."""
+    source = "model M\n  Real z;\nequation\n  z = sqrt(2.0) + der(time);\nend M;\n"
+    assert _equation_text(source, "M") == ["z = sqrt(2.0) + der(time);"]
