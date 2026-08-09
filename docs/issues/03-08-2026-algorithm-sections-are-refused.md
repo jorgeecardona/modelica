@@ -1,8 +1,8 @@
 ---
-title: '`algorithm` sections are refused, and with them `while`, `break` and `return`'
-status: open
+title: `algorithm` sections are refused, and with them `while`, `break` and `return`
+status: in-progress
 area: lang
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
 kind: story
 scope: L

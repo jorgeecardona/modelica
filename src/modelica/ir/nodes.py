@@ -32,6 +32,7 @@ __all__ = [
     "Binary",
     "BinaryOp",
     "BoolLiteral",
+    "Break",
     "Call",
     "Causality",
     "Class",
@@ -43,9 +44,11 @@ __all__ = [
     "Expr",
     "Extends",
     "ForEquation",
+    "ForStatement",
     "IfBranch",
     "IfEquation",
     "IfExpr",
+    "IfStatement",
     "IntLiteral",
     "Modification",
     "Program",
@@ -54,7 +57,9 @@ __all__ = [
     "Ref",
     "Reinit",
     "Restriction",
+    "Return",
     "Statement",
+    "StatementBranch",
     "StringLiteral",
     "Subscript",
     "Unary",
@@ -62,6 +67,7 @@ __all__ = [
     "Variability",
     "When",
     "WhenBranch",
+    "WhileStatement",
 ]
 
 
@@ -228,7 +234,11 @@ EMPTY = Modification()
 
 
 # --------------------------------------------------------------------------------------
-# Statements (the body of a `when`)
+# Statements (the body of a `when`, and the body of an `algorithm` section)
+#
+# A statement is *causal* in a way an equation is not: it runs in order, and a variable it
+# assigns may be assigned again below. That is the whole difference between the two lists,
+# and it is why they are separate node types rather than one with a flag.
 # --------------------------------------------------------------------------------------
 
 
@@ -246,7 +256,62 @@ class Reinit:
     value: Expr
 
 
-type Statement = Assign | Reinit
+@dataclass(frozen=True, slots=True)
+class Break:
+    """``break;`` -- leave the innermost loop. No fields; the node *is* the information."""
+
+
+@dataclass(frozen=True, slots=True)
+class Return:
+    """``return;`` -- leave the enclosing function."""
+
+
+@dataclass(frozen=True, slots=True)
+class StatementBranch:
+    """One ``if``/``elseif`` arm of a statement, distinct from :class:`IfBranch`.
+
+    Same shape as the equation-side branch and a different body type, which is the point:
+    an arm of an if-*statement* holds statements, and the type system says so rather than
+    a later pass discovering it.
+    """
+
+    condition: Expr
+    body: tuple[Statement, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class IfStatement:
+    branches: tuple[StatementBranch, ...]
+    otherwise: tuple[Statement, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ForStatement:
+    """``for i in 1:n loop ... end for;`` in an algorithm section.
+
+    Unlike :class:`ForEquation`, this one does **not** have to be unrolled: a statement
+    sequence may keep its loop, because the emitted code has loops. Whether flattening
+    unrolls it anyway is a decision for the pass, not for the node.
+    """
+
+    index: str
+    over: Expr
+    body: tuple[Statement, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WhileStatement:
+    """``while c loop ... end while;`` -- the one construct with no equation counterpart.
+
+    An equation section cannot express it at all: the number of times a loop runs is a
+    property of the values, and an equation says nothing about order.
+    """
+
+    condition: Expr
+    body: tuple[Statement, ...]
+
+
+type Statement = Assign | Reinit | Break | Return | IfStatement | ForStatement | WhileStatement
 
 
 # --------------------------------------------------------------------------------------
@@ -373,6 +438,18 @@ class Class:
     components: tuple[Component, ...] = ()
     equations: tuple[Equation, ...] = ()
     initial_equations: tuple[Equation, ...] = ()
+    algorithms: tuple[tuple[Statement, ...], ...] = ()
+    """The ``algorithm`` sections, each kept whole rather than merged into one list.
+
+    Two sections are not one section written twice. Each runs as a unit, and a variable
+    assigned in the first and read in the second is a different model from the same
+    statements in one section -- so the boundary is information, and concatenating them
+    here would throw it away before any pass could use it. The equations *are* merged,
+    because an equation section has no order for a boundary to interrupt.
+
+    A ``function`` is a class whose body is one of these over its ``input`` and ``output``
+    components; no separate node is needed for it.
+    """
     classes: tuple[Class, ...] = ()
     annotation: Modification = EMPTY
     """What the class looks like: ``Icon(graphics = {...})`` and ``Diagram(...)``."""

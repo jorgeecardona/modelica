@@ -61,7 +61,7 @@ from modelica import ir
 from modelica.lang.unparse import unparse, unparse_expr
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping
+    from collections.abc import Iterable, Iterator, Mapping, Sequence
     from types import ModuleType
 
 __all__ = [
@@ -70,6 +70,7 @@ __all__ = [
     "Connector",
     "Declaration",
     "Expression",
+    "Function",
     "Integer",
     "Model",
     "Modifier",
@@ -80,6 +81,7 @@ __all__ = [
     "Type",
     "alias",
     "assign",
+    "break_",
     "call",
     "connect",
     "constant",
@@ -89,8 +91,10 @@ __all__ = [
     "exp",
     "flow",
     "for_",
+    "for_statement",
     "icon",
     "if_",
+    "if_statement",
     "input_",
     "log",
     "mod",
@@ -104,6 +108,7 @@ __all__ = [
     "range_",
     "ref",
     "reinit",
+    "return_",
     "shape",
     "sign",
     "sin",
@@ -113,6 +118,7 @@ __all__ = [
     "to_ir",
     "to_modelica",
     "when",
+    "while_statement",
 ]
 
 # Unquoted despite naming things defined further down: a `type` alias is evaluated lazily,
@@ -380,6 +386,50 @@ def assign(target: Operand, value: Operand) -> ir.Assign:
 def when(condition: Operand, *body: ir.Statement) -> ir.When:
     """``when condition then body end when;`` -- fires at the instant it becomes true."""
     return ir.When((ir.WhenBranch(_lift(condition), body),))
+
+
+def break_() -> ir.Break:
+    """``break;`` -- leave the innermost loop of an ``algorithm`` section."""
+    return ir.Break()
+
+
+def return_() -> ir.Return:
+    """``return;`` -- leave the enclosing function."""
+    return ir.Return()
+
+
+def if_statement(
+    condition: Operand,
+    *body: ir.Statement,
+    elseif: Sequence[tuple[Operand, Sequence[ir.Statement]]] = (),
+    otherwise: Sequence[ir.Statement] = (),
+) -> ir.IfStatement:
+    """``if c then ... else ... end if;`` as a *statement*, which :func:`if_` is not.
+
+    The two are different constructs that Modelica spells with the same word. :func:`if_`
+    builds an expression and has a value; this builds control flow and has none, so its
+    branches hold statements and its ``else`` may be absent altogether. One name for both
+    would make the difference invisible at the call site, which is where it matters.
+
+    ``elseif`` takes ``(condition, body)`` pairs and is not sugar for nesting: an
+    :class:`~modelica.ir.IfStatement` holds its branches in a list, so ``elseif b then``
+    and ``else if b then`` are *different values* here -- unlike the expression form, where
+    nesting is the only representation there is. Passing the pairs keeps the value flat and
+    keeps the printed source the same shape as what was written.
+    """
+    branches = [ir.StatementBranch(_lift(condition), body)]
+    branches += [ir.StatementBranch(_lift(c), tuple(b)) for c, b in elseif]
+    return ir.IfStatement(tuple(branches), tuple(otherwise))
+
+
+def for_statement(index: str, over: Operand, *body: ir.Statement) -> ir.ForStatement:
+    """``for i in 1:n loop ... end for;`` over statements -- the counterpart of :func:`for_`."""
+    return ir.ForStatement(index, _lift(over), body)
+
+
+def while_statement(condition: Operand, *body: ir.Statement) -> ir.WhileStatement:
+    """``while c loop ... end while;`` -- no equation counterpart exists."""
+    return ir.WhileStatement(_lift(condition), body)
 
 
 # --------------------------------------------------------------------------------------
@@ -686,6 +736,16 @@ class Model(metaclass=_ClassMeta, restriction="model"):
         """Override and ``yield`` equations that hold only at initialisation."""
         return iter(())
 
+    def algorithm(self) -> Iterator[ir.Statement]:
+        """Override and ``yield`` the statements of this class's ``algorithm`` section.
+
+        One method, therefore one section. A class with two sections is expressible in
+        ``.mo`` and not here, and that asymmetry is deliberate: the second section exists
+        to re-run statements after the first has finished, which is a thing to write on
+        purpose in a file, not a thing to reach for from Python.
+        """
+        return iter(())
+
 
 class Connector(Model, restriction="connector"):
     """Base class for a ``connector`` -- the interface ``connect()`` joins."""
@@ -697,6 +757,15 @@ class Record(Model, restriction="record"):
 
 class Block(Model, restriction="block"):
     """Base class for a ``block`` -- a model whose connectors all have causality."""
+
+
+class Function(Model, restriction="function"):
+    """Base class for a ``function`` -- ``input``/``output`` components and one algorithm.
+
+    A function has no equations; it has a body. Declare its arguments with
+    :func:`input_` and its results with :func:`output`, and write the body by overriding
+    :meth:`Model.algorithm`.
+    """
 
 
 # --------------------------------------------------------------------------------------
@@ -814,8 +883,17 @@ def _class_to_ir(target: _ClassMeta, within: str) -> ir.Class:
         components=components,
         equations=_section(target, "equations"),
         initial_equations=_section(target, "initial_equations"),
+        algorithms=_algorithm(target),
         annotation=cast("ir.Modification", own.get("ICON", ir.EMPTY)),
     )
+
+
+def _algorithm(target: _ClassMeta) -> tuple[tuple[ir.Statement, ...], ...]:
+    """The class's own ``algorithm`` body, as the one-element tuple of sections it makes."""
+    body = target.__dict__.get("algorithm")
+    if body is None:
+        return ()
+    return (tuple(cast("Iterable[ir.Statement]", body(target))),)
 
 
 def _section(target: _ClassMeta, name: str) -> tuple[ir.Equation, ...]:

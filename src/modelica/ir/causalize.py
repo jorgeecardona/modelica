@@ -810,8 +810,19 @@ def _modes(work: _Work, matched: dict[int, str], states: tuple[str, ...]) -> tup
 
 
 def _statement(statement: ir.Statement, work: _Work) -> ir.Statement:
-    value = simplify(substitute(_name_derivatives(statement.value, work), work.aliases))
-    return type(statement)(statement.target, value)
+    """Rewrite one ``when`` body statement into the names the solver uses.
+
+    Assignment and ``reinit`` are the whole of a ``when`` body in an equation section. The
+    compound statements exist in the IR for ``algorithm`` sections, which do not reach
+    causalization -- flattening refuses them first -- so meeting one here is a bug in an
+    earlier pass rather than a model the user wrote, and it says so.
+    """
+    match statement:
+        case ir.Assign(target=target, value=value) | ir.Reinit(target=target, value=value):
+            rewritten = simplify(substitute(_name_derivatives(value, work), work.aliases))
+            return type(statement)(target, rewritten)
+        case _:  # pragma: no cover - flattening refuses algorithm sections above this
+            raise CausalizationError(f"{type(statement).__name__} cannot appear in a 'when' body")
 
 
 def _when(when: ir.When, work: _Work) -> ir.When:

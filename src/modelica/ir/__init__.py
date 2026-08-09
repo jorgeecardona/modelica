@@ -35,6 +35,9 @@ from modelica.ir.nodes import (
     BoolLiteral as BoolLiteral,
 )
 from modelica.ir.nodes import (
+    Break as Break,
+)
+from modelica.ir.nodes import (
     Call as Call,
 )
 from modelica.ir.nodes import (
@@ -68,6 +71,9 @@ from modelica.ir.nodes import (
     ForEquation as ForEquation,
 )
 from modelica.ir.nodes import (
+    ForStatement as ForStatement,
+)
+from modelica.ir.nodes import (
     IfBranch as IfBranch,
 )
 from modelica.ir.nodes import (
@@ -75,6 +81,9 @@ from modelica.ir.nodes import (
 )
 from modelica.ir.nodes import (
     IfExpr as IfExpr,
+)
+from modelica.ir.nodes import (
+    IfStatement as IfStatement,
 )
 from modelica.ir.nodes import (
     IntLiteral as IntLiteral,
@@ -101,7 +110,13 @@ from modelica.ir.nodes import (
     Restriction as Restriction,
 )
 from modelica.ir.nodes import (
+    Return as Return,
+)
+from modelica.ir.nodes import (
     Statement as Statement,
+)
+from modelica.ir.nodes import (
+    StatementBranch as StatementBranch,
 )
 from modelica.ir.nodes import (
     StringLiteral as StringLiteral,
@@ -124,6 +139,9 @@ from modelica.ir.nodes import (
 from modelica.ir.nodes import (
     WhenBranch as WhenBranch,
 )
+from modelica.ir.nodes import (
+    WhileStatement as WhileStatement,
+)
 
 __all__ = [
     "EMPTY",
@@ -132,6 +150,7 @@ __all__ = [
     "Binary",
     "BinaryOp",
     "BoolLiteral",
+    "Break",
     "Call",
     "Causality",
     "Class",
@@ -143,9 +162,11 @@ __all__ = [
     "Expr",
     "Extends",
     "ForEquation",
+    "ForStatement",
     "IfBranch",
     "IfEquation",
     "IfExpr",
+    "IfStatement",
     "IntLiteral",
     "Modification",
     "Program",
@@ -154,7 +175,9 @@ __all__ = [
     "Ref",
     "Reinit",
     "Restriction",
+    "Return",
     "Statement",
+    "StatementBranch",
     "StringLiteral",
     "Subscript",
     "Unary",
@@ -162,4 +185,5 @@ __all__ = [
     "Variability",
     "When",
     "WhenBranch",
+    "WhileStatement",
 ]

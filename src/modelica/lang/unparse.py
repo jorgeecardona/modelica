@@ -13,7 +13,13 @@ from __future__ import annotations
 from modelica import ir
 from modelica.lang.precedence import BINARY, IF, NON_ASSOCIATIVE, PRIMARY, UNARY_SIGN
 
-__all__ = ["unparse", "unparse_class", "unparse_equation", "unparse_expr"]
+__all__ = [
+    "unparse",
+    "unparse_class",
+    "unparse_equation",
+    "unparse_expr",
+    "unparse_statement",
+]
 
 
 def _real(value: float) -> str:
@@ -130,12 +136,66 @@ def _annotation(mod: ir.Modification) -> str:
     return f" annotation{_modification(mod)}" if mod else ""
 
 
-def _statement(node: ir.Statement) -> str:
+def unparse_statement(  # noqa: PLR0911 -- one return per statement form, like the expressions
+    node: ir.Statement,
+    indent: int = 0,
+    *,
+    assign: str = ":=",
+) -> list[str]:
+    """Render one statement as lines, indented by ``indent`` levels.
+
+    ``assign`` is the spelling of an assignment, and it is a parameter because the same
+    :class:`~modelica.ir.Assign` means two different pieces of syntax depending on where it
+    stands. Inside an ``algorithm`` section it is ``:=``. Inside a ``when`` in an *equation*
+    section it is ``=``, because there it is an equation that happens to have a designated
+    left-hand side. Printing ``:=`` in the second place produces a file no Modelica tool
+    will read, which is the sort of thing a round-trip test catches and a reader does not.
+    """
+    pad = "  " * indent
     match node:
         case ir.Assign(target=target, value=value):
-            return f"{target.name} = {unparse_expr(value)};"
+            return [f"{pad}{target.name} {assign} {unparse_expr(value)};"]
         case ir.Reinit(target=target, value=value):
-            return f"reinit({target.name}, {unparse_expr(value)});"
+            return [f"{pad}reinit({target.name}, {unparse_expr(value)});"]
+        case ir.Break():
+            return [f"{pad}break;"]
+        case ir.Return():
+            return [f"{pad}return;"]
+        case ir.ForStatement(index=index, over=over, body=body):
+            return [
+                f"{pad}for {index} in {unparse_expr(over)} loop",
+                *_statement_body(body, indent + 1),
+                f"{pad}end for;",
+            ]
+        case ir.WhileStatement(condition=condition, body=body):
+            return [
+                f"{pad}while {unparse_expr(condition)} loop",
+                *_statement_body(body, indent + 1),
+                f"{pad}end while;",
+            ]
+        case ir.IfStatement():
+            return _if_statement(node, indent)
+
+
+def _statement_body(body: tuple[ir.Statement, ...], indent: int) -> list[str]:
+    lines: list[str] = []
+    for statement in body:
+        lines += unparse_statement(statement, indent)
+    return lines
+
+
+def _if_statement(node: ir.IfStatement, indent: int) -> list[str]:
+    pad = "  " * indent
+    lines: list[str] = []
+    for position, branch in enumerate(node.branches):
+        keyword = "if" if position == 0 else "elseif"
+        lines.append(f"{pad}{keyword} {unparse_expr(branch.condition)} then")
+        lines += _statement_body(branch.body, indent + 1)
+    if node.otherwise:
+        lines.append(f"{pad}else")
+        lines += _statement_body(node.otherwise, indent + 1)
+    lines.append(f"{pad}end if;")
+    return lines
 
 
 def unparse_equation(node: ir.Equation, indent: int = 0) -> list[str]:
@@ -151,7 +211,8 @@ def unparse_equation(node: ir.Equation, indent: int = 0) -> list[str]:
             for position, branch in enumerate(branches):
                 keyword = "when" if position == 0 else "elsewhen"
                 lines.append(f"{pad}{keyword} {unparse_expr(branch.condition)} then")
-                lines += [f"{pad}  {_statement(s)}" for s in branch.body]
+                for statement in branch.body:
+                    lines += unparse_statement(statement, indent + 1, assign="=")
             lines.append(f"{pad}end when;")
             return lines
         case ir.ForEquation(index=index, over=over, body=body):
@@ -216,6 +277,7 @@ def _is_short_definition(node: ir.Class) -> bool:
         and len(node.extends) == 1
         and not node.components
         and not node.equations
+        and not node.algorithms
         and not node.classes
     )
 
@@ -238,7 +300,13 @@ def _members(node: ir.Class, indent: int) -> list[str]:
 
 
 def _sections(node: ir.Class, indent: int) -> list[str]:
-    """The equation sections, initial first, each with its keyword line."""
+    """The equation sections, initial first, then the algorithm sections in order.
+
+    A class may interleave them in the source; the IR keeps the equations as one list and
+    the algorithm sections as several, so this order is what a round trip converges to
+    rather than what was necessarily typed. Nothing downstream depends on the interleaving
+    -- an algorithm section is a unit and the equations are a set.
+    """
     pad = "  " * indent
     lines: list[str] = []
     for keyword, equations in (
@@ -250,6 +318,10 @@ def _sections(node: ir.Class, indent: int) -> list[str]:
         lines.append(f"{pad}{keyword}")
         for equation in equations:
             lines += unparse_equation(equation, indent + 1)
+    for section in node.algorithms:
+        lines.append(f"{pad}algorithm")
+        for statement in section:
+            lines += unparse_statement(statement, indent + 1)
     return lines
 
 

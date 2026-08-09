@@ -182,6 +182,13 @@ def effective(found: Found, scope: Scope) -> Effective:
         if component.name in result.members:
             raise FlattenError(f"{found.cls.name} declares {component.name!r} twice")
         result.members[component.name] = Member(component, inner)
+    if found.cls.algorithms:
+        # The parser reads algorithm sections; this pass cannot yet instantiate one, and a
+        # section that were silently dropped would leave a model short of the equations its
+        # author wrote. Refused by name instead, at the class that carries it.
+        raise FlattenError(
+            f"{found.cls.name} has an algorithm section, which cannot be flattened yet"
+        )
     result.equations += found.cls.equations
     result.initial_equations += found.cls.initial_equations
     return result
@@ -353,6 +360,25 @@ def _substitute(  # noqa: PLR0911 -- one case per node type
             return node
 
 
+def _substitute_statement(node: ir.Statement, values: Mapping[str, ir.Expr]) -> ir.Statement:
+    """Substitution inside the body of a ``when``, which is where a statement can reach here.
+
+    Only the two simple forms are handled, and that is not a shortcut: a ``when`` in an
+    equation section takes assignments and ``reinit`` and nothing else, so the compound
+    statements cannot occur. They are refused rather than ignored, because the day flattening
+    learns to unroll an algorithm section this function will be the first thing to be wrong.
+    """
+    match node:
+        case ir.Assign(target=target, value=value):
+            return ir.Assign(target, _substitute(value, values))
+        case ir.Reinit(target=target, value=value):
+            return ir.Reinit(target, _substitute(value, values))
+        case _:  # pragma: no cover - unreachable while `when` bodies are simple statements
+            raise FlattenError(
+                f"{type(node).__name__} inside a 'for' equation is not supported yet"
+            )
+
+
 def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir.Equation:
     """The same substitution, over an equation and anything nested inside it."""
 
@@ -371,7 +397,7 @@ def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir
                 tuple(
                     ir.WhenBranch(
                         go(branch.condition),
-                        tuple(type(s)(s.target, go(s.value)) for s in branch.body),
+                        tuple(_substitute_statement(s, values) for s in branch.body),
                     )
                     for branch in branches
                 )
@@ -424,9 +450,20 @@ def _prefix_modification(
 
 
 def _prefix_statement(node: ir.Statement, prefix: _Path, local: frozenset[str]) -> ir.Statement:
-    target = _prefix_ref(node.target, prefix, local)
-    value = _prefix_expr(node.value, prefix, local)
-    return ir.Assign(target, value) if isinstance(node, ir.Assign) else ir.Reinit(target, value)
+    """Qualify the names in a ``when`` body with the instance path they were found under.
+
+    The same two forms as :func:`_substitute_statement`, and for the same reason: a ``when``
+    in an equation section holds nothing else, and the compound statements are refused here
+    rather than silently returned unqualified -- which would leave a statement naming a
+    variable that does not exist at this level.
+    """
+    match node:
+        case ir.Assign(target=target, value=value):
+            return ir.Assign(_prefix_ref(target, prefix, local), _prefix_expr(value, prefix, local))
+        case ir.Reinit(target=target, value=value):
+            return ir.Reinit(_prefix_ref(target, prefix, local), _prefix_expr(value, prefix, local))
+        case _:  # pragma: no cover - unreachable while `when` bodies are simple statements
+            raise FlattenError(f"{type(node).__name__} inside a 'when' is not supported yet")
 
 
 # --------------------------------------------------------------------------------------

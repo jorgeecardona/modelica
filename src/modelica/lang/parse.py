@@ -8,9 +8,13 @@ sentence, not like a shift/reduce conflict.
 The target is not "whatever Modelica allows" but **exactly what**
 :mod:`modelica.lang.unparse` **can emit**. That is a checkable specification -- every tree
 the printer can produce must parse back to itself -- and it keeps the surface honest.
-Constructs outside it (arrays, ``for``, ``algorithm``, function bodies, ``redeclare``)
-raise a "not supported yet" error rather than being quietly misread; a parser that shrugs
-at syntax it does not implement produces a model that silently means something else.
+Constructs outside it (``redeclare``, ``import``, ``enumeration``, ``external``) raise a
+"not supported yet" error rather than being quietly misread; a parser that shrugs at syntax
+it does not implement produces a model that silently means something else.
+
+Reading a construct is not the same as running it. An ``algorithm`` section parses here and
+:mod:`modelica.ir.flatten` refuses it by name, which is the same two-step the arrays went
+through: the language first, so the shape exists to be tested, then the semantics.
 
 Two things are deliberately accepted and discarded: a ``within`` clause, because the IR is
 a flat list of classes and nothing downstream asks which package a file came from, and
@@ -82,8 +86,6 @@ _CLOSE: Final = frozenset(")]}")
 
 # Said plainly and early, rather than misparsed and blamed on the solver later.
 _UNSUPPORTED: Final[dict[str, str]] = {
-    "algorithm": "algorithm sections are not supported yet",
-    "break": "'break' is not supported yet",
     "enumeration": "enumerations are not supported yet",
     "external": "external functions are not supported yet",
     "import": "'import' is not supported yet; refer to classes by their full name",
@@ -92,9 +94,11 @@ _UNSUPPORTED: Final[dict[str, str]] = {
     "outer": "'inner'/'outer' elements are not supported yet",
     "redeclare": "'redeclare' is not supported yet",
     "replaceable": "'replaceable' elements are not supported yet",
-    "return": "'return' is not supported yet",
-    "while": "'while' loops are not supported yet",
 }
+
+# Keywords that end a list of statements. The same set as `_SECTION_END` plus the words
+# that close a compound statement, because a statement list is always inside something.
+_STATEMENT_END: Final = _SECTION_END | {"elseif", "else", "elsewhen"}
 
 
 def _merge(first: ir.Modification, second: ir.Modification) -> ir.Modification:
@@ -498,7 +502,12 @@ class _Parser:
         return ir.When(tuple(branches))
 
     def _statement(self) -> ir.Statement:
-        """The body of a ``when``: an assignment, or ``reinit``."""
+        """The body of a ``when``: an assignment, or ``reinit``.
+
+        The simple half. A ``when`` sits in an equation section, where a body of ordinary
+        statements is all the specification allows; the compound forms belong to an
+        ``algorithm`` section and are read by :meth:`_algorithm_statement`.
+        """
         if self._check(Kind.NAME, "reinit") and self._ahead(1).text == "(":
             self.at += 2
             target = self._reference()
@@ -513,6 +522,102 @@ class _Parser:
         value = self.expression()
         self._terminate()
         return ir.Assign(target, value)
+
+    # -- algorithm sections -----------------------------------------------------------
+
+    def _statements(self, *, until: frozenset[str] | set[str]) -> list[ir.Statement]:
+        """A run of statements, stopping before ``until`` without consuming it."""
+        found: list[ir.Statement] = []
+        while not (self._check(Kind.END) or self._keyword(*until)):
+            found.append(self._algorithm_statement())
+        return found
+
+    def _algorithm_statement(self) -> ir.Statement:
+        """One statement of an ``algorithm`` section, compound forms included."""
+        if self.token.kind is Kind.KEYWORD:
+            match self.token.text:
+                case "if":
+                    return self._if_statement()
+                case "for":
+                    return self._for_statement()
+                case "while":
+                    return self._while_statement()
+                case "break":
+                    self.at += 1
+                    self._terminate()
+                    return ir.Break()
+                case "return":
+                    self.at += 1
+                    self._terminate()
+                    return ir.Return()
+                case _:
+                    self._refuse_unsupported()
+        return self._statement()
+
+    def _if_statement(self) -> ir.IfStatement:
+        opening = self.token
+        branches: list[ir.StatementBranch] = []
+        keyword = "if"
+        while self._accept(Kind.KEYWORD, keyword):
+            condition = self.expression()
+            self._expect(Kind.KEYWORD, "then")
+            branches.append(
+                ir.StatementBranch(condition, tuple(self._loop_body(opening, "if"))),
+            )
+            keyword = "elseif"
+        otherwise: tuple[ir.Statement, ...] = ()
+        if self._accept(Kind.KEYWORD, "else"):
+            otherwise = tuple(self._loop_body(opening, "if"))
+        self._closing(opening, "if")
+        return ir.IfStatement(tuple(branches), otherwise)
+
+    def _for_statement(self) -> ir.ForStatement:
+        opening = self._expect(Kind.KEYWORD, "for")
+        index = self._expect(Kind.NAME).text
+        if self._check(Kind.OP, ","):
+            raise self._error("a 'for' over several indices is not supported yet")
+        self._expect(Kind.KEYWORD, "in")
+        over = self._range()
+        self._expect(Kind.KEYWORD, "loop")
+        body = self._loop_body(opening, "for")
+        self._closing(opening, "for")
+        return ir.ForStatement(index, over, tuple(body))
+
+    def _while_statement(self) -> ir.WhileStatement:
+        opening = self._expect(Kind.KEYWORD, "while")
+        condition = self.expression()
+        self._expect(Kind.KEYWORD, "loop")
+        body = self._loop_body(opening, "while")
+        self._closing(opening, "while")
+        return ir.WhileStatement(condition, tuple(body))
+
+    def _loop_body(self, opening: Token, construct: str) -> list[ir.Statement]:
+        """The inside of a compound statement, with the unterminated case named."""
+        found: list[ir.Statement] = []
+        while not self._keyword(*_STATEMENT_END):
+            if self._check(Kind.END):
+                raise self._close(opening, construct)
+            found.append(self._algorithm_statement())
+        return found
+
+    def _closing(self, opening: Token, construct: str) -> None:
+        """Consume ``end <construct>;``, or say which construct was left open.
+
+        Without this the failure surfaces as "expected 'while', found name 'M'" at the
+        class's own ``end``, which names the wrong line and the wrong problem. The body
+        stopped at a keyword that closes *something*, and the only thing worth reporting is
+        which loop it did not close.
+        """
+        if not (self._keyword("end") and self._ahead(1).text == construct):
+            raise self._close(opening, construct)
+        self.at += 2
+        self._terminate()
+
+    def _close(self, opening: Token, construct: str) -> ModelicaSyntaxError:
+        return self._error(
+            f"unterminated {construct!r}: expected 'end {construct};'",
+            opening,
+        )
 
     def _if_equation(self) -> ir.IfEquation:
         opening = self.token
@@ -630,6 +735,7 @@ class _Parser:
         components: list[ir.Component] = []
         equations: list[ir.Equation] = []
         initial_equations: list[ir.Equation] = []
+        algorithms: list[tuple[ir.Statement, ...]] = []
         annotation = ir.EMPTY
 
         while not self._keyword("end"):
@@ -647,11 +753,18 @@ class _Parser:
                 self._expect(Kind.OP, ";")
                 continue
             if self._accept(Kind.KEYWORD, "initial"):
+                if self._check(Kind.KEYWORD, "algorithm"):
+                    raise self._error("'initial algorithm' sections are not supported yet")
                 self._expect(Kind.KEYWORD, "equation")
                 initial_equations += self._equations()
                 continue
             if self._accept(Kind.KEYWORD, "equation"):
                 equations += self._equations()
+                continue
+            if self._accept(Kind.KEYWORD, "algorithm"):
+                # Appended as its own section, never merged with the one before it: see
+                # `ir.Class.algorithms` for why the boundary carries information.
+                algorithms.append(tuple(self._statements(until=_SECTION_END)))
                 continue
             if self._accept(Kind.KEYWORD, "extends"):
                 extends.append(ir.Extends(self._type_name(), self._modification()))
@@ -677,6 +790,7 @@ class _Parser:
             components=tuple(components),
             equations=tuple(equations),
             initial_equations=tuple(initial_equations),
+            algorithms=tuple(algorithms),
             classes=tuple(nested),
             annotation=annotation,
         )
