@@ -61,6 +61,8 @@ class Box:
     """The text to draw, first line is the label."""
     rotation: float = 0.0
     """Degrees counter-clockwise, carried from the node so the icon and its pins agree."""
+    caption: str = "right"
+    """Which side a turned component's name goes, so it never lands inside the loop."""
 
     def turned(self, x: float, y: float) -> tuple[float, float]:
         """A point of the icon's own frame, rotated by this box's rotation.
@@ -396,6 +398,153 @@ def _layered(graph: Graph, boxes: dict[str, Box]) -> None:
 # --------------------------------------------------------------------------------------
 
 
+
+
+# --------------------------------------------------------------------------------------
+# The loop layout: what a person draws when they draw a circuit
+# --------------------------------------------------------------------------------------
+
+CAPTION = 96.0
+"""Room to leave beside a component whose name is written outside its box."""
+
+RAIL = 150.0
+"""Horizontal spacing between components on a rail. Wide enough for a two-line caption."""
+
+RISE = 200.0
+"""Distance between the top rail and the bottom one."""
+
+STUB = 90.0
+"""How far below its node a ground hangs. Far enough that its symbol clears the rail."""
+
+
+def _neighbours(graph: Graph, boxes: dict[str, Box]) -> dict[str, dict[str, str]]:
+    """Which nodes touch which, and through which of the near one's own pins.
+
+    A junction stays a node here, and that is the correction worth stating: walking *through*
+    one makes every pair of pins that meet at a dot adjacent, so a ground on a three-way node
+    comes out with degree two and looks like part of the loop. Kept as a node it is what it
+    is -- a corner the loop passes through, with the ground hanging off it.
+    """
+    touching: dict[str, dict[str, str]] = {i: {} for i in boxes}
+    for edge in graph.edges:
+        if edge.source not in boxes or edge.target not in boxes:
+            continue
+        touching[edge.source][edge.target] = edge.source_port
+        touching[edge.target][edge.source] = edge.target_port
+    return touching
+
+
+def _cycle(touching: dict[str, dict[str, str]]) -> tuple[list[str], dict[str, str]] | None:
+    """The single loop through every node, and the stubs hanging off it.
+
+    ``None`` when the model is not one loop with stubs, which is the whole admission this
+    layout makes: it knows one shape, it recognises that shape, and anything else goes back
+    to the force layout rather than being bent into a rectangle it is not.
+    """
+    stubs = {name: next(iter(near)) for name, near in touching.items() if len(near) == 1}
+    loop = {
+        name: {other for other in near if other not in stubs}
+        for name, near in touching.items()
+        if name not in stubs
+    }
+    if len(loop) < PAIR + 1 or any(len(near) != PAIR for near in loop.values()):
+        return None
+    start = min(loop)
+    order = [start]
+    previous, current = "", start
+    while True:
+        step = next((n for n in sorted(loop[current]) if n != previous), None)
+        if step is None or step == start:
+            break
+        order.append(step)
+        previous, current = current, step
+    return (order, stubs) if len(order) == len(loop) else None
+
+
+def _turn(box: Box, wanted: str, *, up: bool) -> None:
+    """Stand a component on end, with ``wanted`` at the top when ``up``.
+
+    Which way it turns is decided by where the pin already is, not by a table of component
+    types. A rotation of -90 sends the icon frame's ``x = -90`` edge upward and +90 sends it
+    down, so the pin that has to be at the top picks the sign.
+    """
+    found = next((p for p in box.node.ports if p.name == wanted and p.at), None)
+    if found is None or found.at is None:
+        box.rotation = -90.0
+        return
+    on_the_left = found.at[0] < 0
+    box.rotation = -90.0 if on_the_left is up else 90.0
+
+
+def _loop(graph: Graph, boxes: dict[str, Box]) -> bool:
+    """Place a series loop the way a schematic is drawn, or say it cannot.
+
+    The conventions, and they are the whole algorithm: the source stands on the left edge
+    with its positive pin at the top; the series parts run along the top rail in the order
+    the loop visits them; the last one stands on the right edge; the return is the bottom
+    rail; and anything hanging off the loop -- a ground -- goes *below* what it hangs from.
+    """
+    touching = _neighbours(graph, boxes)
+    walked = _cycle(touching)
+    if walked is None:
+        return False
+    order, stubs = walked
+    # The junctions came along to keep the loop honest; they are corners, not components,
+    # and `_junctions` puts each one where its own wires meet once the parts are placed.
+    parts = [name for name in order if boxes[name].node.kind != "junction"]
+    if len(parts) < PAIR + 1:
+        return False
+    order_written = {name: index for index, name in enumerate(boxes)}
+    # Which part takes the left edge. A ground is taken at the source's own terminal, so the
+    # left edge belongs to one of the two parts meeting the grounded node -- and of those, to
+    # whichever the modeller declared first. That is not a guess about which is a source: it
+    # is the order the model is written in, and a model is written source-first for the same
+    # reason it is drawn that way.
+    grounded = set(stubs.values())
+    candidates = [name for name in parts if set(touching[name]) & grounded] or parts
+    anchor = min(candidates, key=lambda name: order_written[name])
+    cut = order.index(anchor)
+    order = order[cut:] + order[:cut]
+    # And which way round it. Current leaves a source at the terminal the ground is *not*
+    # on, so the walk steps away from the grounded node first; going the other way puts the
+    # loop's last part on the top rail and crosses every wire.
+    if len(order) > 1 and order[1] in grounded:
+        order = [order[0], *reversed(order[1:])]
+    parts = [name for name in order if boxes[name].node.kind != "junction"]
+
+    first, *rest = parts
+    span = max(len(rest) - 1, 1)
+    width = span * RAIL
+    boxes[first].x, boxes[first].y = 0.0, RISE / 2
+    boxes[first].caption = "left"
+    _turn(boxes[first], _towards(touching, first, rest[0]), up=True)
+    along = rest[:-1] if len(rest) > 1 else rest
+    for index, name in enumerate(along):
+        boxes[name].x = width * (index + 0.5) / max(len(along), 1) if len(rest) > 1 else width / 2
+        boxes[name].y = 0.0
+    if len(rest) > 1:
+        last = rest[-1]
+        boxes[last].x, boxes[last].y = width, RISE / 2
+        _turn(boxes[last], _towards(touching, last, rest[-2]), up=True)
+    for name, hangs in stubs.items():
+        boxes[name].x = width / 2 if boxes[hangs].node.kind == "junction" else boxes[hangs].x
+        boxes[name].y = RISE + STUB
+    _junctions(graph, boxes)
+    return True
+
+
+def _towards(touching: dict[str, dict[str, str]], near: str, far: str) -> str:
+    """The pin ``near`` uses to reach ``far``, following a junction between them if there is one."""
+    direct = touching[near].get(far)
+    if direct is not None:
+        return direct
+    for other, port in touching[near].items():
+        if far in touching.get(other, {}):
+            return port
+    return ""
+
+
+
 def place(graph: Graph) -> Layout:
     """Give every node a position and report the size of the image that holds them."""
     # A node that contains other nodes is drawn as the frame around them, so it gets no
@@ -406,16 +555,27 @@ def place(graph: Graph) -> Layout:
         return Layout(width=2 * MARGIN, height=2 * MARGIN)
 
     if graph.kind == "schematic":
-        _from_model(graph, boxes) if _placed(boxes) else _force(graph, boxes)
+        if _placed(boxes):
+            _from_model(graph, boxes)
+        elif not _loop(graph, boxes):
+            # Not one loop with stubs, so there is no convention to apply and the springs
+            # are still the best available answer. Said here rather than left to be found.
+            _force(graph, boxes)
     else:
         _layered(graph, boxes)
 
     frame = 14.0 if parents else 0.0
-    left = min(box.left for box in boxes.values()) - frame
+    # A caption written beside a turned component sits outside its box, and a box is all the
+    # bounds know about. Without this the name is cropped by the viewBox -- on whichever side
+    # it was written, so both get the room.
+    turned = [box for box in boxes.values() if box.rotation]
+    before = CAPTION if any(box.caption == "left" for box in turned) else 0.0
+    after = CAPTION if any(box.caption != "left" for box in turned) else 0.0
+    left = min(box.left for box in boxes.values()) - frame - before
     top = min(box.top for box in boxes.values()) - frame
     for box in boxes.values():
         box.x += MARGIN - left
         box.y += MARGIN - top
-    width = max(box.left + box.width for box in boxes.values()) + MARGIN + frame
+    width = max(box.left + box.width for box in boxes.values()) + MARGIN + frame + after
     height = max(box.top + box.height for box in boxes.values()) + MARGIN + frame
     return Layout(boxes=boxes, width=width, height=height)

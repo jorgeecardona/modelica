@@ -266,8 +266,12 @@ def _caption(box: Box, name: str, label: Label, scale: float) -> list[str]:
     shown = list(box.node.detail[:2])
     step = label.size * scale * 1.15
     if box.rotation:
-        # Beside a turned component, reading down: the space above it is a lead.
-        left, anchor = box.x + FRAME * scale + 6, "start"
+        # Beside a turned component, reading down: the space above it is a lead. Which side
+        # is the layout's call -- a name written into the middle of a loop is worse than no
+        # name -- and the default is the right, where a single component has room.
+        outward = -1.0 if box.caption == "left" else 1.0
+        left = box.x + outward * (FRAME * scale + 6)
+        anchor = "end" if box.caption == "left" else "start"
         first = box.y - label.size * scale * 0.6
     else:
         # Above an upright one, and the *stack* grows upward so the last line clears the

@@ -82,7 +82,7 @@ cabildo issues show <slug>
 |---|---|---|---|---|---|---|
 | [There is no honest number for how much Modelica this reads, because the corpus is ours](03-08-2026-reachability-and-agreement-against-a-reference-tool.md) | ci | story | L | probe | open | — |
 | [Diagrams draw boxes, and the icons that would make them read like circuits now survive parsing](04-08-2026-diagrams-draw-boxes-not-icons.md) | diagram | story | L | inspect | open | — |
-| [The return wire is routed through the component it comes back to](09-08-2026-the-return-wire-is-routed-through-the-component-it-comes-back-to.md) | diagram | bug | M | inspect | open | — |
+| [A model with no Placement is drawn by a force layout, and a force layout knows no conventions](09-08-2026-the-return-wire-is-routed-through-the-component-it-comes-back-to.md) | diagram | bug | L | inspect | in-progress · @cute-replicant-6e76d | — |
 | [The EKF results live in a log and a deleted scratch file, not in the documentation](03-08-2026-an-estimation-notebook.md) | docs | story | M | inspect | open | — |
 | [The Association has not been told this exists, and the trademark note assumes they will be](03-08-2026-tell-the-modelica-association.md) | docs | idea | XS | inspect | open | — |
 | [The README says nothing in Python reaches a trajectory, and something does](03-08-2026-the-readme-claim-is-too-strong.md) | docs | bug | S | inspect | open | — |
@@ -116,5 +116,5 @@ cabildo issues show <slug>
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_35 open — 35 open; 13 done. Generated; edit the files, then `cabildo issues reindex`._
+_35 open — 34 open, 1 in-progress; 13 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->
