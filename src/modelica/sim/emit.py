@@ -85,6 +85,19 @@ from modelica.ir.derive import ONE, ZERO, d_dx, mul, simplify, sub
 from modelica.ir.rewrite import contains, names, residual, substitute
 from modelica.ir.share import share, substituted
 from modelica.lang.unparse import unparse_expr
+from modelica.sim.dialect import (
+    CONDITIONAL as _CONDITIONAL,
+)
+from modelica.sim.dialect import (
+    NON_ASSOCIATIVE as _NON_ASSOCIATIVE,
+)
+from modelica.sim.dialect import (
+    PRIMARY as _PRIMARY,
+)
+from modelica.sim.dialect import PYTHON, Dialect
+from modelica.sim.dialect import (
+    SIGN as _SIGN,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -109,54 +122,9 @@ class EmitError(Exception):
 # Expressions
 # --------------------------------------------------------------------------------------
 
-_CONDITIONAL: Final = 0
-_NOT: Final = 3
 _PRODUCT: Final = 6
-_SIGN: Final = 7
-_PRIMARY: Final = 9
 
-_BINARY: Final[dict[str, tuple[str, int]]] = {
-    "or": ("or", 1),
-    "and": ("and", 2),
-    "==": ("==", 4),
-    "<>": ("!=", 4),
-    "<": ("<", 4),
-    "<=": ("<=", 4),
-    ">": (">", 4),
-    ">=": (">=", 4),
-    "+": ("+", 5),
-    "-": ("-", 5),
-    "*": ("*", 6),
-    "/": ("/", 6),
-    "^": ("**", 8),
-}
 
-_NON_ASSOCIATIVE: Final = frozenset({"^", "==", "<>", "<", "<=", ">", ">="})
-
-_FUNCTIONS: Final[dict[str, str]] = {
-    "abs": "abs",
-    "acos": "np.arccos",
-    "asin": "np.arcsin",
-    "atan": "np.arctan",
-    "atan2": "np.arctan2",
-    "ceil": "np.ceil",
-    "cos": "np.cos",
-    "cosh": "np.cosh",
-    "exp": "np.exp",
-    "floor": "np.floor",
-    "log": "np.log",
-    "log10": "np.log10",
-    "max": "max",
-    "min": "min",
-    "mod": "np.mod",
-    "rem": "np.fmod",
-    "sign": "np.sign",
-    "sin": "np.sin",
-    "sinh": "np.sinh",
-    "sqrt": "np.sqrt",
-    "tan": "np.tan",
-    "tanh": "np.tanh",
-}
 
 _TRANSPARENT: Final = frozenset({"noEvent", "pre", "smooth"})
 """Calls that mean something to the *solver* and nothing to arithmetic.
@@ -244,39 +212,47 @@ def _unwrap(node: ir.Expr) -> ir.Expr:
     return node
 
 
-def _precedence(node: ir.Expr) -> int:
+def _precedence(node: ir.Expr, dialect: Dialect) -> int:
     match _unwrap(node):
         case ir.IfExpr():
             return _CONDITIONAL
         case ir.Binary(op=op):
-            return _BINARY[op][1]
+            return dialect.binary[op][1]
         case ir.Unary(op="not"):
-            return _NOT
+            return dialect.negation_level
         case ir.Unary():
             return _SIGN
         case _:
             return _PRIMARY
 
 
-def emit_expr(node: ir.Expr, symbols: Mapping[str, str], *, minimum: int = _CONDITIONAL) -> str:
-    """Render ``node`` as Python, parenthesised if it binds looser than ``minimum``."""
-    text = _render(_unwrap(node), symbols)
-    return f"({text})" if _precedence(node) < minimum else text
+def emit_expr(
+    node: ir.Expr,
+    symbols: Mapping[str, str],
+    *,
+    minimum: int = _CONDITIONAL,
+    dialect: Dialect = PYTHON,
+) -> str:
+    """Render ``node`` in ``dialect``, parenthesised if it binds looser than ``minimum``."""
+    text = _render(_unwrap(node), symbols, dialect)
+    return f"({text})" if _precedence(node, dialect) < minimum else text
 
 
-def _call(node: ir.Call, symbols: Mapping[str, str]) -> str:
+def _call(node: ir.Call, symbols: Mapping[str, str], dialect: Dialect) -> str:
     if node.name == "div":
-        left, right = (emit_expr(a, symbols) for a in node.args)
-        return f"np.trunc(({left}) / ({right}))"
+        left, right = (emit_expr(a, symbols, dialect=dialect) for a in node.args)
+        return f"{dialect.truncate}(({left}) / ({right}))"
     if node.name in ("initial", "terminal"):
-        return "False"
-    if node.name not in _FUNCTIONS:
-        raise EmitError(f"no translation for the function {node.name!r}")
-    arguments = ", ".join(emit_expr(argument, symbols) for argument in node.args)
-    return f"{_FUNCTIONS[node.name]}({arguments})"
+        return dialect.false
+    if node.name not in dialect.functions:
+        raise EmitError(f"no translation for the function {node.name!r} in {dialect.name}")
+    arguments = ", ".join(emit_expr(a, symbols, dialect=dialect) for a in node.args)
+    return f"{dialect.functions[node.name]}({arguments})"
 
 
-def _render(node: ir.Expr, symbols: Mapping[str, str]) -> str:  # noqa: C901, PLR0911 - one case per node type
+def _render(  # noqa: C901, PLR0911, PLR0912 - one case per node type, two of them dialect-split
+    node: ir.Expr, symbols: Mapping[str, str], dialect: Dialect
+) -> str:
     match node:
         case ir.Ref():
             try:
@@ -288,27 +264,40 @@ def _render(node: ir.Expr, symbols: Mapping[str, str]) -> str:  # noqa: C901, PL
         case ir.IntLiteral(value=value):
             return str(value)
         case ir.BoolLiteral(value=value):
-            return "True" if value else "False"
+            return dialect.true if value else dialect.false
         case ir.StringLiteral(value=value):
             return repr(value)
         case ir.Array() | ir.Subscript() | ir.Range():
             raise EmitError("array equations are not supported yet")
+        case ir.Binary(op="^", lhs=lhs, rhs=rhs) if dialect.power is not None:
+            return dialect.power(
+                emit_expr(lhs, symbols, dialect=dialect),
+                emit_expr(rhs, symbols, dialect=dialect),
+            )
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
-            symbol, level = _BINARY[op]
-            left = emit_expr(lhs, symbols, minimum=level + (op in _NON_ASSOCIATIVE))
-            right = emit_expr(rhs, symbols, minimum=level + 1)
+            symbol, level = dialect.binary[op]
+
+            def floor(side: ir.Expr, base: int, op: str = op) -> int:
+                inner = _unwrap(side)
+                wanted = dialect.clarify.get(op, frozenset())
+                return _PRIMARY if isinstance(inner, ir.Binary) and inner.op in wanted else base
+
+            left_at = level + (op in _NON_ASSOCIATIVE)
+            left = emit_expr(lhs, symbols, minimum=floor(lhs, left_at), dialect=dialect)
+            right = emit_expr(rhs, symbols, minimum=floor(rhs, level + 1), dialect=dialect)
             return f"{left} {symbol} {right}"
         case ir.Unary(op="not", operand=operand):
-            return f"not {emit_expr(operand, symbols, minimum=_NOT)}"
+            inner = emit_expr(operand, symbols, minimum=dialect.negation_level, dialect=dialect)
+            return f"{dialect.negation}{inner}"
         case ir.Unary(op=op, operand=operand):
-            return f"{op}{emit_expr(operand, symbols, minimum=_SIGN)}"
+            return f"{op}{emit_expr(operand, symbols, minimum=_SIGN, dialect=dialect)}"
         case ir.Call():
-            return _call(node, symbols)
+            return _call(node, symbols, dialect)
         case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
-            return (
-                f"{emit_expr(then, symbols, minimum=1)} if "
-                f"{emit_expr(condition, symbols, minimum=1)} else "
-                f"{emit_expr(otherwise, symbols, minimum=_CONDITIONAL)}"
+            return dialect.conditional(
+                emit_expr(condition, symbols, minimum=1, dialect=dialect),
+                emit_expr(then, symbols, minimum=1, dialect=dialect),
+                emit_expr(otherwise, symbols, minimum=_CONDITIONAL, dialect=dialect),
             )
 
 

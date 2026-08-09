@@ -1,8 +1,8 @@
 ---
 title: A C emitter — the second backend, and the one FMU export needs
-status: open
+status: in-progress
 area: sim
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
 kind: story
 scope: L

@@ -41,6 +41,10 @@ def at(where: ir.Span | None) -> str:
     return f" at {where}" if where is not None else ""
 
 
+PAIR = 2
+"""Arguments a two-argument built-in takes."""
+
+
 class EvaluationError(Exception):
     """An expression could not be evaluated: an unknown name or function."""
 
@@ -60,7 +64,22 @@ _FUNCTIONS: dict[str, Callable[[float], float]] = {
     "log": math.log,
     "log10": math.log10,
     "abs": abs,
+    # Added when the C dialect landed: the emitter could translate these and the reference
+    # tier could not evaluate them, so a model using `floor` had a compiled answer and no
+    # interpreted one to check it against. `docs/ideas/backends.md:8` calls this tier the
+    # reference, and a reference that knows fewer functions than the compiler is not one.
+    "ceil": math.ceil,
+    "floor": math.floor,
 }
+
+_PAIRS: dict[str, Callable[[float, float], float]] = {
+    "atan2": math.atan2,
+    "mod": lambda a, b: math.fmod(a, b) + b if math.fmod(a, b) and (a < 0) != (b < 0) else math.fmod(a, b),
+    "rem": math.fmod,
+}
+"""The two-argument built-ins. ``mod`` floors and ``rem`` truncates, which is Modelica's
+distinction and not Python's -- `math.fmod` is `rem`, and using it for both is the mistake
+this table exists to avoid."""
 
 
 # The numeric operators, as tables rather than a `match`. Both take two numbers and the
@@ -124,6 +143,8 @@ def _call(node: ir.Call, env: Mapping[str, Value]) -> Value:
         return min(args) if node.name == "min" else max(args)
     if node.name in _FUNCTIONS and len(args) == 1:
         return _FUNCTIONS[node.name](args[0])
+    if node.name in _PAIRS and len(args) == PAIR:
+        return _PAIRS[node.name](args[0], args[1])
     raise EvaluationError(f"unknown function {node.name!r}")
 
 
