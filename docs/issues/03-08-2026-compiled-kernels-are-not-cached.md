@@ -1,8 +1,8 @@
 ---
 title: Nothing caches a compiled kernel, though the content hash that would key it exists
-status: open
+status: done
 area: sim
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
 kind: story
 scope: M
@@ -59,3 +59,78 @@ cache keys on the source file, which is the likely reason.
 No cache on disk across processes in the first pass. In-process is where the repeated builds
 are, and a disk cache adds an invalidation problem that a content hash makes tractable but not
 free.
+
+## What landed
+
+`modelica.sim.kernel.build` is cached on the content of the model. Measured on this machine,
+building every model in the corpus once:
+
+| | cold | warm |
+| --- | --- | --- |
+| whole corpus, interpreted | 272.8 ms | 0.68 ms |
+| `AtwoodPendulum` alone | 168.7 ms | 0.17 ms |
+| `Robertson`, `jit=True`, first call included | 3.16 s | 0.07 ms |
+| `Pendulum`, `jit=True`, first call included | 2.78 s | 0.10 ms |
+
+The two `jit` rows are the ones this was reached for, and they had to be measured in a
+throwaway environment because numba is in no dependency group here. They include exercising
+every entry point once, since numba compiles at the first call and a build that only returns
+the functions would have measured nothing.
+
+Each Done bullet:
+
+- **Same `Kernel` for the same model.** `build` normalises `jit` and defers to an
+  `lru_cache`d `_compiled`. `clear_cache` and `cache_info` are exported so a test can start
+  cold and read the hit count.
+- **Keyed on content, not on the file.** `tests/test_cache.py` asks it three ways: the same
+  model built twice is one entry; the same model written with different comments, blank lines
+  and spacing is the *same* entry; `-v / R` changed to `-v * R` is a different one. Identity
+  (``is``) and not equality, because two kernels from one model compare equal whether or not
+  anything was cached.
+- **`System` is hashable.** `modelica.ir.system.FrozenMap`, coerced in `__post_init__`.
+- **Numba's own `cache=True`** is answered below, and stays off.
+
+### Why `FrozenMap` and not a tuple of pairs
+
+The issue offered the tuple, as `ir.Call.named` does. Ten places read `Mode.derivative` and
+`System.aliases` with `[]`, `.items()` and `in`, and turning a mapping into a sequence to win
+a hash would have made every one of them say `dict(...)` first. `FrozenMap` is a
+`collections.abc.Mapping` that adds `__hash__` and nothing else -- equality stays the one
+`Mapping` already defines, so a test comparing `system.aliases` to a dict literal reads
+unchanged, and the hash is over a `frozenset` of the pairs so that it agrees with that
+equality.
+
+The cost of agreeing is stated in the class docstring rather than hidden: iteration order is
+visible downstream, so two systems differing *only* in the order of otherwise identical
+aliases would compare equal and share an entry while generating different source.
+Causalization is deterministic, so the pipeline cannot produce that pair. It is a hole in the
+argument and not one in the behaviour.
+
+### Numba's `cache=True`, answered
+
+It cannot be turned on, and it does not degrade -- it raises at decoration time. Measured on
+numba 0.66 against a function built the way `kernel.build` builds them:
+
+    RuntimeError: cannot cache function 'f': no locator available for file '<modelica:Demo>'
+
+The guess in the Inferred section was right: numba's cache keys on the source *file*, and
+these functions come from `exec` with a synthetic filename. Writing the generated source to a
+real file would give numba a locator, and that is a disk cache -- which this issue put out of
+scope for a reason. The reason and the error are recorded at that line in `_accelerate`.
+
+## Deliberately not done, found while doing it
+
+- **`lru_cache` keys on the call as written**, so `build(system)` and `build(system, jit=False)`
+  were two entries for one answer -- and both forms are in this repo, since
+  `modelica.sim.solve.simulate` always passes the keyword. Decorating `build` directly
+  compiled the same model twice while reporting a hit rate that looked fine. `build` is now a
+  wrapper that normalises the keyword before the cache sees it, and there is a test named for
+  the mistake.
+- **The cache is bounded at 32 and nothing measured that number.** An entry holds the `System`
+  it was keyed on and every array the generated module allocated. Thirty-two is more than a
+  notebook or a test session has models; it is a guess, and it is one constant to change.
+- **`FlatModel` is not cached.** `flatten` and `causalize` run again for every call that
+  starts from source; only `build` is spared. Those passes are the cheap ones -- 273 ms for
+  the whole corpus is the *build*, and the corpus flattens in less -- but a caller that
+  re-parses in a loop still pays them.
+- **Nothing on disk, as planned.** A second process compiles from scratch.

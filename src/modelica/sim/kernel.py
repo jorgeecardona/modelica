@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
+from functools import lru_cache
 from types import FunctionType
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, Protocol
 
 import numpy as np
 
@@ -27,7 +28,20 @@ if TYPE_CHECKING:
 
     from modelica.ir.system import System
 
-__all__ = ["Kernel", "build"]
+__all__ = ["CACHED", "CacheInfo", "Kernel", "build", "cache_info", "clear_cache"]
+
+
+class CacheInfo(NamedTuple):
+    """What `cache_info` returns.
+
+    Declared here rather than imported: `functools` spells it ``_CacheInfo``, and a private
+    name from the standard library has no business in this module's signatures.
+    """
+
+    hits: int
+    misses: int
+    maxsize: int | None
+    currsize: int
 
 
 class _Prepare(Protocol):
@@ -119,8 +133,50 @@ class Kernel:
         return p, y, w
 
 
+CACHED: Final = 32
+"""How many distinct models `build` keeps compiled at once.
+
+Bounded rather than unbounded, because a cache entry holds the `System` it was keyed on and
+every array the generated module allocated, and a long-lived process that builds a hundred
+different models should not hold all hundred. Thirty-two is more than a notebook or a test
+session has models and small enough that the memory is not worth thinking about; nothing was
+measured to choose it, and if a workload ever wants more this is the number to change.
+"""
+
+
 def build(model: System | Code, *, jit: bool = False) -> Kernel:
-    """Compile a system (or already-emitted code) into callables."""
+    """Compile a system (or already-emitted code) into callables.
+
+    Cached on the *content* of ``model``, which is what `docs/ideas/backends.md:70` asks for:
+    "The IR nodes are frozen, slotted and hashable, so a `FlatModel` has a content hash and
+    needs no extra machinery to get one. That hash is the cache key for the compiled kernel.
+    It recompiles when the model changed, and not when the mtime of the file changed."
+
+    So two identical models parsed from two different paths are one entry, and changing one
+    character in one equation is a different key. Nothing about a filename or a timestamp
+    reaches this.
+
+    `System` had to be made hashable for it -- see `modelica.ir.system.FrozenMap`. It was the
+    only value between `FlatModel` and `Code` that was not, so the key the document promised
+    existed at both ends of the pipeline and not in the middle.
+
+    Sharing one `Kernel` between callers is safe because the generated module has no mutable
+    state: every function writes into an ``out`` array the caller owns, `Kernel.start`
+    allocates fresh arrays on each call, and the two module-level constants the emitter writes
+    (``_seed`` and ``_null``) are read and never written. `clear_cache` drops everything -- a
+    test that wants to time a cold compile has to.
+
+    The keyword is normalised here rather than cached with it, and that is not a style
+    choice. `functools.lru_cache` keys on the call as written, so ``build(system)`` and
+    ``build(system, jit=False)`` are two entries for one answer -- and both forms are in this
+    repo, since `modelica.sim.solve.simulate` always passes the keyword. Decorating `build`
+    directly compiled the same model twice and reported a hit rate that looked fine.
+    """
+    return _compiled(model, jit)
+
+
+@lru_cache(maxsize=CACHED)
+def _compiled(model: System | Code, jit: bool) -> Kernel:  # noqa: FBT001 - normalised by `build`
     code = model if isinstance(model, Code) else emit(model)
     namespace: dict[str, Any] = {"np": np}
     exec(compile(code.source, f"<modelica:{code.name}>", "exec"), namespace)  # noqa: S102
@@ -138,6 +194,16 @@ def build(model: System | Code, *, jit: bool = False) -> Kernel:
         indicators=namespace["indicators"],
         transition=namespace["transition"],
     )
+
+
+def clear_cache() -> None:
+    """Forget every compiled kernel. A test timing a cold build calls this first."""
+    _compiled.cache_clear()
+
+
+def cache_info() -> CacheInfo:
+    """Hits, misses, and how full the cache is -- `functools.lru_cache`'s own record."""
+    return CacheInfo(*_compiled.cache_info())
 
 
 def _accelerate(namespace: dict[str, Any]) -> None:
@@ -164,7 +230,16 @@ def _accelerate(namespace: dict[str, Any]) -> None:
     differential debugging (see `docs/ideas/backends.md`) is worth nothing if the fast path
     can answer a question the slow path answers differently.
 
-    Stated honestly, it is defensive rather than a fix for an observed failure: no model in
+    ``cache=False`` is not an oversight and cannot be turned on. Numba's on-disk cache needs
+    to find the source file a function came from, and these functions come from `exec`. Asking
+    for it raises at decoration time rather than falling back -- measured on numba 0.66,
+    ``RuntimeError: cannot cache function 'rhs': no locator available for file
+    '<modelica:Demo>'``. Writing the generated source to a real file would give numba a
+    locator, and that is a disk cache, which is a separate piece of work with an invalidation
+    problem of its own. The in-process cache on `build` is what removes the repeated
+    compilation this was reached for.
+
+    Stated honestly, the error model is defensive rather than a fix for an observed failure: no model in
     the corpus reaches a division by exactly zero. The pendulum comes closest and does not
     arrive -- at ``y = -L`` its Newton lands on an ``x`` of about 1e-16 rather than on 0.0, so
     both tiers return the same finite nonsense. But an exact zero pivot is *reachable in

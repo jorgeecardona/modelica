@@ -10,21 +10,77 @@ produces it lives in :mod:`modelica.ir.causalize`.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator
 
     from modelica.ir import nodes as ir
     from modelica.ir.flat import FlatVariable
 
-__all__ = ["Block", "Mode", "System"]
+__all__ = ["Block", "FrozenMap", "Mode", "System"]
+
+_K = TypeVar("_K")
+_V = TypeVar("_V")
 
 
-def _no_aliases() -> dict[str, ir.Expr]:
-    return {}
+class FrozenMap(Mapping[_K, _V]):
+    """A mapping that is a value: immutable, comparable, and hashable.
+
+    Two fields of this module are mappings -- :attr:`Mode.derivative` and
+    :attr:`System.aliases` -- and a ``dict`` in a frozen dataclass makes the whole dataclass
+    unhashable. That is not a formality. `docs/ideas/backends.md:70` promises "a ``FlatModel``
+    has a content hash and needs no extra machinery to get one. That hash is the cache key for
+    the compiled kernel", and `System` sits between `FlatModel` and `Code`, both of which
+    hashed while it did not -- so the key was available at both ends of the pipeline and not
+    in the middle.
+
+    A tuple of pairs is what `ir.Call.named` does for the same reason and it was the obvious
+    move. It is not the one taken: ten places read these two fields with ``[]``, ``.items()``
+    and ``in``, and turning a mapping into a sequence to win a hash would make every one of
+    them say ``dict(...)`` first. This keeps the reading and fixes the hashing.
+
+    Equality is inherited and untouched: `collections.abc.Mapping` already compares two
+    mappings by content, so ``system.aliases == {...}`` in a test goes on reading the way it
+    reads. Only ``__hash__`` is added -- ``Mapping`` sets it to ``None``, and that single
+    ``None`` is what made a whole `System` unhashable.
+
+    The hash is over a ``frozenset`` of the pairs, so it agrees with that inherited equality:
+    two maps with the same pairs in a different order are equal and therefore must hash the
+    same. The cost is stated rather than hidden. Iteration order *is* visible downstream --
+    the emitter writes aliases out in it -- so two systems differing only in the order of
+    otherwise identical aliases would compare equal and share a cache entry while generating
+    different source. Causalization is deterministic, so that pair cannot arise from the
+    pipeline; it is a hole in the argument and not one in the behaviour.
+    """
+
+    __slots__ = ("_hash", "_lookup")
+
+    def __init__(self, items: Mapping[_K, _V] | None = None) -> None:
+        self._lookup: dict[_K, _V] = {} if items is None else dict(items)
+        self._hash: int = hash(frozenset(self._lookup.items()))
+
+    def __getitem__(self, key: _K) -> _V:
+        return self._lookup[key]
+
+    def __iter__(self) -> Iterator[_K]:
+        return iter(self._lookup)
+
+    def __len__(self) -> int:
+        return len(self._lookup)
+
+    def __hash__(self) -> int:
+        return self._hash
+
+    def __repr__(self) -> str:
+        return f"FrozenMap({self._lookup!r})"
+
+
+def _no_aliases() -> FrozenMap[str, ir.Expr]:
+    return FrozenMap()
 
 
 @dataclass(frozen=True)
@@ -99,6 +155,14 @@ class Mode:
     blocks: tuple[Block, ...]
     pivot: ir.Expr | None = None
 
+    def __post_init__(self) -> None:
+        """Whatever mapping was handed in becomes a `FrozenMap`, so the mode is hashable.
+
+        Coerced rather than demanded, because the type stays `Mapping` and every caller goes
+        on passing a dict. A hole that has to be remembered is a hole.
+        """
+        object.__setattr__(self, "derivative", FrozenMap(self.derivative))
+
 
 @dataclass(frozen=True)
 class System:
@@ -139,6 +203,10 @@ class System:
     aliases: Mapping[str, ir.Expr] = field(default_factory=_no_aliases)
     whens: tuple[ir.When, ...] = ()
     initial_equations: tuple[ir.Equal, ...] = ()
+
+    def __post_init__(self) -> None:
+        """See `Mode.__post_init__`: the one dict left between `FlatModel` and `Code`."""
+        object.__setattr__(self, "aliases", FrozenMap(self.aliases))
 
     @property
     def mode(self) -> Mode:
