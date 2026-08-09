@@ -794,9 +794,7 @@ def enumeration(name: str, *literals: str, doc: str = "") -> Type:
     literal that was never declared. A bare string would not.
     """
     caller = sys._getframe(1)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
-    return Type(
-        name, literals=literals, doc=doc, module=str(caller.f_globals["__name__"])
-    )
+    return Type(name, literals=literals, doc=doc, module=str(caller.f_globals["__name__"]))
 
 
 def alias(name: str, base: Type, **attributes: object) -> Type:
@@ -1021,7 +1019,13 @@ def _class_to_ir(target: _ClassMeta, within: str) -> ir.Class:
     own = target.__dict__
     imports = tuple(cast("Iterable[ir.Import]", own.get("IMPORTS", ())))
     declared = [
-        (value.redeclaring, replace(value.component(within), type_name=_shorten(value.component(within).type_name, imports)))
+        (
+            value.redeclaring,
+            replace(
+                value.component(within),
+                type_name=_shorten(value.component(within).type_name, imports),
+            ),
+        )
         for value in own.values()
         if isinstance(value, Declaration)
     ]

@@ -162,9 +162,7 @@ class Ground(Model):
 class Probe(Model):
     """A 1 V source charging a capacitor through one swappable element"""
 
-    element = replaceable(
-        Resistor(R=100, doc="The component under test"), constrainedby=OnePort
-    )
+    element = replaceable(Resistor(R=100, doc="The component under test"), constrainedby=OnePort)
     source = ConstantVoltage(V=1)
     c = Capacitor(C=0.01, v=mod(start=0, fixed=True))
     ground = Ground()

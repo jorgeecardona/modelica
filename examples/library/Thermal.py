@@ -15,9 +15,7 @@ from modelica.build import (
 
 Temperature = alias("Temperature", Real, unit="K")
 HeatFlowRate = alias("HeatFlowRate", Real, unit="W")
-Schedule = enumeration(
-    "Schedule", "day", "night", doc="Which of two setpoints is in force"
-)
+Schedule = enumeration("Schedule", "day", "night", doc="Which of two setpoints is in force")
 
 
 class HeatPort(Connector):

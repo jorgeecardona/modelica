@@ -40,10 +40,11 @@ needs_cc = pytest.mark.skipif(COMPILER is None, reason="no C compiler on this ma
 #: -- because somebody wrote the missing C -- fails this file and gets its check turned on,
 #: rather than staying quietly untested.
 REFUSED = {
-    "AtwoodPendulum": "simultaneous block",
     "Pendulum": "state sets",
     "TwoInertias": "state sets",
 }
+"""`AtwoodPendulum` left this list when the dense solve landed: its 4x4 tears to a 2x2 that
+is *linear*, so it needs `md_solve` and not Newton, and the check below now runs on it."""
 
 
 def _system(model: Path) -> System:
@@ -65,8 +66,17 @@ def _library(system: System, tmp_path: Path) -> Any:
     assert COMPILER is not None
     subprocess.run(  # noqa: S603 - compiler from PATH, input generated here
         [
-            COMPILER, "-std=c11", "-O2", "-Wall", "-Werror",
-            "-shared", "-fPIC", str(source), "-o", str(shared), "-lm",
+            COMPILER,
+            "-std=c11",
+            "-O2",
+            "-Wall",
+            "-Werror",
+            "-shared",
+            "-fPIC",
+            str(source),
+            "-o",
+            str(shared),
+            "-lm",
         ],
         check=True,
         capture_output=True,
@@ -89,7 +99,9 @@ def test_every_model_is_accounted_for(model: Path) -> None:
 
 @needs_cc
 @pytest.mark.parametrize(
-    "model", [m for m in MODELS if m.stem not in REFUSED], ids=[m.stem for m in MODELS if m.stem not in REFUSED]
+    "model",
+    [m for m in MODELS if m.stem not in REFUSED],
+    ids=[m.stem for m in MODELS if m.stem not in REFUSED],
 )
 def test_the_c_right_hand_side_answers_what_the_python_one_answers(
     model: Path, tmp_path: Path

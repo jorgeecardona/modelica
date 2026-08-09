@@ -45,6 +45,26 @@ than about either language, so it lives beside the levels and not in a dialect.
 """
 
 
+def _numpy_entry(name: str, row: int, column: int, size: int) -> str:
+    """A numpy matrix is indexed by a pair, so its row length is not needed to find an entry.
+
+    C's is: a flat block indexed by ``row * n + column``, which is why ``size`` is in the
+    signature at all.
+    """
+    del size
+    return f"{name}[{row}, {column}]"
+
+
+def _numpy_solve(a: str, b: str, x: str, size: int) -> str:
+    """``np.linalg.solve`` takes the shape from the arrays, so the size is not needed here.
+
+    A named function rather than a lambda that ignores an argument, because a reader seeing
+    an unused parameter should be told why once rather than wonder every time.
+    """
+    del size
+    return f"{x} = np.linalg.solve({a}, {b})"
+
+
 @dataclass(frozen=True)
 class Dialect:
     """One target language, as the handful of things code generation has to know about it."""
@@ -83,9 +103,20 @@ class Dialect:
     """
     preamble: tuple[str, ...] = ()
     """Lines a translation unit needs before anything this dialect emits will compile."""
-    clarify: Mapping[str, frozenset[str]] = field(
-        default_factory=dict[str, "frozenset[str]"]
-    )
+    square: Callable[[str, int], str] = lambda name, size: f"{name} = np.zeros(({size}, {size}))"
+    """An ``n``-by-``n`` matrix of zeros, ready to be filled entry by entry."""
+    column: Callable[[str, int], str] = lambda name, size: f"{name} = np.empty({size})"
+    """An ``n``-vector, every entry of which is written before it is read."""
+    entry: Callable[[str, int, int, int], str] = _numpy_entry
+    """Where one entry of a square matrix is, which is the two languages' real disagreement.
+
+    Python indexes a matrix with a pair and C indexes a flat block with arithmetic, so the
+    size has to reach here -- which is why it is a parameter rather than something the
+    caller formats.
+    """
+    linear_solve: Callable[[str, str, str, int], str] = _numpy_solve
+    """Solve ``A x = b``. One line, because both languages can say it in one."""
+    clarify: Mapping[str, frozenset[str]] = field(default_factory=dict[str, "frozenset[str]"])
     """Operand operators this language wants bracketed even where precedence settles it.
 
     C's ``&&`` binds tighter than ``||``, so ``a && b || c`` is unambiguous -- and ``-Wall``
@@ -152,7 +183,8 @@ PYTHON: Final = Dialect(
 #: ``static inline`` and not ``static``, and that is not style. A generated unit carries every
 #: helper whether or not this particular model uses one, and a plain ``static`` function that
 #: nothing calls is an error under ``-Werror=unused-function`` -- so a model with no ``mod``
-#: in it would fail to compile because of a helper written for a model that has one.
+#: in it would fail to compile because of a helper written for a model that has one. The same
+#: applies to ``md_solve``, which most models never call.
 C_PREAMBLE: Final = (
     "#include <math.h>",
     "",
@@ -164,6 +196,36 @@ C_PREAMBLE: Final = (
     "static inline double md_min(double a, double b) { return a < b ? a : b; }",
     "static inline double md_max(double a, double b) { return a > b ? a : b; }",
     "static inline double md_sign(double a) { return (double)((a > 0.0) - (a < 0.0)); }",
+    "",
+    "/* Dense LU with partial pivoting: the linear blocks are two- and three-by-two, and a",
+    "   BLAS dependency for that would be a build system in exchange for nothing. */",
+    "static inline void md_solve(int n, double *a, double *b, double *x) {",
+    "    for (int k = 0; k < n; ++k) {",
+    "        int pivot = k;",
+    "        for (int i = k + 1; i < n; ++i) {",
+    "            if (fabs(a[i * n + k]) > fabs(a[pivot * n + k])) { pivot = i; }",
+    "        }",
+    "        if (pivot != k) {",
+    "            for (int j = 0; j < n; ++j) {",
+    "                double swap = a[k * n + j];",
+    "                a[k * n + j] = a[pivot * n + j];",
+    "                a[pivot * n + j] = swap;",
+    "            }",
+    "            double swap = b[k]; b[k] = b[pivot]; b[pivot] = swap;",
+    "        }",
+    "        for (int i = k + 1; i < n; ++i) {",
+    "            double factor = a[i * n + k] / a[k * n + k];",
+    "            a[i * n + k] = 0.0;",
+    "            for (int j = k + 1; j < n; ++j) { a[i * n + j] -= factor * a[k * n + j]; }",
+    "            b[i] -= factor * b[k];",
+    "        }",
+    "    }",
+    "    for (int i = n - 1; i >= 0; --i) {",
+    "        double total = b[i];",
+    "        for (int j = i + 1; j < n; ++j) { total -= a[i * n + j] * x[j]; }",
+    "        x[i] = total / a[i * n + i];",
+    "    }",
+    "}",
     "",
 )
 
@@ -220,6 +282,12 @@ C: Final = Dialect(
     integer=lambda value: f"{value}.0",
     power=lambda base, exponent: f"pow({base}, {exponent})",
     truncate="trunc",
+    square=lambda name, size: f"double {name}[{size * size}] = {{0}}",
+    column=lambda name, size: f"double {name}[{size}] = {{0}}",
+    entry=lambda name, row, col, size: f"{name}[{row * size + col}]",
+    linear_solve=lambda a, b, x, size: (
+        f"double {x}[{size}] = {{0}}; md_solve({size}, {a}, {b}, {x})"
+    ),
     preamble=C_PREAMBLE,
     clarify={"or": frozenset({"and"})},
 )

@@ -398,8 +398,6 @@ def _layered(graph: Graph, boxes: dict[str, Box]) -> None:
 # --------------------------------------------------------------------------------------
 
 
-
-
 # --------------------------------------------------------------------------------------
 # The loop layout: what a person draws when they draw a circuit
 # --------------------------------------------------------------------------------------
@@ -542,7 +540,6 @@ def _towards(touching: dict[str, dict[str, str]], near: str, far: str) -> str:
         if far in touching.get(other, {}):
             return port
     return ""
-
 
 
 def place(graph: Graph) -> Layout:

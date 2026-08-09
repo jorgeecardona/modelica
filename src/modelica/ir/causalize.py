@@ -689,9 +689,7 @@ def _tear(unknowns: tuple[str, ...], equations: tuple[ir.Equal, ...]) -> Block:
                 break
         if found is None:
             # Nothing comes apart, so guess the variable the most equations are waiting on.
-            counts = {
-                name: sum(contains(residuals[i], name) for i in unused) for name in pending
-            }
+            counts = {name: sum(contains(residuals[i], name) for i in unused) for name in pending}
             chosen = max(sorted(pending), key=lambda name: counts[name])
             torn.append(chosen)
             pending.discard(chosen)
@@ -713,8 +711,7 @@ def _tear(unknowns: tuple[str, ...], equations: tuple[ir.Equal, ...]) -> Block:
         folded.append((name, value))
     left_over = tuple(equations[index] for index in sorted(unused))
     torn_equations = tuple(
-        ir.Equal(simplify(substitute(residual(equation), table)), ZERO)
-        for equation in left_over
+        ir.Equal(simplify(substitute(residual(equation), table)), ZERO) for equation in left_over
     )
     return Block(tuple(torn), torn_equations, torn=tuple(folded))
 

@@ -209,7 +209,9 @@ def _disagreement(  # noqa: C901, PLR0911 -- one exit per kind of difference, wh
         here = f"{path}.{left.name}" if path else left.name
         for field in ("restriction", "partial", "comment", "imports", "extends", "literals"):
             if getattr(left, field) != getattr(right, field):
-                return f"{here}: {field} is {getattr(left, field)!r} against {getattr(right, field)!r}"
+                return (
+                    f"{here}: {field} is {getattr(left, field)!r} against {getattr(right, field)!r}"
+                )
         for attribute in ("components", "classes", "redeclarations"):
             mine = {member.name: member for member in getattr(left, attribute)}
             theirs = {member.name: member for member in getattr(right, attribute)}
@@ -224,9 +226,19 @@ def _disagreement(  # noqa: C901, PLR0911 -- one exit per kind of difference, wh
             return f"{here}: the equations differ"
         return f"{here}: differs, and every part compared equal -- look at the annotation"
     if isinstance(left, ir.Component) and isinstance(right, ir.Component):
-        for field in ("type_name", "variability", "causality", "connector", "scoping",
-                      "comment", "dimensions", "replaceable", "constraining",
-                      "modification", "annotation"):
+        for field in (
+            "type_name",
+            "variability",
+            "causality",
+            "connector",
+            "scoping",
+            "comment",
+            "dimensions",
+            "replaceable",
+            "constraining",
+            "modification",
+            "annotation",
+        ):
             mine, theirs = getattr(left, field), getattr(right, field)
             if mine != theirs:
                 return f"{path}.{left.name}.{field}:\n        mo: {mine!r}\n        py: {theirs!r}"

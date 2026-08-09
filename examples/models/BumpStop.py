@@ -27,9 +27,7 @@ class BumpStop(Model):
         yield connect(self.stop.flange_b, self.mass.flange_a)
         kinetic = 0.5 * self.mass.m * self.mass.v**2
         strain = 0.5 * self.spring.c * self.spring.s_rel**2
-        contact = call(
-            "Translational.contactEnergy", self.stop.s_rel, self.stop.gap, self.stop.k
-        )
+        contact = call("Translational.contactEnergy", self.stop.s_rel, self.stop.gap, self.stop.k)
         yield self.E == kinetic + strain + contact
 
 

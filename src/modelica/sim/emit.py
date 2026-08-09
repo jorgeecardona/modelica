@@ -105,7 +105,7 @@ if TYPE_CHECKING:
     from modelica.ir.flat import FlatVariable
     from modelica.ir.system import Block, Mode, System
 
-__all__ = ["HELD", "Code", "EmitError", "Emitter", "Trigger", "emit"]
+__all__ = ["HELD", "Code", "EmitError", "Emitter", "Trigger", "emit", "iterated"]
 
 _ITERATIONS: Final = 50
 """Newton iterations before an implicit block gives up and returns what it has."""
@@ -123,7 +123,6 @@ class EmitError(Exception):
 # --------------------------------------------------------------------------------------
 
 _PRODUCT: Final = 6
-
 
 
 _TRANSPARENT: Final = frozenset({"noEvent", "pre", "smooth"})
@@ -415,7 +414,7 @@ def _jacobian(block: Block) -> list[list[ir.Expr]]:
     ]
 
 
-def _iterated(block: Block) -> bool:
+def iterated(block: Block) -> bool:
     """True when the block's Jacobian moves with its unknowns, so Newton is the only way.
 
     Asked here rather than left inside the code that writes the loop because the answer is
@@ -740,16 +739,16 @@ class Emitter:
             return [f"{self.symbols[block.unknowns[0]]} = {self.expr(block.assignment)}"]
         residuals = [residual(equation) for equation in block.equations]
         jacobian = _jacobian(block)
-        lines = self.newton(block, jacobian) if _iterated(block) else (
-            self.linear(block, residuals, jacobian)
+        lines = (
+            self.newton(block, jacobian)
+            if iterated(block)
+            else (self.linear(block, residuals, jacobian))
         )
         # Recovered after the solve and in order, each one written over the torn unknowns and
         # whatever the earlier ones produced. They are outside the Newton loop on purpose:
         # the residuals already have them folded in, so iterating on them would be computing
         # the same numbers twice per step.
-        lines.extend(
-            f"{self.symbols[name]} = {self.expr(value)}" for name, value in block.torn
-        )
+        lines.extend(f"{self.symbols[name]} = {self.expr(value)}" for name, value in block.torn)
         return lines
 
     def system_lines(
@@ -761,15 +760,19 @@ class Emitter:
     ) -> list[str]:
         """Fill ``_A`` and ``_b`` for one linear system, and solve it into ``_x``."""
         size = len(block.unknowns)
-        lines = [f"{indent}_A = np.zeros(({size}, {size}))", f"{indent}_b = np.empty({size})"]
+        dialect = self.dialect
+        lines = [
+            f"{indent}{dialect.square('_A', size)}",
+            f"{indent}{dialect.column('_b', size)}",
+        ]
         for row, entries in enumerate(jacobian):
             lines.extend(
-                f"{indent}_A[{row}, {column}] = {self.expr(entry)}"
+                f"{indent}{dialect.entry('_A', row, column, size)} = {self.expr(entry)}"
                 for column, entry in enumerate(entries)
                 if entry != ZERO
             )
             lines.append(f"{indent}_b[{row}] = {self.expr(right[row])}")
-        lines.append(f"{indent}_x = np.linalg.solve(_A, _b)")
+        lines.append(f"{indent}{dialect.linear_solve('_A', '_b', '_x', size)}")
         return lines
 
     def linear(
@@ -841,7 +844,7 @@ class Emitter:
         lines.extend(
             f"    w[{self.slots[unknown]}] = {self.symbols[unknown]}"
             for block in mode.blocks
-            if _iterated(block)
+            if iterated(block)
             for unknown in block.unknowns
         )
         return lines

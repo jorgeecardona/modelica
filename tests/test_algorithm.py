@@ -326,7 +326,9 @@ REFUSALS = [
 ]
 
 
-@pytest.mark.parametrize(("what", "body"), REFUSALS, ids=[w.strip("'").split()[-1] for w, _ in REFUSALS])
+@pytest.mark.parametrize(
+    ("what", "body"), REFUSALS, ids=[w.strip("'").split()[-1] for w, _ in REFUSALS]
+)
 def test_a_body_that_cannot_be_inlined_says_which_form_stopped_it(what: str, body: str) -> None:
     with pytest.raises(FlattenError, match=what):
         flatten(parse(_function(body)), "M")

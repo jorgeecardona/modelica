@@ -142,9 +142,7 @@ def share(roots: Sequence[ir.Expr], prefix: str = "_s") -> Shared:
         _count(root, counts)
 
     repeated = [
-        node
-        for node, seen in counts.items()
-        if seen > 1 and isinstance(node, _WORTH_NAMING)
+        node for node, seen in counts.items() if seen > 1 and isinstance(node, _WORTH_NAMING)
     ]
     repeated.sort(key=lambda node: (_depth(node), repr(node)))
 

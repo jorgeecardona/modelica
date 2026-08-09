@@ -70,9 +70,9 @@ colour, so it reads correctly on a light page and on a dark one.
 from modelica import diagram
 
 picture = diagram.of("examples/models/RLCCircuit.mo", "examples/library/Electrical.mo")
-picture.write("rlc.svg")        # an image
-print(picture.to_mermaid())     # or text for a Markdown page
-print(picture.to_dot())         # or source for Graphviz
+picture.write("rlc.svg")  # an image
+print(picture.to_mermaid())  # or text for a Markdown page
+print(picture.to_dot())  # or source for Graphviz
 ```
 
 A notebook shows the picture when you put it on the last line of a cell.

@@ -884,9 +884,7 @@ def _rebind(found: Found, scope: Scope, outer: ir.Modification, prefix: _Path) -
         if declared is None:
             raise FlattenError(f"{found.cls.name} has no class {name!r} to redeclare")
         if not declared.replaceable:
-            raise FlattenError(
-                f"{here} is not declared `replaceable`, so no class can replace it"
-            )
+            raise FlattenError(f"{here} is not declared `replaceable`, so no class can replace it")
         if len(replacement.extends) != 1:
             raise FlattenError(f"{here}: a class redeclaration must name one class")
         target = scope.resolve(replacement.extends[0].type_name)
@@ -912,9 +910,7 @@ def _check_class_constraint(
     member the constraint declares must exist in the replacement under the same name. With no
     ``constrainedby``, the declared default is its own constraint.
     """
-    wanted = declared.constraining or (
-        declared.extends[0].type_name if declared.extends else ""
-    )
+    wanted = declared.constraining or (declared.extends[0].type_name if declared.extends else "")
     if not wanted:
         return
     constraint = declared_in.resolve(wanted)
@@ -952,9 +948,7 @@ def _check_constraint(
     if isinstance(constraint, str) or isinstance(provided, str):
         # A predefined type constrains by identity: `constrainedby Real` takes a Real.
         if constraint != provided:
-            raise FlattenError(
-                f"{name}: {replacement.type_name!r} does not satisfy {wanted!r}"
-            )
+            raise FlattenError(f"{name}: {replacement.type_name!r} does not satisfy {wanted!r}")
         return
     required = set(effective(constraint, declared.inside(constraint)).members)
     offered = set(effective(provided, writer.inside(provided)).members)
@@ -1149,9 +1143,7 @@ class _Flattener:
         for equation in merged.equations:
             self._equation(equation, prefix, local, scope=inner, outer=resolved_outer)
         for equation in merged.initial_equations:
-            self._equation(
-                equation, prefix, local, scope=inner, outer=resolved_outer, initial=True
-            )
+            self._equation(equation, prefix, local, scope=inner, outer=resolved_outer, initial=True)
         for section in found.cls.algorithms:
             for equation in _section_equations(section, found.cls.name):
                 self._equation(equation, prefix, local, scope=inner, outer=resolved_outer)

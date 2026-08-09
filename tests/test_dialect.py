@@ -66,7 +66,10 @@ CASES: list[tuple[str, dict[str, float]]] = [
     # `&&` binds tighter than `||` in C, and `and` tighter than `or` in Python -- the same
     # order, which is why this passes; it is here because taking one table for both would
     # not have been checked otherwise.
-    ("if a > 0.0 and b > 0.0 or c > 0.0 then d else e", {"a": -1.0, "b": 1.0, "c": 1.0, "d": 5.0, "e": 6.0}),
+    (
+        "if a > 0.0 and b > 0.0 or c > 0.0 then d else e",
+        {"a": -1.0, "b": 1.0, "c": 1.0, "d": 5.0, "e": 6.0},
+    ),
     ("if not (a > 0.0) then d else e", {"a": -1.0, "d": 5.0, "e": 6.0}),
     ("if a > 0.0 and not (b > 0.0) then d else e", {"a": 1.0, "b": -1.0, "d": 5.0, "e": 6.0}),
 ]

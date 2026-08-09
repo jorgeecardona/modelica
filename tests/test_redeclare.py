@@ -224,7 +224,10 @@ def test_a_redeclaration_instantiates_the_replacement_instead() -> None:
     """Not a coefficient: a different class, so a different parameter and equation."""
     flat = _flat(SWAPPED, "B")
     assert [v.name for v in flat.variables] == ["rig.element.v", "rig.element.i", "rig.element.C"]
-    assert unparse_equation(flat.equations[0])[0] == "rig.element.i = rig.element.C * der(rig.element.v);"
+    assert (
+        unparse_equation(flat.equations[0])[0]
+        == "rig.element.i = rig.element.C * der(rig.element.v);"
+    )
 
 
 def test_the_replacement_brings_its_own_modification_and_not_the_old_one() -> None:

@@ -130,7 +130,9 @@ def test_an_unknown_name_says_where_it_was_written() -> None:
     exist, code generation died on "nothing computes 'Rw'", and it was found by reading the
     file rather than by being told where to look.
     """
-    with pytest.raises(FlattenError, match=re.escape("unknown name 'Rw' in an equation at Motor.mo:5:7")):
+    with pytest.raises(
+        FlattenError, match=re.escape("unknown name 'Rw' in an equation at Motor.mo:5:7")
+    ):
         flatten(parse(MISTAKE, "Motor.mo"), "Motor")
 
 

@@ -18,9 +18,7 @@ class RLCCircuit(Model):
 
     source = Electrical.ConstantVoltage(V=1, annotation=place([(-92, -18), (-56, 18)], -90))
     r = Electrical.Resistor(R=1, annotation=place([(-38, 42), (-2, 78)]))
-    l = Electrical.Inductor(
-        L=1, i=mod(start=0, fixed=True), annotation=place([(16, 42), (52, 78)])
-    )
+    l = Electrical.Inductor(L=1, i=mod(start=0, fixed=True), annotation=place([(16, 42), (52, 78)]))
     c = Electrical.Capacitor(
         C=1, v=mod(start=0, fixed=True), annotation=place([(56, -18), (92, 18)], -90)
     )

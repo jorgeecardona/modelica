@@ -57,9 +57,9 @@ real.
 ```python
 @dataclass(frozen=True, slots=True)
 class Instant:
-    latches: tuple[bool, ...]   # what the model believes each watched relation says
-    state: tuple[float, ...]    # y — constant unless a `when` branch reinitialises it
-    fired: frozenset[int]       # events that have already acted here
+    latches: tuple[bool, ...]  # what the model believes each watched relation says
+    state: tuple[float, ...]  # y — constant unless a `when` branch reinitialises it
+    fired: frozenset[int]  # events that have already acted here
 ```
 
 Nothing is approximated. So a counterexample is a genuine execution, and not something that

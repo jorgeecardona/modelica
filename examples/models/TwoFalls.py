@@ -15,9 +15,7 @@ class TwoFalls(Model):
     """Two bodies dropped from different heights, sharing one gravity"""
 
     environment = inner(Translational.Environment(g=9.81))
-    high = Translational.FallingBody(
-        s=mod(start=100, fixed=True), v=mod(start=0, fixed=True)
-    )
+    high = Translational.FallingBody(s=mod(start=100, fixed=True), v=mod(start=0, fixed=True))
     low = Translational.FallingBody(s=mod(start=20, fixed=True), v=mod(start=0, fixed=True))
     gap = Real("How far apart they are -- constant, because gravity ignores mass", unit="m")
 

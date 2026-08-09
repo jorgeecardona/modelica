@@ -87,12 +87,7 @@ def test_two_instances_of_one_class_hold_two_different_classes() -> None:
     `a` and `b` are the same `Rig`. In the flat model one contains a resistor and the other a
     capacitor, which means the binding is per *instance* and not per class.
     """
-    extra = (
-        "model Two\n"
-        "  Rig a;\n"
-        "  Rig b(redeclare model Kind = Parts.Capacitor);\n"
-        "end Two;\n"
-    )
+    extra = "model Two\n  Rig a;\n  Rig b(redeclare model Kind = Parts.Capacitor);\nend Two;\n"
     flat = _flat(extra, "Two")
     names = [v.name for v in flat.variables]
     assert "a.element.R" in names

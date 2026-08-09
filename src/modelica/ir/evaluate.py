@@ -74,7 +74,9 @@ _FUNCTIONS: dict[str, Callable[[float], float]] = {
 
 _PAIRS: dict[str, Callable[[float, float], float]] = {
     "atan2": math.atan2,
-    "mod": lambda a, b: math.fmod(a, b) + b if math.fmod(a, b) and (a < 0) != (b < 0) else math.fmod(a, b),
+    "mod": lambda a, b: (
+        math.fmod(a, b) + b if math.fmod(a, b) and (a < 0) != (b < 0) else math.fmod(a, b)
+    ),
     "rem": math.fmod,
 }
 """The two-argument built-ins. ``mod`` floors and ``rem`` truncates, which is Modelica's

@@ -28,7 +28,7 @@ import re
 from typing import TYPE_CHECKING, Final
 
 from modelica.sim.dialect import C
-from modelica.sim.emit import EmitError, Emitter
+from modelica.sim.emit import EmitError, Emitter, iterated
 
 if TYPE_CHECKING:
     from modelica.ir.system import Mode, System
@@ -56,15 +56,11 @@ def _refuse(system: System) -> Mode:
     and give wrong answers, which is the one outcome worth ruling out.
     """
     if len(system.modes) != 1:
-        raise EmitError(
-            f"C: {len(system.modes)} state sets, and the mode dispatcher has no C yet"
-        )
+        raise EmitError(f"C: {len(system.modes)} state sets, and the mode dispatcher has no C yet")
     (mode,) = system.modes
-    implicit = [block for block in mode.blocks if block.assignment is None]
-    if implicit:
-        raise EmitError(
-            f"C: {len(implicit)} simultaneous block(s), and the linear solve has no C yet"
-        )
+    newton = [block for block in mode.blocks if block.assignment is None and iterated(block)]
+    if newton:
+        raise EmitError(f"C: {len(newton)} block(s) need Newton, and the iteration has no C yet")
     return mode
 
 
@@ -127,11 +123,7 @@ def unit(system: System) -> str:
     mode = _refuse(system)
     emitter = Emitter(system, dialect=C)
     declared = sorted(
-        {
-            symbol
-            for symbol in emitter.symbols.values()
-            if _LOCAL.match(symbol) and symbol != "t"
-        }
+        {symbol for symbol in emitter.symbols.values() if _LOCAL.match(symbol) and symbol != "t"}
     )
 
     rhs_rest = [
@@ -148,10 +140,7 @@ def unit(system: System) -> str:
             f"{emitter.symbols[name]} = {emitter.expr(node)}"
             for name, node in system.aliases.items()
         ),
-        *(
-            f"out[{slot}] = {emitter.symbols[name]}"
-            for slot, name in enumerate(emitter.observed)
-        ),
+        *(f"out[{slot}] = {emitter.symbols[name]}" for slot, name in enumerate(emitter.observed)),
     ]
     observe_body = _live([*emitter.unpack(mode), *observe_rest])
 
