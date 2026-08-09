@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from modelica import ir
-from modelica.build import Model, Package, to_modelica
+from modelica.build import Model, Package, to_ir, to_modelica
 from modelica.ir.evaluate import evaluate
 from modelica.ir.flatten import element
 
@@ -173,21 +173,6 @@ def _load(path: Path) -> ModuleType:
     return module
 
 
-def _twin_text(source: Path) -> str:
-    """Render the Python twin of ``source`` as Modelica.
-
-    A library twin exposes its whole package as ``PACKAGE``; a model twin is a single
-    class named after the file. Those are the only two shapes an example may take.
-    """
-    module = _load(source.with_suffix(".py"))
-    target: object = getattr(module, "PACKAGE", None) or getattr(module, source.stem)
-    if isinstance(target, Package):
-        return to_modelica(target)
-    assert isinstance(target, type), f"{source.stem} is neither a package nor a class"
-    assert issubclass(target, Model), f"{source.stem} is not a modelica.build.Model"
-    return to_modelica(target)
-
-
 @pytest.mark.parametrize(
     "source", LIBRARY_FILES + MODEL_FILES, ids=_ids(LIBRARY_FILES + MODEL_FILES)
 )
@@ -199,13 +184,91 @@ def test_python_twin_exists(source: Path) -> None:
     )
 
 
+def _twin_class(source: Path) -> Any:
+    """The Python twin of ``source`` as the :class:`modelica.ir.Class` it builds."""
+    module = _load(source.with_suffix(".py"))
+    target: object = getattr(module, "PACKAGE", None) or getattr(module, source.stem)
+    if not isinstance(target, Package):
+        assert isinstance(target, type), f"{source.stem} is neither a package nor a class"
+        assert issubclass(target, Model), f"{source.stem} is not a modelica.build.Model"
+    return to_ir(target)
+
+
+def _disagreement(  # noqa: C901, PLR0911 -- one exit per kind of difference, which is the point
+    left: Any, right: Any, path: str = ""
+) -> str | None:
+    """Where two IR values first disagree, named so the message points at a declaration.
+
+    ``assert a == b`` on two packages prints two screens of dataclass and leaves the reader
+    to diff them by eye. What is wanted is "Electrical.Resistor.R", so this walks the two in
+    step and reports the first place they part company.
+    """
+    if left == right:
+        return None
+    if isinstance(left, ir.Class) and isinstance(right, ir.Class):
+        here = f"{path}.{left.name}" if path else left.name
+        for field in ("restriction", "partial", "comment", "imports", "extends", "literals"):
+            if getattr(left, field) != getattr(right, field):
+                return f"{here}: {field} is {getattr(left, field)!r} against {getattr(right, field)!r}"
+        for attribute in ("components", "classes", "redeclarations"):
+            mine = {member.name: member for member in getattr(left, attribute)}
+            theirs = {member.name: member for member in getattr(right, attribute)}
+            if set(mine) != set(theirs):
+                only = sorted(set(mine) ^ set(theirs))
+                return f"{here}: {attribute} differ by {only}"
+            for name, member in mine.items():
+                found = _disagreement(member, theirs[name], here)
+                if found is not None:
+                    return found
+        if left.equations != right.equations:
+            return f"{here}: the equations differ"
+        return f"{here}: differs, and every part compared equal -- look at the annotation"
+    if isinstance(left, ir.Component) and isinstance(right, ir.Component):
+        for field in ("type_name", "variability", "causality", "connector", "scoping",
+                      "comment", "dimensions", "replaceable", "constraining",
+                      "modification", "annotation"):
+            mine, theirs = getattr(left, field), getattr(right, field)
+            if mine != theirs:
+                return f"{path}.{left.name}.{field}:\n        mo: {mine!r}\n        py: {theirs!r}"
+    return f"{path}: {left!r} against {right!r}"
+
+
 @pytest.mark.parametrize(
     "source", LIBRARY_FILES + MODEL_FILES, ids=_ids(LIBRARY_FILES + MODEL_FILES)
 )
-def test_python_twin_says_the_same_thing(source: Path) -> None:
-    expected = _normalise(source.read_text(encoding="utf-8"))
-    actual = _normalise(_twin_text(source))
-    assert actual == expected
+def test_python_twin_builds_the_same_value(source: Path) -> None:
+    """The real equivalence, and the only one a *library* can have.
+
+    A library is a package of classes and has no flat model of its own -- there is nothing
+    to flatten until a model instantiates it -- so `test_front_ends_flatten_to_the_same_model`
+    cannot reach the four in `examples/library/`. What both front ends do promise for every
+    file, library or model, is the same `ir.Class` (`docs/architecture.md:41`), and that is
+    a value, so it can simply be compared.
+
+    This replaces a normalised-text diff, which was the wrong instrument twice over: it
+    failed on formatting that means nothing, and it pinned `modelica.lang.unparse` -- any
+    change to the printer broke tests about the corpus rather than tests about the printer.
+    """
+    parse = _require("modelica.lang", "parse")
+    (expected,) = parse(source.read_text(encoding="utf-8"), source.name).classes
+    found = _disagreement(expected, _twin_class(source))
+    assert found is None, f"the two front ends disagree at {found}"
+
+
+@pytest.mark.parametrize(
+    "source", LIBRARY_FILES + MODEL_FILES, ids=_ids(LIBRARY_FILES + MODEL_FILES)
+)
+def test_the_corpus_is_written_the_way_the_printer_prints(source: Path) -> None:
+    """Corpus hygiene, and no longer a claim about the Python front end.
+
+    Every example is written in the form `modelica.lang.unparse` produces, so a reader who
+    prints a model gets back the file they are looking at. The Python twin does not appear
+    here at all: it builds an equal value, and the printer is a function, so equal values
+    print equally -- checking the twin's *text* would only re-test the printer.
+    """
+    parse = _require("modelica.lang", "parse")
+    text = source.read_text(encoding="utf-8")
+    assert _normalise(to_modelica(parse(text, source.name))) == _normalise(text)
 
 
 # --------------------------------------------------------------------------------------

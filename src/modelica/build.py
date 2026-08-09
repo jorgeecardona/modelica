@@ -137,12 +137,22 @@ type TypeRef = Type | _ClassMeta
 
 
 def _lift(value: object) -> ir.Expr:
-    """Turn a Python value into an IR expression node."""
+    """Turn a Python value into an IR expression node.
+
+    A negative number comes back as a *negated literal*, not a negative one, because that is
+    what the same text parses to: Modelica has no negative literals, only a unary minus in
+    front of one, and `-a` already builds `Unary` here through `__neg__`. Python folds the
+    sign before this function ever sees it, so the folding is undone. Without that the two
+    front ends build different trees for `R = -1` -- equal in value, unequal as IR -- and the
+    printer renders both as `-1`, which is why a text comparison never noticed.
+    """
     if isinstance(value, Expression):
         return value.node
     # bool before int: bool is a subclass of int, and `true` is not `1` in Modelica.
     if isinstance(value, bool):
         return ir.BoolLiteral(value)
+    if isinstance(value, (int, float)) and value < 0:
+        return ir.Unary("-", _lift(-value))
     if isinstance(value, int):
         return ir.IntLiteral(value)
     if isinstance(value, float):
