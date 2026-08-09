@@ -88,7 +88,7 @@ cabildo issues show <slug>
 | [The README says nothing in Python reaches a trajectory, and something does](03-08-2026-the-readme-claim-is-too-strong.md) | docs | bug | S | inspect | open | — |
 | [FMI 3.0 export — a System as an FMU, and the two routes disagree in the docs](03-08-2026-fmi-export.md) | fmi | story | L | test | open | — |
 | [FMI 3.0 import — the mode table exists, the FMU reader does not](03-08-2026-fmi-import.md) | fmi | story | L | test | open | — |
-| [RoastingMachine's moisture is assumed, and Cropster has it measured per lot](03-08-2026-green-moisture-as-a-measurement.md) | sim | idea | S | probe | open | — |
+| [RoastingMachine's moisture is assumed, and Cropster has it measured per lot](03-08-2026-green-moisture-as-a-measurement.md) | sim | idea | S | probe | blocked · @jorge | — |
 | [JAX gives the ensemble what Vulkan was being asked for, in double precision, today](03-08-2026-jax-is-the-ensemble-vehicle.md) | sim | idea | M | probe | open | the-ensemble-driver |
 | [The method-of-lines path is the one GPU coupling with a working precedent](03-08-2026-method-of-lines-on-the-device.md) | sim | idea | L | probe | open | — |
 | [Parameters are always an argument, and burning them in as literals is the other half](03-08-2026-parameters-as-constants-or-as-arguments.md) | sim | story | S | probe | open | — |
@@ -113,5 +113,5 @@ cabildo issues show <slug>
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_32 open — 32 open; 18 done. Generated; edit the files, then `cabildo issues reindex`._
+_32 open — 31 open, 1 blocked; 18 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

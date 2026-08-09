@@ -218,6 +218,24 @@ max = 85.0
 # would turn the softest two numbers on this page, `moisture` and the 3.5 % organic loss,
 # into one measurement and one residual.
 #
+# What that measurement would buy, measured 2026-08-09 by sweeping `moisture` from 10 to 16 %
+# and simulating each with the other seven parameters left where the joint fit put them:
+#
+#     water lost (% of charge) = 0.821 * green moisture (%) + 0.739
+#
+# straight to within 0.028 points over that range. So one point of green moisture is 0.82
+# points of charge, and the organic residual -- measured total loss less this -- moves 0.82
+# points the other way. The slope is under 1.00 because the water is also a heat sink: more of
+# it means cooler beans and a smaller fraction driven off, 88.8 % at 11 % against 87.0 % at
+# 15 %. At the 13 % carried here the residual is 3.35 to 3.57 %, which brackets the assumed
+# 3.5 % and is worth nothing: the 11.37 % target below was derived by subtracting that 3.5 %.
+#
+# The curve is not indifferent either -- the probe rms over the five measured points has a
+# minimum near 13.1 % and costs 4.2 K by 10 % -- and that is not a determination. Those seven
+# parameters were fitted jointly with `moisture = 0.13`, so freezing them and sweeping the
+# eighth asks where the eighth belongs given seven chosen to suit it. Same trap as the
+# exotherm.
+#
 # THE PARAMETERS ARE THE SESSION'S, NOT BATCH 1'S. Fitted against all five batches at once,
 # with one initial machine temperature each, because that is what genuinely differed: batch
 # 1 followed a 35-minute cold-start preheat, batches 2-5 came off a purge-and-reheat between
