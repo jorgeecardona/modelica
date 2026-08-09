@@ -92,8 +92,6 @@ _UNSUPPORTED: Final[dict[str, str]] = {
     "inner": "'inner'/'outer' elements are not supported yet",
     "operator": "operator overloading is not supported yet",
     "outer": "'inner'/'outer' elements are not supported yet",
-    "redeclare": "'redeclare' is not supported yet",
-    "replaceable": "'replaceable' elements are not supported yet",
 }
 
 # Keywords that end a list of statements. The same set as `_SECTION_END` plus the words
@@ -380,10 +378,14 @@ class _Parser:
             while True:
                 self._accept(Kind.KEYWORD, "each")
                 self._accept(Kind.KEYWORD, "final")
-                self._refuse_unsupported()
-                name = self._type_name()
-                entries[name] = self._modification()
-                self._string_comment()
+                if self._check(Kind.KEYWORD, "redeclare"):
+                    name, entry = self._redeclaration()
+                    entries[name] = entry
+                else:
+                    self._refuse_unsupported()
+                    name = self._type_name()
+                    entries[name] = self._modification()
+                    self._string_comment()
                 if not self._accept(Kind.OP, ","):
                     break
             self._expect(Kind.OP, ")")
@@ -391,6 +393,69 @@ class _Parser:
         if self._accept(Kind.OP, "=") or self._accept(Kind.OP, ":="):
             value = self.expression()
         return ir.Modification(value, entries)
+
+    def _redeclaration(self) -> tuple[str, ir.Modification]:
+        """``redeclare Capacitor element(C = 0.01)``, or ``redeclare package M = Water``.
+
+        Returns the name being replaced and a modification carrying the whole replacement
+        declaration. The name is the key the enclosing modification files it under, which
+        is what lets flattening find it beside the ordinary entries rather than in a second
+        table that would have to be kept in step with them.
+        """
+        self._expect(Kind.KEYWORD, "redeclare")
+        self._accept(Kind.KEYWORD, "each")
+        self._accept(Kind.KEYWORD, "final")
+        again = self._accept(Kind.KEYWORD, "replaceable") is not None
+        if self._looks_like_class():
+            replacement = self.class_definition()
+            if again:
+                replacement = replace(replacement, replaceable=True)
+            return replacement.name, ir.Modification(redeclare=replacement)
+        component = self._one_component(replaceable=again)
+        return component.name, ir.Modification(redeclare=component)
+
+    def _one_component(self, *, replaceable: bool) -> ir.Component:
+        """A single declaration without its semicolon -- what a redeclaration replaces with."""
+        type_name = self._type_name()
+        name = self._expect(Kind.NAME).text
+        dimensions = self._bracketed()
+        modification = self._modification()
+        constraining = self._constraining()
+        return ir.Component(
+            name=name,
+            type_name=type_name,
+            dimensions=dimensions,
+            modification=modification,
+            replaceable=replaceable,
+            constraining=constraining,
+            comment=self._string_comment(),
+        )
+
+    def _replaceable(self) -> tuple[ir.Class | None, list[ir.Component]]:
+        """The element after a ``replaceable``: a class definition, or a component clause.
+
+        Returns whichever of the two it was, because the caller files them in different
+        lists. The short class form reads its own constraining clause -- it owns the
+        semicolon that follows it -- so only the long form can still have one waiting.
+        """
+        if not self._looks_like_class():
+            return None, self._component_clause(replaceable=True)
+        definition = self.class_definition()
+        constraint = definition.constraining or self._constraining()
+        return replace(definition, replaceable=True, constraining=constraint), []
+
+    def _constraining(self) -> str:
+        """``constrainedby TwoPin`` -- the interface a replacement has to provide.
+
+        Its own class-modification is read and dropped. Modelica lets a constraining clause
+        carry default modifications for the replacement; nothing here uses them, and reading
+        them is what stops the parser mistaking the following text for something else.
+        """
+        if not self._accept(Kind.KEYWORD, "constrainedby"):
+            return ""
+        name = self._type_name()
+        self._modification()
+        return name
 
     # -- equations ------------------------------------------------------------------
 
@@ -646,7 +711,7 @@ class _Parser:
 
     # -- declarations ---------------------------------------------------------------
 
-    def _component_clause(self) -> list[ir.Component]:
+    def _component_clause(self, *, replaceable: bool = False) -> list[ir.Component]:
         """One type name, one set of prefixes, one or more names sharing them."""
         variability: ir.Variability = "continuous"
         causality: ir.Causality = "none"
@@ -665,23 +730,31 @@ class _Parser:
 
         type_name = self._type_name()
         declared: list[ir.Component] = []
+        constraining = ""
         while True:
             name = self._expect(Kind.NAME).text
             dimensions = self._bracketed()
+            modification = self._modification()
+            # The constraining clause belongs to the *clause*, after the last name, so a
+            # declaration reads it and the loop keeps whichever one it found.
+            constraining = self._constraining() or constraining
             declared.append(
                 ir.Component(
                     name=name,
                     type_name=type_name,
                     dimensions=dimensions,
-                    modification=self._modification(),
+                    modification=modification,
                     variability=variability,
                     causality=causality,
                     connector=connector,
+                    replaceable=replaceable,
+                    constraining=constraining,
                     comment=self._string_comment(),
                 ),
             )
             if not self._accept(Kind.OP, ","):
                 break
+        declared = [replace(c, constraining=constraining) for c in declared]
         annotation = self._annotation()
         self._expect(Kind.OP, ";")
         # One annotation, written once, for a clause that may declare several names.
@@ -709,6 +782,9 @@ class _Parser:
         name = self._expect(Kind.NAME).text
         if self._accept(Kind.OP, "="):
             base = ir.Extends(self._type_name(), self._modification())
+            # Read here rather than by the caller, because the short form owns its own
+            # semicolon and the constraining clause sits in front of it.
+            constraining = self._constraining()
             comment = self._string_comment()
             annotation = self._annotation()
             self._expect(Kind.OP, ";")
@@ -716,13 +792,17 @@ class _Parser:
                 name=name,
                 restriction=restriction,
                 partial=partial,
+                constraining=constraining,
                 comment=comment,
                 annotation=annotation,
                 extends=(base,),
             )
         return self._long_definition(name, restriction, partial=partial)
 
-    def _long_definition(  # noqa: C901 -- a flat dispatch over element kinds
+    def _long_definition(  # noqa: C901, PLR0912, PLR0915 -- one flat dispatch, one arm per
+        # element kind. Modelica has eleven of them and they share nothing but the loop that
+        # reads them; splitting the arms across helpers to satisfy three counters would put
+        # the grammar in one place and the reading of it in another.
         self,
         name: str,
         restriction: ir.Restriction,
@@ -769,6 +849,20 @@ class _Parser:
             if self._accept(Kind.KEYWORD, "extends"):
                 extends.append(ir.Extends(self._type_name(), self._modification()))
                 self._terminate()
+                continue
+            if self._check(Kind.KEYWORD, "redeclare"):
+                # Legal Modelica, and a different feature: a redeclaration written as an
+                # element modifies something an `extends` brought in, which needs the base
+                # class merged before this loop runs. Named rather than misread.
+                raise self._error(
+                    "a 'redeclare' element in a class body is not supported yet; "
+                    "redeclare in a modification instead"
+                )
+            if self._accept(Kind.KEYWORD, "replaceable"):
+                definition, declared = self._replaceable()
+                if definition is not None:
+                    nested.append(definition)
+                components += declared
                 continue
             self._refuse_unsupported()
             if self._looks_like_class():

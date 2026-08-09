@@ -1,8 +1,8 @@
 ---
-title: '`replaceable` and `redeclare` are refused, and the standard library is built on them'
-status: open
+title: `replaceable` and `redeclare` are refused, and the standard library is built on them
+status: in-progress
 area: lang
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
 kind: story
 scope: L

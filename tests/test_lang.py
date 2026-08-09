@@ -305,15 +305,14 @@ def test_extends_and_connect() -> None:
 
 UNSUPPORTED = [
     ("import", "model M\n  import Modelica.Constants;\nend M;\n"),
-    ("redeclare", "model M\n  redeclare Real x;\nend M;\n"),
-    ("replaceable", "model M\n  replaceable Real x;\nend M;\n"),
     ("inner", "model M\n  inner Real x;\nend M;\n"),
     ("outer", "model M\n  outer Real x;\nend M;\n"),
     ("enumeration", "model M\n  type E = enumeration(a, b);\nend M;\n"),
     ("external", "function f\nexternal;\nend f;\n"),
 ]
-# `algorithm`, `while`, `break` and `return` used to be on this list. They are read now;
-# `tests/test_algorithm.py` is where they are held to what they mean.
+# `algorithm`, `while`, `break` and `return` used to be on this list, and so did
+# `replaceable` and `redeclare`. They are read now; `tests/test_algorithm.py` and
+# `tests/test_redeclare.py` are where they are held to what they mean.
 
 
 @pytest.mark.parametrize(("keyword", "source"), UNSUPPORTED, ids=[k for k, _ in UNSUPPORTED])

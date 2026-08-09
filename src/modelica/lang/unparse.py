@@ -116,11 +116,22 @@ def _if_chain(node: ir.IfExpr) -> str:
         branch = branch.otherwise
 
 
+def _entry(name: str, mod: ir.Modification) -> str:
+    """One item inside a class-modification: a redeclaration, or a name and what it says."""
+    if mod.redeclare is None:
+        return f"{name}{_modification(mod)}"
+    if isinstance(mod.redeclare, ir.Class):
+        # A redeclared class is a short definition, and its own printer ends it with a
+        # semicolon that has no place inside a parenthesised list.
+        return f"redeclare {unparse_class(mod.redeclare)[0].rstrip(';')}"
+    return f"redeclare {_component(mod.redeclare).rstrip(';')}"
+
+
 def _modification(mod: ir.Modification) -> str:
     """Render a modification the way it attaches to a name: ``(a = 1, b(c = 2)) = 3``."""
     parts: list[str] = []
     if mod.entries:
-        inner = ", ".join(f"{name}{_modification(m)}" for name, m in mod.entries.items())
+        inner = ", ".join(_entry(name, m) for name, m in mod.entries.items())
         parts.append(f"({inner})")
     if mod.value is not None:
         parts.append(f" = {unparse_expr(mod.value)}")
@@ -263,17 +274,26 @@ def _component(component: ir.Component) -> str:
         else ""
     )
     modification = _modification(component.modification)
+    constraining = f" constrainedby {component.constraining}" if component.constraining else ""
     comment = _comment(component.comment)
     annotation = _annotation(component.annotation)
+    head = "replaceable " if component.replaceable else ""
     return (
-        f"{prefix}{component.type_name} {component.name}{shape}{modification}{comment}{annotation};"
+        f"{head}{prefix}{component.type_name} {component.name}{shape}"
+        f"{modification}{constraining}{comment}{annotation};"
     )
 
 
 def _is_short_definition(node: ir.Class) -> bool:
-    """``type Voltage = Real(unit = "V");`` -- one extends and nothing else."""
+    """``type Voltage = Real(unit = "V");`` -- one extends and nothing else.
+
+    A `replaceable` class qualifies whatever its restriction, because that is the form it
+    is written in: ``replaceable package Medium = PartialMedium constrainedby ...`` is a
+    short definition with a package's keyword, and printing it long would turn its default
+    into an ``extends`` that means something else.
+    """
     return (
-        node.restriction == "type"
+        (node.restriction == "type" or node.replaceable)
         and len(node.extends) == 1
         and not node.components
         and not node.equations
@@ -328,14 +348,18 @@ def _sections(node: ir.Class, indent: int) -> list[str]:
 def unparse_class(node: ir.Class, indent: int = 0) -> list[str]:
     """Render a class definition as a list of lines."""
     pad = "  " * indent
+    head = "replaceable " if node.replaceable else ""
+    constraining = f" constrainedby {node.constraining}" if node.constraining else ""
     if _is_short_definition(node):
         base = node.extends[0]
+        keyword = "type" if not node.replaceable else node.restriction
         modification = _modification(base.modification)
         comment = _comment(node.comment)
         annotation = _annotation(node.annotation)
-        return [f"{pad}type {node.name} = {base.type_name}{modification}{comment}{annotation};"]
+        body = f"{modification}{constraining}{comment}{annotation}"
+        return [f"{pad}{head}{keyword} {node.name} = {base.type_name}{body};"]
 
-    header = f"{pad}{'partial ' if node.partial else ''}{node.restriction} {node.name}"
+    header = f"{pad}{head}{'partial ' if node.partial else ''}{node.restriction} {node.name}"
     lines = [f"{header}{_comment(node.comment)}"]
     lines += _members(node, indent)
     lines += _sections(node, indent)
@@ -345,7 +369,7 @@ def unparse_class(node: ir.Class, indent: int = 0) -> list[str]:
     if node.annotation:
         lines.append(f"{pad}  annotation{_modification(node.annotation)};")
 
-    lines.append(f"{pad}end {node.name};")
+    lines.append(f"{pad}end {node.name}{constraining};")
     return lines
 
 

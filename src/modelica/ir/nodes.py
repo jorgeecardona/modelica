@@ -225,9 +225,18 @@ class Modification:
 
     value: Expr | None = None
     entries: dict[str, Modification] = field(default_factory=dict[str, "Modification"])
+    redeclare: Component | Class | None = None
+    """``M(redeclare Capacitor element)`` -- the declaration that replaces one.
+
+    A redeclaration is not a value and not an entry: it says *which class* a component is,
+    which is a question settled before any equation exists. It rides on the modification
+    because that is where Modelica writes it, and it holds a whole declaration rather than
+    a type name because the replacement may carry modifications of its own -- ``redeclare
+    Capacitor element(C = 0.01)`` is one redeclaration, not a redeclaration and a binding.
+    """
 
     def __bool__(self) -> bool:
-        return self.value is not None or bool(self.entries)
+        return self.value is not None or bool(self.entries) or self.redeclare is not None
 
 
 EMPTY = Modification()
@@ -406,6 +415,15 @@ class Component:
     comment: str = ""
     annotation: Modification = EMPTY
     """Where the component sits in the enclosing diagram: ``Placement(transformation(...))``."""
+    replaceable: bool = False
+    """Whether a modification may replace this component's class -- ``replaceable Resistor e;``."""
+    constraining: str = ""
+    """``constrainedby TwoPin``: the interface a replacement has to provide.
+
+    Empty when none was written, which means the declared type is its own constraint. The
+    two are not the same claim: ``replaceable Resistor e`` accepts only a resistor, and
+    ``replaceable Resistor e constrainedby TwoPin`` accepts anything with a resistor's pins.
+    """
     dimensions: tuple[Expr, ...] = ()
     """``Real T[n]`` is ``dimensions=(Ref(("n",)),)``. Empty for a scalar, which is most of them.
 
@@ -433,6 +451,10 @@ class Class:
     name: str
     restriction: Restriction
     partial: bool = False
+    replaceable: bool = False
+    """``replaceable package Medium = PartialMedium`` -- a class a modification may replace."""
+    constraining: str = ""
+    """The ``constrainedby`` of a replaceable class; empty when none was written."""
     comment: str = ""
     extends: tuple[Extends, ...] = ()
     components: tuple[Component, ...] = ()
