@@ -35,9 +35,9 @@ from typing import TYPE_CHECKING
 from modelica.ir import nodes as ir
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
-__all__ = ["Shared", "share"]
+__all__ = ["Shared", "share", "substituted"]
 
 #: Node types worth naming. A reference or a literal is already one token, so naming it
 #: makes the source longer rather than shorter.
@@ -53,6 +53,14 @@ class Shared:
 
     roots: tuple[ir.Expr, ...]
     """The expressions handed in, with every named part replaced by a reference to its name."""
+
+    names: tuple[tuple[ir.Expr, ir.Ref], ...] = ()
+    """Each original subexpression and the reference that now stands for it.
+
+    What a caller needs to rewrite something the pass never saw -- an expression built after
+    the plan was made, which is the ordinary case for an emitter that discovers what it
+    prints as it prints it.
+    """
 
     def __bool__(self) -> bool:
         return bool(self.definitions)
@@ -88,13 +96,18 @@ def _count(node: ir.Expr, counts: Counter[ir.Expr]) -> None:
             _count(child, counts)
 
 
-def _rewrite(node: ir.Expr, table: dict[ir.Expr, ir.Ref]) -> ir.Expr:
-    """``node`` with every named subexpression replaced by its reference."""
+def substituted(node: ir.Expr, table: Mapping[ir.Expr, ir.Ref]) -> ir.Expr:
+    """``node`` with every named subexpression replaced by its reference.
+
+    Public because the plan is not the end of the story: a caller that keeps emitting after
+    the names are fixed has to apply them to expressions the pass never saw, and doing that
+    by hand is how the two would drift.
+    """
     if node in table:
         return table[node]
 
     def go(inner: ir.Expr) -> ir.Expr:
-        return _rewrite(inner, table)
+        return substituted(inner, table)
 
     match node:
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
@@ -139,6 +152,10 @@ def share(roots: Sequence[ir.Expr], prefix: str = "_s") -> Shared:
     definitions: list[tuple[str, ir.Expr]] = []
     for position, node in enumerate(repeated):
         name = f"{prefix}{position}"
-        definitions.append((name, _rewrite(node, table)))
+        definitions.append((name, substituted(node, table)))
         table[node] = ir.Ref((name,))
-    return Shared(tuple(definitions), tuple(_rewrite(root, table) for root in roots))
+    return Shared(
+        tuple(definitions),
+        tuple(substituted(root, table) for root in roots),
+        tuple(table.items()),
+    )

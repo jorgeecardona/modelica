@@ -83,10 +83,11 @@ from typing import TYPE_CHECKING, Final
 from modelica.ir import nodes as ir
 from modelica.ir.derive import ONE, ZERO, d_dx, mul, simplify, sub
 from modelica.ir.rewrite import contains, names, residual, substitute
+from modelica.ir.share import share, substituted
 from modelica.lang.unparse import unparse_expr
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
     from modelica.ir.flat import FlatVariable
     from modelica.ir.system import Block, Mode, System
@@ -203,6 +204,22 @@ def _real(value: float) -> str:
     if value != value or value in (float("inf"), float("-inf")):  # noqa: PLR0124 - NaN check
         return {"nan": "np.nan", "inf": "np.inf", "-inf": "-np.inf"}[repr(value)]
     return repr(float(value))
+
+
+def _define(lines: list[str], name: str, definition: str) -> list[str]:
+    """Put ``definition`` immediately before the first line that reads ``name``.
+
+    Textual, and safe to be: the names are generated with a prefix no symbol in the module
+    starts with, so a match is a use and never part of a longer word. The indentation is
+    copied from the line it goes in front of, which is what puts a name first used inside a
+    Newton loop inside that loop.
+    """
+    for position, line in enumerate(lines):
+        if name not in line:
+            continue
+        pad = line[: len(line) - len(line.lstrip())]
+        return [*lines[:position], f"{pad}{definition}", *lines[position:]]
+    return lines  # pragma: no cover - every name came from an expression that was printed
 
 
 def _identifier(name: str, taken: set[str]) -> str:
@@ -577,6 +594,15 @@ class _Emitter:
     switching: int | None = None
     """The workspace slot holding which state set is in use, when there is a choice."""
 
+    shared: dict[ir.Expr, ir.Ref] = field(default_factory=dict[ir.Expr, "ir.Ref"])
+    """Subexpressions this function has already named, and the name each one now reads as."""
+
+    collecting: list[ir.Expr] | None = None
+    """Where :meth:`expr` records what it is asked to print, during the first of two passes."""
+
+    prefix: str = "_s"
+    """What a named subexpression is called, chosen so it cannot collide with a variable."""
+
     def __post_init__(self) -> None:
         self.observed = (
             *(variable.name for variable in self.system.variables),
@@ -584,6 +610,12 @@ class _Emitter:
         )
         taken = set(_RESERVED)
         self.symbols = {name: _identifier(name, taken) for name in self.observed}
+        # A prefix no symbol already starts with, so a named subexpression can never land on
+        # a variable's name. `_s0` would do for every model anybody would write, and a model
+        # with a variable called `_s0` is exactly the one that would be silently wrong.
+        self.prefix = "_s"
+        while any(symbol.startswith(self.prefix) for symbol in taken):
+            self.prefix = f"_{self.prefix}"
         self.tangents = {name: _identifier(f"$d_{name}", taken) for name in self.observed}
         self.symbols["time"] = "t"
         self.slots = {name: slot for slot, name in enumerate(self.observed)}
@@ -602,7 +634,62 @@ class _Emitter:
     # -- pieces ------------------------------------------------------------------------
 
     def expr(self, node: ir.Expr, *, minimum: int = _CONDITIONAL) -> str:
-        return emit_expr(_latched(node, self.held), self.symbols, minimum=minimum)
+        # Latched *first*, and then named. The other order defeats the latch: `_latched`
+        # matches a watched relation as a whole node, so naming a subexpression inside one
+        # leaves a relation that no longer matches, and it goes back to being re-decided on
+        # every evaluation -- which is the exact failure the freezing exists to prevent, and
+        # it showed up as `BumpStop` losing 2.3e-8 of a conserved energy.
+        node = _latched(node, self.held)
+        if self.collecting is not None:
+            self.collecting.append(node)
+        if self.shared:
+            node = substituted(node, self.shared)
+        return emit_expr(node, self.symbols, minimum=minimum)
+
+    def sharing(self, body: Callable[[], list[str]]) -> list[str]:
+        """Emit ``body`` with every twice-written subexpression named once.
+
+        The body is emitted **twice**: once to find out what it prints, and once for real
+        with the names in place. That is deliberate, and cheaper than the alternative. Which
+        expressions a block prints is decided inside `solve`, `linear` and `newton` -- a
+        residual substituted at zero, a Newton block printing its Jacobian, a linear one
+        printing neither unchanged -- and predicting that set from outside would mean a
+        second copy of those three methods with nothing keeping them in step.
+
+        **Each name is defined immediately before the first line that reads it**, and that
+        placement is the whole correctness argument. What this function emits is not one
+        expression but a *sequence*: block two reads what block one assigned, and a Newton
+        block reads an unknown that only exists inside its own loop. Hoisting a name to the
+        top of the function would put it before the assignment it depends on -- silently,
+        because the variable exists as a Python local either way, holding whatever the last
+        step left in it. That was measured, not reasoned about: it moved `BumpStop`'s
+        conserved energy by 2.3e-8 and broke `AtwoodPendulum`'s Jacobian outright.
+
+        Defining a name just before its first use cannot do that. Everything the definition
+        reads was read by that line too, so it was already assigned. A name whose first use
+        is inside a loop is defined inside the loop and recomputed per iteration, which is
+        no worse than the repetition it replaced.
+        """
+        outer, self.collecting = self.collecting, []
+        try:
+            body()
+            plan = share(self.collecting, self.prefix)
+        finally:
+            self.collecting = outer
+        if not plan:
+            return body()
+        for name, _ in plan.definitions:
+            self.symbols[name] = name
+        held, self.shared = self.shared, dict(plan.names)
+        try:
+            lines = body()
+        finally:
+            self.shared = held
+        # Latest first: inserting `_s1` before `_s0` means `_s1`'s own definition line is in
+        # place to count as a use of `_s0`, which is where `_s0` then has to go.
+        for name, node in reversed(plan.definitions):
+            lines = _define(lines, name, f"{name} = {self.expr(node)}")
+        return lines
 
     def live(self, mode: Mode) -> list[str]:
         """The blocks with every relation read directly, for setting the latches."""
@@ -836,18 +923,26 @@ class _Emitter:
         turn it into the shared zero row rather than into an allocation.
         """
         width = len(mode.states)
-        lines = list(self.unpack(mode))
+        head = list(self.unpack(mode))
         carried: dict[str, str] = {}
         for slot, state in enumerate(mode.states):
-            carried[state] = row = self.tangents[state]
-            lines.append(f"{row} = _seed[{slot}]")
-        for block in mode.blocks:
-            lines.extend(self.solve(block))
-            if block.assignment is not None:
-                lines.extend(self.chain(block.unknowns[0], block.assignment, carried))
-            else:
-                lines.extend(self.implicit(block, carried, width))
-        return lines, carried
+            head.append(f"{self.tangents[state]} = _seed[{slot}]")
+
+        def body() -> list[str]:
+            # Rebuilt from scratch on each pass, because `sharing` runs this twice and the
+            # second run is the one whose `carried` the callers read.
+            carried.clear()
+            carried.update({state: self.tangents[state] for state in mode.states})
+            lines: list[str] = []
+            for block in mode.blocks:
+                lines.extend(self.solve(block))
+                if block.assignment is not None:
+                    lines.extend(self.chain(block.unknowns[0], block.assignment, carried))
+                else:
+                    lines.extend(self.implicit(block, carried, width))
+            return lines
+
+        return [*head, *self.sharing(body)], carried
 
     def differentiate(self, mode: Mode) -> list[str]:
         """``d(dy)/dy`` -- the Jacobian every implicit solver wants."""
@@ -955,7 +1050,7 @@ class _Emitter:
         return _function("latch", "t, y, p, w", [*body, "return w"])
 
     def rhs(self, mode: Mode) -> list[str]:
-        body = [*self.unpack(mode), *self.blocks(mode)]
+        body = [*self.unpack(mode), *self.sharing(lambda: self.blocks(mode))]
         body.extend(
             f"dy[{slot}] = {self.symbols[mode.derivative[state]]}"
             for slot, state in enumerate(mode.states)
