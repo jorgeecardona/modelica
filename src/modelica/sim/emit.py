@@ -82,6 +82,7 @@ from typing import TYPE_CHECKING, Final
 
 from modelica.ir import nodes as ir
 from modelica.ir.derive import ONE, ZERO, d_dx, mul, simplify, sub
+from modelica.ir.evaluate import EvaluationError, evaluate
 from modelica.ir.rewrite import contains, names, residual, substitute
 from modelica.ir.share import share, substituted
 from modelica.lang.unparse import unparse_expr
@@ -102,6 +103,7 @@ from modelica.sim.dialect import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
+    from modelica.ir.evaluate import Value
     from modelica.ir.flat import FlatVariable
     from modelica.ir.system import Block, Mode, System
 
@@ -187,13 +189,24 @@ def _real(value: float) -> str:
 def _define(lines: list[str], name: str, definition: str) -> list[str]:
     """Put ``definition`` immediately before the first line that reads ``name``.
 
-    Textual, and safe to be: the names are generated with a prefix no symbol in the module
-    starts with, so a match is a use and never part of a longer word. The indentation is
-    copied from the line it goes in front of, which is what puts a name first used inside a
-    Newton loop inside that loop.
+    Textual, and safe to be *because the match is on a word boundary*. The prefix keeps a
+    generated name away from every Modelica symbol, and that was once the whole argument --
+    but it says nothing about the generated names themselves, and ``__s2`` is a substring of
+    ``__s23``. A plain ``in`` test finds the first line mentioning ``__s23`` and defines
+    ``__s2`` in front of it, which can be before the assignment ``__s2`` reads.
+
+    Latent until the folded compile mode arrived: the bug needs a model where CSE names run
+    past nine *and* a shorter name's first real use comes after a longer one's. Folding
+    renumbers everything, and `AtwoodPendulum` produced exactly that -- ``__s2 = 0.35 *
+    der_w1`` written 28 lines above ``der_w1 = _x[0]``, and an `UnboundLocalError` from the
+    generated Jacobian.
+
+    The indentation is copied from the line it goes in front of, which is what puts a name
+    first used inside a Newton loop inside that loop.
     """
+    used = re.compile(rf"\b{re.escape(name)}\b")
     for position, line in enumerate(lines):
-        if name not in line:
+        if not used.search(line):
             continue
         pad = line[: len(line) - len(line.lstrip())]
         return [*lines[:position], f"{pad}{definition}", *lines[position:]]
@@ -608,6 +621,22 @@ class Emitter:
     dialect: Dialect = PYTHON
     """Which language the expressions come out in. The *decisions* are the same either way."""
 
+    fold: bool = False
+    """Burn the parameters in as literals instead of reading them out of ``p``.
+
+    `docs/ideas/backends.md:66`: "Specialisation is a choice, not a policy. Burn the
+    parameters in as literals and fold them, or leave them as an argument so that one
+    compiled artefact serves a whole sweep. Two compile modes, and the caller picks."
+
+    The array read is not what this saves. What it saves is everything *downstream* of the
+    parameter: a comparison against a constant becomes a constant, a branch on it disappears,
+    a multiplication by one goes. `simplify` already does all of that; folding is what gives
+    it something to work on.
+    """
+
+    literals: dict[str, ir.Expr] = field(default_factory=dict[str, "ir.Expr"])
+    """Each parameter's value as a literal node, when :attr:`fold` is set. Empty otherwise."""
+
     def __post_init__(self) -> None:
         self.observed = (
             *(variable.name for variable in self.system.variables),
@@ -631,6 +660,8 @@ class Emitter:
             self.held[relation] = ir.Binary(">", ir.Ref((held,)), ir.RealLiteral(0.5))
         if len(self.system.modes) > 1:
             self.switching = len(self.observed) + len(self.watched)
+        if self.fold:
+            self.literals = _literal_parameters(self.system)
 
     def holding(self, position: int) -> int:
         """The workspace slot holding the ``position``-th watched relation."""
@@ -645,6 +676,12 @@ class Emitter:
         # every evaluation -- which is the exact failure the freezing exists to prevent, and
         # it showed up as `BumpStop` losing 2.3e-8 of a conserved energy.
         node = _latched(node, self.held)
+        if self.literals:
+            # Before latching would be wrong: a relation is matched as a whole node, and one
+            # whose sides have both folded to constants is a relation with nothing to watch.
+            # `_watched` decides what is an event from the *unfolded* system, so folding first
+            # would leave the emitter watching a slot no expression reads.
+            node = simplify(substitute(node, self.literals))
         if self.collecting is not None:
             self.collecting.append(node)
         if self.shared:
@@ -730,10 +767,23 @@ class Emitter:
         return order
 
     def unpack(self, mode: Mode) -> list[str]:
-        """Read the parameter and state vectors into locals, in ``mode``'s variables."""
+        """Read the parameter and state vectors into locals, in ``mode``'s variables.
+
+        Folded, a parameter is written as its value rather than read out of ``p``. Not for
+        the saved array read -- `expr` has already replaced every *use* of it, so these lines
+        exist only to keep the name defined for `observe`, which reports parameters like any
+        other variable. Writing the literal is what makes that report say what was compiled
+        in: a caller who edits ``p`` in folded mode changes nothing, and the observation
+        should not claim otherwise.
+        """
         return [
             *(
-                f"{self.symbols[variable.name]} = p[{slot}]"
+                f"{self.symbols[variable.name]} = "
+                + (
+                    emit_expr(self.literals[variable.name], {}, dialect=self.dialect)
+                    if variable.name in self.literals
+                    else f"p[{slot}]"
+                )
                 for slot, variable in enumerate(self.system.parameters)
             ),
             *(f"{self.symbols[name]} = y[{slot}]" for slot, name in enumerate(mode.states)),
@@ -1052,7 +1102,15 @@ class Emitter:
 
     def initial(self) -> str:
         constant = {v.name for v in self.system.parameters}
-        body = [f"{self.symbols[v.name]} = p[{i}]" for i, v in enumerate(self.system.parameters)]
+        body = [
+            f"{self.symbols[v.name]} = "
+            + (
+                emit_expr(self.literals[v.name], {}, dialect=self.dialect)
+                if v.name in self.literals
+                else f"p[{i}]"
+            )
+            for i, v in enumerate(self.system.parameters)
+        ]
         body.extend(
             f"y[{slot}] = {self.expr(self.system[name].start or ir.RealLiteral(0.0))}"
             for slot, name in enumerate(self.system.states)
@@ -1221,6 +1279,57 @@ class Emitter:
         )
 
 
-def emit(system: System) -> Code:
-    """Write ``system`` out as a Python module, ready to be compiled."""
-    return Emitter(system).code()
+def _literal_parameters(system: System) -> dict[str, ir.Expr]:
+    """Every parameter's value, as a literal node.
+
+    Evaluated in dependency order, because a parameter may be written in terms of others --
+    `RoastingMachine`'s ``m_dry = m_green * (1 - moisture)`` is the case. The order is the one
+    `Emitter.ordered` already computes for the emitted ``parameters`` function, so the two
+    cannot disagree about what a parameter is worth.
+
+    A parameter this cannot evaluate is an error and not a silent pass-through. Folding that
+    quietly skipped one would emit a kernel whose ``p`` matters for some parameters and not
+    others, which is the one thing a caller choosing between two modes must be able to rule
+    out.
+    """
+    environment: dict[str, Value] = {}
+    literals: dict[str, ir.Expr] = {}
+    for variable in Emitter(system).ordered():
+        node = variable.binding if variable.binding is not None else variable.start
+        if node is None:
+            value: Value = 0.0
+        else:
+            try:
+                value = evaluate(node, environment)
+            except EvaluationError as error:
+                message = f"cannot fold {variable.name!r}: {error}"
+                raise EmitError(message) from error
+        environment[variable.name] = value
+        literals[variable.name] = _as_literal(value)
+    return literals
+
+
+def _as_literal(value: Value) -> ir.Expr:
+    """A computed parameter value, back as the node kind it came from.
+
+    An `IntLiteral` where the value is a whole number and not a float, because
+    `RoastingMachine`'s burner schedule divides by one and `HeatBar` sizes an array with one:
+    a parameter's type survives folding or the folded model is not the same model.
+    """
+    if isinstance(value, bool):
+        return ir.BoolLiteral(value)
+    if isinstance(value, int):
+        return ir.IntLiteral(value)
+    if isinstance(value, str):
+        return ir.StringLiteral(value)
+    return ir.RealLiteral(float(value))
+
+
+def emit(system: System, *, fold: bool = False) -> Code:
+    """Write ``system`` out as a Python module, ready to be compiled.
+
+    ``fold`` picks the compile mode. The default leaves the parameters as an argument, so one
+    artefact serves a whole sweep; ``fold=True`` burns their values in as literals and lets
+    `simplify` fold everything downstream of them.
+    """
+    return Emitter(system, fold=fold).code()

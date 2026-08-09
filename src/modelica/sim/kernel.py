@@ -144,7 +144,7 @@ measured to choose it, and if a workload ever wants more this is the number to c
 """
 
 
-def build(model: System | Code, *, jit: bool = False) -> Kernel:
+def build(model: System | Code, *, jit: bool = False, fold: bool = False) -> Kernel:
     """Compile a system (or already-emitted code) into callables.
 
     Cached on the *content* of ``model``, which is what `docs/ideas/backends.md:70` asks for:
@@ -172,12 +172,16 @@ def build(model: System | Code, *, jit: bool = False) -> Kernel:
     repo, since `modelica.sim.solve.simulate` always passes the keyword. Decorating `build`
     directly compiled the same model twice and reported a hit rate that looked fine.
     """
-    return _compiled(model, jit)
+    return _compiled(model, jit, fold)
 
 
 @lru_cache(maxsize=CACHED)
-def _compiled(model: System | Code, jit: bool) -> Kernel:  # noqa: FBT001 - normalised by `build`
-    code = model if isinstance(model, Code) else emit(model)
+def _compiled(
+    model: System | Code,
+    jit: bool,  # noqa: FBT001 - positional so `lru_cache` sees one key per call shape
+    fold: bool,  # noqa: FBT001 - the same reason
+) -> Kernel:
+    code = model if isinstance(model, Code) else emit(model, fold=fold)
     namespace: dict[str, Any] = {"np": np}
     exec(compile(code.source, f"<modelica:{code.name}>", "exec"), namespace)  # noqa: S102
     if jit:

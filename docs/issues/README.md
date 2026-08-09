@@ -90,7 +90,7 @@ cabildo issues show <slug>
 | [FMI 3.0 import — the mode table exists, the FMU reader does not](03-08-2026-fmi-import.md) | fmi | story | L | test | open | — |
 | [RoastingMachine's moisture is assumed, and Cropster has it measured per lot](03-08-2026-green-moisture-as-a-measurement.md) | sim | idea | S | probe | blocked · @jorge | — |
 | [JAX gives the ensemble what Vulkan was being asked for, in double precision, today](03-08-2026-jax-is-the-ensemble-vehicle.md) | sim | idea | M | probe | open | the-ensemble-driver |
-| [Parameters are always an argument, and burning them in as literals is the other half](03-08-2026-parameters-as-constants-or-as-arguments.md) | sim | story | S | probe | open | — |
+| [Parameters are always an argument, and burning them in as literals is the other half](03-08-2026-parameters-as-constants-or-as-arguments.md) | sim | story | S | probe | in-progress · @cute-replicant-6e76d | — |
 | [A phase-change kinetics example — the reachable half of the welding animation](03-08-2026-phase-change-kinetics-example.md) | sim | idea | M | test | open | — |
 | [`spatialDistribution()` — the one PDE the Association standardized, and we do not have it](03-08-2026-spatialdistribution.md) | sim | story | M | test | open | — |
 | [Spike: can an emitted SPIR-V kernel run an ensemble on compute-ml at all?](03-08-2026-spike-a-spirv-emitter-against-compute-ml.md) | sim | spike | L | probe | open | the-ensemble-driver |
@@ -113,5 +113,5 @@ cabildo issues show <slug>
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_32 open — 31 open, 1 blocked; 19 done. Generated; edit the files, then `cabildo issues reindex`._
+_32 open — 30 open, 1 in-progress, 1 blocked; 19 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->
