@@ -1,9 +1,10 @@
 ---
 title: IR nodes carry no source span, so no error below the parser can point at the equation
-status: in-progress
+status: done
 area: ir
 owner: cute-replicant-6e76d
 filed: 2026-08-03
+fixed_in: bb55964
 kind: bug
 scope: M
 verify: test
@@ -65,3 +66,37 @@ check the hash path deliberately rather than assume it.
   several equations may produce it.
 - The two documents above get corrected in the same change. Leaving a page claiming a
   capability that was just implemented differently is how the next reader gets misled.
+
+## What landed
+
+`bb55964`. 871 tests pass.
+
+`ir.Span` is a file, a line and a column, and it rides on the three kinds of node an error
+actually names: `Ref`, `Equal` and `Component`. Both messages the Measured section quotes now
+say where:
+
+    unknown name 'Rw' in an equation at Motor.mo:5:7
+    nothing in the environment answers 'Rw' at Motor.mo:5:7
+
+The Inferred section said to check the equality and hash path deliberately rather than assume
+`compare=False` covers it. Checked, and it does — a frozen dataclass builds `__hash__` from
+the same fields it compares, so excluding a field from one excludes it from both.
+`tests/test_lang.py` asserts it directly rather than leaving it to the two equivalence suites
+to notice, and those two pass unchanged, which is the observation the Done bullet asked for.
+
+Both documents are corrected. `docs/ideas/backends.md` now promises what is delivered and
+adds the one thing that is *not*: naming the equation a reference sits in — "equation 12 of
+BouncingBall" — is a caller change, not a missing capability. The equation's span is on the
+equation and the interpreter is handed an expression, so the information exists and nothing
+passes it down.
+
+## Deliberately not done, found while doing it
+
+- **No span on literals or operators.** A span is there to be reported and no message names
+  an addition. It would also not survive: `derive`, `simplify` and `share` all rebuild
+  expressions from their parts, so a span on an intermediate is dropped the first time
+  anything touches it. The three nodes that carry one are the three that reach an error
+  message intact.
+- **The interpreter still does not name the equation.** See above; it is a signature change
+  on `evaluate` and its callers, and it belongs to whoever wants the fuller message rather
+  than to this issue, which asked for the position and got it.
