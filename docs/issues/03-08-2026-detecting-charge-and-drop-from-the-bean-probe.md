@@ -1,14 +1,14 @@
 ---
 title: Detecting charge and drop from the bean probe — the models are fine, the decision layer is wrong
-status: open
+status: done
 area: sim
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
+blocked_by:
+  - no-output-jacobian
 kind: idea
 scope: L
 verify: probe
-blocked_by:
-  - no-output-jacobian
 ---
 
 ## Measured
@@ -79,3 +79,100 @@ outcome and should be written down rather than left open.
 
 No filter, no IMM, no detector in `modelica.sim`. A Modelica compiler that ships a Kalman filter
 has stopped being a Modelica compiler.
+
+## The answer, 2026-08-09
+
+**No.** The estimator's discrete hypothesis cannot be the model's latch configuration, and the
+reason is not a missing feature — it is that a latch is the wrong kind of object. This closes
+the way the entry said it would if the answer came out no: *the pieces are exported, the filter
+lives downstream*.
+
+`verify: probe`. Everything below was run, not reasoned.
+
+### A latch is a function of the state, so it carries no belief
+
+Starting `modelica.verify.check_iteration` from **every** latch configuration, at a fixed
+state, over every corpus model that has events:
+
+| model | latches | starting configurations | settled configurations |
+| --- | --- | --- | --- |
+| `RoastingMachine` | 9 | 512 | 1 |
+| `Pendulum` | 2 | 1 | 1 |
+| `TwoInertias` | 2 | 1 | 1 |
+| `BouncingBall` | 1 | 1 | 1 |
+| `BumpStop` | 1 | 2 | 1 |
+| `DrainingTank` | 1 | 2 | 1 |
+| `Setback` | 1 | 2 | 1 |
+
+Five hundred and twelve starting configurations, one place to land. Set the latches to
+anything and the event iteration repairs them, because a latch is the cached value of a
+relation the model can evaluate for itself.
+
+What it is a function *of* is visible by moving the argument. Same state, different time:
+
+    t =   0.0 s   512 -> 1   111111110
+    t =  80.0 s   512 -> 1   011111110
+    t = 300.0 s   512 -> 1   001111110
+    t = 600.0 s   512 -> 1   000111110
+    t = 700.0 s   512 -> 1   000001110
+    t = 800.0 s   512 -> 1   000000000
+
+That is the burner schedule, read back out of the latch word.
+
+An IMM hypothesis has to be the opposite thing. The premise of this entry is that "a charge and
+a drop both move the bean probe fast and far, and no rule on the signal alone separates them" —
+so `LOADED`/`EMPTY` is *precisely* the information the state does not carry. A latch is
+precisely the information the state does carry. They are complements, and no amount of
+plumbing turns one into the other.
+
+There is a second, independent reason. `LOADED` and `EMPTY` have different state vectors — four
+states against one. A latch does not change the state vector. The object that does is `Mode`,
+and modes come out of index reduction, not out of a modeller declaring two regimes.
+
+### And the construct that would be needed does not exist
+
+Filed separately as
+[`a-when-clause-can-only-reinit-a-state-so-no-discrete-variable`](09-08-2026-a-when-clause-can-only-reinit-a-state-so-no-discrete-variable.md).
+Three legal Modelica models, asked for a kernel:
+
+    refused  Boolean, plain equation:        DerivativeError: a '>' expression has no derivative
+    refused  discrete Real, in a when:       EmitError: no translation for Assign(...) inside a when-clause
+    refused  counter with pre(), in a when:  EmitError: no translation for Assign(...) inside a when-clause
+
+`modelica.sim.emit.Emitter.statement` matches `reinit` of a state and nothing else. The middle
+two *causalize* — they fail at emission. So this engine has no discrete variable that remembers
+at all, and "the engine already models 'door open' and 'charged' as latched discrete state" —
+written in the Measured section above, on 3 Aug — **is wrong**. It models the burner schedule
+as latched relations. That is a different thing and it was worth finding out.
+
+### What is exported, which is what this repository owed the problem
+
+All three, and the one that was blocking now exists. `RoastingMachine` at t = 300 s:
+
+| piece | what it is | measured |
+| --- | --- | --- |
+| **F** | `kernel.jacobian` | 4x4, exact, source-transformed |
+| **H** | `kernel.observe_jacobian` | 30x4, exact; relative error 1.3e-10 against a central difference quotient, and the worst entry is the *quotient's* — `d C_bean / d m_w` is exactly `cp_water = 4186` and the quotient says 4186.000001 |
+| **the discrete half** | `code.events` (9), `Trigger.latch`, `indicators`, `transition`, `modelica.verify` | 512 configurations enumerated in seconds |
+
+The rows the bridge reads, for free:
+
+    H['probe'] = [0.0, 0.0, 1.0, 0.0]
+    H['lag']   = [0.0, 1.0, -1.0, 0.0]
+
+The measurement is exactly the third state, so the `LOADED` filter's H is a selector and not a
+computation. `lag` — how far the coffee runs ahead of its own probe, the quantity the operator
+actually cares about — is the difference of two states and is not measured at all, which is the
+case for having the model in the loop rather than a rule on the signal.
+
+## Deliberately not done, found while doing it
+
+- **The IMM is still downstream and should be.** Nothing here changed that; what changed is
+  that it is now a decision rather than a gap, and the last piece it was waiting on shipped.
+- **If the memoried-discrete issue lands, this question is worth asking again** — and the
+  answer would still be no for `LOADED`/`EMPTY` specifically, because of the state-dimension
+  argument, which no discrete flag fixes. What it would make possible is a model that carries
+  its own regime, which is a different and probably better thing to build.
+- **`observed` is 30 variables wide on a 4-state model**, so H is 30x4 and 26 of its rows are
+  parameters and derivatives the estimator has no use for. Selecting rows is the caller's
+  business today. Worth noticing before somebody multiplies the whole thing every step.
