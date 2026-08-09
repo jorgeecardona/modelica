@@ -86,6 +86,9 @@ from modelica.ir.nodes import (
     IfStatement as IfStatement,
 )
 from modelica.ir.nodes import (
+    Import as Import,
+)
+from modelica.ir.nodes import (
     IntLiteral as IntLiteral,
 )
 from modelica.ir.nodes import (
@@ -167,6 +170,7 @@ __all__ = [
     "IfEquation",
     "IfExpr",
     "IfStatement",
+    "Import",
     "IntLiteral",
     "Modification",
     "Program",

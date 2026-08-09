@@ -96,6 +96,7 @@ __all__ = [
     "icon",
     "if_",
     "if_statement",
+    "import_",
     "input_",
     "log",
     "mod",
@@ -919,8 +920,11 @@ def _type_to_ir(target: Type, within: str) -> ir.Class:
 
 def _class_to_ir(target: _ClassMeta, within: str) -> ir.Class:
     own = target.__dict__
+    imports = tuple(cast("Iterable[ir.Import]", own.get("IMPORTS", ())))
+    declared = [value.component(within) for value in own.values() if isinstance(value, Declaration)]
     components = tuple(
-        value.component(within) for value in own.values() if isinstance(value, Declaration)
+        replace(component, type_name=_shorten(component.type_name, imports))
+        for component in declared
     )
     # `Model`/`Connector`/... are how Python spells the restriction, not superclasses to
     # extend; every other base is a real Modelica `extends`.
@@ -934,6 +938,7 @@ def _class_to_ir(target: _ClassMeta, within: str) -> ir.Class:
         restriction=target.__modelica_restriction__,
         partial=target.__modelica_partial__,
         comment=_docstring(cast("str | None", own.get("__doc__"))),
+        imports=imports,
         extends=extends,
         components=components,
         equations=_section(target, "equations"),
@@ -949,6 +954,38 @@ def _algorithm(target: _ClassMeta) -> tuple[tuple[ir.Statement, ...], ...]:
     if body is None:
         return ()
     return (tuple(cast("Iterable[ir.Statement]", body(target))),)
+
+
+def _shorten(type_name: str, imports: Sequence[ir.Import]) -> str:
+    """The name a type is written by, given what this class imported.
+
+    The Python front end always knows a class by its package, so ``Electrical.Resistor`` is
+    what :func:`_qualified` produces. A ``.mo`` file that imported ``E = Electrical`` writes
+    ``E.Resistor``, and the two front ends have to say the same thing -- so the imports are
+    applied here, in the one place that has both the full name and the class's own imports.
+    """
+    for entry in imports:
+        if entry.wildcard and type_name.startswith(f"{entry.path}."):
+            return type_name[len(entry.path) + 1 :]
+        if entry.alias and type_name.startswith(f"{entry.path}."):
+            return f"{entry.alias}.{type_name[len(entry.path) + 1 :]}"
+        if not entry.alias and not entry.wildcard and type_name == entry.path:
+            return entry.name
+    return type_name
+
+
+def import_(path: str, alias: str = "", *, wildcard: bool = False) -> ir.Import:
+    """One ``import`` for a class body, listed in its ``IMPORTS``.
+
+    The path is a string and not a class, unlike everywhere else in this module, because an
+    import names a *package* -- and a package here is a module, which cannot be referred to
+    as a value from inside the class body that imports it.
+
+    ``IMPORTS`` is a *tuple*, like every other class-level constant here: a list would be a
+    mutable class attribute shared by every subclass, which is a real hazard and which the
+    linter is right to refuse.
+    """
+    return ir.Import(path, alias, wildcard=wildcard)
 
 
 def _section(target: _ClassMeta, name: str) -> tuple[ir.Equation, ...]:

@@ -90,7 +90,6 @@ _CLOSE: Final = frozenset(")]}")
 _UNSUPPORTED: Final[dict[str, str]] = {
     "enumeration": "enumerations are not supported yet",
     "external": "external functions are not supported yet",
-    "import": "'import' is not supported yet; refer to classes by their full name",
     "inner": "'inner'/'outer' elements are not supported yet",
     "operator": "operator overloading is not supported yet",
     "outer": "'inner'/'outer' elements are not supported yet",
@@ -432,6 +431,29 @@ class _Parser:
             constraining=constraining,
             comment=self._string_comment(),
         )
+
+    def _import(self) -> ir.Import:
+        """``import A.B.C;``, ``import D = A.B.C;`` or ``import A.B.*;``.
+
+        The renaming form is told apart by looking one token past the name: ``import D =``
+        can only be a rename, and ``import D.E`` can only be a path, so a single token of
+        lookahead settles it without backtracking.
+        """
+        self._expect(Kind.KEYWORD, "import")
+        alias = ""
+        if self._check(Kind.NAME) and self._ahead(1).text == "=":
+            alias = self._expect(Kind.NAME).text
+            self._expect(Kind.OP, "=")
+        path = self._type_name()
+        # `.*` is one token: the lexer reads it as Modelica's element-wise product, which
+        # is what it is everywhere except here.
+        wildcard = self._accept(Kind.OP, ".*") is not None
+        if wildcard and alias:
+            raise self._error("an 'import' cannot both rename and use a wildcard")
+        self._string_comment()
+        self._annotation()
+        self._expect(Kind.OP, ";")
+        return ir.Import(path, alias, wildcard=wildcard)
 
     def _replaceable(self) -> tuple[ir.Class | None, list[ir.Component]]:
         """The element after a ``replaceable``: a class definition, or a component clause.
@@ -819,6 +841,7 @@ class _Parser:
     ) -> ir.Class:
         comment = self._string_comment()
         nested: list[ir.Class] = []
+        imports: list[ir.Import] = []
         extends: list[ir.Extends] = []
         components: list[ir.Component] = []
         equations: list[ir.Equation] = []
@@ -854,6 +877,9 @@ class _Parser:
                 # `ir.Class.algorithms` for why the boundary carries information.
                 algorithms.append(tuple(self._statements(until=_SECTION_END)))
                 continue
+            if self._check(Kind.KEYWORD, "import"):
+                imports.append(self._import())
+                continue
             if self._accept(Kind.KEYWORD, "extends"):
                 extends.append(ir.Extends(self._type_name(), self._modification()))
                 self._terminate()
@@ -888,6 +914,7 @@ class _Parser:
             restriction=restriction,
             partial=partial,
             comment=comment,
+            imports=tuple(imports),
             extends=tuple(extends),
             components=tuple(components),
             equations=tuple(equations),

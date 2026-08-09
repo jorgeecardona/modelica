@@ -101,7 +101,14 @@ def test_components_are_boxes(rlc: diagram.Graph) -> None:
 
 
 def test_a_component_carries_its_type_and_its_settings(rlc: diagram.Graph) -> None:
-    assert rlc["r"].type_name == "Electrical.Resistor"
+    """The type is named the way the *source* names it, alias and all.
+
+    ``RLCCircuit`` writes ``import E = Electrical;``, so its components are declared as
+    ``E.Resistor`` and the picture says ``E.Resistor``. Resolving the alias away here would
+    print a name that appears nowhere in the file the reader has open; the diagram's job is
+    to show the model as written, and what the flattener makes of the name is its own.
+    """
+    assert rlc["r"].type_name == "E.Resistor"
     assert rlc["r"].detail == ("R = 1",)
     assert [port.name for port in rlc["r"].ports] == ["p", "n"]
 

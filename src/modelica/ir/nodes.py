@@ -49,6 +49,7 @@ __all__ = [
     "IfEquation",
     "IfExpr",
     "IfStatement",
+    "Import",
     "IntLiteral",
     "Modification",
     "Program",
@@ -434,6 +435,34 @@ class Component:
     """
 
 
+@dataclass(frozen=True, slots=True)
+class Import:
+    """``import A.B.C;``, ``import D = A.B.C;`` and ``import A.B.*;`` -- the three forms.
+
+    All three say the same kind of thing: *this simple name, here, means that full path*.
+    They differ only in which simple name. The qualified form takes the last segment of the
+    path, the renaming form takes the name given, and the wildcard form takes every class in
+    the package. Storing the path as written keeps the distinction, which the printer needs
+    and which an error message reads better for.
+
+    An import is always resolved from the top of the program, never relative to the class
+    that wrote it. That is Modelica's rule and it is the reason this node carries no scope.
+    """
+
+    path: str
+    alias: str = ""
+    """The name given by ``import D = A.B.C``. Empty for the other two forms."""
+    wildcard: bool = False
+    """``import A.B.*`` -- every class in ``path`` is visible by its own simple name."""
+
+    @property
+    def name(self) -> str:
+        """The simple name this import introduces; empty for a wildcard, which introduces many."""
+        if self.wildcard:
+            return ""
+        return self.alias or self.path.rsplit(".", 1)[-1]
+
+
 @dataclass(frozen=True)
 class Extends:
     type_name: str
@@ -456,6 +485,8 @@ class Class:
     constraining: str = ""
     """The ``constrainedby`` of a replaceable class; empty when none was written."""
     comment: str = ""
+    imports: tuple[Import, ...] = ()
+    """``import`` elements, in the order written. They bind names and nothing else."""
     extends: tuple[Extends, ...] = ()
     components: tuple[Component, ...] = ()
     equations: tuple[Equation, ...] = ()

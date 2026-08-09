@@ -100,9 +100,40 @@ class Scope:
             for nested in cls.classes:
                 if nested.name == head:
                     return Found(nested, (nested, *self.chain[depth:]))
+            found = self._imported(cls, head)
+            if found is not None:
+                return found
         for cls in self.program.classes:
             if cls.name == head:
                 return Found(cls, (cls,))
+        return None
+
+    def _imported(self, cls: ir.Class, head: str) -> Found | None:
+        """What ``head`` means here because an ``import`` said so.
+
+        Checked *after* the class's own nested classes and before the enclosing ones, which
+        is Modelica's order: a name declared in a class is not shadowed by something the
+        same class imported, and an import does shadow what an outer class declares.
+
+        The path is resolved from the top of the program and never relative to ``cls``, so
+        the lookup starts from an empty chain. That is the rule, and it is also what keeps
+        this from recursing: the root scope has no imports to consult.
+        """
+        root = Scope(self.program)
+        for entry in cls.imports:
+            target = f"{entry.path}.{head}" if entry.wildcard else entry.path
+            if not entry.wildcard and entry.name != head:
+                continue
+            try:
+                found = root.resolve(target)
+            except FlattenError:
+                if entry.wildcard:
+                    continue
+                raise FlattenError(
+                    f"{cls.name} imports {entry.path!r}, which does not resolve"
+                ) from None
+            if isinstance(found, Found):
+                return found
         return None
 
     def inside(self, found: Found) -> Scope:

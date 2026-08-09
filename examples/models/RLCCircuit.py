@@ -8,11 +8,13 @@ sys.path.append(str(Path(__file__).resolve().parent.parent / "library"))
 
 import Electrical
 
-from modelica.build import Model, connect, mod, place, to_modelica
+from modelica.build import Model, connect, import_, mod, place, to_modelica
 
 
 class RLCCircuit(Model):
     """A series RLC circuit stepped with 1 V -- damped oscillation, two states"""
+
+    IMPORTS = (import_("Electrical", "E"),)
 
     source = Electrical.ConstantVoltage(V=1, annotation=place([(-18, -64), (18, -28)]))
     r = Electrical.Resistor(R=1, annotation=place([(-80, 16), (-44, 52)]))

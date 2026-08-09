@@ -299,13 +299,26 @@ def _is_short_definition(node: ir.Class) -> bool:
         and not node.equations
         and not node.algorithms
         and not node.classes
+        and not node.imports
     )
 
 
+def _import(node: ir.Import) -> str:
+    if node.wildcard:
+        return f"import {node.path}.*;"
+    if node.alias:
+        return f"import {node.alias} = {node.path};"
+    return f"import {node.path};"
+
+
 def _members(node: ir.Class, indent: int) -> list[str]:
-    """The declarations: nested classes, then ``extends``, then components."""
+    """The declarations: imports, nested classes, then ``extends``, then components.
+
+    Imports come first because they bind the names everything after them uses, which is
+    both the convention and the only order that reads.
+    """
     pad = "  " * indent
-    lines: list[str] = []
+    lines: list[str] = [f"{pad}  {_import(i)}" for i in node.imports]
     for nested in node.classes:
         lines.append("")
         lines += unparse_class(nested, indent + 1)

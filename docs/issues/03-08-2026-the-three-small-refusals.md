@@ -1,8 +1,8 @@
 ---
-title: '`import`, `enumeration` and `inner`/`outer` — the three small refusals'
-status: open
+title: `import`, `enumeration` and `inner`/`outer` — the three small refusals
+status: in-progress
 area: lang
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
 kind: story
 scope: M
