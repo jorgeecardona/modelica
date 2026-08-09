@@ -1,11 +1,14 @@
-"""``algorithm`` sections: the language half.
+"""``algorithm`` sections, from the text down to the equations they mean.
 
-What this pins is a *shape*, not a semantics. An algorithm section parses, prints, and
-parses back to the same value; a ``function`` is a class with ``input``/``output``
-components and one such section; and the Python front end says the same things the ``.mo``
-front end says. Nothing here simulates, because nothing yet can:
-:mod:`modelica.ir.flatten` refuses a class that carries a section, and the last test in
-this file is what holds it to refusing *by name* rather than dropping it quietly.
+Three claims, in the order the file makes them. A section parses, prints and parses back
+to the same value, and the Python front end says the same things the ``.mo`` front end
+says. A ``function`` -- a class with ``input``/``output`` components and one section --
+is *inlined* at a call, so what reaches the solver is an expression. And a section in a
+model becomes one equation per variable it assigns, by the same symbolic execution.
+
+Everything here therefore ends in ordinary equations, which is the point: no stage below
+:mod:`modelica.ir.flatten` learns that statements exist. The corpus model that simulates
+one is ``BumpStop``; what this file holds is the conversion itself and its edges.
 
 The two spellings of an assignment are the subtlety worth a test of their own. The IR has
 one :class:`~modelica.ir.Assign`, and Modelica writes it as ``:=`` in an algorithm section
@@ -18,6 +21,7 @@ from __future__ import annotations
 import pytest
 
 from modelica import build, ir
+from modelica.ir.causalize import causalize
 from modelica.ir.flatten import FlattenError
 from modelica.ir.source import flatten
 from modelica.lang import parse
@@ -173,11 +177,91 @@ def test_an_unterminated_loop_names_the_construct() -> None:
         parse("model M\nalgorithm\n  while true loop\n    x := 1.0;\nend M;\n")
 
 
-def test_flattening_refuses_a_section_on_an_instantiated_class() -> None:
-    """A section in a *model* has no implementation; only a function body is inlined."""
-    program = parse(LOOPS)
-    with pytest.raises(FlattenError, match="algorithm section"):
-        flatten(program, "Loops")
+def test_a_section_of_loops_names_the_form_that_stopped_it() -> None:
+    """`Loops` uses every statement form, and the ones with no expression are refused."""
+    with pytest.raises(FlattenError, match=r"the algorithm section of 'Loops' uses a 'for' loop"):
+        flatten(parse(LOOPS), "Loops")
+
+
+# --------------------------------------------------------------------------------------
+# A section in a model is the equations it is equivalent to
+# --------------------------------------------------------------------------------------
+
+SECTION = """\
+model Section "A clipped signal, written as statements instead of as an equation"
+  parameter Real lo = 0.0;
+  parameter Real hi = 1.0;
+  Real x(start = -0.5, fixed = true);
+  Real u;
+  Real y;
+equation
+  der(x) = 1.0;
+  u = 2.0 * x;
+algorithm
+  y := u;
+  if y < lo then
+    y := lo;
+  elseif y > hi then
+    y := hi;
+  end if;
+end Section;
+"""
+
+
+def test_a_section_becomes_one_equation_per_variable_it_assigns() -> None:
+    """Three statements assigning one variable are one equation, not three."""
+    assert _equation_text(SECTION, "Section") == [
+        "der(x) = 1.0;",
+        "u = 2.0 * x;",
+        "y = if u < lo then lo elseif u > hi then hi else u;",
+    ]
+
+
+def test_the_model_is_balanced_after_the_conversion() -> None:
+    """The count is what the balance check reads, so the conversion has to get it right."""
+    flat = flatten(parse(SECTION), "Section")
+    assert flat.is_balanced()
+
+
+def test_what_the_section_produced_causalizes_like_any_other_equation() -> None:
+    """The claim the conversion exists to make: nothing below flattening sees a statement."""
+    system = causalize(flatten(parse(SECTION), "Section"))
+    assert list(system.states) == ["x"]
+
+
+def test_a_section_may_assign_a_component_variable() -> None:
+    """A statement target can be dotted, and it is the component's variable it defines."""
+    source = (
+        "model Inner\n  Real v;\nend Inner;\n\n"
+        "model Outer\n  Inner c;\n  Real w;\nequation\n  w = 3.0;\n"
+        "algorithm\n  c.v := 2.0 * w;\nend Outer;\n"
+    )
+    assert _equation_text(source, "Outer") == ["w = 3.0;", "c.v = 2.0 * w;"]
+
+
+def test_two_sections_each_contribute_their_own_equations() -> None:
+    source = (
+        "model Two\n  Real a;\n  Real b;\n  Real c;\nequation\n  a = 1.0;\n"
+        "algorithm\n  b := a + 1.0;\n"
+        "algorithm\n  c := b + 1.0;\nend Two;\n"
+    )
+    assert _equation_text(source, "Two") == ["a = 1.0;", "b = a + 1.0;", "c = b + 1.0;"]
+
+
+def test_a_section_may_call_a_function() -> None:
+    """Inlining runs on what the section produced, so the two features compose."""
+    source = (
+        "function twice\n  input Real a;\n  output Real b;\nalgorithm\n  b := 2.0 * a;\nend twice;\n\n"
+        "model Uses\n  Real p;\n  Real q;\nequation\n  p = 1.5;\nalgorithm\n  q := twice(p);\nend Uses;\n"
+    )
+    assert _equation_text(source, "Uses") == ["p = 1.5;", "q = 2.0 * p;"]
+
+
+def test_reading_a_variable_the_section_also_assigns_is_refused() -> None:
+    """``y := y + 1`` has no meaning here: a continuous variable has no earlier value."""
+    source = "model Bad\n  Real y;\nalgorithm\n  y := y + 1.0;\nend Bad;\n"
+    with pytest.raises(FlattenError, match="reads 'y' before assigning it"):
+        flatten(parse(source), "Bad")
 
 
 # --------------------------------------------------------------------------------------

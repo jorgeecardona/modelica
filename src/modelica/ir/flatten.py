@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Final, Literal
 from modelica.ir import nodes as ir
 from modelica.ir.evaluate import EvaluationError, evaluate
 from modelica.ir.flat import BaseType, FlatModel, FlatVariable
+from modelica.ir.rewrite import names
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -343,14 +344,20 @@ def _prefix_expr(  # noqa: PLR0911 -- one case per node type
 def _substitute(  # noqa: PLR0911 -- one case per node type
     node: ir.Expr, values: Mapping[str, ir.Expr]
 ) -> ir.Expr:
-    """Replace whole single-part references by name. Used to put a loop index into a body."""
+    """Replace whole references by their dotted name.
+
+    Single-part keys are what a loop index needs; dotted ones are what an algorithm section
+    needs, because a statement may assign a component's variable (``c.v := ...``). A
+    single-part key still matches only a single-part reference, so the loop index case is
+    unchanged by the generalisation.
+    """
 
     def go(inner: ir.Expr) -> ir.Expr:
         return _substitute(inner, values)
 
     match node:
-        case ir.Ref(parts=(name,)) if name in values:
-            return values[name]
+        case ir.Ref(parts=parts) if ".".join(parts) in values:
+            return values[".".join(parts)]
         case ir.Subscript(base=base, indices=indices):
             return ir.Subscript(base, tuple(go(i) for i in indices))
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
@@ -514,8 +521,7 @@ def _inline(found: Found, scope: Scope, call: ir.Call, depth: int) -> ir.Expr:
     for component in components:
         if component.causality != "input" and component.modification.value is not None:
             environment[component.name] = component.modification.value
-    for statement in found.cls.algorithms[0]:
-        environment = _run(statement, environment, name)
+    environment = _sequence(found.cls.algorithms[0], environment, f"function {name!r}")
 
     result = environment.get(outputs[0].name)
     if result is None:
@@ -551,7 +557,7 @@ def _bind(name: str, inputs: Sequence[ir.Component], call: ir.Call) -> dict[str,
 
 
 def _run(
-    statement: ir.Statement, environment: Mapping[str, ir.Expr], name: str
+    statement: ir.Statement, environment: Mapping[str, ir.Expr], where: str
 ) -> dict[str, ir.Expr]:
     """Execute one statement symbolically: an environment in, a new environment out.
 
@@ -562,18 +568,16 @@ def _run(
     such merge unless its trip count is known, and an early exit has no merge at all.
     """
     match statement:
-        case ir.Assign(target=ir.Ref(parts=(target,)), value=value):
-            return {**environment, target: _substitute(value, environment)}
-        case ir.Assign(target=target):
-            raise FlattenError(f"{name!r} assigns {target.name!r}, which is not one of its own")
+        case ir.Assign(target=target, value=value):
+            return {**environment, target.name: _substitute(value, environment)}
         case ir.IfStatement(branches=branches, otherwise=otherwise):
-            return _merge_branches(branches, otherwise, environment, name)
+            return _merge_branches(branches, otherwise, environment, where)
         case _:
             # Named in Modelica's words rather than the node's: the reader wrote `while`,
             # and `WhileStatement` is this toolchain's business, not theirs.
             raise FlattenError(
-                f"{name!r} uses {_SPELLING[type(statement)]}, which cannot be inlined into an"
-                f" expression; a function body may assign and branch, and nothing else"
+                f"{where} uses {_SPELLING[type(statement)]}, which cannot be turned into an"
+                f" expression; statements here may assign and branch, and nothing else"
             )
 
 
@@ -581,39 +585,77 @@ def _merge_branches(
     branches: Sequence[ir.StatementBranch],
     otherwise: Sequence[ir.Statement],
     environment: Mapping[str, ir.Expr],
-    name: str,
+    where: str,
 ) -> dict[str, ir.Expr]:
     """Run every arm against its own copy, then reconcile what they disagree about."""
     conditions = [_substitute(branch.condition, environment) for branch in branches]
-    arms: list[dict[str, ir.Expr]] = []
-    for branch in branches:
-        arm = dict(environment)
-        for statement in branch.body:
-            arm = _run(statement, arm, name)
-        arms.append(arm)
-    fallback = dict(environment)
-    for statement in otherwise:
-        fallback = _run(statement, fallback, name)
+    arms = [_sequence(branch.body, environment, where) for branch in branches]
+    fallback = _sequence(otherwise, environment, where)
+
+    def chosen(arm: Mapping[str, ir.Expr], key: str) -> ir.Expr:
+        value = arm.get(key)
+        if value is None:
+            raise FlattenError(
+                f"{where} assigns {key!r} on some paths and not on others; every branch,"
+                f" and the `else`, has to give it a value"
+            )
+        return value
 
     result = dict(environment)
     touched = {key for arm in (*arms, fallback) for key in arm if arm[key] != environment.get(key)}
-    for key in touched:
-        value = fallback.get(key)
-        if value is None:
-            raise FlattenError(
-                f"{name!r} assigns {key!r} on some paths and not on others; a function that"
-                f" branches must give every branch, and the `else`, a value"
-            )
+    for key in sorted(touched):
+        value = chosen(fallback, key)
         for condition, arm in reversed(list(zip(conditions, arms, strict=True))):
-            chosen = arm.get(key)
-            if chosen is None:
-                raise FlattenError(
-                    f"{name!r} assigns {key!r} on some paths and not on others; a function"
-                    f" that branches must give every branch, and the `else`, a value"
-                )
-            value = ir.IfExpr(condition, chosen, value)
+            value = ir.IfExpr(condition, chosen(arm, key), value)
         result[key] = value
     return result
+
+
+def _sequence(
+    body: Sequence[ir.Statement], environment: Mapping[str, ir.Expr], where: str
+) -> dict[str, ir.Expr]:
+    """A run of statements, each against what the one before it left."""
+    result = dict(environment)
+    for statement in body:
+        result = _run(statement, result, where)
+    return result
+
+
+def _section_equations(section: Sequence[ir.Statement], owner: str) -> list[ir.Equal]:
+    """An ``algorithm`` section in a model, as the equations it is equivalent to.
+
+    The same symbolic execution a function body gets, started from an *empty* environment:
+    a name the section reads before assigning is left as a reference, so it means the
+    model's own variable, and every name the section assigns comes out as one equation
+    defining it. A section of ``n`` assignments becomes ``n`` equations, which is exactly
+    the count the balance check expects of it.
+
+    Doing it here rather than carrying the section down to causalization is a choice with
+    a reason. A section carried down would have to match as a *group* -- all its outputs
+    against one node -- and the emitter would need control flow, and `ir.derive` would have
+    no way to differentiate it, so the Jacobian would fall back to differences. Converted
+    here, none of that arises: what the later stages see is expressions, which they already
+    know how to match, sort, differentiate and emit.
+
+    The price is the subset. Statements that cannot become expressions are refused by
+    :func:`_run`, and so is the one case that would silently mean the wrong thing.
+    """
+    where = f"the algorithm section of {owner!r}"
+    environment = _sequence(section, {}, where)
+    assigned = set(environment)
+    equations: list[ir.Equal] = []
+    for name, value in environment.items():
+        read_back = sorted(assigned.intersection(names(value)))
+        if read_back:
+            # `y := y + 1` in an equation section's neighbour is not an increment: there is
+            # no previous value of a continuous variable to add to. Refused rather than
+            # emitted as `y = y + 1`, which has no solution and would be blamed on the solver.
+            raise FlattenError(
+                f"{where} reads {read_back[0]!r} before assigning it, and assigns it too;"
+                f" a variable a section defines has no earlier value to read"
+            )
+        equations.append(ir.Equal(ir.Ref(tuple(name.split("."))), value))
+    return equations
 
 
 def _prefix_modification(
@@ -762,15 +804,6 @@ class _Flattener:
         local = frozenset(merged.members)
         if outer.value is not None:
             raise FlattenError(f"{'.'.join(prefix)}: a composite component cannot have a value")
-        if found.cls.algorithms:
-            # A `function` reaches this pass through `_inline` and never through here, so a
-            # section on an instantiated class is the case that has no implementation. It is
-            # refused by name: dropped silently it would leave the model short of the
-            # statements its author wrote, and nothing downstream would say so.
-            raise FlattenError(
-                f"{found.cls.name} has an algorithm section, which can only be flattened"
-                f" inside a function"
-            )
         inner = scope.inside(found)
         for name, member in merged.members.items():
             self._component(
@@ -780,6 +813,9 @@ class _Flattener:
             self._equation(equation, prefix, local, scope=inner)
         for equation in merged.initial_equations:
             self._equation(equation, prefix, local, scope=inner, initial=True)
+        for section in found.cls.algorithms:
+            for equation in _section_equations(section, found.cls.name):
+                self._equation(equation, prefix, local, scope=inner)
 
     def _component(
         self,
