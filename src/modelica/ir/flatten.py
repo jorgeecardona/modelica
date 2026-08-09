@@ -34,7 +34,7 @@ from itertools import pairwise, product
 from typing import TYPE_CHECKING, Final, Literal
 
 from modelica.ir import nodes as ir
-from modelica.ir.evaluate import EvaluationError, evaluate
+from modelica.ir.evaluate import EvaluationError, at, evaluate
 from modelica.ir.flat import BaseType, FlatModel, FlatVariable
 from modelica.ir.rewrite import names
 
@@ -308,7 +308,7 @@ def _prefix_ref(
         return ir.Ref((*prefix, *ref.parts))
     if ref.parts == ("time",) or not strict:
         return ref
-    raise FlattenError(f"unknown name {ref.name!r} in an equation")
+    raise FlattenError(f"unknown name {ref.name!r} in an equation{at(ref.span)}")
 
 
 def _unary(op: ir.UnaryOp, operand: ir.Expr) -> ir.Expr:

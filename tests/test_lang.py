@@ -463,3 +463,43 @@ def test_numbers_are_classified(text: str, kind: Kind) -> None:
 def test_lexer_errors(source: str, message: str) -> None:
     with pytest.raises(ModelicaSyntaxError, match=message):
         tokenize(source)
+
+
+# --------------------------------------------------------------------------------------
+# Source spans: the position survives the parser
+# --------------------------------------------------------------------------------------
+
+SPANNED = "model Motor\n  parameter Real R = 1;\n  Real i;\nequation\n  i = Rw * 2.0;\nend Motor;\n"
+
+
+def test_a_reference_an_equation_and_a_component_carry_where_they_were_written() -> None:
+    motor = parse(SPANNED, "Motor.mo").classes[0]
+    assert str(motor.components[1].span) == "Motor.mo:3:8"
+    equation = motor.equations[0]
+    assert isinstance(equation, ir.Equal)
+    assert str(equation.span) == "Motor.mo:5:3"
+    product = equation.rhs
+    assert isinstance(product, ir.Binary)
+    reference = product.lhs
+    assert isinstance(reference, ir.Ref)
+    assert str(reference.span) == "Motor.mo:5:7"
+
+
+def test_a_span_does_not_change_what_a_node_equals_or_hashes_to() -> None:
+    """The property two whole test files rest on, stated once where it can fail.
+
+    ``parse(unparse(x)) == x`` compares trees, and the example suite compares flat models
+    built by two front ends -- one of them Python, where there is no source text at all. A
+    span that counted would break both, and would also change the content hash that keys a
+    compiled kernel.
+    """
+    plain, placed = ir.Ref(("x",)), ir.Ref(("x",), ir.Span("M.mo", 1, 1))
+    assert plain == placed
+    assert hash(plain) == hash(placed)
+    assert ir.Equal(plain, plain) == ir.Equal(plain, plain, ir.Span("M.mo", 2, 2))
+    assert ir.Component("r", "Resistor") == ir.Component("r", "Resistor", ir.Span("M.mo", 3, 3))
+
+
+def test_the_printer_does_not_print_a_span() -> None:
+    """It is metadata, not syntax, so the round trip cannot see it."""
+    assert unparse(parse(SPANNED, "Motor.mo")) == unparse(parse(SPANNED))

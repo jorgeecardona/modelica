@@ -21,9 +21,13 @@ keep a second, slow, honest evaluator over the same IR.
 it will never be on the hot path. It is also the **reference tier**, and it is always
 there.
 
-* It reports an error in *Modelica* terms: "division by zero in equation 12 of
-  BouncingBall: ball.v / ball.m". It can, because it still holds the IR node and the source
-  span. The compiled kernel holds only a NaN.
+* It reports an error in *Modelica* terms, and points at the line: "nothing in the
+  environment answers 'Rw' at Motor.mo:5:7". It can, because it still holds the IR node and
+  the span the parser put on it. The compiled kernel holds only a NaN.
+
+  What it does not yet do is name the *equation* the reference sits in -- "equation 12 of
+  BouncingBall" -- because an equation's span is on the equation and the interpreter is
+  handed an expression. That is a caller change, not a missing capability.
 * It is what the compiled kernel is tested against. Any expression, any model, both
   evaluators, one answer. That is a property test, and not a hope.
 * It gives **differential debugging**. When a compiled run disagrees with an interpreted

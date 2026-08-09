@@ -140,8 +140,14 @@ possible, and the debuggability it is meant to buy.
 A lexer and a recursive-descent parser, both written by hand, against the Modelica Language
 Specification 3.x grammar. There is no parser generator and no pyparsing. The grammar is
 stable and small enough to write out. Only a hand-written parser gives a usable error:
-"expected `end <name>;` at 12:5, to close `model Foo` opened at 3:1". AST nodes are frozen
-dataclasses that carry source spans.
+"expected `end <name>;` at 12:5, to close `model Foo` opened at 3:1".
+
+Every token carries a line and a column, and the nodes an error can point at carry them on
+after the parser has finished: a reference, an equation and a component each hold an
+optional `ir.Span`. It is excluded from equality and from hashing, which is what lets the
+same model built from Python -- where there is no source text and every span is `None` --
+still compare equal to the one read from a `.mo`. Literals and operators carry none: a span
+is there to be *reported*, and no message names an addition.
 
 ### `modelica.build` — Python to IR
 

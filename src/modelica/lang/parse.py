@@ -156,6 +156,10 @@ class _Parser:
             raise self._error(f"expected {wanted}, found {self.token.describe()}")
         return token
 
+    def _at(self, token: Token) -> ir.Span:
+        """Where ``token`` was written, as the IR spells a position."""
+        return ir.Span(self.filename, token.line, token.column)
+
     def _keyword(self, *texts: str) -> bool:
         token = self.token
         return token.kind is Kind.KEYWORD and token.text in texts
@@ -179,7 +183,10 @@ class _Parser:
         return ".".join(self._dotted())
 
     def _reference(self) -> ir.Ref:
-        return ir.Ref(self._dotted())
+        # Taken before the name is read, so it points at the first character of `c.v` rather
+        # than at whatever follows it.
+        where = self._at(self.token)
+        return ir.Ref(self._dotted(), where)
 
     def _string_comment(self) -> str:
         token = self._accept(Kind.STRING)
@@ -298,16 +305,17 @@ class _Parser:
                 args, named = self._arguments()
                 return ir.Call(token.text, args, named)
             case Kind.NAME:
+                where = self._at(token)
                 parts = self._dotted()
                 if self._check(Kind.OP, "("):
                     args, named = self._arguments()
                     return ir.Call(".".join(parts), args, named)
                 indices = self._bracketed()
                 if not indices:
-                    return ir.Ref(parts)
+                    return ir.Ref(parts, where)
                 if self._check(Kind.OP, "."):
                     raise self._error("a subscript on an inner component is not supported yet")
-                return ir.Subscript(ir.Ref(parts), indices)
+                return ir.Subscript(ir.Ref(parts, where), indices)
             case _:
                 self._refuse_unsupported()
         raise self._error(f"expected an expression, found {token.describe()}")
@@ -558,11 +566,12 @@ class _Parser:
                     return self._for_equation()
                 case _:
                     self._refuse_unsupported()
+        where = self._at(self.token)
         lhs = self.expression()
         self._expect(Kind.OP, "=")
         rhs = self.expression()
         self._terminate()
-        return ir.Equal(lhs, rhs)
+        return ir.Equal(lhs, rhs, where)
 
     def _for_equation(self) -> ir.ForEquation:
         """``for i in 1:n loop ... end for;`` -- read one, with one index.
@@ -817,7 +826,8 @@ class _Parser:
         declared: list[ir.Component] = []
         constraining = ""
         while True:
-            name = self._expect(Kind.NAME).text
+            named = self._expect(Kind.NAME)
+            name = named.text
             dimensions = self._bracketed()
             modification = self._modification()
             # The constraining clause belongs to the *clause*, after the last name, so a
@@ -827,6 +837,7 @@ class _Parser:
                 ir.Component(
                     name=name,
                     type_name=type_name,
+                    span=self._at(named),
                     dimensions=dimensions,
                     modification=modification,
                     variability=variability,

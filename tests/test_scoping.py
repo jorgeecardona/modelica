@@ -18,11 +18,13 @@ And the picture has to agree. :mod:`modelica.diagram` draws components; drawing 
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import pytest
 
-from modelica import diagram
+from modelica import diagram, ir
+from modelica.ir.evaluate import EvaluationError, evaluate
 from modelica.ir.flatten import FlattenError
 from modelica.ir.source import flatten
 from modelica.lang import parse
@@ -112,3 +114,37 @@ def test_the_diagram_does_not_draw_an_outer(tmp_path: Path) -> None:
     drawn = {node.id for node in diagram.of(str(path), model="Scene", depth=2).nodes}
     assert "a.env" not in drawn
     assert {"env", "a", "b"} <= drawn
+
+
+# --------------------------------------------------------------------------------------
+# What a span is for: an error below the parser that points at the line
+# --------------------------------------------------------------------------------------
+
+MISTAKE = "model Motor\n  parameter Real R = 1;\n  Real i;\nequation\n  i = Rw * 2.0;\nend Motor;\n"
+
+
+def test_an_unknown_name_says_where_it_was_written() -> None:
+    """The message this whole span exists for, pinned so it cannot rot back.
+
+    `CHANGELOG.md` records the real occurrence: a modification bound a name that did not
+    exist, code generation died on "nothing computes 'Rw'", and it was found by reading the
+    file rather than by being told where to look.
+    """
+    with pytest.raises(FlattenError, match=re.escape("unknown name 'Rw' in an equation at Motor.mo:5:7")):
+        flatten(parse(MISTAKE, "Motor.mo"), "Motor")
+
+
+def test_the_interpreter_says_where_too() -> None:
+    equation = parse(MISTAKE, "Motor.mo").classes[0].equations[0]
+    assert isinstance(equation, ir.Equal)
+    wanted = re.escape("nothing in the environment answers 'Rw' at Motor.mo:5:7")
+    with pytest.raises(EvaluationError, match=wanted):
+        evaluate(equation.rhs, {})
+
+
+def test_a_model_built_from_python_says_what_it_always_said() -> None:
+    """No source text, no span, and the message is no worse than it was."""
+    built = ir.Equal(ir.Ref(("i",)), ir.Binary("*", ir.Ref(("Rw",)), ir.RealLiteral(2.0)))
+    wanted = re.escape("nothing in the environment answers 'Rw'") + "$"
+    with pytest.raises(EvaluationError, match=wanted):
+        evaluate(built.rhs, {})

@@ -1,8 +1,8 @@
 ---
 title: IR nodes carry no source span, so no error below the parser can point at the equation
-status: open
+status: in-progress
 area: ir
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
 kind: bug
 scope: M

@@ -60,6 +60,7 @@ __all__ = [
     "Restriction",
     "Return",
     "Scoping",
+    "Span",
     "Statement",
     "StatementBranch",
     "StringLiteral",
@@ -82,10 +83,38 @@ type UnaryOp = Literal["+", "-", "not"]
 
 
 @dataclass(frozen=True, slots=True)
+class Span:
+    """Where a value was written: a file, a line and a column, all one-based but the file.
+
+    Its own type rather than three fields on everything that has one, so that "carries a
+    position" is one thing to add and one thing to look for. Compared and hashed like any
+    other value; what keeps a span out of a *node's* equality is the node's field, not this.
+    """
+
+    file: str
+    line: int
+    column: int
+
+    def __str__(self) -> str:
+        return f"{self.file}:{self.line}:{self.column}"
+
+
+# Every ``span`` field below is written ``field(default=None, compare=False, repr=False)``,
+# and the ``compare=False`` is doing real work rather than tidying. ``parse(unparse(x)) == x``
+# compares IR trees, and `tests/test_examples.py` compares flat models built by the two front
+# ends -- one of which is Python, where there is no source text and every span is ``None``. A
+# span that counted towards equality would fail both, and because a frozen dataclass builds
+# its ``__hash__`` from the same fields, it would also change the content hash that keys a
+# compiled kernel. Excluded from both, a span is metadata in the strict sense: present or
+# absent, the value means the same thing.
+
+
+@dataclass(frozen=True, slots=True)
 class Ref:
     """A reference to a variable, possibly qualified: ``c.v`` is ``Ref(("c", "v"))``."""
 
     parts: tuple[str, ...]
+    span: Span | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.parts:
@@ -336,6 +365,7 @@ class Equal:
 
     lhs: Expr
     rhs: Expr
+    span: Span | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -411,6 +441,9 @@ class Component:
 
     name: str
     type_name: str
+    span: Span | None = field(default=None, compare=False, repr=False)
+    """Where the component was declared. See the note above :class:`Ref` for why it does not
+    take part in equality."""
     modification: Modification = EMPTY
     variability: Variability = "continuous"
     causality: Causality = "none"

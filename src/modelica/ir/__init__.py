@@ -119,6 +119,9 @@ from modelica.ir.nodes import (
     Scoping as Scoping,
 )
 from modelica.ir.nodes import (
+    Span as Span,
+)
+from modelica.ir.nodes import (
     Statement as Statement,
 )
 from modelica.ir.nodes import (
@@ -184,6 +187,7 @@ __all__ = [
     "Restriction",
     "Return",
     "Scoping",
+    "Span",
     "Statement",
     "StatementBranch",
     "StringLiteral",

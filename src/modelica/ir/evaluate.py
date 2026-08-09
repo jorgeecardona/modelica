@@ -29,6 +29,18 @@ __all__ = ["EvaluationError", "Value", "evaluate"]
 type Value = float | int | bool | str
 
 
+def at(where: ir.Span | None) -> str:
+    """`` at Motor.mo:12:5``, or nothing at all when the value came from Python.
+
+    A suffix rather than a prefix so that a message reads as a sentence with the location as
+    an aside, and so that the message a caller already matches on is still its beginning.
+    The empty case is not a degradation to apologise for: :mod:`modelica.build` builds the
+    same IR from Python, where there is no line to point at, and an error there is no worse
+    than it was.
+    """
+    return f" at {where}" if where is not None else ""
+
+
 class EvaluationError(Exception):
     """An expression could not be evaluated: an unknown name or function."""
 
@@ -86,11 +98,11 @@ def _boolean(value: Value, origin: ir.Expr) -> bool:
     return value
 
 
-def _lookup(name: str, env: Mapping[str, Value]) -> Value:
+def _lookup(name: str, env: Mapping[str, Value], where: ir.Span | None = None) -> Value:
     try:
         return env[name]
     except KeyError:
-        raise EvaluationError(f"nothing in the environment answers {name!r}") from None
+        raise EvaluationError(f"nothing in the environment answers {name!r}{at(where)}") from None
 
 
 def _call(node: ir.Call, env: Mapping[str, Value]) -> Value:
@@ -100,7 +112,7 @@ def _call(node: ir.Call, env: Mapping[str, Value]) -> Value:
         (arg,) = node.args
         if not isinstance(arg, ir.Ref):
             raise EvaluationError(f"{node.name}() needs a variable, got {arg!r}")
-        return _lookup(f"{node.name}({arg.name})", env)
+        return _lookup(f"{node.name}({arg.name})", env, arg.span)
     if node.name == "noEvent":
         (arg,) = node.args
         return evaluate(arg, env)
@@ -142,7 +154,7 @@ def evaluate(node: ir.Expr, env: Mapping[str, Value]) -> Value:
     """Evaluate ``node`` against ``env``. Fails loudly on names ``env`` cannot answer."""
     match node:
         case ir.Ref():
-            return _lookup(node.name, env)
+            return _lookup(node.name, env, node.span)
         case (
             ir.RealLiteral(value=value)
             | ir.IntLiteral(value=value)
