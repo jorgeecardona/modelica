@@ -735,14 +735,27 @@ class _Emitter:
         ]
 
     def solve(self, block: Block) -> list[str]:
-        """Compute a block's unknowns: an assignment, a linear solve, or Newton."""
+        """Compute a block's variables, then the torn ones.
+
+        An assignment, a linear solve or a Newton iteration for what the block still has to
+        solve; then the variables tearing moved out of it, which follow by substitution once
+        the rest are known.
+        """
         if block.assignment is not None:
             return [f"{self.symbols[block.unknowns[0]]} = {self.expr(block.assignment)}"]
         residuals = [residual(equation) for equation in block.equations]
         jacobian = _jacobian(block)
-        if _iterated(block):
-            return self.newton(block, jacobian)
-        return self.linear(block, residuals, jacobian)
+        lines = self.newton(block, jacobian) if _iterated(block) else (
+            self.linear(block, residuals, jacobian)
+        )
+        # Recovered after the solve and in order, each one written over the torn unknowns and
+        # whatever the earlier ones produced. They are outside the Newton loop on purpose:
+        # the residuals already have them folded in, so iterating on them would be computing
+        # the same numbers twice per step.
+        lines.extend(
+            f"{self.symbols[name]} = {self.expr(value)}" for name, value in block.torn
+        )
+        return lines
 
     def system_lines(
         self,
@@ -880,13 +893,14 @@ class _Emitter:
         """
         rows = [self.combination(residual(equation), carried) for equation in block.equations]
         if all(row is None for row in rows):
-            for unknown in block.unknowns:
+            for unknown in block.solved:
                 carried.pop(unknown, None)
             return []
         jacobian = _jacobian(block)
         if len(block.unknowns) == 1:
             carried[block.unknowns[0]] = row = self.tangents[block.unknowns[0]]
-            return [f"{row} = -({rows[0]}) / ({self.expr(jacobian[0][0])})"]
+            single = f"{row} = -({rows[0]}) / ({self.expr(jacobian[0][0])})"
+            return [single, *self._torn_tangents(block, carried)]
         size = len(block.unknowns)
         lines = [f"_M = np.zeros(({size}, {size}))", f"_R = np.zeros(({size}, {width}))"]
         for position, entries in enumerate(jacobian):
@@ -901,6 +915,20 @@ class _Emitter:
         for position, unknown in enumerate(block.unknowns):
             carried[unknown] = row = self.tangents[unknown]
             lines.append(f"{row} = _D[{position}]")
+        return [*lines, *self._torn_tangents(block, carried)]
+
+    def _torn_tangents(self, block: Block, carried: dict[str, str]) -> list[str]:
+        """The chain rule over the variables a torn block recovers by substitution.
+
+        Each is an explicit function of the torn unknowns, which have just been given their
+        tangents, so this is the same chain rule an ordinary 1x1 assignment gets -- run in
+        the order the substitutions were made, because a later one may read an earlier.
+        Without it the recovered variables would have no tangent at all, and the Jacobian
+        would come out short by exactly the variables tearing moved.
+        """
+        lines: list[str] = []
+        for name, value in block.torn:
+            lines.extend(self.chain(name, value, carried))
         return lines
 
     def tangent(self, mode: Mode) -> tuple[list[str], dict[str, str]]:

@@ -35,14 +35,21 @@ EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 LIBRARY = EXAMPLES / "library"
 MODELS = EXAMPLES / "models"
 
-COVERED = ("Robertson", "Pendulum", "BouncingBall", "DrainingTank", "RoastingMachine")
+COVERED = (
+    "Robertson",
+    "Pendulum",
+    "AtwoodPendulum",
+    "BouncingBall",
+    "DrainingTank",
+    "RoastingMachine",
+)
 """Models chosen for the constructs they force the emitter to write, not for coverage.
 
-Compiling costs real time, so this is five models rather than the whole corpus, picked so
+Compiling costs real time, so this is six models rather than the whole corpus, picked so
 that between them every shape in the generated source is compiled at least once:
-``Robertson`` is explicit blocks and nothing else; ``Pendulum`` is the mode dispatcher, a
-Newton iteration and a 3x3 linear solve, which is the only place `np.linalg.solve` with a
-2-D right-hand side appears; ``BouncingBall`` is a ``when`` with a ``reinit``;
+``Robertson`` is explicit blocks and nothing else; ``Pendulum`` is the mode dispatcher and a
+Newton iteration; ``AtwoodPendulum`` is the only place `np.linalg.solve` with a 2-D
+right-hand side appears; ``BouncingBall`` is a ``when`` with a ``reinit``;
 ``DrainingTank`` is a latched relation read through the workspace; and ``RoastingMachine``
 is a nine-segment schedule against ``time``, which is the shape that used to be
 uncompilable. Compiling every function of each, measured:
@@ -52,6 +59,14 @@ uncompilable. Compiling every function of each, measured:
     DrainingTank      2.4 s
     RoastingMachine   3.9 s
     Pendulum         37.9 s     <- two modes, so every function is written and compiled twice
+    AtwoodPendulum    not measured on the machine that took the others
+
+``AtwoodPendulum`` was added when tearing landed, and the reason is worth recording because
+it is the sort of coverage that goes quietly. `Pendulum` used to carry the 3x3 linear solve
+that was the only compiled instance of `np.linalg.solve` with a 2-D right-hand side. Tearing
+reduced that block to a single torn unknown, so `Pendulum` stopped emitting the matrix path
+entirely -- and nothing else in this list ever did. `AtwoodPendulum` tears to *two* unknowns
+and still emits it, which is why it is here.
 
 ``RoastingMachine`` is here **because** it was the counterexample, and it is worth recording
 what it was a counterexample to. It used to be absent with a finding attached: Numba did not

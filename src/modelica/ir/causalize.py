@@ -50,7 +50,7 @@ from modelica.ir.derive import (
     simplify,
 )
 from modelica.ir.flat import FlatVariable
-from modelica.ir.rewrite import names, residual, solve_for, substitute
+from modelica.ir.rewrite import contains, names, residual, solve_for, substitute
 from modelica.ir.system import Block, Mode, System
 
 if TYPE_CHECKING:
@@ -649,6 +649,76 @@ class _Tarjan:
         return self.result
 
 
+def _tear(unknowns: tuple[str, ...], equations: tuple[ir.Equal, ...]) -> Block:
+    """Split a simultaneous block into the part a solver iterates on and the part that follows.
+
+    A block of *n* equations is not usually *n*-dimensional in any real sense. Most of its
+    variables come out by substitution once a few are guessed -- the pendulum's 4x4 block is
+    two guesses and two assignments -- and iterating on all four is iterating on two numbers
+    that were never in doubt. Tearing is choosing which few, and it is the third of the three
+    things `docs/architecture.md:125` says this compiler can do that a precompiled library
+    cannot.
+
+    The choice is greedy, and deliberately so. Picking the *smallest* torn set is NP-hard;
+    picking a correct one is not, and correctness is what a torn form has to have. So: take
+    any equation that has one unknown left and comes apart for it, and make it an assignment;
+    when none does, tear the unknown that appears in the most equations still unused, and
+    look again. Whatever is left over at the end is the residual system over the torn set.
+
+    Substituting the assignments back into those residuals is what makes the result usable
+    without touching anything downstream: the block that comes out is an ordinary block over
+    the torn unknowns, so `emit` solves it with the machinery it already has, and only the
+    recovery of the substituted variables is new.
+    """
+    residuals = {index: residual(equation) for index, equation in enumerate(equations)}
+    unused = set(residuals)
+    pending = set(unknowns)
+    torn: list[str] = []
+    assignments: list[tuple[str, ir.Expr]] = []
+
+    while pending:
+        found = None
+        for index in sorted(unused):
+            left = residuals[index]
+            reachable = [name for name in pending if contains(left, name)]
+            if len(reachable) != 1:
+                continue
+            answer = solve_for(left, reachable[0])
+            if answer is not None:
+                found = (index, reachable[0], answer)
+                break
+        if found is None:
+            # Nothing comes apart, so guess the variable the most equations are waiting on.
+            counts = {
+                name: sum(contains(residuals[i], name) for i in unused) for name in pending
+            }
+            chosen = max(sorted(pending), key=lambda name: counts[name])
+            torn.append(chosen)
+            pending.discard(chosen)
+            continue
+        index, name, answer = found
+        assignments.append((name, answer))
+        unused.discard(index)
+        pending.discard(name)
+
+    if not assignments:
+        return Block(unknowns, equations)
+    # Each assignment may read the ones before it; folding them in leaves every residual --
+    # and every recovered variable -- written over the torn unknowns alone.
+    folded: list[tuple[str, ir.Expr]] = []
+    table: dict[str, ir.Expr] = {}
+    for name, answer in assignments:
+        value = simplify(substitute(answer, table))
+        table[name] = value
+        folded.append((name, value))
+    left_over = tuple(equations[index] for index in sorted(unused))
+    torn_equations = tuple(
+        ir.Equal(simplify(substitute(residual(equation), table)), ZERO)
+        for equation in left_over
+    )
+    return Block(tuple(torn), torn_equations, torn=tuple(folded))
+
+
 def _blocks(work: _Work, matched: dict[int, str]) -> tuple[Block, ...]:
     """Sort the matched equations into block-lower-triangular order."""
     producer = {name: equation for equation, name in matched.items()}
@@ -666,12 +736,13 @@ def _blocks(work: _Work, matched: dict[int, str]) -> tuple[Block, ...]:
         members = sorted(component)
         equations = tuple(work.equations[index] for index in members)
         unknowns = tuple(matched[index] for index in members)
-        assignment = pivot = None
         if len(members) == 1:
             left = residual(equations[0])
             assignment = solve_for(left, unknowns[0])
             pivot = simplify(d_dx(left, unknowns[0]))
-        blocks.append(Block(unknowns, equations, assignment, pivot))
+            blocks.append(Block(unknowns, equations, assignment, pivot))
+            continue
+        blocks.append(_tear(unknowns, equations))
     return tuple(blocks)
 
 

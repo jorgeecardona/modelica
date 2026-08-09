@@ -1,8 +1,8 @@
 ---
 title: Tearing is priced in by three documents and implemented by none
-status: open
+status: in-progress
 area: ir
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
 kind: story
 scope: L

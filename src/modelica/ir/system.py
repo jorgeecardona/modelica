@@ -48,6 +48,24 @@ class Block:
     equations: tuple[ir.Equal, ...]
     assignment: ir.Expr | None = None
     pivot: ir.Expr | None = None
+    torn: tuple[tuple[str, ir.Expr], ...] = ()
+    """Variables this block computes by substitution once its ``unknowns`` are known.
+
+    Tearing splits a simultaneous block in two. What stays in ``unknowns`` and ``equations``
+    is the part a solver still has to iterate on; what moves here is the part that follows
+    from it by forward substitution, in the order given, each expression written over the
+    torn unknowns and whatever was already known. ``len(unknowns)`` is therefore the size of
+    the *numerical* problem, and ``len(self)`` is the size of the block as causalization
+    found it.
+
+    Empty for a block that was not torn, which is every 1x1 block and any block where no
+    variable came out.
+    """
+
+    @property
+    def solved(self) -> tuple[str, ...]:
+        """Every variable this block computes: the ones it iterates on, then the torn ones."""
+        return (*self.unknowns, *(name for name, _ in self.torn))
 
     @property
     def is_linear_scalar(self) -> bool:
@@ -55,7 +73,8 @@ class Block:
         return self.assignment is not None
 
     def __len__(self) -> int:
-        return len(self.unknowns)
+        """How many variables the block computes, torn or not -- its size before tearing."""
+        return len(self.unknowns) + len(self.torn)
 
 
 @dataclass(frozen=True)
