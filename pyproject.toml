@@ -185,6 +185,10 @@ ignore = [
     "D400",    # class docstrings become Modelica description strings, which take no period
     "ANN201",  # `def equations(self)` is the DSL's form; annotating 24 of them buys nothing
     "E741",    # `l` is the inductor, because `l` is the inductor in the `.mo` twin
+    "SIM300",  # `self.E == kinetic + strain + contact` is not a comparison with a Yoda side.
+               # `==` builds an equation here, the left-hand side is the variable it defines,
+               # and swapping the operands writes a different `.mo` -- which the twin test
+               # then reports as a mismatch with no obvious cause
 ]
 "tests/*" = [
     "S101",    # asserts are the point of tests

@@ -1,0 +1,70 @@
+summary = "A mass on a spring swinging into an elastic stop: the contact law is a user-written function, inlined into the equations."
+teaches = ["function", "algorithm section", "a one-sided contact law", "energy across an event"]
+requires = ["Translational"]
+
+[parse]
+classes = ["BumpStop"]
+
+[flatten]
+model = "BumpStop"
+states = ["mass.s", "mass.v"]
+index = 1
+balanced = true
+
+# m=1, c=4 -> the free swing has omega = 2 rad/s and would reach s = +1. The stop at
+# gap = 0.5 with k = 100 turns it around at s = 0.6517 instead, and the reference points
+# below come from integrating that piecewise-linear problem exactly: in each region the
+# equation is linear with constant coefficients, so the only numerics is finding the
+# instant s crosses the gap. Cross-checked against an independent solve_ivp at rtol 1e-12,
+# which agrees to 4e-10 at t = 10.
+[simulate]
+stop = 10.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 1.0
+values = { "mass.s" = 0.416146836547, "mass.v" = 1.818594853651 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 3.0
+values = { "mass.s" = -0.325443125892, "mass.v" = 1.891123234281 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 5.0
+values = { "mass.s" = -0.887625807718, "mass.v" = 0.921130664939 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 10.0
+values = { "mass.s" = -0.575759149055, "mass.v" = 1.635238700960 }
+rtol = 1e-8
+source = "analytic"
+
+# Nothing here dissipates, so the total energy is a constant of the motion -- and it is
+# computed *through the second function*, so this checks the inlining as well as the
+# physics. An event that lost energy would show up here and nowhere else.
+[[simulate.invariant]]
+expr = "E"
+value = 2.0
+atol = 1e-8
+
+# A stop pushes and never pulls. That is what makes the law one-sided, and it is the part
+# a linear spring could not express. The slack is the event locator's: the branch switches
+# where the root finder put the crossing, so the force is zero there to a few ulps of the
+# located instant and not to zero exactly. Measured worst excursion is -1.0e-7.
+[[simulate.invariant]]
+expr = "stop.f"
+min = 0.0
+max = 20.0
+atol = 1e-6
+
+# It never reaches the +1 a free swing would: the stop turns it at 0.6517.
+[[simulate.invariant]]
+expr = "mass.s"
+min = -1.0
+max = 0.66

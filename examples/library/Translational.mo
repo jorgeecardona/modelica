@@ -51,6 +51,38 @@ package Translational "Minimal 1-D translational mechanics, after Modelica.Mecha
     f = d * der(s_rel);
   end Damper;
 
+  function contactForce "Force from a one-sided elastic stop, zero until s_rel passes gap"
+    input Real s_rel(unit = "m");
+    input Real gap(unit = "m");
+    input Real k(unit = "N/m");
+    output Real f(unit = "N");
+  algorithm
+    f := 0.0;
+    if s_rel > gap then
+      f := k * (s_rel - gap);
+    end if;
+  end contactForce;
+
+  function contactEnergy "Strain energy stored in that stop -- the integral of contactForce"
+    input Real s_rel(unit = "m");
+    input Real gap(unit = "m");
+    input Real k(unit = "N/m");
+    output Real u(unit = "J");
+  algorithm
+    u := 0.0;
+    if s_rel > gap then
+      u := 0.5 * k * (s_rel - gap) ^ 2;
+    end if;
+  end contactEnergy;
+
+  model Stop "One-sided elastic contact, after Modelica.Mechanics.Translational.ElastoGap"
+    extends Compliant;
+    parameter Real k(unit = "N/m") = 100 "Contact stiffness";
+    parameter Position gap = 0.5 "Free travel before the stop is met";
+  equation
+    f = contactForce(s_rel, gap, k);
+  end Stop;
+
   model Fixed "Immovable ground point"
     parameter Position s0 = 0 "Position it is fixed at";
     Flange flange;
