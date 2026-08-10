@@ -1,8 +1,8 @@
 ---
 title: No work-precision harness, so every speed claim in the docs is unmeasured
-status: open
+status: in-progress
 area: sim
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
 kind: story
 scope: L
@@ -59,80 +59,84 @@ closes this is the measurement itself, on a machine that is named.
   explicit method takes 10^7-10^8 steps where a stiff one takes a few hundred, and no
   throughput figure shows that.
 
-## Partial, 2026-08-10: the harness exists and stage 1 is half measured
+## Stage 1, 2026-08-10
 
-`scripts/bench.py` and `moon run :bench`. Not closed: stage 1 has one of its two problems, and
-stages 2 and 3 are untouched. What follows is what was measured, including the two numbers
-that stopped it.
+`scripts/bench.py` and `moon run :bench`. Stage 1 is measured; stages 2 and 3 are not, and are
+split off below. `verify: probe` -- the numbers and the machine follow.
 
-### Robertson, and it is a real work-precision diagram
+x86_64, CPython 3.12.7, 51 output points, best of 2. Reference: `Radau` and `LSODA` at
+rtol = atol = 1e-12, **computed here, not the Bari published solution**.
 
-x86_64, CPython 3.12.7, to t = 1e4, 51 output points, best of 2. Reference: `Radau` and
-`LSODA` at rtol = atol = 1e-12, **computed here, not the Bari published solution**.
+### Robertson, to t = 1e4
 
 | method | rtol | seconds | rel error | steps |
 | --- | --- | --- | --- | --- |
-| Radau | 1e-4 | 0.0167 | 6.15e-05 | 87 |
-| Radau | 1e-6 | 0.0305 | 1.19e-06 | 134 |
-| Radau | 1e-8 | 0.0755 | 1.21e-08 | 293 |
-| Radau | 1e-10 | 0.2144 | 2.00e-10 | 797 |
-| BDF | 1e-4 | 0.0179 | 1.12e-03 | 135 |
-| BDF | 1e-6 | 0.0362 | 3.10e-05 | 226 |
-| BDF | 1e-8 | 0.0693 | 4.73e-07 | 396 |
-| BDF | 1e-10 | 0.1275 | 1.27e-08 | 709 |
-| LSODA | 1e-4 | 0.0035 | 1.57e-03 | 164 |
-| LSODA | 1e-6 | 0.0064 | 1.70e-04 | 285 |
-| LSODA | 1e-8 | 0.0122 | 6.61e-06 | 506 |
-| LSODA | 1e-10 | 0.0225 | 1.44e-06 | 906 |
+| Radau | 1e-4 | 0.0165 | 6.15e-05 | 87 |
+| Radau | 1e-6 | 0.0303 | 1.19e-06 | 134 |
+| Radau | 1e-8 | 0.0749 | 1.21e-08 | 293 |
+| BDF | 1e-4 | 0.0177 | 1.12e-03 | 135 |
+| BDF | 1e-6 | 0.0356 | 3.10e-05 | 226 |
+| BDF | 1e-8 | 0.0676 | 4.73e-07 | 396 |
+| LSODA | 1e-4 | 0.0034 | 1.57e-03 | 164 |
+| LSODA | 1e-6 | 0.0065 | 1.70e-04 | 285 |
+| LSODA | 1e-8 | 0.0123 | 6.61e-06 | 506 |
 
-**And this is why the diagram has two axes.** Compared at the same *requested tolerance*,
-`LSODA` looks 10x faster than `Radau`. Compared at the same *achieved error* -- about 1.3e-6 --
-`LSODA` takes 0.0225 s and `Radau` takes 0.0305 s, so it is 1.35x. The ten is an artefact of
-`LSODA` delivering four orders less accuracy than it was asked for; the 1.35 is the answer.
-Every speed claim made without an error axis is that first number.
+### VanDerPol, mu = 1000, to t = 20
 
-### `VanDerPol` stopped it, twice, and both are findings
+| method | rtol | seconds | rel error | steps |
+| --- | --- | --- | --- | --- |
+| Radau | 1e-4 | 0.7475 | 3.43e-04 | 2034 |
+| Radau | 1e-5 | 1.1472 | 4.40e-05 | 3317 |
+| Radau | 1e-6 | 1.8747 | 2.13e-06 | 5719 |
+| BDF | 1e-4 | 0.7471 | **4.33e-01** | 3513 |
+| BDF | 1e-5 | 1.0672 | 1.97e-02 | 5112 |
+| BDF | 1e-6 | 1.5668 | 4.27e-03 | 7714 |
+| LSODA | 1e-4 | 0.1107 | **9.60e-01** | 4442 |
+| LSODA | 1e-5 | 0.1400 | 3.97e-02 | 5659 |
+| LSODA | 1e-6 | 0.1728 | 2.30e-03 | 7086 |
 
-**It is too slow to sweep at its own horizon.** At mu = 1000 the period is about 1600, so the
-`.toml`'s stop of 3000 is two relaxation cycles. Measured with `Radau`:
+### What the two axes say, which one axis cannot
 
-    stop 3000   rtol 1e-04   118.3 s
-    stop  300   rtol 1e-04    11.7 s
-    stop  300   rtol 1e-10   265.4 s
-    stop   20   rtol 1e-10    16.5 s
+**On Robertson the tolerance-matched comparison is a lie by a factor of seven.** `LSODA` at
+1e-6 looks 4.7x faster than `Radau` at 1e-6. It is also delivering 1.70e-04 against
+1.19e-06 -- two orders worse than asked. At *matched error* near 1e-6, `Radau` takes 0.0303 s
+and `LSODA` needs better than its 1e-8 point, so the honest ratio is about 2x and possibly
+under 1. Every speed claim made without an error axis is the 4.7.
 
-A sweep of three methods over four tolerances at stop = 3000 is hours. The harness runs it to
-20, which is the first sharp corner, and says so where the number is set.
+**On VanDerPol it is worse than a lie, it is a different answer.** `LSODA` is 6.7x faster than
+`Radau` at every tolerance and its error at 1e-4 is **0.96 relative** -- it is not solving the
+problem. `BDF` at 1e-4 is 0.43. Only `Radau` tracks its own tolerance across the sweep, and it
+is the slowest of the three. A benchmark that reported seconds at a fixed tolerance would have
+ranked them exactly backwards.
 
-**A self-computed reference is not a reference for it.** At stop = 20 the harness refused to
-print a curve at all:
+That is the entry's thesis, measured: `docs/architecture.md:130` says "the target is to be
+*faster* on the classic problems", and on the harder of these two the fast solver is the one
+that is wrong.
 
-    the two reference methods disagree by 7.04e-08, which is more than the loosest
-    tolerance under test (1e-10) -- there is no error axis
+### How deep a sweep can go is measured, not chosen
 
-That is the guard doing its job. `Radau` and `LSODA` at rtol = atol = 1e-12 do not agree on
-this problem to better than 7e-8, so an error measured against either is measuring the
-reference. **`VanDerPol` needs the Bari published solution**, and that is now a concrete
-prerequisite rather than a preference -- which is the opposite of what the entry assumed when
-it listed the two problems together as equally ready.
+The reference has to be `MARGIN` = 10x better than the tightest point it grades. At
+rtol = atol = 1e-12 the two witnesses agree to **4.7e-11** relative on Robertson and **1.6e-8**
+on VanDerPol, so the sweeps stop at 1e-8 and 1e-6. Deeper than that on either needs the Bari
+values.
 
-### What is left
+**This corrected a table published earlier the same day.** The first version of the guard
+compared an *absolute* difference against the *loosest* tolerance in the sweep -- wrong twice,
+since a reference must beat the best point it grades rather than the worst, and 7e-8 means
+nothing until you know the state is order 1 rather than order 1e6. Under it, Robertson was
+swept to 1e-10 against a reference only 2x better. Those two rows were withdrawn.
 
-- **Stage 1, second half.** `VanDerPol` with the Bari reference values, which have to be
-  obtained rather than computed.
-- **Stage 2.** `HIRES`, `E5`, `Ring Modulator`. None is in the corpus; each is a model to
-  write and validate first.
-- **Stage 3.** `ScalableTestSuite`, which is an external Modelica library.
-- **No diagram is drawn.** `moon run :bench` prints a table and writes JSON. A plot is a
-  reader's convenience and the numbers are the claim.
+## Deliberately not done
 
-## Deliberately not done, found while doing it
-
-- **Not a CI gate**, as the entry required. `runInCI: false`, `cache: false`, and the reason
-  is at the task.
-- **`_SPARSE_STATES` is 16 and every problem here is under it**, so these numbers are the
-  dense path. A sparse work-precision curve is a different run and the harness does not force
-  either.
-- **The reference bar may be too generous.** The guard compares the two witnesses against the
-  *loosest* tolerance under test; a reference should be far tighter than the *tightest*. It
-  fired anyway on `VanDerPol`, so the weaker bar was enough this time.
+- Not a CI gate, as the entry required: `runInCI: false`, `cache: false`, reason at the task.
+- **No diagram is drawn.** `moon run :bench` prints the table and writes JSON. A plot is a
+  reader's convenience; the numbers are the claim.
+- **`VanDerPol` runs to 20 and not to its `.toml`'s 3000.** At mu = 1000 the period is about
+  1600, so 3000 is two relaxation cycles and costs 118 s at rtol 1e-4 alone; a tenth of one
+  cycle at 1e-10 costs 265 s. Twenty is the first sharp corner and it is a sweep somebody will
+  run. Stated where the number is set.
+- **Stages 2 and 3 are split off** rather than left implied here: `HIRES`, `E5` and
+  `Ring Modulator` are three models to write and validate before anything can be timed, and
+  `ScalableTestSuite` is an external library. Both are their own entries now.
+- **These are the dense-Jacobian path.** Every problem here is under `_SPARSE_STATES`, so none
+  of them exercises the sparse solve that landed the same day.

@@ -50,6 +50,10 @@ WITNESSES = ("Radau", "LSODA")
 TOLERANCES = (1e-4, 1e-6, 1e-8, 1e-10)
 METHODS = ("Radau", "BDF", "LSODA")
 
+#: A reference has to be this many times tighter than the tightest point it is the reference
+#: *for*. Ten is modest and it is the rule that decides how deep each sweep below can go.
+MARGIN = 10.0
+
 #: Stage 1 of `docs/ideas/benchmarks.md:84`: the two problems that are in a published test set
 #: *and* already in this corpus, with the horizon each is swept over.
 #:
@@ -63,7 +67,15 @@ METHODS = ("Radau", "BDF", "LSODA")
 #: A sweep of three methods over four tolerances at that horizon is hours. Twenty seconds of
 #: simulated time is the first sharp corner and it is 0.75 s to 16.5 s, which is a sweep
 #: somebody will actually run.
-PROBLEMS: dict[str, float] = {"Robertson": 1.0e4, "VanDerPol": 20.0}
+#: How deep each sweep goes is measured, not chosen, and the two problems differ. A reference
+#: computed here agrees with itself to 4.7e-11 relative on `Robertson` and only 1.6e-8 on
+#: `VanDerPol` -- whose states are order 2 and 4.5, so that is not a scaling artefact. Divided
+#: by `MARGIN` that supports 1e-8 and 1e-6 respectively, and no further. Anything deeper on
+#: either needs the Bari published values.
+PROBLEMS: dict[str, tuple[float, tuple[float, ...]]] = {
+    "Robertson": (1.0e4, (1e-4, 1e-6, 1e-8)),
+    "VanDerPol": (20.0, (1e-4, 1e-5, 1e-6)),
+}
 
 
 def system(stem: str) -> System:
@@ -77,12 +89,16 @@ def system(stem: str) -> System:
     return causalize(flatten(sources, stem))
 
 
-def reference(model: System, stop: float, grid: np.ndarray) -> np.ndarray:
+def reference(
+    model: System, stop: float, grid: np.ndarray, tolerances: tuple[float, ...]
+) -> np.ndarray:
     """The answer the error axis is measured against, and a check that it is one.
 
-    Two methods at `REFERENCE`, compared. If they disagree by more than the loosest tolerance
-    under test, the reference is not a reference and the run says so rather than quoting an
-    error against a number nobody should trust.
+    Two methods at `REFERENCE`, compared *relative to the size of the states*, and against the
+    **tightest** tolerance the sweep will ask for divided by `MARGIN`. The first version of
+    this compared an absolute difference against the loosest tolerance, which is wrong twice:
+    a reference has to be better than the best point it grades, not than the worst, and a
+    difference of 7e-8 means nothing until you know whether the state is 1 or 1e6.
     """
     answers = [
         sampled(
@@ -94,11 +110,15 @@ def reference(model: System, stop: float, grid: np.ndarray) -> np.ndarray:
         )
         for method in WITNESSES
     ]
-    spread = float(np.abs(answers[0] - answers[1]).max())
-    if spread > min(TOLERANCES):
+    scale = np.maximum(np.abs(answers[0]), 1.0)
+    spread = float(np.abs((answers[0] - answers[1]) / scale).max())
+    allowed = min(tolerances) / MARGIN
+    if spread > allowed:
         message = (
-            f"the two reference methods disagree by {spread:.2e}, which is more than the"
-            f" loosest tolerance under test ({min(TOLERANCES):.0e}) -- there is no error axis"
+            f"{model.name}: the two reference methods disagree by {spread:.2e} relative,"
+            f" and the tightest point asked for is {min(tolerances):.0e} -- a reference has to"
+            f" be {MARGIN:.0f}x better than that ({allowed:.1e}). Loosen the sweep or bring a"
+            " published reference."
         )
         raise SystemExit(message)
     return answers[0]
@@ -162,16 +182,16 @@ def run(repeats: int, points: int) -> dict[str, Any]:
     print(f"timing    best of {repeats}\n")
 
     collected: dict[str, Any] = {"machine": machine, "reference": REFERENCE, "problems": {}}
-    for stem, stop in PROBLEMS.items():
+    for stem, (stop, tolerances) in PROBLEMS.items():
         model = system(stem)
         grid = np.linspace(0.0, stop, points)
-        truth = reference(model, stop, grid)
+        truth = reference(model, stop, grid, tolerances)
         print(f"{stem}, to t = {stop:g}, {len(model.states)} states")
         print(f"  {'method':8s} {'rtol':>8s} {'seconds':>10s} {'rel error':>11s} {'steps':>7s}")
         collected["problems"][stem] = {"stop": stop, "curves": {}}
         for method in METHODS:
             curve: list[dict[str, float]] = []
-            for tolerance in TOLERANCES:
+            for tolerance in tolerances:
                 point = measure(model, stop, grid, method, tolerance, truth, repeats)
                 curve.append(point)
                 print(
