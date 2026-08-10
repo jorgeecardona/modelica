@@ -1,11 +1,12 @@
 ---
 title: The JIT compiles the kernel, not the step — the integrator loop is still Python
-status: in-progress
+status: done
 area: sim
 owner: cute-replicant-6e76d
 filed: 2026-08-03
 blocked_by:
   - work-precision-harness
+fixed_in: 331d226
 kind: story
 scope: L
 verify: probe
