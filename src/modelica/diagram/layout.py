@@ -373,6 +373,11 @@ def _force(graph: Graph, boxes: dict[str, Box]) -> None:
         temperature *= 0.985
 
     _separate(boxes)
+    # And *after* separating, because separating moves boxes and a junction has to land on
+    # the pins as they finally are. `_from_model` and `_loop` both did this and the force
+    # layout did not, so every junction in a force-laid model sat at wherever the springs
+    # left it -- aligned with none of its wires, and each one stair-stepping to reach the dot.
+    _junctions(graph, boxes)
 
 
 def _separate(boxes: dict[str, Box]) -> None:
