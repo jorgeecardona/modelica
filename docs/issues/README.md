@@ -90,8 +90,7 @@ cabildo issues show <slug>
 | [FMI 3.0 import — the mode table exists, the FMU reader does not](03-08-2026-fmi-import.md) | fmi | story | L | test | open | — |
 | [RoastingMachine's moisture is assumed, and Cropster has it measured per lot](03-08-2026-green-moisture-as-a-measurement.md) | sim | idea | S | probe | blocked · @jorge | — |
 | [`spatialDistribution()` — the one PDE the Association standardized, and we do not have it](03-08-2026-spatialdistribution.md) | sim | story | L | test | blocked | — |
-| [The JIT compiles the kernel, not the step — the integrator loop is still Python](03-08-2026-the-jit-compiles-the-kernel-not-the-step.md) | sim | story | L | probe | open | work-precision-harness |
-| [No work-precision harness, so every speed claim in the docs is unmeasured](03-08-2026-work-precision-harness.md) | sim | story | L | probe | in-progress · @cute-replicant-6e76d | — |
+| [The JIT compiles the kernel, not the step — the integrator loop is still Python](03-08-2026-the-jit-compiles-the-kernel-not-the-step.md) | sim | story | L | probe | open | — |
 | [A Result is readable only by this package, and the whole field reads one `.mat` format](03-08-2026-write-results-other-tools-can-read.md) | sim | story | M | test | open | — |
 | [An `initial equation` is parsed, flattened, carried on System — and read by nothing](04-08-2026-initial-equations-are-carried-and-never-read.md) | sim | bug | M | test | open | — |
 | [A model can be integrated and cannot be asked where it settles](09-08-2026-a-model-can-be-integrated-and-cannot-be-asked-where-it-settles.md) | sim | story | M | test | open | — |
@@ -101,11 +100,12 @@ cabildo issues show <slug>
 | [No corpus model is worth solving two ways — nothing has several zones under one schedule](09-08-2026-no-corpus-model-is-worth-solving-two-ways-nothing-has-several-zones.md) | sim | idea | M | test | open | a-model-can-be-integrated-and-cannot-be-asked-where-it-settles |
 | [Nothing fits a parameter to data, and the reason that is hard is that parameters trade off](09-08-2026-nothing-fits-a-parameter-to-data-and-the-reason-that-is-hard.md) | sim | idea | L | probe | open | the-parameter-derivative-has-a-name-reserved-for-it-in-the-emitter |
 | [The parameter derivative has a name reserved for it in the emitter and no code behind it](09-08-2026-the-parameter-derivative-has-a-name-reserved-for-it-in-the-emitter.md) | sim | story | S | test | open | — |
+| [Stages 2 and 3 of the benchmark: HIRES, E5, Ring Modulator, and ScalableTestSuite](10-08-2026-stages-2-and-3-of-the-benchmark-hires-e5-ring-modulator-and.md) | sim | story | L | probe | open | — |
 | [A fixed-step co-simulation schedule never branches, so it could be recorded once](03-08-2026-replay-a-fixed-step-cosimulation-schedule.md) | ssp | idea | M | probe | open | ssp-read-the-archive-and-run-the-master |
 | [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
 | [Chattering across instants is watched by a counter, and the checker cannot see it](03-08-2026-chattering-across-instants.md) | verify | idea | M | probe | open | — |
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_26 open — 23 open, 1 in-progress, 2 blocked; 27 done. Generated; edit the files, then `cabildo issues reindex`._
+_26 open — 24 open, 2 blocked; 28 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

@@ -1,9 +1,10 @@
 ---
 title: No work-precision harness, so every speed claim in the docs is unmeasured
-status: in-progress
+status: done
 area: sim
 owner: cute-replicant-6e76d
 filed: 2026-08-03
+fixed_in: 56a7b62
 kind: story
 scope: L
 verify: probe
