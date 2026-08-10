@@ -22,6 +22,9 @@ from typing import TYPE_CHECKING, Final
 from modelica.diagram.icon import FRAME, Disc, Label, Stroke
 from modelica.diagram.layout import CHAR, LINE, PAD, place
 
+_CLEARANCE: Final = 6.0
+"""How far a label stays from any component. The same bound the wires keep."""
+
 _PIXEL: Final = 0.05
 """Below this two points are one point, because the path is written to one decimal."""
 
@@ -158,10 +161,11 @@ def _edge_svg(edge: Edge, layout: Layout, kind: str) -> list[str]:
     parts = [f'<path class="link{weak}" d="{path}" fill="none"{marker} />']
     # A drawn pin needs no name beside it: the icon already says where the wire attaches,
     # and the label was only ever standing in for a pin nobody could see.
+    boxes = tuple(layout.boxes.values())
     if start is None:
-        parts.extend(_port_label(edge.source_port, x1, y1, source, target))
+        parts.extend(_port_label(edge.source_port, x1, y1, source, target, boxes))
     if end is None and _room(edge, (x1, y1), (x2, y2), near=start is None):
-        parts.extend(_port_label(edge.target_port, x2, y2, target, source))
+        parts.extend(_port_label(edge.target_port, x2, y2, target, source, boxes))
     return parts
 
 
@@ -357,7 +361,9 @@ def _path(points: list[tuple[float, float]]) -> str:
     )
 
 
-def _port_label(name: str, x: float, y: float, near: Box, far: Box) -> list[str]:
+def _port_label(  # noqa: PLR0913, PLR0917 - a name, where it starts, and what it must miss
+    name: str, x: float, y: float, near: Box, far: Box, boxes: tuple[Box, ...] = ()
+) -> list[str]:
     """The connector name, written just outside the box the line leaves.
 
     It sits beside the line and not on it. A character with a line through it is worse
@@ -373,13 +379,16 @@ def _port_label(name: str, x: float, y: float, near: Box, far: Box) -> list[str]
     # the plant's `y` on top of its own frame.
     at_x = at_y = 0.0
     clear = False
-    for reach in (13.0, 18.0, 24.0, 31.0, 40.0):
+    obstacles = boxes or (near, far)
+    for reach in (13.0, 18.0, 24.0, 31.0, 40.0, 50.0):
         at_x = x + dx / length * reach - dy / length * 6
         at_y = y + dy / length * reach + dx / length * 6 + 3.5
-        # Both boxes, not just the one it names: stepping out of its own component walks it
-        # toward the other, and a word on the wrong box is no more readable than a word on
-        # the right one.
-        clear = not _touching(at_x, at_y, name, near) and not _touching(at_x, at_y, name, far)
+        # Every box, and a *clearance* -- the two corrections the router needed, made here
+        # too. Stepping a word out of its own component walks it toward whatever else is
+        # there, and a word one pixel off an edge reads as stuck to it. Measured before this:
+        # twelve labels within 6 px of a box across the corpus, the worst at 0.9, `flange`
+        # pressed against `friction` in `DCMotor`.
+        clear = all(not _touching(at_x, at_y, name, box) for box in obstacles)
         if clear:
             break
     if not clear:
@@ -401,12 +410,13 @@ def _touching(x: float, y: float, name: str, box: Box) -> bool:
     about four fifths of the body character, which is the same arithmetic
     `tests/test_diagram_layout.py` uses to decide two labels have collided.
     """
-    half = len(name) * CHAR * 0.8 / 2
+    half = len(name) * CHAR * 0.8 / 2 + _CLEARANCE
+    reach = LINE / 2 + _CLEARANCE
     return (
         x - half < box.left + box.width
         and x + half > box.left
-        and y - LINE / 2 < box.top + box.height
-        and y + LINE / 2 > box.top
+        and y - reach < box.top + box.height
+        and y + reach > box.top
     )
 
 

@@ -191,6 +191,11 @@ def test_a_port_name_is_not_written_over_a_component(model: Path) -> None:
     `PIControl`'s feedback leaves the plant downward, and 13 px down from a pin on the
     bottom edge is still inside the block -- the plant's ``y`` was printed on its own frame.
     The renderer steps the name out along the wire until it clears.
+
+    A *clearance*, and against **every** box rather than the two the wire joins -- the same
+    two corrections the router needed. Measured before them: twelve labels within 6 px of a
+    box across the corpus, the worst at 0.9, ``flange`` pressed against ``friction`` in
+    `DCMotor`. A word one pixel off an edge reads as stuck to it.
     """
     import re  # noqa: PLC0415 - one test reads the output text
 
@@ -199,15 +204,18 @@ def test_a_port_name_is_not_written_over_a_component(model: Path) -> None:
         r'<text class="port" x="([-\d.]+)" y="([-\d.]+)"[^>]*>([^<]*)</text>', svg(graph)
     )
     for x, y, name in texts:
-        half = len(name) * CHAR * 0.8 / 2
+        half = len(name) * CHAR * 0.8 / 2 + CLEARANCE
+        reach = LINE / 2 + CLEARANCE
         for node_id, box in layout.boxes.items():
             over = (
                 float(x) - half < box.left + box.width
                 and float(x) + half > box.left
-                and float(y) - LINE / 2 < box.top + box.height
-                and float(y) + LINE / 2 > box.top
+                and float(y) - reach < box.top + box.height
+                and float(y) + reach > box.top
             )
-            assert not over, f"{model.stem}: {name!r} is written over {node_id}"
+            assert not over, (
+                f"{model.stem}: {name!r} is written over {node_id} or within {CLEARANCE:g}px of it"
+            )
 
 
 def _segments(path: str) -> list[tuple[tuple[float, float], tuple[float, float]]]:
