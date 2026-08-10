@@ -22,6 +22,9 @@ from typing import TYPE_CHECKING, Final
 from modelica.diagram.icon import FRAME, Disc, Label, Stroke
 from modelica.diagram.layout import CHAR, LINE, PAD, place
 
+_PIXEL: Final = 0.05
+"""Below this two points are one point, because the path is written to one decimal."""
+
 _STRAIGHT: Final = 1e-9
 """Cross product below which three points count as one line. Coordinates are pixels."""
 
@@ -74,20 +77,26 @@ def _escape(text: str) -> str:
 def _corner(box: Box, towards_x: float, towards_y: float) -> tuple[float, float]:
     """Where a wire attaches to a box: the **middle of the side** that faces the other one.
 
-    Not the point where a ray from centre to centre happens to leave the rectangle, which is
-    what this did before. That point slides along the edge as the other box moves, so two
-    components sitting at the same height attached at two *different* heights and the wire
-    between them had to jog -- two corners and a step of a few pixels, for nothing.
+    Which side is decided by direction, and **where on that side is decided by the other
+    end**: the point slides along the edge to meet it, clamped so it stays on the side and
+    off the rounded corners. A box edge is a whole side of attachment points and there is no
+    reason to insist on its midpoint -- insisting is what produced a two-corner jog with a
+    step of a few pixels between components that were nearly aligned already.
 
-    A side has one middle and it does not move. Two boxes facing each other across a gap
-    attach at the same height, and `_route` then has a straight line to draw.
+    A *pin* is different and is not routed through here: an icon says where its pin is, and a
+    wire that arrives anywhere else is a wire that misses. Only a plain box slides.
     """
     dx, dy = towards_x - box.x, towards_y - box.y
     if dx == 0 and dy == 0:
         return box.x, box.y
+    inset = 10.0  # keep the attachment off the rounded corners
     if abs(dx) >= abs(dy):
-        return (box.left + box.width if dx > 0 else box.left), box.y
-    return box.x, (box.top + box.height if dy > 0 else box.top)
+        side = box.left + box.width if dx > 0 else box.left
+        low, high = box.top + inset, box.top + box.height - inset
+        return side, min(max(towards_y, min(low, high)), max(low, high))
+    side = box.top + box.height if dy > 0 else box.top
+    low, high = box.left + inset, box.left + box.width - inset
+    return min(max(towards_x, min(low, high)), max(low, high)), side
 
 
 def _edge_svg(edge: Edge, layout: Layout, kind: str) -> list[str]:
@@ -127,8 +136,17 @@ def _edge_svg(edge: Edge, layout: Layout, kind: str) -> list[str]:
     # was leaving.
     aim = (source.x, under) if under is not None else (target.x, target.y)
     back = (target.x, under) if under is not None else (source.x, source.y)
+    # Twice, because a sliding attachment has to know where the *other* end actually landed.
+    # One pass aims each side at the other box's centre, and two boxes nearly aligned then
+    # slide past each other and still need a jog; the second pass re-aims at the point the
+    # first produced, and they meet. A pin does not move, so a wire with one converges after
+    # the first pass and a wire with two never moves at all.
     x1, y1 = start or _corner(source, *aim)
-    x2, y2 = end or _corner(target, *back)
+    # A wire going under aims at the dip at both ends; a forward one aims at the point the
+    # other end just landed on, which is what lets the two slide into line.
+    x2, y2 = end or _corner(target, *(back if under is not None else (x1, y1)))
+    if start is None and under is None:
+        x1, y1 = _corner(source, x2, y2)
     path = _route(
         (x1, y1),
         (x2, y2),
@@ -308,9 +326,16 @@ def _straighten(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
     other was emitted as five points on one line -- geometrically straight, and carrying four
     joints for a reader and a diff to wonder about.
     """
+
+    def same(a: tuple[float, float], b: tuple[float, float]) -> bool:
+        # To the precision the path is *written* at. `_path` formats to one decimal, so two
+        # points a thousandth apart print identically and the difference is a corner nobody
+        # can see and no reader can act on. Exact equality left those in.
+        return abs(a[0] - b[0]) < _PIXEL and abs(a[1] - b[1]) < _PIXEL
+
     kept: list[tuple[float, float]] = []
     for point in points:
-        if kept and point == kept[-1]:
+        if kept and same(point, kept[-1]):
             continue
         if len(kept) >= 2:  # noqa: PLR2004 - a reversal needs two points behind it
             (ax, ay), (bx, by) = kept[-2], kept[-1]
@@ -318,7 +343,7 @@ def _straighten(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
             second = (point[0] - bx, point[1] - by)
             if first[0] * second[0] + first[1] * second[1] < 0:
                 kept.pop()
-                if kept and point == kept[-1]:
+                if kept and same(point, kept[-1]):
                     continue
             elif abs(first[0] * second[1] - first[1] * second[0]) < _STRAIGHT:
                 kept.pop()  # straight on: the middle point is not a corner

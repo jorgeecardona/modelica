@@ -32,6 +32,10 @@ if TYPE_CHECKING:
     from modelica.diagram.graph import Graph
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+
+CLEARANCE = 6.0
+"""How far a wire stays from a component it does not attach to. Measured over the corpus:
+nothing today comes closer, so this is a floor and not a target."""
 MODELS = sorted((EXAMPLES / "models").glob("*.mo"))
 
 
@@ -214,8 +218,14 @@ def _segments(path: str) -> list[tuple[tuple[float, float], tuple[float, float]]
 
 
 def _crosses(a: tuple[float, float], b: tuple[float, float], box: Box) -> bool:
-    """Whether the axis-aligned segment ``a``-``b`` passes through ``box``'s interior."""
-    pad = 2.0
+    """Whether the segment ``a``-``b`` comes within `CLEARANCE` of ``box``.
+
+    Clearance and not overlap. A wire laid exactly along an edge does not cross anything and
+    reads as though it were glued to the box -- "lines living tangential to the boxes", which
+    is the complaint that produced this bound. A negative pad grows the rectangle instead of
+    shrinking it, which is the whole change from the first version.
+    """
+    pad = -CLEARANCE
     low_x, high_x = box.left + pad, box.left + box.width - pad
     low_y, high_y = box.top + pad, box.top + box.height - pad
     (x1, y1), (x2, y2) = a, b
@@ -236,6 +246,9 @@ def test_no_wire_runs_through_a_component_it_does_not_touch(model: Path, depth: 
     at the *ends* of a wire and nothing about what lay between them; it is given every box
     now, and picks the middle segment that clears all of them.
 
+    Held to a *clearance* rather than to non-overlap, because a wire laid along an edge is
+    the same fault seen from one pixel away.
+
     Checked at both depths, because the first version of this test only looked at the closed
     picture and found nothing -- the crossing is only reachable once a component is opened.
     """
@@ -254,7 +267,7 @@ def test_no_wire_runs_through_a_component_it_does_not_touch(model: Path, depth: 
             through = [a for a, b in _segments(path) if _crosses(a, b, box)]
             assert not through, (
                 f"{model.stem} at depth {depth}: the wire {edge.source} -> {edge.target}"
-                f" runs through {node_id}"
+                f" runs through {node_id} or within {CLEARANCE:g}px of it"
             )
 
 
