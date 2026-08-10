@@ -238,3 +238,72 @@ def test_a_zero_pivot_is_an_infinity_in_both_tiers() -> None:
         " _accelerate has lost error_model='numpy'"
     )
     assert np.isnan(compiled(0.0, 0.0))
+
+
+def test_the_fused_loop_compiles_and_lands_where_the_interpreted_one_does() -> None:
+    """`modelica.sim.radau`, compiled, against the same loop run as ordinary Python.
+
+    This is the one question `tests/test_radau.py` cannot ask. That file holds the loop to
+    the corpus's own reference points and it does so interpreted, because numba is not in the
+    normal environment; here the identical code path is compiled and the two are differenced
+    bit for bit. Anything that fails only under compilation -- a type numba widens, a complex
+    array it lays out differently, a branch it constant-folds -- shows up as a difference and
+    nowhere else.
+
+    The *control flow* is compared exactly and the numbers are not, and the split is the
+    finding. Every counter matches -- 243 steps, 1 rejection, 1883 right-hand sides, 49
+    Jacobians -- so the compiled loop made every decision the interpreted one made, took the
+    same steps at the same sizes and accepted and rejected the same ones. The states differ
+    by 1.4e-15 relative at worst, a handful of units in the last place, which is what
+    contracting a multiply and an add into one instruction does to a sum: LLVM is allowed to
+    emit an FMA where CPython evaluates two roundings, and neither is the wrong answer.
+
+    Asserting bit equality here was the first version of this test and it failed on exactly
+    that. Keeping it would have meant either turning off an optimisation to satisfy a test or
+    weakening what is actually checked; comparing the decisions exactly and the arithmetic to
+    its own rounding checks more, not less.
+    """
+    import numpy as np  # noqa: PLC0415 - after the numba skip
+
+    from modelica.sim import radau  # noqa: PLC0415 - after the numba skip
+
+    system = _system("Robertson")
+    grid = np.linspace(0.0, 1.0e4, 33)
+    slow, slow_stats = radau.simulate(
+        system, stop=1.0e4, times=grid, tolerance=1e-8, absolute=1e-8, jit=False
+    )
+    fast, fast_stats = radau.simulate(
+        system, stop=1.0e4, times=grid, tolerance=1e-8, absolute=1e-8, jit=True
+    )
+
+    assert fast_stats.steps == slow_stats.steps, "the compiled loop took a different path"
+    assert fast_stats.evaluations == slow_stats.evaluations
+    assert fast_stats.jacobians == slow_stats.jacobians
+    assert fast_stats.rejected == slow_stats.rejected
+    assert fast_stats.factorisations == slow_stats.factorisations
+    assert fast_stats.status == slow_stats.status
+    for name in system.states:
+        assert fast[name] == pytest.approx(slow[name], rel=1e-13, abs=0.0), (
+            f"{name} moved further than rounding after compilation"
+        )
+
+
+def test_the_fused_loop_agrees_with_the_scipy_path() -> None:
+    """Two implementations of Radau IIA on one stiff problem, at matched tolerance.
+
+    The weaker of the two checks above and still the one worth having: `tests/test_radau.py`
+    proves this loop reaches the corpus's published points, and this proves that where the
+    corpus has nothing published -- every intermediate instant of a trajectory -- it tracks
+    the solver the rest of the project uses.
+    """
+    import numpy as np  # noqa: PLC0415 - after the numba skip
+
+    from modelica.sim import radau, simulate  # noqa: PLC0415 - after the numba skip
+
+    system = _system("Robertson")
+    grid = np.linspace(0.0, 1.0e4, 33)
+    theirs = simulate(system, stop=1.0e4, times=grid, tolerance=1e-10, absolute=1e-10)
+    mine, _ = radau.simulate(system, stop=1.0e4, times=grid, tolerance=1e-10, absolute=1e-10)
+    for name in system.states:
+        reference = np.array([theirs.at(float(t))[name] for t in grid])
+        assert mine[name] == pytest.approx(reference, rel=1e-6, abs=1e-12), name

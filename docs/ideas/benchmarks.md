@@ -60,8 +60,9 @@ general integrator cannot.
 * **It puts the right-hand side inside the integrator loop.** RADAU5 is a library. It calls
   the user's `F` through a function pointer, across a call boundary it cannot see through,
   and the parameters live in memory it must load. A JIT compiles the model and the
-  integrator together. The right-hand side is inlined, the parameters are constants, and
-  the folding happens once at compile time instead of once per stage per step.
+  integrator together, the parameters are constants, and the folding happens once at compile
+  time instead of once per stage per step. `modelica.sim.radau` is that loop, and
+  `moon run :bench-fused` puts it on the diagram beside the three SciPy methods.
 * **It differentiates the model.** The equations are held symbolically, so an analytic and
   sparse Jacobian is free. A black-box integrator must use finite differences. That costs
   *n* extra evaluations per Jacobian, and it injects truncation error into the Newton

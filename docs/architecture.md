@@ -115,8 +115,16 @@ can do three things that a precompiled library cannot.
 * **Put the right-hand side inside the integrator loop.** RADAU5 is a library. It calls the
   user's `F` through a function pointer, across a boundary the optimiser cannot see
   through, and the parameters live in memory it must load. A JIT compiles the model and the
-  step together. The right-hand side is inlined, and the parameters are folded to constants
-  once at compile time instead of loaded once per stage per step.
+  step together, and the parameters are folded to constants once at compile time instead of
+  loaded once per stage per step.
+
+    This one is done and measured. `modelica.sim.radau` is Radau IIA written in this
+    repository so that it compiles with the kernel rather than calling into it; the
+    parameter folding is `build(fold=True)`, which the loop inherits rather than performs.
+    Against `solve_ivp(method="Radau")` at *matched error* it is 74x to 162x on Robertson
+    and 211x to 327x on van der Pol, and it takes slightly fewer steps to get there. The
+    table and the machine are in the issue that did it; `moon run :bench-fused` reproduces
+    it.
 * **Differentiate the model.** The equations are held symbolically, so an analytic *and
   sparse* Jacobian is free. Its pattern falls straight out of the incidence matching that
   is already built. A black-box integrator must use finite differences: *n* extra

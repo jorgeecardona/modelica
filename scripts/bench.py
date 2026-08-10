@@ -21,6 +21,7 @@ says so.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import platform
 import time
@@ -32,7 +33,7 @@ import numpy as np
 
 from modelica.ir.causalize import causalize
 from modelica.lang import parse
-from modelica.sim import flatten
+from modelica.sim import flatten, radau
 from modelica.sim.solve import simulate
 
 if TYPE_CHECKING:
@@ -48,7 +49,30 @@ WITNESSES = ("Radau", "LSODA")
 #: What is swept. Coarse enough to be run often; the shape of a work-precision curve is
 #: visible over four decades and does not need eight.
 TOLERANCES = (1e-4, 1e-6, 1e-8, 1e-10)
-METHODS = ("Radau", "BDF", "LSODA")
+SCIPY = ("Radau", "BDF", "LSODA")
+
+#: The fused loop is `modelica.sim.radau`: the same Radau IIA method as the first of those,
+#: with the step compiled together with the model instead of calling into it from Python. It
+#: is on this diagram and not on a table of its own because that is the only comparison that
+#: settles anything -- it is a *different implementation of the same method*, so if fusion is
+#: worth having it shows up as the same curve shifted left, and if it is not, the two curves
+#: land on top of each other.
+#:
+#: numba is in no dependency group (`pyproject.toml` says why), so the column appears when it
+#: is importable and the table says so when it is not. `moon run :bench-fused` installs it.
+FUSED = "fused"
+
+
+def available() -> tuple[str, ...]:
+    """The methods this environment can actually run, which is not a constant."""
+    try:
+        importlib.import_module("numba")
+    except ImportError:
+        return SCIPY
+    return (*SCIPY, FUSED)
+
+
+METHODS = available()
 
 #: A reference has to be this many times tighter than the tightest point it is the reference
 #: *for*. Ten is modest and it is the rule that decides how deep each sweep below can go.
@@ -101,14 +125,7 @@ def reference(
     difference of 7e-8 means nothing until you know whether the state is 1 or 1e6.
     """
     answers = [
-        sampled(
-            simulate(
-                model, stop=stop, times=grid, tolerance=REFERENCE, absolute=REFERENCE, method=method
-            ),
-            model,
-            grid,
-        )
-        for method in WITNESSES
+        sampled(once(model, stop, grid, method, REFERENCE)[0], model, grid) for method in WITNESSES
     ]
     scale = np.maximum(np.abs(answers[0]), 1.0)
     spread = float(np.abs((answers[0] - answers[1]) / scale).max())
@@ -130,6 +147,29 @@ def sampled(result: Any, model: System, grid: np.ndarray) -> np.ndarray:
     return np.stack([result[name][at] for name in model.states])
 
 
+def once(
+    model: System, stop: float, grid: np.ndarray, method: str, tolerance: float
+) -> tuple[Any, int]:
+    """One run, by whichever path the method names, and how many steps it took.
+
+    The step count is exact for the fused loop, which counts them, and approximate for the
+    SciPy path, where the only thing available is the length of the returned trajectory --
+    the union of the solver's own steps with the requested output grid. At 51 output points
+    against hundreds of steps the union is the steps and the column is honest; at a coarse
+    tolerance where a method takes fewer steps than there are output points, it is not, and
+    that is why the fused column is the one that reports the real number.
+    """
+    if method == FUSED:
+        answer, stats = radau.simulate(
+            model, stop=stop, times=grid, tolerance=tolerance, absolute=tolerance, jit=True
+        )
+        return answer, stats.steps
+    result = simulate(
+        model, stop=stop, times=grid, tolerance=tolerance, absolute=tolerance, method=method
+    )
+    return result, len(result.time)
+
+
 def measure(
     model: System,
     stop: float,
@@ -144,27 +184,30 @@ def measure(
     Best of ``repeats`` rather than the mean. A benchmark on a shared laptop measures the
     machine's worst interruptions as much as the code; the minimum is the closest thing to
     the run with nothing else happening.
+
+    The minimum is also what keeps the fused column honest in the other direction. Its first
+    call compiles -- tens of seconds -- and every call after it does not, so the mean of three
+    would report a compile that a real run pays once per process and never inside a sweep.
+    The compile is a real cost and it is reported separately rather than smeared into the
+    per-run number.
     """
     times: list[float] = []
     started = time.perf_counter()
-    answer = simulate(
-        model, stop=stop, times=grid, tolerance=tolerance, absolute=tolerance, method=method
-    )
+    answer, steps = once(model, stop, grid, method, tolerance)
     times.append(time.perf_counter() - started)
     for _ in range(repeats - 1):
         started = time.perf_counter()
-        simulate(
-            model, stop=stop, times=grid, tolerance=tolerance, absolute=tolerance, method=method
-        )
+        once(model, stop, grid, method, tolerance)
         times.append(time.perf_counter() - started)
     got = sampled(answer, model, grid)
     scale = np.maximum(np.abs(truth), 1e-30)
     return {
         "tolerance": tolerance,
         "seconds": min(times),
+        "first": times[0],
         "relative_error": float(np.abs((got - truth) / scale).max()),
         "absolute_error": float(np.abs(got - truth).max()),
-        "samples": len(answer.time),
+        "steps": steps,
     }
 
 
@@ -179,7 +222,10 @@ def run(repeats: int, points: int) -> dict[str, Any]:
         f"reference {WITNESSES[0]} and {WITNESSES[1]} at rtol = atol = {REFERENCE:.0e},"
         " computed here -- not the Bari published solution"
     )
-    print(f"timing    best of {repeats}\n")
+    print(f"timing    best of {repeats}")
+    if FUSED not in METHODS:
+        print("fused     not measured -- numba is absent; run `moon run :bench-fused`")
+    print()
 
     collected: dict[str, Any] = {"machine": machine, "reference": REFERENCE, "problems": {}}
     for stem, (stop, tolerances) in PROBLEMS.items():
@@ -196,7 +242,12 @@ def run(repeats: int, points: int) -> dict[str, Any]:
                 curve.append(point)
                 print(
                     f"  {method:8s} {tolerance:8.0e} {point['seconds']:9.4f}s"
-                    f" {point['relative_error']:11.2e} {point['samples']:7d}"
+                    f" {point['relative_error']:11.2e} {point['steps']:7.0f}"
+                    + (
+                        f"   (first call {point['first']:.1f}s: compiling)"
+                        if point["first"] > 2.0 * point["seconds"]
+                        else ""
+                    )
                 )
             collected["problems"][stem]["curves"][method] = curve
         print()

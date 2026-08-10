@@ -10,6 +10,8 @@ into the two verbs that matter:
 * :func:`emit` and :func:`build` -- system in, generated source and callables out;
 * :func:`diverges` -- two tiers of one model in, the first block they disagree on out;
 * :func:`simulate` -- system in, a :class:`~modelica.sim.result.Result` out;
+* :mod:`modelica.sim.radau` -- the same, by a Radau IIA loop compiled together with the
+  model rather than handed to SciPy: much faster, and no events;
 * :func:`sweep` -- system and a list of parameter values in, one result per value out;
 * :func:`steady` -- system in, the state where it settles out.
 
