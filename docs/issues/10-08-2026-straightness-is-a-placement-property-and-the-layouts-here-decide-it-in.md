@@ -70,3 +70,35 @@ assignment step, and `_loop` walks a cycle onto a rectangle.
   with separate evidence.
 - **The force layout stays** as the fallback for a model that is neither a loop nor causal.
   Every measurement says it is adequate at that.
+
+## Tried 2026-08-10: a constraint added to the energy, and reverted
+
+The obvious next term after `ALIGN`: a ground is pushed below what it connects to. The rule
+already exists -- `tests/test_diagram_layout.py` asserts it -- but only as an assertion, after
+the fact, at the default depth. `DCMotor` opened one level breaks it: the ground sits at
+y = 377 and the thing it joins at y = 396, so the ground is *above* it, and since a ground's
+pin is on top of its stem the router has to send the wire up and over to reach it.
+
+Written as a term in `_force`, it made things **worse**: depth 2 went from 75 % of wires
+straight to 69 %, corners 19 to 25, and `DCMotor` at depth 2 still had its ground above the
+junction. Reverted.
+
+Why, and this is the useful part: **the thing a ground must be below is a junction, and a
+junction has no position of its own.** `_junctions` puts one "in the middle of what it joins",
+and pushing the ground down pushes the junction up, against the springs holding it between
+the components it sits between. The constraint spans two stages that cannot see each other.
+
+That is the same shape as the finding above. Straightness could not be fixed in the router
+because it is decided in placement; this cannot be fixed in placement because it is decided
+partly in a pass that runs afterwards. A term bolted onto one stage of a three-stage pipeline
+loses to the stage next door.
+
+**What that argues for** -- and this is a design note, not a measurement: placement should
+carry *constraints* rather than coordinates. Relative direction (this below that), minimum
+separation, which side a pin faces; then one solve for coordinates against a cost in which a
+bend is expensive. That is what a layered algorithm does at its coordinate-assignment step,
+and it is why Brandes-Köpf takes the ordering as given and solves the positions in one pass
+instead of nudging them.
+
+Recorded here rather than acted on, because it is a rewrite of `modelica.diagram.layout` and
+not an addition to it.
