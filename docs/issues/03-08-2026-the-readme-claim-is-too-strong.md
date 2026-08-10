@@ -4,6 +4,7 @@ status: done
 area: docs
 owner: cute-replicant-6e76d
 filed: 2026-08-03
+fixed_in: 5cdcd5e
 kind: bug
 scope: S
 verify: inspect
