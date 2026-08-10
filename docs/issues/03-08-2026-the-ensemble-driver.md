@@ -4,6 +4,7 @@ status: done
 area: sim
 owner: cute-replicant-6e76d
 filed: 2026-08-03
+fixed_in: 9fd418f
 kind: story
 scope: M
 verify: test
