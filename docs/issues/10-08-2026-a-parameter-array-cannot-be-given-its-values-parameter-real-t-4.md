@@ -89,7 +89,7 @@ Nested literals index successively, so a two-dimensional declaration works the s
   the first value, has the same number of parameters, the same shapes and the same equations;
   only the numbers say otherwise.
 - **A short binding is refused and says both numbers**, because silently short reads as a zero.
-- **A scalar binding still broadcasts.** `Real T[n](start = T_0)` gives every cell the same
+- **A scalar binding still broadcasts.** ``Real T[n]`` with a scalar start gives every cell the same
   start and every array in the corpus relies on it -- indexing into a scalar is the obvious way
   to make this feature work and `HeatBar` stop. It has its own test, holding `HeatBar` to the
   same 54.21324087 it has always given.
