@@ -150,6 +150,19 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# `scripts/` holds things somebody runs, not modules something imports. A benchmark whose
+# whole output is a table on stdout is the case: `print` is not a leftover here, it is the
+# product. The numeric rules relax for the same reason -- a measurement takes the knobs it
+# takes, and `scipy` and `Result` are typed loosely enough that `Any` at the boundary is
+# honest rather than lazy.
+"scripts/*.py" = [
+    "INP001",  # a script is not part of a package; nothing imports it
+    "T201",    # the table on stdout is what it is for
+    "ANN401",  # `Result` and `scipy.sparse` have no stubs worth naming at the boundary
+    "PLR0913", # a measurement takes a problem, a horizon, a method, a tolerance and a truth
+    "PLR0917",
+]
+
 # The pages under docs/notebooks are notebooks -- either jupytext percent format, where
 # `# %%` splits a `.py` into cells, or `.ipynb`. Both are executed by mkdocs-jupyter at build
 # time. A notebook is a script read top to bottom, not a module, so the rules that keep

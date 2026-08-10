@@ -49,6 +49,16 @@ tasks:
       --with numba pytest -q tests/test_jit.py
     inputs: ['src/**/*.py', 'tests/test_jit.py', 'examples/models/*', 'pyproject.toml']
 
+  # Work-precision, not a gate. `docs/ideas/benchmarks.md` argues the shape and
+  # `docs/issues` records why this is deliberately not in `ci`: a timing on a shared runner
+  # is noise, and a flaky performance gate teaches people to ignore the pipeline. Somebody
+  # runs this and records the number with the machine beside it.
+  bench:
+    command: 'uv run --extra sim python -u scripts/bench.py --out bench.json'
+    options:
+      cache: false
+      runInCI: false
+
   # The notebooks under docs/notebooks import the package and run it, so the numerics and the
   # model checker have to be here too -- this task builds the docs *and* executes them, which
   # is why `src/**/*.py` and `examples/**/*` are inputs: a change to either can break a page.
