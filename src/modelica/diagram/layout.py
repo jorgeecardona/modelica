@@ -233,6 +233,24 @@ def _pin_at(box: Box, port: str) -> tuple[float, float]:
 STEPS = 400
 """Iterations of the force layout. Enough to settle every model in the corpus."""
 
+ALIGN = 1.0
+"""How hard a connected pair is pulled into line, per unit of the offset being closed.
+
+Swept against the fraction of wires that come out straight, which is the thing it is for:
+
+    weight   straight (depth 1)   corners
+     0.0            50 %             30
+     0.5            64 %             21
+     1.0            75 %             13
+     1.5            53 %             29
+     2.5            53 %             29, and a rule fails
+
+Not monotonic, and that is the layout being a non-convex energy rather than the sweep being
+noisy: past about 1.5 the alignment term overpowers the springs, the arrangement settles into
+a different basin, and `_separate` then pushes boxes apart again along the axis just squeezed.
+At 2.5 a wire ends up too close to a component and `tests/test_diagram_layout.py` says so.
+"""
+
 GRAVITY = 0.6
 """How hard every box is pulled toward the centre, per unit of distance from it.
 
@@ -333,6 +351,16 @@ def _force(graph: Graph, boxes: dict[str, Box]) -> None:
             shift[source][1] -= dy / distance * pull
             shift[target][0] += dx / distance * pull
             shift[target][1] += dy / distance * pull
+            # Alignment. The springs pull a connected pair *together*; nothing pulled them
+            # into line, and a wire between two boxes that are not in line needs a corner
+            # however well the rest of the layout is doing. The offset that is already the
+            # smaller one is the one squeezed -- a pair almost level goes level, a pair
+            # almost stacked goes stacked -- so this sharpens a decision the spring has
+            # already made rather than making one of its own.
+            axis = 0 if abs(dx) <= abs(dy) else 1
+            offset = (dx, dy)[axis] * ALIGN
+            shift[source][axis] -= offset
+            shift[target][axis] += offset
         for node_id in ids:
             shift[node_id][0] -= boxes[node_id].x * GRAVITY
             shift[node_id][1] -= boxes[node_id].y * GRAVITY
