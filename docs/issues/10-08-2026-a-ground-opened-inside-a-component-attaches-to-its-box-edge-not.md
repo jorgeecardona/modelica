@@ -6,7 +6,7 @@ owner: null
 filed: 2026-08-10
 scope: S
 verify: inspect
-fixed_in: PENDING
+fixed_in: d170e21
 kind: bug
 ---
 
