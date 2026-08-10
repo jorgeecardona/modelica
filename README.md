@@ -23,15 +23,26 @@ experiment is left. Only the goal is. Python 3.12 or later.
 
 ## Why this exists
 
-Python has two halves of a Modelica toolchain, and not the middle.
+Python has the two ends of a Modelica toolchain and very little of the middle.
 [FMPy](https://github.com/CATIA-Systems/FMPy) and
 [PyFMI](https://github.com/modelon-community/PyFMI) *run* an FMU that some other tool
 compiled. The tools that compile Modelica — Dymola, OpenModelica, JModelica — are large
 programs, and none of them is Python.
 
-So two things are missing. Nothing in Python takes Modelica source all the way to a
-trajectory. And nothing treats the model itself — the flat equations, the incidence
-structure, the index — as an ordinary Python value that you can read and change.
+The middle is not empty. [pymoca](https://github.com/pymoca/pymoca) parses Modelica and
+flattens it, and Deltares runs it under [RTC-Tools](https://github.com/rtc-tools/rtc-tools)
+to control water systems: that is a `.mo` file to a trajectory, in Python, in industrial
+use. It gets there with a fixed step and smooth residuals, because its consumer is an
+optimizer.
+
+So the gap is narrower than "nothing does this", and it is two things. Nothing in Python
+takes Modelica source to a trajectory the way a *hybrid* model needs — adaptive stiff
+integration, index reduction, and events the solver stops at. And nothing treats the model
+itself — the flat equations, the incidence structure, the index — as an ordinary Python
+value that you can read and change.
+
+[What else exists](https://jorgeecardona.gitlab.io/pymodelica/ideas/landscape/) is the
+evidence for both halves of that, tool by tool.
 
 That gap is the project. Every stage is a value you can hold.
 
