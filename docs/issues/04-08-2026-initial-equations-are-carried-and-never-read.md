@@ -4,6 +4,7 @@ status: done
 area: sim
 owner: cute-replicant-6e76d
 filed: 2026-08-04
+fixed_in: b09a207
 kind: bug
 scope: M
 verify: test
