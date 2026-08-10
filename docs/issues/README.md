@@ -94,8 +94,7 @@ cabildo issues show <slug>
 | [A when-clause can only reinit a state, so no discrete variable in this engine remembers anything](09-08-2026-a-when-clause-can-only-reinit-a-state-so-no-discrete-variable.md) | sim | story | L | test | open | — |
 | [No component reads a measured signal, so nothing computed elsewhere can drive a model](09-08-2026-no-component-reads-a-measured-signal-so-nothing-computed-elsewhere-can-drive.md) | sim | story | S | test | blocked | — |
 | [No corpus model is worth solving two ways — nothing has several zones under one schedule](09-08-2026-no-corpus-model-is-worth-solving-two-ways-nothing-has-several-zones.md) | sim | idea | M | test | open | — |
-| [Nothing fits a parameter to data, and the reason that is hard is that parameters trade off](09-08-2026-nothing-fits-a-parameter-to-data-and-the-reason-that-is-hard.md) | sim | idea | L | probe | open | the-parameter-derivative-has-a-name-reserved-for-it-in-the-emitter |
-| [The parameter derivative has a name reserved for it in the emitter and no code behind it](09-08-2026-the-parameter-derivative-has-a-name-reserved-for-it-in-the-emitter.md) | sim | story | S | test | open | — |
+| [Nothing fits a parameter to data, and the reason that is hard is that parameters trade off](09-08-2026-nothing-fits-a-parameter-to-data-and-the-reason-that-is-hard.md) | sim | idea | L | probe | open | — |
 | [Stages 2 and 3 of the benchmark: HIRES, E5, Ring Modulator, and ScalableTestSuite](10-08-2026-stages-2-and-3-of-the-benchmark-hires-e5-ring-modulator-and.md) | sim | story | L | probe | open | — |
 | [A fixed-step co-simulation schedule never branches, so it could be recorded once](03-08-2026-replay-a-fixed-step-cosimulation-schedule.md) | ssp | idea | M | probe | open | ssp-read-the-archive-and-run-the-master |
 | [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
@@ -103,5 +102,5 @@ cabildo issues show <slug>
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_22 open — 19 open, 3 blocked; 35 done. Generated; edit the files, then `cabildo issues reindex`._
+_21 open — 18 open, 3 blocked; 36 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

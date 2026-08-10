@@ -1,9 +1,10 @@
 ---
 title: The parameter derivative has a name reserved for it in the emitter and no code behind it
-status: open
+status: done
 area: sim
 owner: null
 filed: 2026-08-09
+fixed_in: c1f22f3
 kind: story
 scope: S
 verify: test
