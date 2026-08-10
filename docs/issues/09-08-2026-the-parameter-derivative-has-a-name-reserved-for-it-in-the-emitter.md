@@ -99,3 +99,51 @@ Three things that then need doing and are not free:
 Verification is settled by precedent: `tests/test_examples.py` already compares `jacobian` and
 `observe_jacobian` against central differences on every corpus model, and the parameter
 partials go in beside them at the same tolerance. Nothing new has to be invented to check it.
+
+## What landed
+
+The reading above held. `Emitter.tangent(mode, seeds=None)` takes the seed set as an argument;
+`seeds is None` means the states and every existing caller keeps its default. Two lines change
+inside it — the width and which matrix the rows are sliced from — and the block walk, `chain`,
+`implicit` and the `sharing` pass are untouched. `differentiate` is now one of four callers.
+
+- **`emit(system, *, sensitivity=("k", "T_amb"))`** emits `jacobian_parameters(t, y, p, w, out)`
+  and `observe_jacobian_parameters(t, y, p, w, out)` beside the other five functions. A name the
+  system does not declare as a parameter raises `EmitError` at emit time, not at call time.
+- **Two more preamble constants**, `_pseed = np.eye(k)` and `_pnull = np.zeros(k)`, sized to the
+  chosen parameters and not to the states. A variable the seed cannot reach gets the shared
+  `_pnull` row, the same way the state jacobian gets `_null`.
+- **`Code.sensitivity` and `Kernel.sensitivity`** carry the names in column order, so a caller
+  can say which column is which. `build(system, sensitivity=(...))` threads through the cache
+  key, so a plain build and a sensitivity build are two entries and neither shadows the other.
+- Asking for nothing is the default and costs nothing: the two functions are still emitted, with
+  zero columns, and no model that does not ask for sensitivities changes by one character.
+
+**Derived parameters chain.** A parameter can be written in terms of others — `RoastingMachine`
+has `m_dry = m_green * (1 - moisture)` — and the equations read the derived one. The block walk
+begins after `parameters` has already run, so seeding only the named parameters leaves the chain
+broken at the binding and d/d(m_green) comes out exactly zero where the difference quotient says
+-0.0757. `tangent` now walks `ordered()` once before the blocks and differentiates each binding
+it can reach, which repairs it. Confirmed load-bearing by removing it: 1 failed, 23 passed.
+
+`tests/test_sensitivity.py`, 24 passed and 1 skipped. The central-difference comparison runs
+over every corpus model, against up to three parameters per model that the equations actually
+read, at the tolerance `test_examples.py` uses for `jacobian`. Checked by hand against algebra
+on `NewtonCooling`: `d(der)/dp = [[-65.0, 0.5]]` against `-(T - T_amb) = -65.0` and `k = 0.5`.
+
+## Deliberately not done, found while doing it
+
+- **The difference quotient has to hold the state fixed, and that is a fact about the models,
+  not about the emitter.** Several corpus models start a state *from* a parameter —
+  `RoastingMachine` has `m_w` beginning at `m_green * moisture`. Calling `start(0.0, p)` on both
+  sides of the difference therefore moves the state as well as the parameter, and differences a
+  quantity that is not the partial. The first RoastingMachine failure was this, in the test, and
+  the emitter was right. `dy(t)/dp` — the derivative that *does* include that motion — is the
+  trajectory sensitivity this issue already declined.
+- **No sensitivity for a folded kernel.** `fold=True` burns parameters in as literals and a
+  literal has no derivative; the two options compose only in the sense that the constant-folded
+  kernel is a different build. Passing both is not refused today and probably should be, but
+  refusing it is a guess about which one the caller meant.
+- **No sparsity for the parameter partials.** `jacobian` has `differentiate_sparse` and a
+  `_pattern`; these two are dense. A parameter column is dense far more often than a state
+  column — a parameter usually reaches most of the model — so the pattern would buy less.

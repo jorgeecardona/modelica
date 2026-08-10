@@ -581,6 +581,9 @@ class Code:
     """The workspace slot holding which state set is in use, or ``None`` for a model with
     only one -- which is most of them, and for those the generated source is unchanged."""
 
+    sensitivity: tuple[str, ...] = ()
+    """The parameters ``jacobian_parameters`` differentiates against, in column order."""
+
     sparsity: tuple[tuple[int, ...], ...] = ()
     """`modelica.ir.system.Mode.sparsity` for the chosen mode, carried so a caller holding
     only a `Code` can build the sparse structure ``jacobian_sparse`` fills."""
@@ -625,6 +628,13 @@ class Emitter:
 
     dialect: Dialect = PYTHON
     """Which language the expressions come out in. The *decisions* are the same either way."""
+
+    sensitivity: tuple[str, ...] = ()
+    """Parameters to differentiate against, and the width of the sensitivity rows.
+
+    Empty is the default and emits the two functions as stubs, because a model nobody is
+    fitting should not pay for rows it will never read.
+    """
 
     fold: bool = False
     """Burn the parameters in as literals instead of reading them out of ``p``.
@@ -995,7 +1005,9 @@ class Emitter:
             lines.extend(self.chain(name, value, carried))
         return lines
 
-    def tangent(self, mode: Mode) -> tuple[list[str], dict[str, str]]:
+    def tangent(
+        self, mode: Mode, seeds: Sequence[str] | None = None
+    ) -> tuple[list[str], dict[str, str]]:
         """Forward mode over the very blocks the right-hand side runs, and what it reached.
 
         One row vector per variable rather than one scalar per (variable, state) pair. The
@@ -1009,22 +1021,43 @@ class Emitter:
         whose derivative is another state costs nothing at all: its row *is* a row of the
         identity, and it is handed straight to ``out``.
 
+        ``seeds`` is what the rows are seeded from, and defaults to the states. Nothing else
+        in this method knows the difference: the walk over the blocks, `chain`, `implicit`
+        and the sharing pass are all written in terms of ``carried``, a mapping from a
+        variable to the name of its tangent row. Seeding the *parameters* instead is what
+        `differentiate_parameters` does, and it is the whole of the change.
+
         The mapping that comes back says which variables have a tangent at all. A name that
         is missing from it is structurally independent of every state, which is a different
         thing from having a tangent that happens to be zero, and the two callers below both
         turn it into the shared zero row rather than into an allocation.
         """
-        width = len(mode.states)
+        seeded = tuple(mode.states) if seeds is None else tuple(seeds)
+        width = len(seeded)
+        matrix = "_seed" if seeds is None else "_pseed"
         head = list(self.unpack(mode))
         carried: dict[str, str] = {}
-        for slot, state in enumerate(mode.states):
-            head.append(f"{self.tangents[state]} = _seed[{slot}]")
+        for slot, name in enumerate(seeded):
+            head.append(f"{self.tangents[name]} = {matrix}[{slot}]")
+        # A parameter may be written in terms of others -- `RoastingMachine` has
+        # `m_dry = m_green * (1 - moisture)` -- and the equations read the *derived* one. The
+        # block walk below starts after `parameters` has run, so without this the chain stops
+        # at the seed and the sensitivity to `m_green` comes out zero where it is not.
+        chained: dict[str, str] = {name: self.tangents[name] for name in seeded}
+        if seeds is not None:
+            for variable in self.ordered():
+                if variable.name in chained or variable.binding is None:
+                    continue
+                total = self.combination(variable.binding, chained)
+                if total is not None:
+                    chained[variable.name] = self.tangents[variable.name]
+                    head.append(f"{self.tangents[variable.name]} = {total}")
 
         def body() -> list[str]:
             # Rebuilt from scratch on each pass, because `sharing` runs this twice and the
             # second run is the one whose `carried` the callers read.
             carried.clear()
-            carried.update({state: self.tangents[state] for state in mode.states})
+            carried.update(chained)
             lines: list[str] = []
             for block in mode.blocks:
                 lines.extend(self.solve(block))
@@ -1073,6 +1106,41 @@ class Emitter:
             if columns and row is not None:
                 lines.append(f"out[{at}:{at + len(columns)}] = {row}[_pattern[{slot}]]")
             at += len(columns)
+        return [*lines, "return out"]
+
+    def differentiate_parameters(self, mode: Mode) -> list[str]:
+        """``d(der)/dp`` -- the sensitivity, for the parameters the caller asked about.
+
+        The same forward mode as `differentiate` with the seed moved: rows start on the
+        parameters instead of on the states, and every block downstream carries them the
+        same way. Identification and uncertainty propagation are what want this, and both
+        want it *exact* -- differencing it costs one evaluation per parameter and puts
+        truncation error into the thing being fitted.
+
+        Which parameters is a compile-time choice and not a runtime one, because it sets the
+        width of every tangent row in the function. A model with forty parameters asked about
+        three emits three columns.
+        """
+        lines, carried = self.tangent(mode, self.sensitivity)
+        lines.extend(
+            f"out[{slot}] = {carried.get(mode.derivative[state]) or '_pnull'}"
+            for slot, state in enumerate(mode.states)
+        )
+        return [*lines, "return out"]
+
+    def differentiate_observed_parameters(self, mode: Mode) -> list[str]:
+        """``d(observed)/dp``. `differentiate_parameters` read off one step earlier."""
+        lines, carried = self.tangent(mode, self.sensitivity)
+        lines.extend(
+            f"{self.symbols[name]} = {self.expr(node)}"
+            for name, node in self.system.aliases.items()
+        )
+        for name, node in self.system.aliases.items():
+            lines.extend(self.chain(name, node, carried))
+        lines.extend(
+            f"out[{slot}] = {carried.get(name) or '_pnull'}"
+            for slot, name in enumerate(self.observed)
+        )
         return [*lines, "return out"]
 
     def differentiate_observed(self, mode: Mode) -> list[str]:
@@ -1336,7 +1404,12 @@ class Emitter:
         width = len(self.system.states)
         parts = [
             "import numpy as np",
-            f"_seed = np.eye({width})\n_null = np.zeros({width})\n_pattern = {_pattern(self.system)}",
+            (
+                f"_seed = np.eye({width})\n_null = np.zeros({width})"
+                f"\n_pattern = {_pattern(self.system)}"
+                f"\n_pseed = np.eye({len(self.sensitivity)})"
+                f"\n_pnull = np.zeros({len(self.sensitivity)})"
+            ),
             self.parameters(),
             self.initial(),
             self.latches(),
@@ -1348,6 +1421,16 @@ class Emitter:
                 [self.differentiate_sparse(m) for m in modes],
             ),
             self.dispatch("observe", "t, y, p, w, out", [self.observe(m) for m in modes]),
+            self.dispatch(
+                "jacobian_parameters",
+                "t, y, p, w, out",
+                [self.differentiate_parameters(m) for m in modes],
+            ),
+            self.dispatch(
+                "observe_jacobian_parameters",
+                "t, y, p, w, out",
+                [self.differentiate_observed_parameters(m) for m in modes],
+            ),
             self.dispatch(
                 "observe_jacobian",
                 "t, y, p, w, out",
@@ -1374,6 +1457,7 @@ class Emitter:
             workspace=len(self.observed) + len(self.watched) + (0 if self.switching is None else 1),
             switching=self.switching,
             sparsity=self.system.mode.sparsity,
+            sensitivity=self.sensitivity,
         )
 
 
@@ -1454,11 +1538,16 @@ def _as_literal(value: Value) -> ir.Expr:
     return ir.RealLiteral(float(value))
 
 
-def emit(system: System, *, fold: bool = False) -> Code:
+def emit(system: System, *, fold: bool = False, sensitivity: Sequence[str] = ()) -> Code:
     """Write ``system`` out as a Python module, ready to be compiled.
 
     ``fold`` picks the compile mode. The default leaves the parameters as an argument, so one
     artefact serves a whole sweep; ``fold=True`` burns their values in as literals and lets
     `simplify` fold everything downstream of them.
     """
-    return Emitter(system, fold=fold).code()
+    known = {v.name for v in system.parameters}
+    for name in sensitivity:
+        if name not in known:
+            message = f"{system.name} has no parameter {name!r} to differentiate against"
+            raise EmitError(message)
+    return Emitter(system, fold=fold, sensitivity=tuple(sensitivity)).code()

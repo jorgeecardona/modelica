@@ -24,6 +24,8 @@ import numpy as np
 from modelica.sim.emit import Code, emit
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from numpy.typing import NDArray
 
     from modelica.ir.system import System
@@ -101,6 +103,10 @@ class Kernel:
     rhs: _Evaluate
     jacobian: _Evaluate
     jacobian_sparse: _Evaluate
+    jacobian_parameters: _Evaluate
+    """``d(der)/dp`` over `Code.sensitivity`. Empty columns when nobody asked for any."""
+
+    observe_jacobian_parameters: _Evaluate
     """The same Jacobian as ``jacobian``, written as its non-zeros in `Code.sparsity` order.
 
     A separate entry point rather than a mode of the first, because the two fill differently
@@ -160,7 +166,13 @@ measured to choose it, and if a workload ever wants more this is the number to c
 """
 
 
-def build(model: System | Code, *, jit: bool = False, fold: bool = False) -> Kernel:
+def build(
+    model: System | Code,
+    *,
+    jit: bool = False,
+    fold: bool = False,
+    sensitivity: Sequence[str] = (),
+) -> Kernel:
     """Compile a system (or already-emitted code) into callables.
 
     Cached on the *content* of ``model``, which is what `docs/ideas/backends.md:70` asks for:
@@ -188,7 +200,7 @@ def build(model: System | Code, *, jit: bool = False, fold: bool = False) -> Ker
     repo, since `modelica.sim.solve.simulate` always passes the keyword. Decorating `build`
     directly compiled the same model twice and reported a hit rate that looked fine.
     """
-    return _compiled(model, jit, fold)
+    return _compiled(model, jit, fold, tuple(sensitivity))
 
 
 @lru_cache(maxsize=CACHED)
@@ -196,8 +208,9 @@ def _compiled(
     model: System | Code,
     jit: bool,  # noqa: FBT001 - positional so `lru_cache` sees one key per call shape
     fold: bool,  # noqa: FBT001 - the same reason
+    sensitivity: tuple[str, ...],
 ) -> Kernel:
-    code = model if isinstance(model, Code) else emit(model, fold=fold)
+    code = model if isinstance(model, Code) else emit(model, fold=fold, sensitivity=sensitivity)
     namespace: dict[str, Any] = {"np": np}
     exec(compile(code.source, f"<modelica:{code.name}>", "exec"), namespace)  # noqa: S102
     if jit:
@@ -210,6 +223,8 @@ def _compiled(
         rhs=namespace["rhs"],
         jacobian=namespace["jacobian"],
         jacobian_sparse=namespace["jacobian_sparse"],
+        jacobian_parameters=namespace["jacobian_parameters"],
+        observe_jacobian_parameters=namespace["observe_jacobian_parameters"],
         observe=namespace["observe"],
         observe_jacobian=namespace["observe_jacobian"],
         indicators=namespace["indicators"],
