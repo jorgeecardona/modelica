@@ -1,11 +1,12 @@
 ---
 title: A wire leaves a pin and runs straight back through the component it just left
-status: open
+status: done
 area: diagram
 owner: null
 filed: 2026-08-10
 scope: S
 verify: inspect
+fixed_in: PENDING
 kind: bug
 ---
 
@@ -91,3 +92,34 @@ box at the pin and nowhere else.
 - Nothing about `_pin`, which was the first diagnosis and is not the fault. The original text
   is left above rather than rewritten, because a wrong diagnosis that reads plausibly is worth
   keeping visible next to the measurement that overturned it.
+
+## Fixed
+
+`render._around`. When one stub is horizontal and the other vertical the route is an L, and
+the corner sits on the far side of whichever box the vertical stub belongs to -- usually empty
+space, and for a ground the middle of its own bars. The corner now steps out past the edge
+first: three segments instead of two, and the wire goes round the symbol it left.
+
+    before   M 596.0 343.2  L 596.0 390.0  L 451.6 390.0
+    after    the corner is taken out past the box, and the ground joins at its stem
+
+The other two the measurement reported are **not** defects and the measurement was too
+blunt: a two-pin component's wire runs along the component's own axis, so a resistor's leads
+legitimately cross its box. Only a pin on the *far side* of its own symbol -- a ground's, at
+the top of its stem, with the circuit below -- produces the real fault.
+
+## What was tried and reverted
+
+Making `_straighten` refuse to drop a reversal that would leave the wire inside its own box.
+It looked like the mechanism and it is not: the stub *was* being dropped as a reversal, but
+keeping it merely traded one fault for another. Two wires then carried a false corner --
+`(195.4, 486.8) -> (70.2, 486.8) -> (82.3, 486.8)`, out and straight back -- and
+`test_a_wire_bends_only_where_it_has_to` failed. Reverted, and the detour is the fix that
+does not need it.
+
+## Deliberately not done
+
+- **The measurement is not kept as a test.** It flags a resistor's own leads, and a rule that
+  fires on correct output is worse than no rule. What would be worth writing is narrower: a
+  wire may not cross its own box *on the far side of its pin*, and that needs the pin's
+  outward direction, which the test would have to recompute.

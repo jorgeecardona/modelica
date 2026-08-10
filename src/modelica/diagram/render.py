@@ -258,7 +258,9 @@ def _route(  # noqa: PLR0913 - two points, two boxes, and the two ways round an 
     a, _ = _stub(start, source)
     b, _ = _stub(end, target)
     if under is not None:
-        return _path(_straighten([start, (start[0], under), (end[0], under), end]))
+        return _path(
+            _no_false_corners(_straighten([start, (start[0], under), (end[0], under), end]))
+        )
     a, a_horizontal = _stub(start, source)
     b, b_horizontal = _stub(end, target)
     if a_horizontal and b_horizontal:
@@ -268,10 +270,49 @@ def _route(  # noqa: PLR0913 - two points, two boxes, and the two ways round an 
         middle = _clear((a[1] + b[1]) / 2, a[1], b[1], obstacles, vertical=False)
         points = [start, a, (a[0], middle), (b[0], middle), b, end]
     elif a_horizontal:
-        points = [start, a, (b[0], a[1]), b, end]
+        points = _around([start, a, (b[0], a[1]), b, end], a, b, source, vertical=False)
     else:
-        points = [start, a, (a[0], b[1]), b, end]
-    return _path(_straighten(points))
+        points = _around([start, a, (a[0], b[1]), b, end], a, b, source, vertical=True)
+    return _path(_no_false_corners(_straighten(points)))
+
+
+def _around(
+    points: list[tuple[float, float]],
+    a: tuple[float, float],
+    b: tuple[float, float],
+    source: Box | None,
+    *,
+    vertical: bool,
+) -> list[tuple[float, float]]:
+    """Take the corner out past the box when going straight to it would cut through.
+
+    One stub horizontal and one vertical gives an L, and the corner sits on the far side of
+    whichever box the vertical stub belongs to. Usually that is empty space. When the pin is
+    on the *opposite* side of its own symbol from the thing it connects to -- a ground's, at
+    the top of its stem, with the circuit below and to the left -- the L folds straight back
+    down through the bars.
+
+    So the corner steps out past the edge first. Three segments instead of two, and the wire
+    goes round the symbol it left instead of through it.
+    """
+    if source is None:
+        return points
+    inset = min(source.width, source.height) / 3
+    if vertical:
+        low, high = source.top + inset, source.top + source.height - inset
+        crosses = min(a[1], b[1]) < high and max(a[1], b[1]) > low
+        if not (crosses and source.left < a[0] < source.left + source.width):
+            return points
+        side = (
+            source.left - _CLEARANCE if b[0] < source.x else source.left + source.width + _CLEARANCE
+        )
+        return [points[0], a, (side, a[1]), (side, b[1]), b, points[-1]]
+    low, high = source.left + inset, source.left + source.width - inset
+    crosses = min(a[0], b[0]) < high and max(a[0], b[0]) > low
+    if not (crosses and source.top < a[1] < source.top + source.height):
+        return points
+    side = source.top - _CLEARANCE if b[1] < source.y else source.top + source.height + _CLEARANCE
+    return [points[0], a, (a[0], side), (b[0], side), b, points[-1]]
 
 
 def _clear(
@@ -351,6 +392,24 @@ def _straighten(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
                     continue
             elif abs(first[0] * second[1] - first[1] * second[0]) < _STRAIGHT:
                 kept.pop()  # straight on: the middle point is not a corner
+        kept.append(point)
+    return kept
+
+
+def _no_false_corners(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """One last pass for a point the wire runs straight through.
+
+    `_straighten` drops those as it goes. `_around` can insert one *after* it has run, by
+    taking a corner out past a box on a line the wire was already on, so this sweeps again.
+    """
+    kept = list(points[:1])
+    for point in points[1:]:
+        if len(kept) >= 2:  # noqa: PLR2004 - a straight-through needs two points behind it
+            (ax, ay), (bx, by) = kept[-2], kept[-1]
+            turn = (bx - ax) * (point[1] - by) - (by - ay) * (point[0] - bx)
+            onward = (bx - ax) * (point[0] - bx) + (by - ay) * (point[1] - by)
+            if abs(turn) < _STRAIGHT and onward >= 0:
+                kept.pop()
         kept.append(point)
     return kept
 
