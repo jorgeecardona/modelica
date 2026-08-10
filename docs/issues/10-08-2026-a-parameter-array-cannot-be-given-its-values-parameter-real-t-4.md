@@ -24,7 +24,7 @@ model T
 
 The binding on an array-valued component becomes an array equation -- `ts = {0.0, 1.0, ...}` --
 and `modelica.sim.emit` refuses those. `HeatBar` gets away with it because every one of its
-arrays is given a *scalar* start (`Real T[n](start = T_0, fixed = true)`), which broadcasts;
+arrays is given a *scalar* start ``Real T[n]`` with a scalar ``start``, which broadcasts;
 the moment a component needs different values per element there is no way to say so.
 
 A second wall stands next to it, and a table lookup meets both. A function body cannot loop:
