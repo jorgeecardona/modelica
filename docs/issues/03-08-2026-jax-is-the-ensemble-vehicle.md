@@ -152,12 +152,23 @@ now done elsewhere.
 - **No JAX dependency, and none proposed.** The probe ran in a throwaway environment
   (`uv venv` plus `jax[cpu]`). If this became a backend it would sit behind an extra, like
   `verify` and `sundials`.
-- **No GPU number.** The machine has a Quadro T2000 -- Turing, where fp64 runs at 1/32 rate,
-  which is exactly the objection `docs/ideas/vulkan.md:56` raises -- and the stock jaxlib is
-  CPU-only. A CUDA jaxlib install was started and had not finished when this was written; it
-  is a download of about a gigabyte for a card whose double-precision throughput is the thing
-  under suspicion. **The CPU number is the one that decides this entry**, because it is
-  already 383x and it needs no device at all, which was the argument.
+- **No GPU number, and the reason is the environment rather than JAX.** The machine has a
+  Quadro T2000 -- Turing, where fp64 runs at 1/32 rate, which is exactly the objection
+  `docs/ideas/vulkan.md:56` raises. The CUDA jaxlib *was* installed and the attempt was made:
+
+      nvidia-smi          NVIDIA-SMI 550.163.01, Driver 550.163.01, CUDA 12.4
+      /dev/nvidia0        present, crw-rw-rw-
+      cuInit(0)           999  (CUDA_ERROR_UNKNOWN)
+      jax.devices()       [CpuDevice(id=0)]
+
+  The driver answers, the device nodes are readable, and `cuInit` fails anyway -- which is
+  what a sandbox that does not pass the GPU through looks like from the inside. Nothing here
+  is evidence about the card.
+
+  **The CPU number is the one that decides this entry** in any case, because it is already
+  383x and it needs no device at all, which was the argument. A GPU run is worth having and
+  is not worth blocking on: whoever does it should run this probe outside the sandbox and add
+  a row.
 - **`odeint` has no event handling**, so the probe could not have integrated a model with
   events even if it could emit one. A real backend would need `diffrax`, which does, and
   which is a second dependency.
