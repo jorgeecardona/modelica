@@ -22,6 +22,9 @@ from typing import TYPE_CHECKING, Final
 from modelica.diagram.icon import FRAME, Disc, Label, Stroke
 from modelica.diagram.layout import CHAR, LINE, PAD, place
 
+_STRAIGHT: Final = 1e-9
+"""Cross product below which three points count as one line. Coordinates are pixels."""
+
 _BOTH_LABELS: Final = 60.0
 """How long a line has to be before two port names fit along it without touching."""
 
@@ -69,17 +72,22 @@ def _escape(text: str) -> str:
 
 
 def _corner(box: Box, towards_x: float, towards_y: float) -> tuple[float, float]:
-    """Where the line from the centre of ``box`` leaves it, aimed at a point."""
-    dx = towards_x - box.x
-    dy = towards_y - box.y
+    """Where a wire attaches to a box: the **middle of the side** that faces the other one.
+
+    Not the point where a ray from centre to centre happens to leave the rectangle, which is
+    what this did before. That point slides along the edge as the other box moves, so two
+    components sitting at the same height attached at two *different* heights and the wire
+    between them had to jog -- two corners and a step of a few pixels, for nothing.
+
+    A side has one middle and it does not move. Two boxes facing each other across a gap
+    attach at the same height, and `_route` then has a straight line to draw.
+    """
+    dx, dy = towards_x - box.x, towards_y - box.y
     if dx == 0 and dy == 0:
         return box.x, box.y
-    half_w = box.width / 2 + 2
-    half_h = box.height / 2 + 2
-    scale_x = half_w / abs(dx) if dx else float("inf")
-    scale_y = half_h / abs(dy) if dy else float("inf")
-    scale = min(scale_x, scale_y)
-    return box.x + dx * scale, box.y + dy * scale
+    if abs(dx) >= abs(dy):
+        return (box.left + box.width if dx > 0 else box.left), box.y
+    return box.x, (box.top + box.height if dy > 0 else box.top)
 
 
 def _edge_svg(edge: Edge, layout: Layout, kind: str) -> list[str]:
@@ -127,6 +135,7 @@ def _edge_svg(edge: Edge, layout: Layout, kind: str) -> list[str]:
         source if start else None,
         target if end else None,
         under=under,
+        obstacles=tuple(layout.boxes.values()),
     )
     parts = [f'<path class="link{weak}" d="{path}" fill="none"{marker} />']
     # A drawn pin needs no name beside it: the icon already says where the wire attaches,
@@ -202,13 +211,14 @@ def _under(source: Box, target: Box, layout: Layout) -> float | None:
     return max(box.top + box.height for box in layout.boxes.values()) + layout.below / 2
 
 
-def _route(
+def _route(  # noqa: PLR0913 - two points, two boxes, and the two ways round an obstacle
     start: tuple[float, float],
     end: tuple[float, float],
     source: Box | None,
     target: Box | None,
     *,
     under: float | None = None,
+    obstacles: tuple[Box, ...] = (),
 ) -> str:
     """An orthogonal wire: out of each pin along its own axis, then a Z between the stubs.
 
@@ -218,6 +228,10 @@ def _route(
 
     ``under`` overrides all of that with the one route a backward wire can take: down out of
     the source, along below everything, and up into the target.
+
+    ``obstacles`` are the boxes the middle segment must miss. The two at the ends are always
+    among them; the rest is why a wire in `DCMotor` no longer runs through the converter it
+    has nothing to do with.
     """
     a, _ = _stub(start, source)
     b, _ = _stub(end, target)
@@ -226,10 +240,10 @@ def _route(
     a, a_horizontal = _stub(start, source)
     b, b_horizontal = _stub(end, target)
     if a_horizontal and b_horizontal:
-        middle = _clear((a[0] + b[0]) / 2, a[0], b[0], source, target, vertical=True)
+        middle = _clear((a[0] + b[0]) / 2, a[0], b[0], obstacles, vertical=True)
         points = [start, a, (middle, a[1]), (middle, b[1]), b, end]
     elif not a_horizontal and not b_horizontal:
-        middle = _clear((a[1] + b[1]) / 2, a[1], b[1], source, target, vertical=False)
+        middle = _clear((a[1] + b[1]) / 2, a[1], b[1], obstacles, vertical=False)
         points = [start, a, (a[0], middle), (b[0], middle), b, end]
     elif a_horizontal:
         points = [start, a, (b[0], a[1]), b, end]
@@ -238,40 +252,61 @@ def _route(
     return _path(_straighten(points))
 
 
-def _clear(  # noqa: PLR0913 - a midline, its two ends, and what it must miss
+def _clear(
     middle: float,
     first: float,
     second: float,
-    source: Box | None,
-    target: Box | None,
+    obstacles: tuple[Box, ...],
     *,
     vertical: bool,
 ) -> float:
-    """Move the Z's middle line off any component it would otherwise cross.
+    """Put the Z's middle line where it crosses no component.
 
-    Two pins facing the same way put the midpoint *behind* one of them, so the wire runs
-    back across the symbol it just left before turning. Pushing the line past that symbol
-    is what the pin's own stub was for; this is the same intent, applied to the corner.
+    Two pins facing the same way put the midpoint *behind* one of them, so the wire runs back
+    across the symbol it just left before turning. That was the original case and the fix was
+    to step past whichever of the two boxes it landed in.
+
+    Every box, now, and not only the two at the ends. A wire between two components can run
+    straight through a third that has nothing to do with it -- `DCMotor` drew its winding to
+    its coil through the middle of the converter -- and a router that knows only its own
+    endpoints cannot see that.
+
+    Candidates are the two sides of every box in the way, plus the midpoint itself; the one
+    nearest the midpoint that clears *all* of them wins. If none does, the midpoint stands:
+    a wire through a box is bad and a wire teleported across the picture to avoid one is
+    worse, and there is no third option without a real router.
     """
-    for box in (source, target):
-        if box is None:
-            continue
+
+    def spans(box: Box) -> tuple[float, float]:
         low = (box.left if vertical else box.top) - 6
-        high = low + (box.width if vertical else box.height) + 12
-        if low < middle < high:
-            beyond = max(first, second)
-            middle = high if beyond >= (low + high) / 2 else low
-    return middle
+        return low, low + (box.width if vertical else box.height) + 12
+
+    def blocked(where: float) -> bool:
+        return any(low < where < high for low, high in map(spans, obstacles))
+
+    if not blocked(middle):
+        return middle
+    edges = [edge for box in obstacles for edge in spans(box)]
+    # Between the two ends, or the line stops being a route from one to the other.
+    inside = [e for e in edges if min(first, second) - 12 <= e <= max(first, second) + 12]
+    open_ones = [e for e in inside if not blocked(e)]
+    return min(open_ones, key=lambda e: abs(e - middle)) if open_ones else middle
 
 
 def _straighten(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    """Drop repeats, and drop any point the wire immediately turns back from.
+    """Drop repeats, reversals, and any point the wire does not actually turn at.
 
     A pin's stub points *out* of its component, which is right when the wire leaves that
     way and wrong when the wire arrives from that side: the path then runs past the pin and
     returns along itself, which a reader sees as a line ending in mid-air. Removing the
     reversal is better than never stubbing, because the stub is what keeps a wire from
     emerging out of the middle of a symbol.
+
+    Collinear points go too, and that is the rule "a straight line unless a corner is
+    necessary" made true of the *output* rather than only of the intent. The stub and the Z's
+    midline are constructed whatever the geometry, so a wire between two boxes that face each
+    other was emitted as five points on one line -- geometrically straight, and carrying four
+    joints for a reader and a diff to wonder about.
     """
     kept: list[tuple[float, float]] = []
     for point in points:
@@ -285,6 +320,8 @@ def _straighten(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
                 kept.pop()
                 if kept and point == kept[-1]:
                     continue
+            elif abs(first[0] * second[1] - first[1] * second[0]) < _STRAIGHT:
+                kept.pop()  # straight on: the middle point is not a corner
         kept.append(point)
     return kept
 

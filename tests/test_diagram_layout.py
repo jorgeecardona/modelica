@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import itertools
 import tomllib
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -203,3 +204,84 @@ def test_a_port_name_is_not_written_over_a_component(model: Path) -> None:
                 and float(y) + LINE / 2 > box.top
             )
             assert not over, f"{model.stem}: {name!r} is written over {node_id}"
+
+
+def _segments(path: str) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    import re  # noqa: PLC0415 - one helper reads the emitted path
+
+    points = [(float(x), float(y)) for x, y in re.findall(r"[ML]\s*([-\d.]+)\s+([-\d.]+)", path)]
+    return list(pairwise(points))
+
+
+def _crosses(a: tuple[float, float], b: tuple[float, float], box: Box) -> bool:
+    """Whether the axis-aligned segment ``a``-``b`` passes through ``box``'s interior."""
+    pad = 2.0
+    low_x, high_x = box.left + pad, box.left + box.width - pad
+    low_y, high_y = box.top + pad, box.top + box.height - pad
+    (x1, y1), (x2, y2) = a, b
+    if abs(y1 - y2) < 1e-9:
+        return low_y < y1 < high_y and min(x1, x2) < high_x and max(x1, x2) > low_x
+    if abs(x1 - x2) < 1e-9:
+        return low_x < x1 < high_x and min(y1, y2) < high_y and max(y1, y2) > low_y
+    return False
+
+
+@pytest.mark.parametrize("depth", [1, 2])
+@pytest.mark.parametrize("model", DRAWN, ids=[m.stem for m in DRAWN])
+def test_no_wire_runs_through_a_component_it_does_not_touch(model: Path, depth: int) -> None:
+    """A line through a symbol is the fault a reader notices before any other.
+
+    `DCMotor` opened one level drew its winding to its coil straight through the middle of
+    the converter, which the two have nothing to do with. `render._route` knew the two boxes
+    at the *ends* of a wire and nothing about what lay between them; it is given every box
+    now, and picks the middle segment that clears all of them.
+
+    Checked at both depths, because the first version of this test only looked at the closed
+    picture and found nothing -- the crossing is only reachable once a component is opened.
+    """
+    import re  # noqa: PLC0415 - one test reads the emitted paths
+
+    spec = tomllib.loads(model.with_suffix(".toml").read_text(encoding="utf-8"))
+    files = [str(model), *(str(EXAMPLES / "library" / f"{n}.mo") for n in spec["requires"])]
+    graph = diagram.of(*files, depth=depth)
+    layout = place(graph)
+    drawn = re.findall(r'<path class="link[^"]*" d="([^"]+)"', svg(graph))
+
+    for edge, path in zip(graph.edges, drawn, strict=False):
+        for node_id, box in layout.boxes.items():
+            if node_id in (edge.source, edge.target):
+                continue
+            through = [a for a, b in _segments(path) if _crosses(a, b, box)]
+            assert not through, (
+                f"{model.stem} at depth {depth}: the wire {edge.source} -> {edge.target}"
+                f" runs through {node_id}"
+            )
+
+
+@pytest.mark.parametrize("depth", [1, 2])
+@pytest.mark.parametrize("model", DRAWN, ids=[m.stem for m in DRAWN])
+def test_a_wire_bends_only_where_it_has_to(model: Path, depth: int) -> None:
+    """No point on a wire that the wire does not turn at.
+
+    The stub out of a pin and the Z's midline are constructed whatever the geometry, so a
+    wire between two boxes that face each other came out as five points on one straight line
+    -- geometrically straight, carrying four joints for a reader and a diff to wonder about.
+
+    This is the output side of "a straight line unless a corner is necessary". It does not
+    assert that any particular wire *is* straight, because whether one can be is a fact about
+    where the layout put the boxes; it asserts that none of them claims a corner it does not
+    make.
+    """
+    import re  # noqa: PLC0415 - one test reads the emitted paths
+
+    spec = tomllib.loads(model.with_suffix(".toml").read_text(encoding="utf-8"))
+    files = [str(model), *(str(EXAMPLES / "library" / f"{n}.mo") for n in spec["requires"])]
+    for path in re.findall(
+        r'<path class="link[^"]*" d="([^"]+)"', svg(diagram.of(*files, depth=depth))
+    ):
+        points = [
+            (float(x), float(y)) for x, y in re.findall(r"[ML]\s*([-\d.]+)\s+([-\d.]+)", path)
+        ]
+        for (ax, ay), (bx, by), (cx, cy) in zip(points, points[1:], points[2:], strict=False):
+            turn = (bx - ax) * (cy - by) - (by - ay) * (cx - bx)
+            assert abs(turn) > 1e-9, f"{model.stem} at depth {depth}: a straight-through point"
