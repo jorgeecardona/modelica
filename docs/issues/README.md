@@ -91,11 +91,10 @@ cabildo issues show <slug>
 | [RoastingMachine's moisture is assumed, and Cropster has it measured per lot](03-08-2026-green-moisture-as-a-measurement.md) | sim | idea | S | probe | blocked · @jorge | — |
 | [`spatialDistribution()` — the one PDE the Association standardized, and we do not have it](03-08-2026-spatialdistribution.md) | sim | story | L | test | blocked | — |
 | [The JIT compiles the kernel, not the step — the integrator loop is still Python](03-08-2026-the-jit-compiles-the-kernel-not-the-step.md) | sim | story | L | probe | open | — |
-| [A model can be integrated and cannot be asked where it settles](09-08-2026-a-model-can-be-integrated-and-cannot-be-asked-where-it-settles.md) | sim | story | M | test | in-progress · @cute-replicant-6e76d | — |
 | [A stencil is emitted as n unrolled scalar blocks, so a method-of-lines model is 230,000 lines of Python at n = 10,000](09-08-2026-a-stencil-is-emitted-as-n-unrolled-scalar-blocks-so-a-method.md) | sim | story | L | probe | open | — |
 | [A when-clause can only reinit a state, so no discrete variable in this engine remembers anything](09-08-2026-a-when-clause-can-only-reinit-a-state-so-no-discrete-variable.md) | sim | story | L | test | open | — |
 | [No component reads a measured signal, so nothing computed elsewhere can drive a model](09-08-2026-no-component-reads-a-measured-signal-so-nothing-computed-elsewhere-can-drive.md) | sim | story | S | test | open | — |
-| [No corpus model is worth solving two ways — nothing has several zones under one schedule](09-08-2026-no-corpus-model-is-worth-solving-two-ways-nothing-has-several-zones.md) | sim | idea | M | test | open | a-model-can-be-integrated-and-cannot-be-asked-where-it-settles |
+| [No corpus model is worth solving two ways — nothing has several zones under one schedule](09-08-2026-no-corpus-model-is-worth-solving-two-ways-nothing-has-several-zones.md) | sim | idea | M | test | open | — |
 | [Nothing fits a parameter to data, and the reason that is hard is that parameters trade off](09-08-2026-nothing-fits-a-parameter-to-data-and-the-reason-that-is-hard.md) | sim | idea | L | probe | open | the-parameter-derivative-has-a-name-reserved-for-it-in-the-emitter |
 | [The parameter derivative has a name reserved for it in the emitter and no code behind it](09-08-2026-the-parameter-derivative-has-a-name-reserved-for-it-in-the-emitter.md) | sim | story | S | test | open | — |
 | [Stages 2 and 3 of the benchmark: HIRES, E5, Ring Modulator, and ScalableTestSuite](10-08-2026-stages-2-and-3-of-the-benchmark-hires-e5-ring-modulator-and.md) | sim | story | L | probe | open | — |
@@ -105,5 +104,5 @@ cabildo issues show <slug>
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_24 open — 21 open, 1 in-progress, 2 blocked; 30 done. Generated; edit the files, then `cabildo issues reindex`._
+_23 open — 21 open, 2 blocked; 31 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->
