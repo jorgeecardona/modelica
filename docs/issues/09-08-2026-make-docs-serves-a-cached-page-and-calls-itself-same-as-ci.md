@@ -1,8 +1,8 @@
 ---
 title: "`make docs` serves a cached page and calls itself "same as CI", and the cache outlived the code"
-status: open
+status: done
 area: ci
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-09
 kind: bug
 scope: S
@@ -60,3 +60,63 @@ executes and the local build usually does not.
   owns that key; the fix here is to stop trusting it, not to reimplement it.
 - No change to CI, which is already right for the reason that matters: it caches the
   environment and not the answers.
+
+## What landed
+
+Two targets and a corrected comment. `verify: inspect` -- the artifacts are the `Makefile`
+and `mkdocs.yml`.
+
+    docs          build the site the way CI does -- notebooks re-executed, cache dropped first
+    docs-prose    rebuild fast for a prose edit -- reuses cached notebook output, which may be stale
+
+`make docs` now drops `.cache/mkdocs-jupyter` before building, so it re-executes the
+notebooks the way a clean CI runner does. `make docs-prose` is the 3.5-second path, kept
+because it is the right tool for a prose edit, under a name that does not promise the
+notebooks ran.
+
+`.cache/mkdocs-jupyter` and not `.cache`, which holds nothing else today -- naming the
+directory the plugin owns is the difference between a target and a `rm -rf` waiting for
+somebody to put something else there.
+
+### A second discrepancy, and it was worse than the cache
+
+`make docs` ran:
+
+    uv run --extra docs mkdocs build --strict
+
+and `moon run :docs` runs:
+
+    uv run --extra docs --extra sim --extra verify mkdocs build --strict
+
+So the help text said "same as CI" while building without the numerics *or* the model
+checker. The notebooks under `docs/notebooks/` import both. That is not a stale page, it is a
+different build, and it was in the same line that claimed parity. Both targets now carry all
+three extras.
+
+### The comment in `mkdocs.yml` said the wrong thing
+
+It claimed the committed notebooks "cannot render results from an older version of the code"
+because their outputs are stripped. Stripping the *stored* outputs does not stop that; the
+cache does exactly that. The comment now says so, with the measurement beside it -- 3.5 s warm
+and stale against 9 m 20 s cold and correct -- and names which target drops the cache.
+
+### The cost of being correct fell by fifteen times while this was open
+
+The entry recorded 3.5 s warm against **9 m 20 s** cold. Measured again on 2026-08-10, with
+the same two targets: **2.9 s warm against 36 s cold**.
+
+The old number is not withdrawn -- it was true when it was taken -- but it is no longer the
+argument for keeping a fast path. `compiled-kernels-are-not-cached` closed in between and
+`modelica.sim.kernel.build` is now cached on the content of the model, so a notebook that
+builds the same model in six cells compiles it once. A nine-minute penalty is a reason to
+tolerate a stale page; thirty-six seconds is not, and if `docs-prose` stops being used that
+is the right outcome rather than a regression.
+
+## Deliberately not done, found while doing it
+
+- **No cache setting in `mkdocs.yml`.** The plugin's caching is right for the common case and
+  the fix belongs in the target that promises freshness, not in a global switch that makes
+  every prose edit cost nine minutes.
+- **CI is unchanged.** A clean runner has no `.cache` to begin with, so it was never the one
+  serving stale pages -- the divergence was always local, which is exactly why the help text
+  claiming parity mattered.

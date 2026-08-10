@@ -1,7 +1,7 @@
 # modelica -- task runner. uv is the only tool needed.
 # One-time setup after cloning:  make install-hooks
 .DEFAULT_GOAL := help
-.PHONY: help install-hooks format lint typecheck test check bump build docs
+.PHONY: help install-hooks format lint typecheck test check bump build docs docs-prose
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -27,8 +27,12 @@ test: ## run the test suite
 
 check: lint typecheck test ## the full CI test stage: lint + typecheck + test
 
-docs: ## build the mkdocs site (strict, same as CI)
-	uv run --extra docs mkdocs build --strict
+docs: ## build the site the way CI does -- notebooks re-executed, cache dropped first
+	rm -rf .cache/mkdocs-jupyter
+	uv run --extra docs --extra sim --extra verify mkdocs build --strict
+
+docs-prose: ## rebuild fast for a prose edit -- reuses cached notebook output, which may be stale
+	uv run --extra docs --extra sim --extra verify mkdocs build --strict
 
 bump: ## bump version in pyproject.toml -- TYPE=patch|minor|major (default patch)
 	./scripts/bump-version $(or $(TYPE),patch)

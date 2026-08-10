@@ -63,9 +63,17 @@ plugins:
   # Both formats. The `.py` pages are jupytext percent notebooks -- source only, readable
   # diffs. The `.ipynb` pages are the ones meant to be opened and run: they carry matplotlib
   # figures and ipywidgets sliders, and they are committed with their outputs stripped, so
-  # they diff like the percent files and cannot render results from an older version of the
-  # code. The widget *state* in the built page is whatever executing it here produced; the
-  # sliders only move again when a reader runs the notebook against a kernel.
+  # they diff like the percent files. The widget *state* in the built page is whatever
+  # executing it here produced; the sliders only move again when a reader runs the notebook
+  # against a kernel.
+  #
+  # Stripping the stored outputs does **not** mean a built page cannot show results from an
+  # older version of the code -- an earlier version of this comment said it did, and it was
+  # wrong. `mkdocs-jupyter` caches executed notebooks under `.cache/mkdocs-jupyter`, keyed on
+  # the notebook, so editing `src/` and rebuilding re-renders the prose around output the
+  # cache produced before the change. Measured 2026-08-10: 2.9 s warm and stale against 36 s
+  # cold and correct. `make docs` drops that directory first and `make docs-prose` does not,
+  # which is the whole difference between the two targets.
   #
   # `include_requirejs` is load-bearing, not decoration. The widget bundle nbconvert points at
   # (`@jupyter-widgets/html-manager/dist/embed-amd.js`) is an AMD module, so without a loader on
