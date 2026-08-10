@@ -68,3 +68,34 @@ build — but whichever lands second has to say so.
 - No fit, no optimiser, no uncertainty propagation.
 - No d(rhs)/dp for the *discrete* state. A latched relation is frozen between events by
   construction; what a parameter does to the instant an event fires is a different question.
+
+## The shape, read 2026-08-10 before starting
+
+`Emitter.tangent` is **already generic over what it seeds**. Two lines in it mention states:
+
+    width = len(mode.states)
+    for slot, state in enumerate(mode.states):
+        head.append(f"{self.tangents[state]} = _seed[{slot}]")
+
+Everything after that -- the walk over `mode.blocks`, `chain` for an assignment, `implicit`
+for a solved block, the `sharing` pass -- is written in terms of `carried`, which is a
+mapping from a variable to the name of its tangent row. It does not know or care that the
+rows were seeded from states.
+
+So the change is `tangent(mode, seeds=mode.states)`: seed the chosen *parameters* instead,
+size the rows to `len(seeds)`, and every existing caller keeps its default. `differentiate`
+becomes one of two callers rather than the only one.
+
+Three things that then need doing and are not free:
+
+- **A second seed matrix.** `_seed = np.eye(width)` is sized to the states. Parameter rows are
+  a different width and need their own, which lands next to the note in
+  `the-jacobian-is-emitted-dense` about that matrix being `n` by `n` and eagerly allocated.
+- **Which parameters, at emit time.** The set has to reach `emit` the way `fold` does, because
+  it decides the width of every tangent row in the function. A model with forty parameters and
+  an identification asking about three should emit three columns, not forty.
+- **`Code` and `Kernel` carry the names**, or a caller cannot tell which column is which.
+
+Verification is settled by precedent: `tests/test_examples.py` already compares `jacobian` and
+`observe_jacobian` against central differences on every corpus model, and the parameter
+partials go in beside them at the same tolerance. Nothing new has to be invented to check it.
