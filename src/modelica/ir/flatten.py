@@ -737,6 +737,32 @@ def _inline_all(found: Found, scope: Scope, call: ir.Call, depth: int) -> dict[s
     return written
 
 
+def _element_of(scalar: ir.Component, indices: tuple[int, ...], path: _Path) -> ir.Component:
+    """One element of an array component, with its own share of an array-valued binding.
+
+    ``parameter Real t[4] = {0, 1, 2, 3}`` declares four parameters with four values, and the
+    expansion above makes four components -- so without this each of them carries the *whole*
+    literal as its binding and the model ends at "array equations are not supported yet".
+
+    A scalar binding is left exactly as it is, because that is the broadcast every array in
+    the corpus relies on: ``Real T[n](start = T_0)`` gives every cell the same start, and
+    `HeatBar` would stop working if this indexed into it.
+    """
+    value = scalar.modification.value
+    for index in indices:
+        if not isinstance(value, ir.Array):
+            return scalar  # a scalar binding broadcasts, which is what every array here does
+        if len(value.elements) != 0 and index > len(value.elements):
+            raise FlattenError(
+                f"{'.'.join(path)!r} is declared with {index} or more elements and its value"
+                f" lists {len(value.elements)}"
+            )
+        value = value.elements[index - 1]
+    if value is scalar.modification.value:
+        return scalar
+    return replace(scalar, modification=replace(scalar.modification, value=value))
+
+
 def _bind(name: str, inputs: Sequence[ir.Component], call: ir.Call) -> dict[str, ir.Expr]:
     """Arguments to inputs -- positional first, then by name, then declared defaults."""
     if len(call.args) > len(inputs):
@@ -1300,7 +1326,7 @@ class _Flattener:
         scalar = replace(component, dimensions=())
         for indices in product(*(range(1, size + 1) for size in sizes)):
             self._component(
-                replace(member, component=scalar),
+                replace(member, component=_element_of(scalar, indices, path)),
                 (*here, element(component.name, indices)),
                 outer,
                 floor,

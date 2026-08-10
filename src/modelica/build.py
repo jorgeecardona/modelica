@@ -83,6 +83,7 @@ __all__ = [
     "Type",
     "alias",
     "and_",
+    "array",
     "assign",
     "break_",
     "call",
@@ -407,6 +408,16 @@ def results(*targets: Operand | None) -> Outputs:
     ``None`` for a result the caller does not want, which is Modelica's ``(, b) = f(x)``.
     """
     return Outputs(tuple(None if t is None else _as_ref(t) for t in targets))
+
+
+def array(*elements: Operand) -> Expression:
+    """``{a, b, c}`` -- an array literal, which is how an array component is given values.
+
+    ``parameter Real t[4] = {0, 1, 2, 3}`` from the other front end. A Python list cannot
+    stand in for it: `_lift` turns a value into an expression and a list is not one, so the
+    literal needs a name.
+    """
+    return Expression(ir.Array(tuple(_lift(e) for e in elements)))
 
 
 def range_(start: Operand, stop: Operand, step: Operand | None = None) -> Expression:
