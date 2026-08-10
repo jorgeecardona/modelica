@@ -18,7 +18,7 @@ until someone actually calls :func:`simulate`.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 import numpy as np
 from scipy.integrate import (  # pyright: ignore[reportMissingTypeStubs]
@@ -139,6 +139,24 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     return plan.run(start, stop, y, grid)
 
 
+_SPARSE_STATES: Final = 16
+"""States below which the Jacobian is handed over dense, whatever its pattern says.
+
+Measured on a heat bar swept in ``n``, and on the corpus. Sparse first wins at 25 states
+(2.16x) and reaches 88x at 400; at every corpus size -- 1 to 10 states -- the two are within
+noise of each other, 0.98x to 1.04x. So 16 is above every model here and below where the win
+starts, and nothing in the corpus changes behaviour because of it.
+"""
+
+_SPARSE_FILL: Final = 0.25
+"""Fill fraction above which a dense factorisation is the better one anyway.
+
+A CSR of a nearly full matrix is index arrays and SuperLU wrapped around the same
+factorisation. Not measured at large ``n`` -- no dense large model exists here -- so this is
+a guard against a shape nobody has, chosen rather than found.
+"""
+
+
 def _grid(
     start: float,
     stop: float,
@@ -171,6 +189,17 @@ class _Run:
         self.kernel = kernel
         self.p = p
         self.w = w
+        pattern = kernel.code.sparsity
+        self.indices = np.array([j for row in pattern for j in row], dtype=np.int32)
+        self.indptr = np.cumsum([0, *(len(row) for row in pattern)], dtype=np.int32)
+        # Sparse only where sparse wins. A dense factorisation beats a sparse one on a small
+        # matrix by a wide margin -- the sparse path allocates index arrays, builds a CSR and
+        # calls SuperLU, and for a 2x2 all of that is overhead around four multiplies. Both
+        # numbers were measured on the corpus and on a heat bar swept in `n`.
+        self.sparse = (
+            kernel.states >= _SPARSE_STATES
+            and len(self.indices) <= _SPARSE_FILL * kernel.states * kernel.states
+        )
         self.relative = relative
         self.absolute = absolute
         self.method = method
@@ -181,6 +210,29 @@ class _Run:
 
     def derivative(self, t: float, y: NDArray[np.float64]) -> NDArray[np.float64]:
         return self.kernel.rhs(t, y, self.p, self.w, np.empty(self.kernel.states))
+
+    def sparse_slope(
+        self,
+        t: float,
+        y: NDArray[np.float64],
+    ) -> Any:  # noqa: ANN401 - a `csr_array`; scipy.sparse ships no stub worth naming
+        """The same Jacobian, as a CSR matrix, for a model whose pattern is worth it.
+
+        SciPy switches on what the callable *returns*: `scipy.integrate._ivp.radau` checks
+        `issparse(J)` and factors with `splu` instead of `lu_factor`. The `jac_sparsity`
+        argument is not the way in -- its own documentation says it "is ignored if `jac` is
+        not `None`", and this project always has an exact Jacobian, so that argument could
+        never have applied here.
+
+        The indices and the row pointers are built once and reused; only the data changes.
+        """
+        from scipy.sparse import (  # noqa: PLC0415 - only the sparse path pays  # pyright: ignore[reportMissingTypeStubs]
+            csr_array,
+        )
+
+        data = np.empty(len(self.indices))
+        self.kernel.jacobian_sparse(t, y, self.p, self.w, data)
+        return csr_array((data, self.indices, self.indptr), shape=(n := self.kernel.states, n))
 
     def slope(self, t: float, y: NDArray[np.float64]) -> NDArray[np.float64]:
         """The exact Jacobian, into an array of its own every time.
@@ -250,7 +302,8 @@ class _Run:
         use for it and SciPy warns about arguments a solver ignores, which is a warning
         worth keeping meaningful.
         """
-        implicit: dict[str, Any] = {"jac": self.slope} if self.method in _IMPLICIT else {}
+        chosen = self.sparse_slope if self.sparse else self.slope
+        implicit: dict[str, Any] = {"jac": chosen} if self.method in _IMPLICIT else {}
         solution = cast(
             "_Solution",
             solve_ivp(  # pyright: ignore[reportUnknownArgumentType]

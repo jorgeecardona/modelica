@@ -155,6 +155,52 @@ class Mode:
     blocks: tuple[Block, ...]
     pivot: ir.Expr | None = None
 
+    @cached_property
+    def sparsity(self) -> tuple[tuple[int, ...], ...]:
+        """Which entries of the Jacobian can be non-zero: row ``i``'s column indices.
+
+        ``d der(states[i]) / d states[j]``, structurally. Read off the schedule rather than
+        discovered by probing the function or by colouring it: a variable depends on a state
+        exactly when something it reads does, and the blocks are already in an order where
+        everything a block reads was computed earlier. One pass.
+
+        `docs/architecture.md:120` and `docs/ideas/benchmarks.md:63` both claim this comes
+        free from the incidence matching, and this is the claim honoured: no derivative is
+        taken, no expression is evaluated, and nothing is sampled.
+
+        **Conservative in exactly one place.** Every unknown of a simultaneous block is given
+        the union of what the whole block reads, because they are solved together and which
+        of them actually moves with which input is a question about the solve and not about
+        the incidence. That over-reports; it never under-reports, which is the direction a
+        sparsity pattern has to be wrong in.
+        """
+        from modelica.ir.rewrite import names  # noqa: PLC0415 - a cycle otherwise
+
+        reaches: dict[str, frozenset[int]] = {
+            state: frozenset({index}) for index, state in enumerate(self.states)
+        }
+
+        def carried(node: ir.Expr) -> frozenset[int]:
+            found: frozenset[int] = frozenset()
+            for name in names(node):
+                found |= reaches.get(name, frozenset())
+            return found
+
+        for block in self.blocks:
+            if block.assignment is not None:
+                reaches[block.unknowns[0]] = carried(block.assignment)
+                continue
+            whole: frozenset[int] = frozenset()
+            for equation in block.equations:
+                whole |= carried(equation.lhs) | carried(equation.rhs)
+            for _, value in block.torn:
+                whole |= carried(value)
+            for name in block.solved:
+                reaches[name] = whole
+        return tuple(
+            tuple(sorted(reaches.get(self.derivative[state], frozenset()))) for state in self.states
+        )
+
     def __post_init__(self) -> None:
         """Whatever mapping was handed in becomes a `FrozenMap`, so the mode is hashable.
 
@@ -224,6 +270,11 @@ class System:
     @property
     def blocks(self) -> tuple[Block, ...]:
         return self.modes[0].blocks
+
+    @property
+    def sparsity(self) -> tuple[tuple[int, ...], ...]:
+        """The chosen mode's Jacobian sparsity. See :attr:`Mode.sparsity`."""
+        return self.modes[0].sparsity
 
     @cached_property
     def candidates(self) -> tuple[tuple[str, ...], ...]:

@@ -100,6 +100,12 @@ class Kernel:
     latch: _Latch
     rhs: _Evaluate
     jacobian: _Evaluate
+    jacobian_sparse: _Evaluate
+    """The same Jacobian as ``jacobian``, written as its non-zeros in `Code.sparsity` order.
+
+    A separate entry point rather than a mode of the first, because the two fill differently
+    shaped arrays and a caller has to know which it allocated.
+    """
     observe: _Evaluate
     observe_jacobian: _Evaluate
     indicators: _Evaluate
@@ -203,6 +209,7 @@ def _compiled(
         latch=namespace["latch"],
         rhs=namespace["rhs"],
         jacobian=namespace["jacobian"],
+        jacobian_sparse=namespace["jacobian_sparse"],
         observe=namespace["observe"],
         observe_jacobian=namespace["observe_jacobian"],
         indicators=namespace["indicators"],

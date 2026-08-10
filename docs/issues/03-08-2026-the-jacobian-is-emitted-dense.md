@@ -1,8 +1,8 @@
 ---
 title: The Jacobian is emitted dense, though matching already knows where the zeros are
-status: open
+status: done
 area: sim
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-03
 kind: story
 scope: L
@@ -75,3 +75,80 @@ rather than before". Measured while answering
 That last one is worth separating from the rest of this entry, because it is much smaller: the
 seed is read one row at a time and `_seed[k]` is a basis vector. Removing the matrix does not
 require a sparse Jacobian, a sparse factorisation, or any decision about storage format.
+
+## What landed, 2026-08-10
+
+`Mode.sparsity`, `jacobian_sparse`, and a sparse path in the solver. `tests/test_sparsity.py`,
+46 tests. 1282 pass. `verify: probe`; the numbers are below and the machine is named.
+
+- **The pattern is a value on `System`.** `Mode.sparsity` is one dataflow pass over the
+  schedule: a variable reaches a state exactly when something it reads does, and the blocks
+  are already in an order where everything a block reads was computed earlier. No derivative
+  is taken, no expression is evaluated, nothing is probed or coloured. That is the claim
+  `docs/architecture.md:120` makes, honoured.
+
+  It is exact on all 22 corpus models -- no non-zero of the real Jacobian falls outside it --
+  and tight where it matters: `TwoFalls` 2 of 16, `BouncingBall` 1 of 4, `HeatBar` 22 of 64.
+  Conservative in exactly one place, stated at the property: every unknown of a simultaneous
+  block gets the union of what the whole block reads.
+
+- **The emitted `jacobian_sparse` fills the non-zeros only**, in CSR order, into a flat array
+  of length `nnz` instead of an `n` by `n` one. Checked against the dense one by rebuilding
+  it: exactly equal on every corpus model, not to a tolerance, because it is the same
+  expressions gathered rather than stored whole.
+
+- **The solver hands SciPy a sparse matrix**, above 16 states and below 25 per cent fill.
+
+- **The measurement**, Intel i9-9880H, CPython 3.12.7, a 1D heat bar to t = 2 at rtol 1e-8:
+
+  | n | nnz | fill | dense | sparse | speedup |
+  | --- | --- | --- | --- | --- | --- |
+  | 25 | 73 | 11.7 % | 43.0 ms | 20.0 ms | 2.2x |
+  | 50 | 148 | 5.9 % | 63.2 ms | 16.6 ms | 3.8x |
+  | 100 | 298 | 3.0 % | 3549.8 ms | 181.8 ms | 19.5x |
+  | 200 | 598 | 1.5 % | 559.6 ms | 196.3 ms | 2.9x |
+  | 400 | 1198 | 0.75 % | 9658.6 ms | 109.3 ms | **88.3x** |
+
+  The row-to-row jumps are step sequences, not noise in the timer: the two paths take
+  different steps once the linear algebra differs. The trend is the answer.
+
+  At corpus sizes the two are the same to within noise -- 0.98x to 1.04x over six models -- so
+  the threshold is not protecting anything, it is declining to build machinery that does
+  nothing. 16 is above the widest model here (10 states) and below where the win starts (25).
+
+### `jac_sparsity` is not the way in, and the entry assumed it was
+
+The Done list said "SciPy's `Radau` and `BDF` both take a `jac_sparsity`, and giving them one
+is the cheapest possible first use of it". They do take it, and it would have done nothing:
+its own documentation says it "is ignored if `jac` is not `None`", and this project always
+has an exact Jacobian.
+
+The real switch is what the callable *returns*. `scipy/integrate/_ivp/radau.py:320` checks
+`issparse(J)` and factors with `splu` instead of `lu_factor`. So the pattern had to reach the
+solver as a sparse *matrix*, which is why `jacobian_sparse` exists at all rather than the
+pattern being passed as an argument.
+
+## Deliberately not done, found while doing it
+
+- **The tangent rows are still `n` wide, and the 0.80 GB is still there.** This entry's
+  2026-08-09 note calls `_seed = np.eye(n)` a separable, much smaller half -- "the seed is
+  read one row at a time and `_seed[k]` is a basis vector. Removing the matrix does not
+  require a sparse Jacobian." That is wrong, and it is worth correcting rather than quietly
+  leaving.
+
+  Forward mode here carries **one row vector per variable**, and every state needs its seed
+  row, so `n` rows of width `n` are alive at once whatever the seeds are built from. Building
+  them lazily moves the allocation; it does not remove it. `_seed[k]` is a *view* into one
+  array today, so a lazy version would allocate strictly more.
+
+  The fix is narrow rows -- each variable carrying only the states it reaches, which is
+  exactly what `Mode.sparsity` now knows. It is a much larger change than it looks, because
+  `combination` sums `partial * row` over rows with *different supports*, and aligning two
+  supports on every add is a different generated program. That belongs in its own entry, and
+  it now has a pattern to build on.
+
+- **No sparse linear algebra of our own**, as planned. SciPy's SuperLU does the factorisation.
+- **No colouring**, as planned. The exact derivative is here; colouring is what a black-box
+  integrator needs because it is not.
+- **`_SPARSE_FILL = 0.25` was chosen, not measured.** No dense large model exists in this
+  corpus to measure it against, and the docstring says so where the constant is.

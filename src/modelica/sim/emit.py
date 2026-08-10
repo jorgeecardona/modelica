@@ -581,6 +581,10 @@ class Code:
     """The workspace slot holding which state set is in use, or ``None`` for a model with
     only one -- which is most of them, and for those the generated source is unchanged."""
 
+    sparsity: tuple[tuple[int, ...], ...] = ()
+    """`modelica.ir.system.Mode.sparsity` for the chosen mode, carried so a caller holding
+    only a `Code` can build the sparse structure ``jacobian_sparse`` fills."""
+
     def __str__(self) -> str:
         return self.source
 
@@ -1033,12 +1037,42 @@ class Emitter:
         return [*head, *self.sharing(body)], carried
 
     def differentiate(self, mode: Mode) -> list[str]:
-        """``d(dy)/dy`` -- the Jacobian every implicit solver wants."""
+        """``d(dy)/dy`` -- the Jacobian every implicit solver wants, dense.
+
+        One whole row per state. See `differentiate_sparse` for the other output shape and
+        for which models get it.
+        """
         lines, carried = self.tangent(mode)
         lines.extend(
             f"out[{slot}] = {carried.get(mode.derivative[state]) or '_null'}"
             for slot, state in enumerate(mode.states)
         )
+        return [*lines, "return out"]
+
+    def differentiate_sparse(self, mode: Mode) -> list[str]:
+        """The same Jacobian, written as the non-zeros only, in row-major pattern order.
+
+        ``out`` is one flat array of length ``nnz`` rather than ``n`` by ``n``. What fills it
+        is `Mode.sparsity`, so the layout is CSR with the pattern's own ``indptr`` -- and the
+        caller wraps it without copying, which is what lets `modelica.sim.solve` hand SciPy a
+        sparse matrix and get `splu` instead of a dense factorisation.
+
+        What this does *not* fix, and it is worth being exact because the entry that asked
+        for it guessed otherwise: the tangent *rows* are still ``n`` wide. Forward mode here
+        carries one row vector per variable, seeded from the identity, so the working set is
+        ``n`` by ``n`` whatever the output shape is. Narrow rows -- each variable carrying
+        only the states it reaches -- is a different design and a much larger change, because
+        `combination` would have to align two rows with different supports on every add.
+        """
+        lines, carried = self.tangent(mode)
+        pattern = mode.sparsity
+        at = 0
+        for slot, state in enumerate(mode.states):
+            columns = pattern[slot]
+            row = carried.get(mode.derivative[state])
+            if columns and row is not None:
+                lines.append(f"out[{at}:{at + len(columns)}] = {row}[_pattern[{slot}]]")
+            at += len(columns)
         return [*lines, "return out"]
 
     def differentiate_observed(self, mode: Mode) -> list[str]:
@@ -1245,12 +1279,17 @@ class Emitter:
         width = len(self.system.states)
         parts = [
             "import numpy as np",
-            f"_seed = np.eye({width})\n_null = np.zeros({width})",
+            f"_seed = np.eye({width})\n_null = np.zeros({width})\n_pattern = {_pattern(self.system)}",
             self.parameters(),
             self.initial(),
             self.latches(),
             self.dispatch("rhs", "t, y, p, w, dy", [self.rhs(m) for m in modes]),
             self.dispatch("jacobian", "t, y, p, w, out", [self.differentiate(m) for m in modes]),
+            self.dispatch(
+                "jacobian_sparse",
+                "t, y, p, w, out",
+                [self.differentiate_sparse(m) for m in modes],
+            ),
             self.dispatch("observe", "t, y, p, w, out", [self.observe(m) for m in modes]),
             self.dispatch(
                 "observe_jacobian",
@@ -1277,6 +1316,7 @@ class Emitter:
             events=tuple(event.trigger for event in events),
             workspace=len(self.observed) + len(self.watched) + (0 if self.switching is None else 1),
             switching=self.switching,
+            sparsity=self.system.mode.sparsity,
         )
 
 
@@ -1317,6 +1357,18 @@ def settings(system: System, values: Mapping[str, float] | None = None) -> dict[
             message = f"cannot evaluate {variable.name!r}: {error}"
             raise EmitError(message) from error
     return environment
+
+
+def _pattern(system: System) -> str:
+    """The sparsity, as the module-level index arrays ``jacobian_sparse`` gathers with.
+
+    One array per row, built once at import. `out[a:b] = row[_pattern[i]]` is a gather and a
+    slice store -- one line per row of the Jacobian, whatever the row's width.
+    """
+    rows = ", ".join(
+        f"np.array({list(columns)}, dtype=np.intp)" for columns in system.mode.sparsity
+    )
+    return f"({rows},)" if rows else "()"
 
 
 def _literal_parameters(system: System) -> dict[str, ir.Expr]:
