@@ -1135,6 +1135,55 @@ class Emitter:
         )
         return _function("parameters", "p", [*body, "return p"])
 
+    def conditions(self) -> list[tuple[str, ir.Expr]]:
+        """The initial equations, as one assignment to a state each, in an order that runs.
+
+        Modelica's initialization is a *system*: the initial equations, the model's own
+        equations and every ``fixed = true`` start value are solved together for a consistent
+        point. This solves the explicit subset -- an initial equation that already reads
+        ``state = expression`` -- and refuses everything else by name.
+
+        That split is the point of the entry this closes. Carrying an initial equation and
+        dropping it produced a run that completed, plotted plausibly and was wrong by 21 per
+        cent, and the only clue was a comparison against something else. A refusal is worse
+        than solving it and better than every alternative.
+
+        Ordered by what each one reads, so ``x = 1; y = x + 1`` runs the right way round, and
+        a cycle between two of them is refused rather than resolved by luck.
+        """
+        states = set(self.system.states)
+        pending: list[tuple[str, ir.Expr]] = []
+        for equation in self.system.initial_equations:
+            match equation:
+                case ir.Equal(lhs=ir.Ref() as target, rhs=value) if target.name in states:
+                    pending.append((target.name, value))
+                case ir.Equal(lhs=value, rhs=ir.Ref() as target) if target.name in states:
+                    pending.append((target.name, value))
+                case _:
+                    raise EmitError(
+                        f"{self.system.name}: this initial equation is not an explicit value"
+                        f" for a state, and solving one is not implemented:"
+                        f" {unparse_expr(equation.lhs)} = {unparse_expr(equation.rhs)}"
+                    )
+        ordered: list[tuple[str, ir.Expr]] = []
+        placed: set[str] = set()
+        while pending:
+            ready = [
+                (name, value)
+                for name, value in pending
+                if not any(other in states and other not in placed for other in names(value))
+            ]
+            if not ready:
+                stuck = ", ".join(sorted(name for name, _ in pending))
+                raise EmitError(
+                    f"{self.system.name}: these initial equations read each other in a cycle,"
+                    f" and solving one is not implemented: {stuck}"
+                )
+            ordered.extend(ready)
+            placed.update(name for name, _ in ready)
+            pending = [pair for pair in pending if pair[0] not in placed]
+        return ordered
+
     def initial(self) -> str:
         constant = {v.name for v in self.system.parameters}
         body = [
@@ -1161,6 +1210,14 @@ class Emitter:
             )
             for name in self.observed
         )
+        slots = {name: slot for slot, name in enumerate(self.system.states)}
+        for name, value in self.conditions():
+            # Both, and in this order. `y` is what the solver integrates from; the workspace
+            # slot is what `observe` reports at t = 0, and leaving it holding the `start`
+            # attribute would make the first sample of the run disagree with the run.
+            body.append(f"{self.symbols[name]} = {self.expr(value)}")
+            body.append(f"y[{slots[name]}] = {self.symbols[name]}")
+            body.append(f"w[{self.slots[name]}] = {self.symbols[name]}")
         if self.switching is not None:
             body.append(f"w[{self.switching}] = 0.0")
         return _function("initial", "p, y, w", [*body, "return y"])
