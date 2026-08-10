@@ -10,7 +10,8 @@ into the two verbs that matter:
 * :func:`emit` and :func:`build` -- system in, generated source and callables out;
 * :func:`diverges` -- two tiers of one model in, the first block they disagree on out;
 * :func:`simulate` -- system in, a :class:`~modelica.sim.result.Result` out;
-* :func:`sweep` -- system and a list of parameter values in, one result per value out.
+* :func:`sweep` -- system and a list of parameter values in, one result per value out;
+* :func:`steady` -- system in, the state where it settles out.
 
 Numerics live behind the ``sim`` extra. Importing this module does not pull in SciPy;
 only :func:`simulate` does, which is why it is imported lazily below.
@@ -39,6 +40,9 @@ from modelica.sim.kernel import build as build
 from modelica.sim.matfile import read as read
 from modelica.sim.result import Event as Event
 from modelica.sim.result import Result as Result
+from modelica.sim.steady import Steady as Steady
+from modelica.sim.steady import SteadyError as SteadyError
+from modelica.sim.steady import steady as steady
 from modelica.sim.sweep import grid as grid
 from modelica.sim.sweep import sweep as sweep
 from modelica.sim.sweep import vector as vector
@@ -59,6 +63,8 @@ __all__ = [
     "Result",
     "SimulationError",
     "Source",
+    "Steady",
+    "SteadyError",
     "System",
     "Trigger",
     "View",
@@ -71,6 +77,7 @@ __all__ = [
     "grid",
     "read",
     "simulate",
+    "steady",
     "sweep",
     "to_program",
     "vector",

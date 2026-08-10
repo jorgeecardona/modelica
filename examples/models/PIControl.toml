@@ -70,3 +70,15 @@ after = 6.0
 expr = "plant.y.signal"
 min = -0.001
 max = 1.08
+
+# --------------------------------------------------------------------------------------
+# The one worth having: integral control has no steady-state error *by construction*. The
+# integrator can only stop moving where its input is zero, its input is the error, so the
+# plant output equals the setpoint whatever the plant gain is. `plant.y = 1`, and the
+# controller state sits wherever it must to hold it -- `1 / k_plant`, which is 0.5 here
+# because the controller's own gain is 2.
+# --------------------------------------------------------------------------------------
+[steady]
+values = { "plant.y.signal" = 1.0, "controller.x" = 0.5 }
+atol = 1e-9
+source = "analytic"

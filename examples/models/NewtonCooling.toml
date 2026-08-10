@@ -40,3 +40,14 @@ source = "analytic"
 expr = "T"
 min = 25.0
 max = 90.0
+
+# --------------------------------------------------------------------------------------
+# Where it settles, from `modelica.sim.steady` rather than from a long run.
+#
+# `der(T) = -k (T - T_amb)` vanishes at `T = T_amb`, and at nothing else: one state, one
+# equation, and `k` is not zero. The analytic answer is the parameter.
+# --------------------------------------------------------------------------------------
+[steady]
+values = { "T" = 25.0 }
+atol = 1e-9
+source = "analytic"

@@ -56,3 +56,12 @@ atol = 1e-9
 expr = "ground.p.v"
 value = 0.0
 atol = 1e-12
+
+# --------------------------------------------------------------------------------------
+# At rest the capacitor carries no current, so the resistor drops nothing and the capacitor
+# holds the whole source voltage. `c.v = source.V = 1`, exactly, whatever R and C are.
+# --------------------------------------------------------------------------------------
+[steady]
+values = { "c.v" = 1.0 }
+atol = 1e-9
+source = "analytic"

@@ -44,3 +44,12 @@ source = "reference"
 expr = "r.v + l.v + c.v"
 value = 1.0
 atol = 1e-8
+
+# --------------------------------------------------------------------------------------
+# The same argument with one more state: no current flows at rest, so the inductor carries
+# none and the capacitor holds the source. Independent of R, L and C.
+# --------------------------------------------------------------------------------------
+[steady]
+values = { "l.i" = 0.0, "c.v" = 1.0 }
+atol = 1e-9
+source = "analytic"

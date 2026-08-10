@@ -1,8 +1,8 @@
 ---
 title: A model can be integrated and cannot be asked where it settles
-status: open
+status: done
 area: sim
-owner: null
+owner: cute-replicant-6e76d
 filed: 2026-08-09
 kind: story
 scope: M
@@ -69,3 +69,62 @@ verify: test
   target, which is a solve over *parameters*. That is the calibration machinery, not this.
 - No claim of stability. `VanDerPol` has a limit cycle around an unstable fixed point; the entry
   point reports what Newton found and does not claim anything settles there.
+
+## What landed
+
+`modelica.sim.steady`, `Steady`, `SteadyError`. `tests/test_steady.py`, 14 tests. 1305 pass.
+
+    >>> steady(system)
+    RLCCircuit settles at l.i = 0, c.v = 1 (residual 0.00e+00, 1 steps)
+
+Newton on the emitted `rhs` and `jacobian`, and nothing new is emitted for it -- `rhs` already
+*is* the residual and `jacobian` is d(rhs)/dy exactly. The answer carries every observed
+variable at that point, the residual it reached, and which state set it is an equilibrium
+**of**.
+
+**Four corpus models carry a `[steady]` section with `source = "analytic"`**, where the entry
+asked for two:
+
+| model | settles at | why, in one line |
+| --- | --- | --- |
+| `NewtonCooling` | `T = 25` | `der(T) = -k (T - T_amb)` vanishes only at `T_amb` |
+| `RCCircuit` | `c.v = 1` | no current at rest, so the capacitor holds the source |
+| `RLCCircuit` | `l.i = 0, c.v = 1` | the same, with one more state; independent of R, L and C |
+| `PIControl` | `plant.y = 1, controller.x = 0.5` | integral control has no steady-state error *by construction* -- the integrator stops only where the error is zero |
+
+**And the two analyses agree.** Integrating each far enough under constant inputs arrives at
+the `[steady]` answer to 1e-6. That is the "no model drift" claim made checkable rather than
+asserted: one set of equations, two workflows, one answer.
+
+### `TwoBodyHeat` corrects the entry
+
+This entry expected it to "settle at the heat-capacity-weighted mean of its two initial
+temperatures". That is true of the **trajectory** and it is not a root of the residual. Two
+masses joined by a conductor stop moving whenever their temperatures are *equal* -- at any
+common value -- so `rhs = 0` has a one-parameter family of solutions and its Jacobian is
+singular everywhere on it. Picking the right member needs the conserved energy as an extra
+equation, which a steady solve on `rhs` alone does not have.
+
+So it is **refused**, with that in the message, rather than returning whichever member the
+arithmetic drifted to. The inference in this entry that "steady state and initialization are
+the same nonlinear solve with different unknowns held fixed" is the same observation from the
+other side: what is missing in both cases is the extra equations.
+
+`VanDerPol` behaves as the entry predicted: Newton lands on the origin, the unstable fixed
+point its limit cycle goes round, and nothing here claims the model settles there.
+`DrainingTank` is refused too -- its square root goes imaginary under a Newton step and the
+residual is NaN.
+
+## Deliberately not done, found while doing it
+
+- **No continuation, no homotopy, no line search**, as the entry required. Every model that
+  converges here does so in one step, because each is linear in its states; a model that needs
+  a path is a different entry point.
+- **No stability claim**, as required. `Steady` reports the residual and the mode and says
+  nothing about what a trajectory does near the point.
+- **`values=` overrides parameters** the way `modelica.sim.sweep` does, so an equilibrium can
+  be asked for at another operating point without editing the model. That is the half of
+  "sizing" that is a solve over *states*; the half that solves over *parameters* is the
+  calibration machinery and is still not here.
+- **The `[steady]` section is read by `tests/test_steady.py` and not by `test_examples.py`.**
+  It could move; it is where the analysis it checks lives.
