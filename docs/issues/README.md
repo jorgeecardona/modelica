@@ -82,7 +82,7 @@ cabildo issues show <slug>
 |---|---|---|---|---|---|---|
 | [There is no honest number for how much Modelica this reads, because the corpus is ours](03-08-2026-reachability-and-agreement-against-a-reference-tool.md) | ci | story | L | probe | open | — |
 | [Diagrams draw boxes, and the icons that would make them read like circuits now survive parsing](04-08-2026-diagrams-draw-boxes-not-icons.md) | diagram | story | L | inspect | open | — |
-| [A ground opened inside a component attaches to its box edge, not to its pin](10-08-2026-a-ground-opened-inside-a-component-attaches-to-its-box-edge-not.md) | diagram | bug | S | inspect | open | — |
+| [A wire leaves a pin and runs straight back through the component it just left](10-08-2026-a-ground-opened-inside-a-component-attaches-to-its-box-edge-not.md) | diagram | bug | S | inspect | open | — |
 | [Straightness is a placement property, and the layouts here decide it in the router](10-08-2026-straightness-is-a-placement-property-and-the-layouts-here-decide-it-in.md) | diagram | story | L | probe | open | — |
 | [The EKF results live in a log and a deleted scratch file, not in the documentation](03-08-2026-an-estimation-notebook.md) | docs | story | M | inspect | open | — |
 | [The Association has not been told this exists, and the trademark note assumes they will be](03-08-2026-tell-the-modelica-association.md) | docs | idea | XS | inspect | open | — |
