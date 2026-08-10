@@ -6,6 +6,7 @@ owner: cute-replicant-6e76d
 filed: 2026-08-03
 blocked_by:
   - the-ensemble-driver
+fixed_in: 1f3f1d2
 kind: idea
 scope: M
 verify: probe
