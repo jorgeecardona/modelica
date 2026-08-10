@@ -4,6 +4,7 @@ status: done
 area: ci
 owner: cute-replicant-6e76d
 filed: 2026-08-09
+fixed_in: d62b64d
 kind: bug
 scope: S
 verify: inspect
