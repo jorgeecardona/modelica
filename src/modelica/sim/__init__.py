@@ -9,7 +9,8 @@ into the two verbs that matter:
   the blocks to evaluate, in the order to evaluate them;
 * :func:`emit` and :func:`build` -- system in, generated source and callables out;
 * :func:`diverges` -- two tiers of one model in, the first block they disagree on out;
-* :func:`simulate` -- system in, a :class:`~modelica.sim.result.Result` out.
+* :func:`simulate` -- system in, a :class:`~modelica.sim.result.Result` out;
+* :func:`sweep` -- system and a list of parameter values in, one result per value out.
 
 Numerics live behind the ``sim`` extra. Importing this module does not pull in SciPy;
 only :func:`simulate` does, which is why it is imported lazily below.
@@ -37,6 +38,9 @@ from modelica.sim.kernel import Kernel as Kernel
 from modelica.sim.kernel import build as build
 from modelica.sim.result import Event as Event
 from modelica.sim.result import Result as Result
+from modelica.sim.sweep import grid as grid
+from modelica.sim.sweep import sweep as sweep
+from modelica.sim.sweep import vector as vector
 from modelica.sim.view import View as View
 
 if TYPE_CHECKING:
@@ -63,8 +67,11 @@ __all__ = [
     "emit",
     "emit_expr",
     "flatten",
+    "grid",
     "simulate",
+    "sweep",
     "to_program",
+    "vector",
 ]
 
 _LAZY = frozenset({"SimulationError", "simulate"})

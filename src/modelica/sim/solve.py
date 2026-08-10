@@ -108,6 +108,7 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     points: int | None = None,
     method: str = "Radau",
     jit: bool = False,
+    parameters: NDArray[np.float64] | None = None,
 ) -> Result:
     """Integrate ``model`` from ``start`` to ``stop`` and return every variable it has.
 
@@ -124,10 +125,16 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     out of a Modelica flattener is stiff more often than not -- Robertson and van der Pol
     are both in the example set -- and an implicit method that is merely slower on an easy
     problem beats an explicit one that fails on a hard one.
+
+    ``parameters`` runs the model at values other than the ones it declares. Build the vector
+    with `modelica.sim.sweep.vector`, which recomputes everything downstream of a change --
+    writing into the array by hand leaves a derived parameter holding a value from the old
+    one. The initial conditions are computed *from* it, so a start value written in terms of
+    a parameter follows the override, which is what makes this usable for a sweep.
     """
     kernel = model if isinstance(model, Kernel) else build(model, jit=jit)
     grid = _grid(start, stop, times, points)
-    p, y, w = kernel.start(start)
+    p, y, w = kernel.start(start, parameters)
     plan = _Run(kernel, p, w, tolerance, absolute if absolute is not None else tolerance, method)
     return plan.run(start, stop, y, grid)
 

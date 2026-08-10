@@ -122,7 +122,7 @@ def test_a_parameter_that_cannot_be_evaluated_is_refused_by_name() -> None:
     """
     system = causalize(flatten([parse(source)], "Wobbly"))
     emit(system)  # the argument mode does not care what the binding says
-    with pytest.raises(EmitError, match="cannot fold 'k'"):
+    with pytest.raises(EmitError, match="cannot fold: cannot evaluate 'k'"):
         emit(system, fold=True)
 
 

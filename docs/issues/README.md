@@ -92,7 +92,7 @@ cabildo issues show <slug>
 | [JAX gives the ensemble what Vulkan was being asked for, in double precision, today](03-08-2026-jax-is-the-ensemble-vehicle.md) | sim | idea | M | probe | open | the-ensemble-driver |
 | [`spatialDistribution()` — the one PDE the Association standardized, and we do not have it](03-08-2026-spatialdistribution.md) | sim | story | L | test | blocked | — |
 | [Spike: can an emitted SPIR-V kernel run an ensemble on compute-ml at all?](03-08-2026-spike-a-spirv-emitter-against-compute-ml.md) | sim | spike | L | probe | open | the-ensemble-driver |
-| [The ensemble driver — one compiled model over a matrix of parameters](03-08-2026-the-ensemble-driver.md) | sim | story | M | test | open | — |
+| [The ensemble driver — one compiled model over a matrix of parameters](03-08-2026-the-ensemble-driver.md) | sim | story | M | test | in-progress · @cute-replicant-6e76d | — |
 | [The Jacobian is emitted dense, though matching already knows where the zeros are](03-08-2026-the-jacobian-is-emitted-dense.md) | sim | story | L | probe | open | — |
 | [The JIT compiles the kernel, not the step — the integrator loop is still Python](03-08-2026-the-jit-compiles-the-kernel-not-the-step.md) | sim | story | L | probe | open | work-precision-harness |
 | [No work-precision harness, so every speed claim in the docs is unmeasured](03-08-2026-work-precision-harness.md) | sim | story | L | probe | open | — |
@@ -111,5 +111,5 @@ cabildo issues show <slug>
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 
-_30 open — 28 open, 2 blocked; 23 done. Generated; edit the files, then `cabildo issues reindex`._
+_30 open — 27 open, 1 in-progress, 2 blocked; 23 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

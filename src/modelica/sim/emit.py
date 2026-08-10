@@ -118,6 +118,7 @@ __all__ = [
     "block_jacobian",
     "emit",
     "iterated",
+    "settings",
 ]
 
 ITERATIONS: Final = 50
@@ -1279,34 +1280,53 @@ class Emitter:
         )
 
 
-def _literal_parameters(system: System) -> dict[str, ir.Expr]:
-    """Every parameter's value, as a literal node.
+def settings(system: System, values: Mapping[str, float] | None = None) -> dict[str, Value]:
+    """Every parameter's value, with ``values`` overriding what the model wrote.
 
     Evaluated in dependency order, because a parameter may be written in terms of others --
     `RoastingMachine`'s ``m_dry = m_green * (1 - moisture)`` is the case. The order is the one
     `Emitter.ordered` already computes for the emitted ``parameters`` function, so the two
     cannot disagree about what a parameter is worth.
 
-    A parameter this cannot evaluate is an error and not a silent pass-through. Folding that
-    quietly skipped one would emit a kernel whose ``p`` matters for some parameters and not
-    others, which is the one thing a caller choosing between two modes must be able to rule
-    out.
+    That order is the whole reason overriding is a function and not an array write. Setting
+    ``m_green`` by poking the parameter vector after the fact leaves ``m_dry`` holding a value
+    computed from the old one -- a model that is *nearly* the one the caller asked for, which
+    is worse than one that refuses. Overriding here means every parameter downstream of the
+    change is recomputed from it.
+
+    A parameter this cannot evaluate is an error and not a silent pass-through.
     """
+    given = dict(values or {})
+    known = {variable.name for variable in system.parameters}
+    for name in given:
+        if name not in known:
+            message = f"{system.name} has no parameter {name!r}"
+            raise EmitError(message)
     environment: dict[str, Value] = {}
-    literals: dict[str, ir.Expr] = {}
     for variable in Emitter(system).ordered():
+        if variable.name in given:
+            environment[variable.name] = given[variable.name]
+            continue
         node = variable.binding if variable.binding is not None else variable.start
         if node is None:
-            value: Value = 0.0
-        else:
-            try:
-                value = evaluate(node, environment)
-            except EvaluationError as error:
-                message = f"cannot fold {variable.name!r}: {error}"
-                raise EmitError(message) from error
-        environment[variable.name] = value
-        literals[variable.name] = _as_literal(value)
-    return literals
+            environment[variable.name] = 0.0
+            continue
+        try:
+            environment[variable.name] = evaluate(node, environment)
+        except EvaluationError as error:
+            message = f"cannot evaluate {variable.name!r}: {error}"
+            raise EmitError(message) from error
+    return environment
+
+
+def _literal_parameters(system: System) -> dict[str, ir.Expr]:
+    """Every parameter's value as a literal node, for the folded compile mode."""
+    try:
+        environment = settings(system)
+    except EmitError as error:
+        message = f"cannot fold: {error}"
+        raise EmitError(message) from error
+    return {name: _as_literal(value) for name, value in environment.items()}
 
 
 def _as_literal(value: Value) -> ir.Expr:

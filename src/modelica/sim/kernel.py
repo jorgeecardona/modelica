@@ -122,10 +122,20 @@ class Kernel:
         return len(self.code.events)
 
     def start(
-        self, t: float = 0.0
+        self, t: float = 0.0, parameters: NDArray[np.float64] | None = None
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-        """The parameter vector, the initial state, and a workspace latched at ``t``."""
-        p = self.parameters(np.zeros(len(self.code.parameters)))
+        """The parameter vector, the initial state, and a workspace latched at ``t``.
+
+        ``parameters`` replaces the vector the model computes for itself. The initial state
+        and the latches are then computed from *that*, which is the point: a start value
+        written in terms of a parameter has to follow the override, or a sweep changes the
+        equations and not the conditions they start from.
+        """
+        p = (
+            np.array(parameters, dtype=float)
+            if parameters is not None
+            else self.parameters(np.zeros(len(self.code.parameters)))
+        )
         y = np.zeros(self.states)
         w = np.zeros(self.code.workspace)
         self.initial(p, y, w)
