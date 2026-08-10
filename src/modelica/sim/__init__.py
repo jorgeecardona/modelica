@@ -36,6 +36,7 @@ from modelica.sim.emit import emit as emit
 from modelica.sim.emit import emit_expr as emit_expr
 from modelica.sim.kernel import Kernel as Kernel
 from modelica.sim.kernel import build as build
+from modelica.sim.matfile import read as read
 from modelica.sim.result import Event as Event
 from modelica.sim.result import Result as Result
 from modelica.sim.sweep import grid as grid
@@ -68,6 +69,7 @@ __all__ = [
     "emit_expr",
     "flatten",
     "grid",
+    "read",
     "simulate",
     "sweep",
     "to_program",

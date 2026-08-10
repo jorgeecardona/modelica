@@ -18,6 +18,7 @@ from modelica.sim.view import View, view
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from os import PathLike
 
     from numpy.typing import NDArray
 
@@ -50,6 +51,16 @@ class Result:
     """Shape ``(len(names), len(time))`` -- one row per variable, so a row is a slice."""
 
     events: tuple[Event, ...] = field(default_factory=tuple[Event, ...])
+
+    def write(self, path: str | PathLike[str]) -> None:
+        """Write this run as a Dymola-format ``.mat``, which is what the field reads.
+
+        ModelicaRes, DyMat and BuildingsPy all open it. See `modelica.sim.matfile` for the
+        format and for the two ways of getting it subtly wrong.
+        """
+        from modelica.sim.matfile import write  # noqa: PLC0415 - `scipy.io` stays optional
+
+        write(self, path)
 
     @cached_property
     def _row(self) -> dict[str, int]:
