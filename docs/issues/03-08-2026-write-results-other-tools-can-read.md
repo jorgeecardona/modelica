@@ -4,6 +4,7 @@ status: done
 area: sim
 owner: null
 filed: 2026-08-03
+fixed_in: a09cc90
 kind: story
 scope: M
 verify: test
