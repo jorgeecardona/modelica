@@ -75,3 +75,65 @@ the other while trying to write the same thing.
   and no caller asking for it here.
 - No state-machine syntax (`Modelica.StateGraph`, `state machine` clauses). This is the
   primitive those are built on.
+
+## What landed
+
+`_remembered`, three lines of emitter, and `examples/models/Thermostat`.
+`tests/test_discrete.py`, 8 tests. 1445 pass.
+
+The engine was one step from having this. Causalization already left a discrete variable
+alone -- not a state, not a block unknown -- and it already had a workspace slot, because
+`w` begins with one slot per observed variable. What was missing was a definition and three
+places to use it:
+
+- **`_remembered`** reads the names off the `when` bodies rather than off the `discrete`
+  prefix. The specification says the assignment is what makes a variable discrete-time, and
+  a variable declared `discrete` and never assigned has nothing to remember.
+- **`unpack`** binds each one from its slot, so `rhs` and `observe` read the value instead
+  of computing it.
+- **`statement`** writes the slot for an assignment.
+
+**`pre()` needed no code at all**, which was the one genuine surprise. `transition` runs
+against the *pre-event* workspace, so by the time a body reads the name it is already bound
+to the old value: `n = pre(n) + 1` emits `w[k] = n + 1`. There is a test whose whole job is
+to say this is deliberate rather than lucky.
+
+Each Done bullet:
+
+- **A `when` body may assign a discrete variable, and it persists.** A counter over five
+  events reads 0, 1, 2, 3, 4. A variable never assigned keeps its `start`.
+- **It is state the kernel carries** -- a slot in `w`, written by `transition`, read by
+  `rhs` and `observe`, and no derivative taken of it. A test drives the continuous part
+  from one.
+- **One corpus model uses it, and it is a two-regime model**: `Thermostat`, a heater with
+  hysteresis, where "should the heater be on" is not a function of the current temperature.
+  Two `when` clauses that cannot see each other, and `pre()` for the cycle count.
+
+  Its reference is not another integration. Each phase is `T_inf + (T0 - T_inf) exp(-k t)`
+  and each switching time is one logarithm, so the spec carries **all 33 switching times of
+  a minute** plus four sampled points, from a recurrence with no integrator in it. The
+  sharpest assertion is `heating * (1 - heating) = 0` at `atol = 0`: a regime that was
+  interpolated, or recomputed from a relation each step, could not hold that across 33
+  events.
+
+- **Two refusals gained a remedy.** Assigning a continuous state inside a `when` now says
+  to use `reinit(x, ...)`; assigning an ordinary variable says to declare it `discrete`.
+
+## Deliberately not done, and this entry does not close them
+
+Two Done bullets are **not** met, and they are separable enough to be their own entries
+rather than reasons to keep this one open.
+
+- **The `Boolean` half.** `Boolean hot; hot = x > 0.5;` still fails with
+  `DerivativeError: a '>' expression has no derivative`. The entry itself calls it "a
+  separate defect ... and probably a smaller fix", and it is: a relation-valued variable
+  should be latched like any other watched relation rather than handed to the
+  differentiator. That is a change in causalization, not in the emitter, and nothing in
+  this change touched it.
+- **`modelica.verify` does not enumerate discrete variables.** The entry asks for
+  `check_iteration` to report more than one settled configuration for a model with a
+  memoried flag -- which is the right test of the distinction, and it needs the checker's
+  state to include the remembered slots as well as the latches. `modelica.verify` builds
+  its state from `Trigger.latch` alone today.
+
+Both should be filed against this landing rather than assumed.
