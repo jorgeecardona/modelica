@@ -87,7 +87,6 @@ cabildo issues show <slug>
 | [The Association has not been told this exists, and the trademark note assumes they will be](03-08-2026-tell-the-modelica-association.md) | docs | idea | XS | inspect | open | — |
 | [FMI 3.0 export — a System as an FMU, and the two routes disagree in the docs](03-08-2026-fmi-export.md) | fmi | story | L | test | open | — |
 | [FMI 3.0 import — the mode table exists, the FMU reader does not](03-08-2026-fmi-import.md) | fmi | story | L | test | open | — |
-| [A Boolean set by a relation is differentiated instead of latched](11-08-2026-a-boolean-set-by-a-relation-is-differentiated-instead-of-latched.md) | ir | bug | M | test | open | — |
 | [RoastingMachine's moisture is assumed, and Cropster has it measured per lot](03-08-2026-green-moisture-as-a-measurement.md) | sim | idea | S | probe | blocked · @jorge | — |
 | [`spatialDistribution()` — the one PDE the Association standardized, and we do not have it](03-08-2026-spatialdistribution.md) | sim | story | L | test | blocked | — |
 | [A stencil is emitted as n unrolled scalar blocks, so a method-of-lines model is 230,000 lines of Python at n = 10,000](09-08-2026-a-stencil-is-emitted-as-n-unrolled-scalar-blocks-so-a-method.md) | sim | story | L | probe | open | — |
@@ -102,5 +101,5 @@ cabildo issues show <slug>
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 | [The checker enumerates latches, and a discrete variable is now the other half of the state](11-08-2026-the-checker-enumerates-latches-and-a-discrete-variable-is-now-the-other.md) | verify | story | M | test | open | — |
 
-_21 open — 18 open, 3 blocked; 38 done. Generated; edit the files, then `cabildo issues reindex`._
+_20 open — 17 open, 3 blocked; 39 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

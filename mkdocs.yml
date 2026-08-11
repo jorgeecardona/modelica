@@ -94,6 +94,7 @@ nav:
   - Examples: examples.md
   - Finding where two tiers disagree: diverging.md
   - Notebooks:
+      - Every model in the corpus: notebooks/gallery.ipynb
       - Simulating a model: notebooks/simulating.py
       - Drawing a model: notebooks/drawing.ipynb
       - Turning the knobs: notebooks/exploring.ipynb

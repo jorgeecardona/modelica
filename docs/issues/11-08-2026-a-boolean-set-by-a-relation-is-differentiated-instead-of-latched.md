@@ -1,9 +1,10 @@
 ---
 title: A Boolean set by a relation is differentiated instead of latched
-status: open
+status: done
 area: ir
 owner: null
 filed: 2026-08-11
+fixed_in: 23f99e1
 kind: bug
 scope: M
 verify: test

@@ -1,0 +1,161 @@
+"""Write docs/notebooks/gallery.ipynb -- one entry per corpus model, generated from the corpus."""
+
+import json
+import pathlib
+
+CELLS: list[tuple[str, str]] = []
+
+
+def markdown(text: str) -> None:
+    CELLS.append(("markdown", text.strip("\n")))
+
+
+def code(text: str) -> None:
+    CELLS.append(("code", text.strip("\n")))
+
+
+markdown("""
+# Every model in the corpus
+
+The corpus is the project's specification: each model in `examples/models/` comes with a
+`.toml` saying what it must do, and `tests/test_examples.py` runs the pair on every commit.
+This page shows what those models *are*, and it is generated from the same files — a model
+added to the corpus appears here without anybody editing this notebook, and a model that
+stopped simulating fails the docs build rather than showing a stale picture.
+
+Three things per model: what it teaches, its picture, and its trajectory.
+""")
+
+code('''
+from pathlib import Path
+
+import tomllib
+
+# `..` twice: this notebook is executed from `docs/notebooks/`.
+ROOT = Path.cwd()
+while not (ROOT / "examples").is_dir():
+    ROOT = ROOT.parent
+MODELS = ROOT / "examples" / "models"
+LIBRARY = ROOT / "examples" / "library"
+
+SPECS = {
+    path.stem: tomllib.loads(path.with_suffix(".toml").read_text(encoding="utf-8"))
+    for path in sorted(MODELS.glob("*.mo"))
+}
+print(f"{len(SPECS)} models")
+''')
+
+code('''
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+
+# The same figure style the other notebooks use. A picture does not get to change colour
+# halfway down the site, so the surface stays light in both themes.
+SURFACE, INK, MUTED = "#fcfcfb", "#0b0b0b", "#52514e"
+RAMP = ["#2a78d6", "#eb6834", "#3f9e5a", "#9153c9", "#c2405a", "#0f8b8d"]
+
+mpl.rcParams.update(
+    {
+        "figure.figsize": (8.4, 2.9),
+        "figure.facecolor": SURFACE,
+        "axes.facecolor": SURFACE,
+        "axes.edgecolor": MUTED,
+        "axes.labelcolor": INK,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "text.color": INK,
+        "xtick.color": MUTED,
+        "ytick.color": MUTED,
+        "font.size": 9,
+        "lines.linewidth": 1.6,
+        "figure.dpi": 130,
+    }
+)
+''')
+
+code('''
+from IPython.display import HTML, display
+
+from modelica import diagram
+from modelica.lang import parse
+from modelica.sim import causalize, flatten, simulate
+
+
+def sources(name: str) -> list[Path]:
+    """The model and every library its spec names, in load order."""
+    spec = SPECS[name]
+    return [LIBRARY / f"{lib}.mo" for lib in spec.get("requires", [])] + [MODELS / f"{name}.mo"]
+
+
+def show(name: str) -> None:
+    """One entry: what it teaches, its picture, and what it does."""
+    spec = SPECS[name]
+    teaches = " · ".join(spec.get("teaches", []))
+    display(HTML(
+        f"<h3 style='margin-bottom:.2em'>{name}</h3>"
+        f"<p style='margin:.2em 0'>{spec['summary']}</p>"
+        f"<p style='margin:.2em 0;color:#52514e;font-size:.9em'>{teaches}</p>"
+    ))
+
+    # The picture, when the model has components to draw. A flat pile of equations has no
+    # schematic to have an opinion about, and drawing an empty frame would say otherwise.
+    graph = diagram.of(*(str(path) for path in sources(name)), model=name)
+    if graph.nodes:
+        display(HTML(graph.to_svg()))
+
+    run = spec.get("simulate")
+    if run is None:
+        return
+    system = causalize(flatten([parse(p.read_text(encoding="utf-8")) for p in sources(name)], name))
+    result = simulate(
+        system,
+        stop=run["stop"],
+        tolerance=max(run.get("tolerance", 1e-6), 1e-9),
+        method=run.get("method", "Radau"),
+    )
+
+    # The states are what the model integrates, so they are what a reader wants to see.
+    # Everything else is derived from them and would only crowd the axes.
+    shown = [n for n in system.states if not n.startswith("der_")][:6]
+    figure, axes = plt.subplots()
+    for index, variable in enumerate(shown):
+        axes.plot(result.time, result[variable], color=RAMP[index % len(RAMP)], label=variable)
+    for event in result.events[:40]:
+        axes.axvline(event.time, color=MUTED, linewidth=0.5, alpha=0.35)
+    axes.set_xlabel("time (s)")
+    axes.legend(loc="best", frameon=False, ncols=min(len(shown), 3))
+    plt.show()
+''')
+
+markdown("""
+The vertical hairlines are **events** — the moments the integrator stopped, relocated a zero
+crossing, and restarted. A model with none is smooth all the way through; `BouncingBall` and
+`Thermostat` are mostly hairline.
+""")
+
+code('''
+for name in SPECS:
+    show(name)
+''')
+
+notebook = {
+    "cells": [
+        {
+            "cell_type": kind,
+            "metadata": {},
+            "source": [line + "\n" for line in text.split("\n")[:-1]] + [text.split("\n")[-1]],
+            **({"outputs": [], "execution_count": None} if kind == "code" else {}),
+        }
+        for kind, text in CELLS
+    ],
+    "metadata": {
+        "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+        "language_info": {"name": "python", "version": "3.12"},
+    },
+    "nbformat": 4,
+    "nbformat_minor": 5,
+}
+
+out = pathlib.Path("docs/notebooks/gallery.ipynb")
+out.write_text(json.dumps(notebook, indent=1) + "\n", encoding="utf-8")
+print("wrote", out, len(CELLS), "cells")
