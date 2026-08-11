@@ -1,9 +1,10 @@
 ---
 title: A when-clause can only reinit a state, so no discrete variable in this engine remembers anything
-status: in-progress
+status: done
 area: sim
 owner: quiet-tars-187f2
 filed: 2026-08-09
+fixed_in: 3d68521
 scope: L
 verify: test
 kind: story
