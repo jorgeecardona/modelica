@@ -60,6 +60,7 @@ FLAT = {
     "RoastingMachine",
     "Robertson",
     "Setback",
+    "Thermostat",
     "VanDerPol",
 }
 
