@@ -516,6 +516,31 @@ def _rendered(system: System) -> Iterator[ir.Expr]:
     yield from system.aliases.values()
 
 
+def _remembered(system: System) -> tuple[str, ...]:
+    """The variables a ``when`` assigns, which therefore hold their value between events.
+
+    Modelica calls these discrete-time variables (specification 3.x, section 8.3.5): nothing
+    in the continuous part determines them, so they are neither states nor block unknowns,
+    and causalization leaves them alone. What they are is *memory*, and the workspace is
+    where this engine keeps memory -- they already have a slot there, because ``w`` begins
+    with one slot per observed variable.
+
+    Read off the ``when`` bodies rather than off the ``discrete`` prefix. A variable declared
+    discrete and never assigned has nothing to remember, and one assigned in a ``when`` is
+    discrete whether or not the modeller wrote the prefix -- the specification says the
+    assignment is what makes it so.
+    """
+    states = set(system.states)
+    found = {
+        statement.target.name
+        for when in system.whens
+        for branch in when.branches
+        for statement in branch.body
+        if isinstance(statement, ir.Assign) and statement.target.name not in states
+    }
+    return tuple(name for name in (v.name for v in system.variables) if name in found)
+
+
 def _watched(system: System) -> tuple[ir.Binary, ...]:
     """The relations in the equations, deduplicated, in the order they are first read.
 
@@ -668,6 +693,7 @@ class Emitter:
         self.tangents = {name: _identifier(f"$d_{name}", taken) for name in self.observed}
         self.symbols["time"] = "t"
         self.slots = {name: slot for slot, name in enumerate(self.observed)}
+        self.remembered = _remembered(self.system)
         self.watched = _watched(self.system)
         for position, relation in enumerate(self.watched):
             held = f"$relation{position}"  # `$` keeps it out of reach of Modelica names
@@ -802,6 +828,16 @@ class Emitter:
                 for slot, variable in enumerate(self.system.parameters)
             ),
             *(f"{self.symbols[name]} = y[{slot}]" for slot, name in enumerate(mode.states)),
+            # A discrete variable is *read* from the workspace and never computed. Nothing
+            # in the continuous part determines it: it holds what the last `when` that
+            # assigned it left there, which is what Modelica means by discrete-time
+            # variability, and what makes a model able to say "the door is open" rather
+            # than "the door is open right now because this relation currently holds".
+            *(
+                f"{self.symbols[name]} = w[{self.slots[name]}]"
+                for name in self.remembered
+                if name not in mode.states
+            ),
         ]
 
     def solve(self, block: Block) -> list[str]:
@@ -1375,11 +1411,31 @@ class Emitter:
         return [*body, "return z"]
 
     def statement(self, statement: ir.Statement, states: Mapping[str, int]) -> str:
+        """One line of a ``when`` body: a state reinitialised, or a discrete variable set.
+
+        ``pre(n)`` needs no special handling here and that is not an accident. The name is
+        already bound, by :meth:`unpack`, to the workspace slot -- which holds the value
+        from *before* this event, because ``transition`` is called with the pre-event
+        workspace. So ``n = pre(n) + 1`` emits ``w[k] = n + 1`` where ``n`` is the old
+        value, which is exactly the counter the modeller wrote.
+        """
         match statement:
             case ir.Reinit(target=target, value=value) if target.name in states:
                 return f"    out[{states[target.name]}] = {self.expr(value)}"
             case ir.Reinit(target=target):
                 raise EmitError(f"reinit({target.name}) -- only a state can be reinitialised")
+            case ir.Assign(target=target, value=value) if target.name in self.remembered:
+                return f"    w[{self.slots[target.name]}] = {self.expr(value)}"
+            case ir.Assign(target=target) if target.name in states:
+                raise EmitError(
+                    f"{target.name} is a continuous state, so a when-clause must "
+                    f"reinit({target.name}, ...) rather than assign it"
+                )
+            case ir.Assign(target=target):
+                raise EmitError(
+                    f"{target.name} is assigned in a when-clause but is not discrete; "
+                    f"declare it `discrete` so that it holds its value between events"
+                )
             case _:
                 raise EmitError(f"no translation for {statement!r} inside a when-clause")
 

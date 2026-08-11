@@ -1,0 +1,89 @@
+summary = "A heater with hysteresis: the regime is remembered between events, not re-decided from the temperature."
+teaches = ["a discrete variable that holds its value", "pre()", "two `when` clauses that disagree", "hysteresis"]
+requires = []
+
+[parse]
+classes = ["Thermostat"]
+
+[flatten]
+model = "Thermostat"
+index = 1
+balanced = true
+states = ["T"]
+
+# `heating` and `cycles` are *not* states. Nothing in the continuous part determines them:
+# they hold what the last `when` that assigned them left in the workspace, which is what
+# Modelica means by discrete-time variability. That is the whole point of the model -- a
+# thermostat that re-decided its regime from the current temperature would chatter at the
+# threshold instead of cycling, because "should the heater be on" is not a function of T.
+#
+# Each phase is a closed form: dT/dt = k(T_amb - T) + q*h gives
+# T(t) = T_inf + (T(0) - T_inf) exp(-k t) with T_inf = T_amb + q*h/k, and the switching
+# times follow from one logarithm each. So the reference is that recurrence evaluated in
+# double precision -- no integrator, and no root finder.
+[simulate]
+stop = 60.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 5.0
+values = { T = 19.794327786119432, heating = 1.0, cycles = 2.0 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 20.0
+values = { T = 20.261432644348403, heating = 1.0, cycles = 6.0 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 40.0
+values = { T = 19.012261177587483, heating = 1.0, cycles = 12.0 }
+rtol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 60.0
+values = { T = 20.586374977191966, heating = 1.0, cycles = 17.0 }
+rtol = 1e-8
+source = "analytic"
+
+# Every switching time in the horizon, from the same closed form -- 33 of them. The first
+# is the initial cool-down from 20 degC to the lower threshold; after that the cycle is
+# 2.703 s heating and 0.890 s cooling, and it repeats to the digits shown for a minute.
+# A model that re-decided its regime instead of remembering it would not produce a period
+# at all, so this list is the strongest statement in the file about what the memory does.
+[simulate.events]
+times = [
+  0.459952477, 3.163053197, 4.053262481, 6.756363202, 7.646572486, 10.349673207,
+  11.239882491, 13.942983212, 14.833192496, 17.536293217, 18.426502501, 21.129603222,
+  22.019812506, 24.722913227, 25.613122511, 28.316223231, 29.206432516, 31.909533236,
+  32.799742521, 35.502843241, 36.393052525, 39.096153246, 39.98636253, 42.689463251,
+  43.579672535, 46.282773256, 47.17298254, 49.876083261, 50.766292545, 53.469393266,
+  54.35960255, 57.062703271, 57.952912555,
+]
+atol = 1e-6
+
+# `heating` is 0 or 1 and never anything between. This is the assertion that it is
+# *remembered*: a variable the solver interpolated, or one recomputed from a relation each
+# step, would take intermediate values somewhere in 33 events over 60 seconds.
+[[simulate.invariant]]
+expr = "heating * (1 - heating)"
+value = 0.0
+atol = 0.0
+
+# Hysteresis is what the memory buys. The room stays inside the band, and the small
+# overshoot past each threshold is the integrator stopping *at* the crossing rather than
+# past it -- so this is also a statement about event location.
+[[simulate.invariant]]
+expr = "T"
+min = 18.99
+max = 21.01
+
+# The counter only ever goes up, and it counts the lower crossings and not the upper ones:
+# 17 by t = 60 against 33 events in total.
+[[simulate.invariant]]
+expr = "cycles"
+min = 0.0
+max = 17.0
