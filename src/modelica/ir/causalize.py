@@ -50,7 +50,7 @@ from modelica.ir.derive import (
     simplify,
 )
 from modelica.ir.flat import FlatVariable
-from modelica.ir.rewrite import contains, names, residual, solve_for, substitute
+from modelica.ir.rewrite import contains, isolated, names, residual, solve_for, substitute
 from modelica.ir.system import Block, Mode, System
 
 if TYPE_CHECKING:
@@ -745,6 +745,14 @@ def _blocks(work: _Work, matched: dict[int, str]) -> tuple[Block, ...]:
         unknowns = tuple(matched[index] for index in members)
         if len(members) == 1:
             left = residual(equations[0])
+            # An unknown standing alone on one side has slope exactly +/-1 and needs no
+            # derivative. Taking one anyway is what stopped `hot = x > 0.5` -- an ordinary
+            # Modelica equation -- from building, because a relation has no derivative and
+            # the question was never worth asking of this shape.
+            direct = isolated(left, unknowns[0])
+            if direct is not None:
+                blocks.append(Block(unknowns, equations, direct[0], direct[1]))
+                continue
             assignment = solve_for(left, unknowns[0])
             pivot = simplify(d_dx(left, unknowns[0]))
             blocks.append(Block(unknowns, equations, assignment, pivot))

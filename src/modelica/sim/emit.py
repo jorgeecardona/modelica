@@ -541,6 +541,22 @@ def _remembered(system: System) -> tuple[str, ...]:
     return tuple(name for name in (v.name for v in system.variables) if name in found)
 
 
+_RELATIONS: Final = frozenset({"==", "<>", "<", "<=", ">", ">=", "and", "or"})
+
+
+def _boolean(node: ir.Expr) -> bool:
+    """Whether an expression is boolean-valued, and therefore has no tangent."""
+    match node:
+        case ir.Binary(op=op):
+            return op in _RELATIONS
+        case ir.Unary(op="not") | ir.BoolLiteral():
+            return True
+        case ir.IfExpr(then=then, otherwise=otherwise):
+            return _boolean(then) and _boolean(otherwise)
+        case _:
+            return False
+
+
 def _watched(system: System) -> tuple[ir.Binary, ...]:
     """The relations in the equations, deduplicated, in the order they are first read.
 
@@ -970,7 +986,16 @@ class Emitter:
         is left out of ``carried`` entirely, so the sums downstream of it get shorter instead
         of longer. In a model of any size most variables do not depend on most states, and
         this is the only thing keeping the emitted source proportional to the sparsity.
+
+        A boolean-valued expression has no tangent and needs none. It is piecewise constant
+        between events by construction -- that is what a latched relation *is* -- so its
+        derivative with respect to any state is zero everywhere the derivative exists, and
+        the one place it does not is a crossing, which this engine handles as an event
+        rather than as a slope. Asking ``d_dx`` for it would raise, and raising would be the
+        wrong answer to a question with a correct one.
         """
+        if _boolean(node):
+            return None
         terms: list[str] = []
         for name in dict.fromkeys(names(node)):
             row = carried.get(name)

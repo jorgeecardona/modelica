@@ -14,12 +14,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from modelica.ir import nodes as ir
-from modelica.ir.derive import ZERO, d_dx, div, neg, simplify, sub
+from modelica.ir.derive import ONE, ZERO, d_dx, div, neg, simplify, sub
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
-__all__ = ["contains", "names", "residual", "solve_for", "substitute"]
+__all__ = ["contains", "isolated", "names", "residual", "solve_for", "substitute"]
+
+MINUS_ONE = ir.RealLiteral(-1.0)
+"""The slope of ``rest - name`` in ``name``. Exact, and the sign is the whole point."""
 
 
 def residual(equation: ir.Equal) -> ir.Expr:
@@ -80,15 +83,40 @@ def substitute(node: ir.Expr, mapping: Mapping[str, ir.Expr]) -> ir.Expr:  # noq
             return node
 
 
+def isolated(residual: ir.Expr, name: str) -> tuple[ir.Expr, ir.Expr] | None:
+    """``name - rest`` or ``rest - name``, when ``rest`` does not mention ``name``.
+
+    The answer is ``rest``, and no derivative is taken to find it. That is worth a special
+    case for two reasons. It is the commonest shape in any model -- one side of the equation
+    is the variable being defined -- so the general path spends a differentiation and two
+    simplifications on an answer that was already written down. And it is the *only* path
+    for an equation whose other side has no derivative at all: ``hot = x > 0.5`` is a
+    perfectly ordinary Modelica equation, and asking what a ``>`` differentiates to is
+    asking the wrong question about it.
+    """
+    match residual:
+        case ir.Binary(op="-", lhs=ir.Ref(parts=parts), rhs=rest) if ".".join(parts) == name:
+            return (rest, ONE) if not contains(rest, name) else None
+        case ir.Binary(op="-", lhs=rest, rhs=ir.Ref(parts=parts)) if ".".join(parts) == name:
+            return (rest, MINUS_ONE) if not contains(rest, name) else None
+        case _:
+            return None
+
+
 def solve_for(residual: ir.Expr, name: str) -> ir.Expr | None:
     """Solve ``residual = 0`` for ``name``, or return ``None`` if it does not come out.
 
-    Only the linear case is attempted, which is the case that matters: a block the solver
-    would otherwise have to iterate on becomes a single assignment. Linearity is decided by
-    differentiating -- if ``d residual / d name`` still mentions ``name``, the residual was
-    not linear in it -- and the answer is then the schoolbook ``-b/a`` with
-    ``b = residual`` evaluated at ``name = 0``.
+    Two paths. If ``name`` stands alone on one side, the answer is the other side and
+    nothing is differentiated -- see :func:`_isolated`. Otherwise only the linear case is
+    attempted, which is the case that matters: a block the solver would otherwise have to
+    iterate on becomes a single assignment. Linearity is decided by differentiating -- if
+    ``d residual / d name`` still mentions ``name``, the residual was not linear in it --
+    and the answer is then the schoolbook ``-b/a`` with ``b = residual`` evaluated at
+    ``name = 0``.
     """
+    direct = isolated(residual, name)
+    if direct is not None:
+        return direct[0]
     slope = simplify(d_dx(residual, name))
     if slope == ZERO or contains(slope, name):
         return None
