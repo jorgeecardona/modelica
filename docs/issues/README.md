@@ -94,6 +94,7 @@ cabildo issues show <slug>
 | [No corpus model is worth solving two ways — nothing has several zones under one schedule](09-08-2026-no-corpus-model-is-worth-solving-two-ways-nothing-has-several-zones.md) | sim | idea | M | test | open | — |
 | [Nothing fits a parameter to data, and the reason that is hard is that parameters trade off](09-08-2026-nothing-fits-a-parameter-to-data-and-the-reason-that-is-hard.md) | sim | idea | L | probe | open | — |
 | [Stages 2 and 3 of the benchmark: HIRES, E5, Ring Modulator, and ScalableTestSuite](10-08-2026-stages-2-and-3-of-the-benchmark-hires-e5-ring-modulator-and.md) | sim | story | L | probe | open | — |
+| [A TypeScript backend is a third dialect plus a port of radau.py, and it would put models in the browser](11-08-2026-a-typescript-backend-is-a-third-dialect-plus-a-port-of-radau.md) | sim | idea | L | probe | open | — |
 | [A fixed-step co-simulation schedule never branches, so it could be recorded once](03-08-2026-replay-a-fixed-step-cosimulation-schedule.md) | ssp | idea | M | probe | open | ssp-read-the-archive-and-run-the-master |
 | [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
 | [Chattering across instants is watched by a counter, and the checker cannot see it](03-08-2026-chattering-across-instants.md) | verify | idea | M | probe | open | — |
@@ -101,5 +102,5 @@ cabildo issues show <slug>
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
 | [The checker enumerates latches, and a discrete variable is now the other half of the state](11-08-2026-the-checker-enumerates-latches-and-a-discrete-variable-is-now-the-other.md) | verify | story | M | test | open | — |
 
-_20 open — 17 open, 3 blocked; 39 done. Generated; edit the files, then `cabildo issues reindex`._
+_21 open — 18 open, 3 blocked; 39 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->
