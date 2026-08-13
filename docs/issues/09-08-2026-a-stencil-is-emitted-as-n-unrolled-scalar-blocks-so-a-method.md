@@ -182,3 +182,47 @@ the module and is *not* covered by the narrow one.
 Neither is a reason not to do it. They are the reason it is an emitter change with a cache in
 it rather than three lines moved, and whoever takes it should know before starting that the
 narrow version leaves the biggest function untouched.
+
+## The prerequisite landed, and the arithmetic on the rest is worse than it looked
+
+`1c784ed` caches the forward-mode walk per (mode, seeding). Five methods differentiate and the
+seeding is all that separates them -- `differentiate` and `differentiate_sparse` do not differ
+even in that -- so the identical walk ran twice for one answer.
+
+    emit at n = 1000     1.83 s  ->  0.30 s     6.1x
+
+Byte-identical output, checked by hashing the whole emitted module for five corpus models.
+That buys **emit time, not size**: still 35,108 lines at n = 1000.
+
+### What a shared walk would actually save
+
+Measured at n = 200, splitting each Jacobian into the walk and the lines that write ``out``:
+
+| function | total | output rows | walk |
+| --- | --- | --- | --- |
+| `jacobian` | 1,007 | 200 | 807 |
+| `jacobian_sparse` | 1,007 | 200 | 807 |
+
+So the duplicated part is the 807, not the 1,007 -- the note above called the whole 5,008 at
+n = 1000 "duplicated" and that overstates it by a fifth. Sharing the walk saves one copy of
+it: about **11 % of the module**, not the 14 % claimed.
+
+And it is not free. The walk's assignments name locals (`_d_T_3_ = ...`), and downstream
+expressions read those names. Writing into a scratch means either an extra store per variable
+-- which costs exactly the lines the sharing saved, so nothing is gained -- or making the walk
+assign into ``rows[k]`` directly, so every downstream read becomes an indexed load in the
+hottest function the module has. That is a source-size win paid for in Jacobian evaluation
+time, on the path an implicit solver takes several times per step.
+
+**This is a measurement, not a refusal.** 11 % is real and the runtime cost is unmeasured. But
+it is a trade rather than a cleanup, and whoever takes it should measure the Jacobian call
+before and after rather than assume the indexing is free.
+
+### The bigger target is somewhere else
+
+At n = 1000 the four largest functions are `observe_jacobian` 6,011, `jacobian` 5,008,
+`jacobian_sparse` 5,008 and `observe` 4,010 -- 20,037 of 35,108 lines. `observe_jacobian` is
+the single largest and it is `d(observed)/dy`, which exists for state estimators; a caller
+integrating a bar never touches it. Not emitting what nobody asked for is a larger saving than
+sharing a walk, and it costs no runtime at all. That is worth its own entry before this one is
+taken further.
