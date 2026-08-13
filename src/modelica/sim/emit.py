@@ -685,6 +685,18 @@ class Emitter:
     dialect: Dialect = PYTHON
     """Which language the expressions come out in. The *decisions* are the same either way."""
 
+    observed_jacobian: bool = True
+    """Whether to emit ``observe_jacobian``, ``d(observed)/dy`` -- what an estimator calls H.
+
+    It is the largest function in the module: 6,011 lines on a 1000-cell bar, 17 % of the
+    whole, because it differentiates *every* variable of the model rather than the state
+    derivatives. Nothing in `modelica.sim.solve` calls it, so a run that only wants a
+    trajectory pays for it in emit time, in ``compile()`` and in bytes for nothing.
+
+    Default `True`, so a caller who reaches for `Kernel.observe_jacobian` still finds it. It
+    is `simulate` that turns it off, because `simulate` builds a kernel nobody else sees.
+    """
+
     sensitivity: tuple[str, ...] = ()
     """Parameters to differentiate against, and the width of the sensitivity rows.
 
@@ -1554,10 +1566,16 @@ class Emitter:
                 "t, y, p, w, out",
                 [self.differentiate_observed_parameters(m) for m in modes],
             ),
-            self.dispatch(
-                "observe_jacobian",
-                "t, y, p, w, out",
-                [self.differentiate_observed(m) for m in modes],
+            *(
+                [
+                    self.dispatch(
+                        "observe_jacobian",
+                        "t, y, p, w, out",
+                        [self.differentiate_observed(m) for m in modes],
+                    )
+                ]
+                if self.observed_jacobian
+                else []
             ),
             self.dispatch(
                 "indicators",
@@ -1661,7 +1679,13 @@ def _as_literal(value: Value) -> ir.Expr:
     return ir.RealLiteral(float(value))
 
 
-def emit(system: System, *, fold: bool = False, sensitivity: Sequence[str] = ()) -> Code:
+def emit(
+    system: System,
+    *,
+    fold: bool = False,
+    sensitivity: Sequence[str] = (),
+    observed_jacobian: bool = True,
+) -> Code:
     """Write ``system`` out as a Python module, ready to be compiled.
 
     ``fold`` picks the compile mode. The default leaves the parameters as an argument, so one
@@ -1673,4 +1697,9 @@ def emit(system: System, *, fold: bool = False, sensitivity: Sequence[str] = ())
         if name not in known:
             message = f"{system.name} has no parameter {name!r} to differentiate against"
             raise EmitError(message)
-    return Emitter(system, fold=fold, sensitivity=tuple(sensitivity)).code()
+    return Emitter(
+        system,
+        fold=fold,
+        sensitivity=tuple(sensitivity),
+        observed_jacobian=observed_jacobian,
+    ).code()

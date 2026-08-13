@@ -133,7 +133,11 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     one. The initial conditions are computed *from* it, so a start value written in terms of
     a parameter follows the override, which is what makes this usable for a sweep.
     """
-    kernel = model if isinstance(model, Kernel) else build(model, jit=jit)
+    # `observed_jacobian=False`: this kernel is internal to the run and nothing here calls
+    # `d(observed)/dy`. It is the largest function the emitter writes -- 17 % of the module on
+    # a 1000-cell bar -- so a caller who only wants a trajectory should not pay to emit it, to
+    # compile it, or to hold it. A caller who *does* want it builds the kernel itself.
+    kernel = model if isinstance(model, Kernel) else build(model, jit=jit, observed_jacobian=False)
     grid = _grid(start, stop, times, points)
     p, y, w = kernel.start(start, parameters)
     plan = _Run(kernel, p, w, tolerance, absolute if absolute is not None else tolerance, method)

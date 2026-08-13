@@ -113,7 +113,13 @@ class Kernel:
     shaped arrays and a caller has to know which it allocated.
     """
     observe: _Evaluate
-    observe_jacobian: _Evaluate
+    observe_jacobian: _Evaluate | None
+    """``d(observed)/dy``, or ``None`` when the caller said not to emit it.
+
+    ``None`` rather than a stub that raises: a kernel should say what it does not have, and a
+    name that is present until you touch it is the shape that makes a caller write the check
+    in the wrong place.
+    """
     indicators: _Evaluate
     transition: _Transition
 
@@ -172,6 +178,7 @@ def build(
     jit: bool = False,
     fold: bool = False,
     sensitivity: Sequence[str] = (),
+    observed_jacobian: bool = True,
 ) -> Kernel:
     """Compile a system (or already-emitted code) into callables.
 
@@ -200,7 +207,7 @@ def build(
     repo, since `modelica.sim.solve.simulate` always passes the keyword. Decorating `build`
     directly compiled the same model twice and reported a hit rate that looked fine.
     """
-    return _compiled(model, jit, fold, tuple(sensitivity))
+    return _compiled(model, jit, fold, tuple(sensitivity), observed_jacobian)
 
 
 @lru_cache(maxsize=CACHED)
@@ -209,8 +216,13 @@ def _compiled(
     jit: bool,  # noqa: FBT001 - positional so `lru_cache` sees one key per call shape
     fold: bool,  # noqa: FBT001 - the same reason
     sensitivity: tuple[str, ...],
+    observed_jacobian: bool,  # noqa: FBT001 - the same reason
 ) -> Kernel:
-    code = model if isinstance(model, Code) else emit(model, fold=fold, sensitivity=sensitivity)
+    code = (
+        model
+        if isinstance(model, Code)
+        else emit(model, fold=fold, sensitivity=sensitivity, observed_jacobian=observed_jacobian)
+    )
     namespace: dict[str, Any] = {"np": np}
     exec(compile(code.source, f"<modelica:{code.name}>", "exec"), namespace)  # noqa: S102
     if jit:
@@ -226,7 +238,7 @@ def _compiled(
         jacobian_parameters=namespace["jacobian_parameters"],
         observe_jacobian_parameters=namespace["observe_jacobian_parameters"],
         observe=namespace["observe"],
-        observe_jacobian=namespace["observe_jacobian"],
+        observe_jacobian=namespace.get("observe_jacobian"),
         indicators=namespace["indicators"],
         transition=namespace["transition"],
     )
