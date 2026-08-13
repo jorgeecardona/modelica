@@ -166,26 +166,15 @@ def sensitivity(  # noqa: PLR0913 - a solver has knobs, and this one has the sam
     if not named:
         message = f"{kernel.name}: no parameters to differentiate against"
         raise SimulationError(message)
-    unhandled = [
-        trigger.condition
-        for trigger in kernel.code.events
-        if trigger.switch is not None or trigger.reinitialises
-    ]
+    unhandled = [trigger.condition for trigger in kernel.code.events if trigger.switch is not None]
     if unhandled:
-        # What is refused is a crossing that moves ``y`` itself, and that is narrower than
-        # "has a `when`". The jump below is ``S+ = S- + (f- - f+) dt*/dp``, which is the whole
-        # story exactly when ``y`` is continuous across the crossing -- when ``h`` is the
-        # identity. A latch flip is; so is a `when` whose body only assigns *discrete*
-        # variables, because those change what ``f`` is without moving where ``y`` is, and the
-        # ``f- - f+`` term is precisely that.
-        #
-        # Measured over the corpus: `Thermostat`'s two `when` clauses assign `heating` and
-        # `cycles` and touch no state, so it goes through. `BouncingBall` reinitialises ``v``
-        # from ``v``, so its ``dh/dy`` is a real matrix and `Kernel.transition` would have to
-        # be differentiated -- which nothing emits. Refused rather than approximated.
+        # What is left refused is a mode switch, where the crossing does not merely move the
+        # state but changes *which variables the state is*. `Mode.derivative` differs either
+        # side of it, so `S` is not even the same shape, and that is a different piece of work
+        # from a jump.
         message = (
-            f"{kernel.name}: {unhandled} reinitialises a state or switches state sets, and the"
-            " sensitivity jump at one needs `d(transition)/dy`, which is not emitted"
+            f"{kernel.name}: {unhandled} switches state sets, and a sensitivity across one is"
+            " not a jump -- the state vector itself changes meaning"
         )
         raise SimulationError(message)
 
@@ -673,29 +662,40 @@ def _jump(  # noqa: PLR0913, PLR0917 - the crossing, and everything it is read a
 ) -> NDArray[np.float64]:
     """Apply the transition and move ``S`` with it.
 
-    ``S+ = S- + (f- - f+) dt*/dp`` with ``dt*/dp = -(g_y S-) / (dg/dt)``. A latch flip leaves
-    ``y`` continuous, so that product is the whole of the jump -- and where the crossing is a
-    schedule, ``g_y`` is zero and the jump is zero with it, which is why
-    `Kernel.indicator_jacobian`'s zero rows are worth having.
+    ``S+ = H S- + dh/dp + (H f- - f+) dt*/dp`` with ``dt*/dp = -(g_y S-) / (dg/dt)``, where
+    ``H`` is `Kernel.transition_jacobian` -- the identity for a crossing that only flips a
+    latch or sets a discrete variable, and something else where a ``reinit`` moves the state.
 
-    **``f- - f+``, and the order is not a detail.** Writing it the other way round is the
-    obvious mistake and it is not obviously wrong: it leaves the sensitivity continuous where
-    it should be, and it moves in the right direction. The derivation is that just after the
-    crossing ``x(t) = x(t*) + f+ (t - t*)``, so differentiating at fixed ``t`` gives
-    ``S+ = [S- + f- dt*/dp] - f+ dt*/dp``. On the model in `tests/test_sensitivity_forward.py`
-    the two differ by a factor of three -- -0.75 against the closed form's -0.25 -- which is
-    how this was caught.
+    ``dh/dp`` is not optional and `BouncingBall` is why. Its ``reinit(v, -e * pre(v))`` puts
+    ``e`` *only* in the reset, so with that term missing the sensitivity to ``g`` came out at
+    5.5e-10 and the sensitivity to ``e`` at 1.0 -- wrong by the whole of itself.
+
+    **The order inside the bracket is not a detail.** Writing ``f+ - H f-`` is the obvious
+    mistake and it is not obviously wrong: it leaves the sensitivity continuous where it
+    should be, and it moves in the right direction. The derivation is that just after the
+    crossing ``y(t) = h(y(t*)) + f+ (t - t*)``, so differentiating at fixed ``t`` gives
+    ``S+ = H [S- + f- dt*/dp] - f+ dt*/dp``. On the model in
+    `tests/test_sensitivity_forward.py` the two differ by a factor of three -- -0.75 against
+    the closed form's -0.25 -- which is how it was caught while ``H`` was still the identity.
     """
     y, s = u[:n], u[n:].reshape(n, m)
     gradient = kernel.indicator_jacobian(at, y, p, w, np.zeros((kernel.events, n)))[index].copy()
     slope = float(kernel.indicator_slope(at, y, p, w, np.zeros(kernel.events))[index])
     before = kernel.rhs(at, y, p, w, np.empty(n)).copy()
-    kernel.transition(index, at, y, p, w, np.empty(n))
+    h = kernel.transition_jacobian(index, at, y, p, w, np.zeros((n, n))).copy()
+    direct = kernel.transition_jacobian_parameters(index, at, y, p, w, np.zeros((n, m))).copy()
+    # `transition` returns the state *after* the crossing, which for a `reinit` is not the one
+    # it was handed. Everything above is read at the pre-event point on purpose: `H`, `dh/dp`,
+    # `g_y`, the slope and `f-` are all properties of where the run arrived, not of where it
+    # leaves. Reading `dh/dp` one line too late was worth a factor of exactly `-e` on
+    # `BouncingBall` -- `-pre(v)` evaluated at the reflected velocity instead of the incoming
+    # one -- and a constant factor across every sample is what made it findable.
+    y = np.ascontiguousarray(kernel.transition(index, at, y, p, w, np.empty(n)))
     after = kernel.rhs(at, y, p, w, np.empty(n)).copy()
     if slope == 0.0:  # pragma: no cover - a crossing reached with no speed cannot be located
         return u
     moved = -(gradient @ s) / slope
-    jumped = s + np.outer(before - after, moved)
+    jumped = h @ s + direct + np.outer(h @ before - after, moved)
     return np.concatenate([y, np.asarray(jumped, dtype=float).ravel()])
 
 

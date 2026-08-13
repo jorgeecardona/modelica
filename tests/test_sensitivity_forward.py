@@ -265,17 +265,64 @@ def test_a_when_that_only_sets_a_discrete_variable_goes_through() -> None:
     assert (np.abs(exact.output[:, 0, :][:, taken] - crude) / scale).max() <= 1e-5
 
 
-def test_a_when_that_reinitialises_a_state_is_still_refused() -> None:
-    """`BouncingBall` turns its velocity round, so ``h`` is not the identity.
+@pytest.mark.parametrize(("parameter", "stop"), [("g", 3.0), ("e", 0.6), ("e", 3.0)])
+def test_a_reinitialised_state_carries_its_sensitivity_across_the_bounce(
+    parameter: str, stop: float
+) -> None:
+    """`BouncingBall`, which needs every term the formula has.
 
-    ``dh/dy`` is `Kernel.transition` differentiated and nothing emits it. Refused with the
-    reason rather than approximated -- and the reason now names what is actually wrong,
-    which is the reinitialisation and not the `when`.
+    ``S+ = H S- + dh/dp + (H f- - f+) dt*/dp``. Its ``reinit(v, -e * pre(v))`` makes ``H``
+    something other than the identity, and puts ``e`` **only** in the reset -- so a
+    sensitivity to ``e`` is almost entirely ``dh/dp``, while a sensitivity to ``g`` needs none
+    of that term at all. The two parameters test different halves of the same jump.
+
+    Six bounces by ``t = 3``, and the exact and differenced answers agree to every digit
+    printed. The horizon matters as a check on the *quotient* rather than on the formula: the
+    later bounce times move with the parameter, so a difference quotient that still agrees
+    after six of them is one worth believing.
+    """
+    forward = pytest.importorskip("modelica.sim.sensitivity").sensitivity
+    simulate = pytest.importorskip("modelica.sim.solve").simulate
+    build = pytest.importorskip("modelica.sim.kernel").build
+    vector = pytest.importorskip("modelica.sim.sweep").vector
+
+    system = _system("BouncingBall")
+    grid = np.array([stop])
+    exact = forward(system, [parameter], stop=stop, times=grid, tolerance=1e-11)
+
+    kernel = build(system, sensitivity=(parameter,))
+    declared = list(kernel.code.parameters)
+    value = float(kernel.parameters(np.zeros(len(declared)))[declared.index(parameter)])
+    step = 1e-7 * abs(value)
+    ends = [
+        simulate(
+            system,
+            stop=stop,
+            times=grid,
+            tolerance=1e-11,
+            parameters=vector(system, {parameter: value + delta}),
+        )
+        for delta in (step, -step)
+    ]
+    crude = (
+        ends[0]["h"][np.searchsorted(ends[0].time, stop)]
+        - ends[1]["h"][np.searchsorted(ends[1].time, stop)]
+    ) / (2 * step)
+    got = exact["h", parameter][np.searchsorted(exact.time, stop)]
+    assert abs(got - crude) <= 1e-4 * max(1.0, abs(crude)), f"{got:+.9f} against {crude:+.9f}"
+
+
+def test_a_mode_switch_is_still_refused() -> None:
+    """The one case left, and it is not a jump at all.
+
+    Across a switch `Mode.derivative` differs on either side, so ``S`` is not even the same
+    shape -- the state vector changes meaning rather than value. `Pendulum` is the corpus
+    model with one.
     """
     forward = pytest.importorskip("modelica.sim.sensitivity").sensitivity
     error = pytest.importorskip("modelica.sim.solve").SimulationError
-    with pytest.raises(error, match="reinitialises a state"):
-        forward(_system("BouncingBall"), ["e"], stop=1.0)
+    with pytest.raises(error, match="switches state sets"):
+        forward(_system("Pendulum"), ["L"], stop=1.0)
 
 
 def test_asking_for_a_parameter_the_kernel_was_not_built_for_is_refused() -> None:

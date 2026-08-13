@@ -154,6 +154,21 @@ class Kernel:
     """
 
     transition: _Transition
+    transition_jacobian: _Transition
+    """``d(transition)/dy`` for one event: the identity except where a ``reinit`` writes.
+
+    Part of a sensitivity across a crossing, ``S+ = H S- + dh/dp + (H f- - f+) dt*/dp``. A
+    crossing that only flips a latch or sets a discrete variable has ``H = I``, which is why
+    most models never need to look at it.
+    """
+
+    transition_jacobian_parameters: _Transition
+    """``d(transition)/dp`` for one event, over `Code.sensitivity`.
+
+    The other half, and not an optional one: `BouncingBall`'s ``reinit(v, -e * pre(v))`` puts
+    ``e`` *only* in the reset, so a sensitivity to it is entirely this term. Zero wherever a
+    reset does not mention a differentiated parameter.
+    """
 
     @property
     def name(self) -> str:
@@ -275,6 +290,8 @@ def _compiled(
         indicator_jacobian=namespace["indicator_jacobian"],
         indicator_slope=namespace["indicator_slope"],
         transition=namespace["transition"],
+        transition_jacobian=namespace["transition_jacobian"],
+        transition_jacobian_parameters=namespace["transition_jacobian_parameters"],
     )
 
 

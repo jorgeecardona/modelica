@@ -588,6 +588,35 @@ def _watched(system: System) -> tuple[ir.Binary, ...]:
     return tuple(found)
 
 
+def _before(node: ir.Expr) -> ir.Expr:
+    """``pre(x)`` as ``x``, for differentiating a ``reinit`` with respect to where it came from.
+
+    Inside a ``when`` body ``pre(x)`` *is* the value before the event, which is exactly the
+    ``y`` that ``d(transition)/dy`` differentiates against -- so the two are the same variable
+    for this purpose and the walk only knows the plain name. `BouncingBall` writes
+    ``reinit(v, -e * pre(v))`` and its row of ``H`` is ``-e``, which is only reachable through
+    this.
+
+    `Emitter.statement` needs no equivalent, and the reason is worth keeping together with
+    this one: at *runtime* the name is already bound to the pre-event value, so rendering
+    ``pre(v)`` and rendering ``v`` produce the same line. It is only the tangent walk, which
+    matches on node identity, that has to be told.
+    """
+    match node:
+        case ir.Call(name="pre", args=(ir.Ref() as ref,)):
+            return ref
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, _before(lhs), _before(rhs))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _before(operand))
+        case ir.Call(name=name, args=args):
+            return ir.Call(name, tuple(_before(argument) for argument in args))
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(_before(condition), _before(then), _before(otherwise))
+        case _:
+            return node
+
+
 def _latched(node: ir.Expr, held: Mapping[ir.Expr, ir.Expr]) -> ir.Expr:  # noqa: PLR0911 - one case per node type
     """Replace each watched relation by a read of the value latched at the last event."""
     if not held:
@@ -1665,6 +1694,73 @@ class Emitter:
             body.extend(lines or ["    pass"])
         return [*body, "return out"]
 
+    def differentiate_transition(
+        self, position: int, mode: Mode, events: tuple[_Event, ...]
+    ) -> list[str]:
+        """``d(transition)/dy`` -- how a reinitialised state depends on where it came from.
+
+        The last term an event-crossing sensitivity needs. Across a crossing
+        ``S+ = H S- + (H f- - f+) dt*/dp``, and ``H`` is this: the identity everywhere except
+        the rows a ``reinit`` writes, where it is the tangent of what the ``reinit`` assigns.
+        `BouncingBall`'s ``reinit(v, -e * v)`` gives a diagonal of ``-e`` in ``v``'s row and
+        ones elsewhere.
+
+        The identity is the *right* default rather than a convenience. A ``when`` that only
+        assigns discrete variables leaves every state where it was -- `Thermostat` is that --
+        and a state no branch mentions is untouched whatever else the branch does. So the rows
+        this fills are exactly the `ir.Reinit` targets and nothing else has to be enumerated.
+
+        The same forward-mode walk again, gathered at the reinit expressions instead of at the
+        state derivatives, which is the sixth place `tangent` is read.
+        """
+        del position  # the rows are the same in every mode; only `transition` dispatches
+        states = {name: slot for slot, name in enumerate(mode.states)}
+        lines, carried = self.tangent(mode)
+        body = [*lines, "out[:] = _seed"]
+        for k, event in enumerate(events):
+            rows = [
+                f"    out[{states[statement.target.name]}] = "
+                f"{self.combination(_before(statement.value), carried) or '_null'}"
+                for statement in event.body
+                if isinstance(statement, ir.Reinit) and statement.target.name in states
+            ]
+            body.append(f"if event == {k}:")
+            body.extend(rows or ["    pass"])
+        return [*body, "return out"]
+
+    def differentiate_transition_parameters(
+        self, position: int, mode: Mode, events: tuple[_Event, ...]
+    ) -> list[str]:
+        """``d(transition)/dp`` -- how a reset depends on the parameters directly.
+
+        `BouncingBall`'s ``reinit(v, -e * pre(v))`` is the case, and it is the one that shows
+        why this is not optional. Differentiating that run with respect to ``g`` needs only
+        `differentiate_transition`, because ``g`` is nowhere in the reset; with respect to
+        ``e`` the answer is wrong by a factor of one -- the whole sensitivity -- because ``e``
+        appears *only* there. Measured before this existed: 5.5e-10 for ``g`` and 1.0 for
+        ``e``.
+
+        So the jump across a crossing is ``S+ = H S- + dh/dp + (H f- - f+) dt*/dp``, and this
+        is ``dh/dp``. Zero everywhere a reset does not mention a differentiated parameter,
+        which is most of them.
+        """
+        del position  # the rows are the same in every mode; only `transition` dispatches
+        if not self.sensitivity:
+            return ["return out"]
+        states = {name: slot for slot, name in enumerate(mode.states)}
+        lines, carried = self.tangent(mode, self.sensitivity)
+        body = [*lines, "out[:] = 0.0"]
+        for k, event in enumerate(events):
+            rows = [
+                f"    out[{states[statement.target.name]}] = "
+                f"{self.combination(_before(statement.value), carried) or '_pnull'}"
+                for statement in event.body
+                if isinstance(statement, ir.Reinit) and statement.target.name in states
+            ]
+            body.append(f"if event == {k}:")
+            body.extend(rows or ["    pass"])
+        return [*body, "return out"]
+
     def code(self) -> Code:
         events = self.events()
         modes = self.system.modes
@@ -1723,6 +1819,19 @@ class Emitter:
                 "indicator_slope",
                 "t, y, p, w, out",
                 [self.indicator_slope(k, m, events) for k, m in enumerate(modes)],
+            ),
+            self.dispatch(
+                "transition_jacobian",
+                "event, t, y, p, w, out",
+                [self.differentiate_transition(k, m, events) for k, m in enumerate(modes)],
+            ),
+            self.dispatch(
+                "transition_jacobian_parameters",
+                "event, t, y, p, w, out",
+                [
+                    self.differentiate_transition_parameters(k, m, events)
+                    for k, m in enumerate(modes)
+                ],
             ),
             self.dispatch(
                 "transition",

@@ -304,3 +304,47 @@ Two things the narrowing exposed, both in code written earlier the same day:
 
 So the remaining refusal is one model and one condition: a crossing that reinitialises a
 state, needing ``d(transition)/dy``.
+
+## A reinitialised state goes through too, and the entry closes
+
+Two more emitted terms, and the jump is complete:
+
+    S+ = H S- + dh/dp + (H f- - f+) dt*/dp
+
+`Kernel.transition_jacobian` is ``H = d(transition)/dy`` -- the identity except in the rows a
+``reinit`` writes -- and `Kernel.transition_jacobian_parameters` is ``dh/dp``. Both are the
+same forward-mode walk, gathered at the ``reinit`` expressions instead of at the state
+derivatives.
+
+`BouncingBall` needs every term and is why both exist. Its ``reinit(v, -e * pre(v))`` makes
+``H`` something other than the identity *and* puts ``e`` **only** in the reset. With ``dh/dp``
+missing, the sensitivity to ``g`` was already right at 5.5e-10 while the sensitivity to ``e``
+was wrong by 1.0 -- the whole of itself.
+
+    stop   bounces   dh/de exact      differenced
+    0.60      1      +0.657668        +0.657668
+    1.20      2      -2.144789        -2.144789
+    1.80      3      -3.808208        -3.808208
+    3.00      6      +1.163888        +1.163888
+
+Every digit, through six bounces whose times all move with the parameter.
+
+### Two things worth keeping
+
+**``pre(x)`` is ``x`` for this purpose, and only the walk needs telling.** `BouncingBall`
+writes ``-e * pre(v)``, and inside a ``when`` body ``pre(v)`` *is* the pre-event value, which
+is exactly what ``d(transition)/dy`` differentiates against. At runtime the name is already
+bound to it, so `Emitter.statement` needs no equivalent -- it is only the tangent walk, which
+matches on node identity, that has to be told. Without it ``H``'s ``v`` row came out zero.
+
+**Reading ``dh/dp`` one line too late cost a factor of exactly ``-e``.** `transition` returns
+the post-event state, and ``-pre(v)`` evaluated at the reflected velocity rather than the
+incoming one is ``-(-e v)`` instead of ``-v``. A *constant* factor across every sample and
+every horizon is what made it findable -- 0.526/0.658, 1.716/2.145, 3.047/3.808, all -0.8 --
+where a varying error would have looked like ordinary numerical disagreement.
+
+### What is left refused
+
+A mode switch, and it is not a jump at all: `Mode.derivative` differs either side, so ``S`` is
+not the same shape. The state vector changes meaning rather than value, which is a different
+piece of work and a different entry if anybody wants it.
