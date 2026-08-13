@@ -247,7 +247,10 @@ What the probe needs, unchanged and now blocking only itself:
 
 - **`RoastingMachine` against a Cropster roast log.** The model this entry names, the data it
   names, and neither is reachable yet -- forward sensitivity refuses a model with events, and
-  `RoastingMachine` has nine.
+  `RoastingMachine` has nine. Now filed on its own as
+  [`forward-sensitivity-refuses-a-model-with-events`](13-08-2026-forward-sensitivity-refuses-a-model-with-events-and-the-shortcut-of-handling.md),
+  with the census showing `RoastingMachine` is eight-ninths of the way there and stopped by a
+  single `T_bean > T_dry`.
 - **`dy0/dp`**, still not emitted, so a model whose starts depend on the fitted parameters
   needs its `S(0)` by hand.
 
