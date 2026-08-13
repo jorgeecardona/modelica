@@ -1143,7 +1143,7 @@ wheels = [
 
 [[package]]
 name = "modelica"
-version = "0.0.83"
+version = "0.0.84"
 source = { editable = "." }
 
 [package.optional-dependencies]

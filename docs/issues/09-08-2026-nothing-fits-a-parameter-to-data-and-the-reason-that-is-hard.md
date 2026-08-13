@@ -1,8 +1,8 @@
 ---
 title: Nothing fits a parameter to data, and the reason that is hard is that parameters trade off
-status: open
+status: in-progress
 area: sim
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-09
 blocked_by:
   - the-parameter-derivative-has-a-name-reserved-for-it-in-the-emitter
@@ -82,3 +82,64 @@ dangerous without the diagnostic.
 - No state estimation. An EKF tracks states with parameters known; this fits parameters with
   states unknown. They share `observe_jacobian` and nothing else, and merging them would produce
   a joint estimator nobody asked for.
+
+## The first of the three pieces landed 2026-08-13
+
+`modelica.sim.sensitivity`. ``S' = (df/dy) S + (df/dp)`` integrated alongside ``y``, with both
+partials taken from the emitted `jacobian` and `jacobian_parameters` -- exact, by source
+transformation, so nothing in it differences anything. `Sensitivity` carries ``dy/dp`` and,
+through the chain rule over `observe_jacobian` and `observe_jacobian_parameters`,
+``d(observed)/dp`` -- which is the one a caller wants, because a measurement is almost never a
+state.
+
+### Checked against the thing it replaces
+
+Central differences of two runs, ``h = 1e-5`` relative, both at ``rtol = 1e-9``, every observed
+variable at eight points:
+
+| | worst relative disagreement |
+| --- | --- |
+| `NewtonCooling`, `d/dk` | 1.8e-7 |
+| `RCCircuit`, `d/dr.R` | 8.1e-10 |
+| `RCCircuit`, `d/dc.C` | 8.9e-7 |
+| `MassSpringDamper`, `d/dspring.c` | 7.0e-8 |
+
+About where a quotient of two 1e-9 trajectories should land, which is the point: the
+disagreement belongs to the quotient. `tests/test_sensitivity_forward.py`, 7 tests.
+
+### Two refusals, both measured into existence
+
+**A model with events is refused.** This was going to be an approximation until
+`RoastingMachine` was tried: integrated through the augmented system with no event handling,
+its *own trajectory* -- before any sensitivity is read -- comes out **8.8e-2** from
+`simulate`'s, because the latches are set once and never refreshed. And ``S`` needs a jump
+condition at a crossing, since a `when` that reinitialises a state moves ``dy/dp`` by an
+amount depending on the crossing time, which itself depends on ``p``. Eight corpus models have
+events; returning a number that is quietly wrong for all of them is not an option.
+
+**A kernel built without `sensitivity=` is refused**, rather than returning the zeros its
+empty `jacobian_parameters` would produce. Zeros are a plausible answer -- a parameter nothing
+depends on has exactly that sensitivity -- so the failure has to be loud.
+
+### And one thing left open on purpose
+
+``S(0) = dy0/dp`` defaults to zero and is the caller's to supply. A start value written in
+terms of a parameter has it non-zero, and **no emitted function computes it**: `initial` maps
+``p`` to ``y0`` and its derivative is written nowhere. `sensitivity` does not guess, because a
+wrong ``S(0)`` is wrong for the whole run and reads like a modelling error rather than an
+unset argument.
+
+### What is left on this entry
+
+The other two pieces, unchanged: the identifiability report over a parameter set and a
+measurement set, and the fit that refuses to fit what the report says is inseparable. Both now
+have their input.
+
+Also new, and both blocking a *complete* answer rather than the next piece:
+
+- **`dy0/dp` is not emitted.** Until it is, a model whose starts depend on the fitted
+  parameters needs its `S(0)` written by hand.
+- **Events.** An identifiability report on `RoastingMachine` -- which is the model this entry
+  names for its probe -- cannot be built until forward sensitivity crosses an event.
+
+1554 pass, typecheck 0.

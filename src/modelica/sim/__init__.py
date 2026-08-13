@@ -42,6 +42,7 @@ from modelica.sim.kernel import build as build
 from modelica.sim.matfile import read as read
 from modelica.sim.result import Event as Event
 from modelica.sim.result import Result as Result
+from modelica.sim.sensitivity import Sensitivity, sensitivity
 from modelica.sim.steady import Steady as Steady
 from modelica.sim.steady import SteadyError as SteadyError
 from modelica.sim.steady import steady as steady
@@ -63,6 +64,7 @@ __all__ = [
     "Event",
     "Kernel",
     "Result",
+    "Sensitivity",
     "SimulationError",
     "Source",
     "Steady",
@@ -78,6 +80,7 @@ __all__ = [
     "flatten",
     "grid",
     "read",
+    "sensitivity",
     "simulate",
     "steady",
     "sweep",
