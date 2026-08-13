@@ -32,12 +32,11 @@ keeps the model each one shrank to:
   eliminations put a cycle in the derivative map and `_Work.level` walked it forever.
   Fixed; `test_a_linear_ode_system_terminates` is the regression test, and the register entry
   carries the sha.
-* a triangular model refused as structurally singular, because the matching that succeeds is
-  not the one whose leftovers are states. Still open, carried below as an expected failure.
+* a triangular model refused as structurally singular, because the matching that succeeded
+  was not the one whose leftovers are states. Fixed; `test_a_model_with_a_causal_order_is_never_refused`
+  is the regression test.
 
-The register has both. The generated properties `assume` past a refusal and past a model that
-exceeds `BUDGET`, so they go on saying what they say about the models that get through rather
-than being taken down with them.
+The register has both, each with the sha that closed it.
 """
 
 from __future__ import annotations
@@ -46,7 +45,7 @@ import signal
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from modelica.ir.causalize import CausalizationError, causalize
@@ -162,8 +161,10 @@ BUDGET = 5.0
 
 A budget rather than hypothesis's `deadline`, which measures how long a call *took* and
 therefore cannot interrupt one that never ends. This can, because a `while` loop in pure
-Python checks for signals between bytecodes, and a draw that never ends is a thing this
-generator produces: see the register entry named on `test_a_linear_ode_system_terminates`.
+Python checks for signals between bytecodes, and a draw that never ended is a thing this
+generator produced -- see `test_a_linear_ode_system_terminates`. Nothing discards a draw that
+exceeds it: a guard that swallowed the timeout would hide the next hang the way the missing
+guard hid the last one.
 
 Unix only. `signal.setitimer` does not exist on Windows and this project's CI is Linux, so
 the guard degrades to no guard rather than to a skipped test -- on a platform where a hang
@@ -191,19 +192,20 @@ def _causalize(source: str, seconds: float = BUDGET) -> System:
 
 
 def _causalized(source: str) -> System:
-    """Causalize, or hand this draw back to hypothesis.
+    """Causalize a `solvable` draw, which must succeed.
 
-    `assume` rather than a bare `return`, so that a run where *every* draw is refused fails
-    the health check instead of passing on nothing. Both outcomes discarded here have a
-    register entry of their own and a test below that carries the shrunk model, so nothing is
-    being swallowed: the properties in this section are about the *schedule*, and a model with
-    no schedule has nothing to say about one.
+    It did not always. `a-triangular-model-is-refused-as-structurally-singular` was 400
+    refusals in 4,000 draws and this helper used to `assume` past them; since the matching
+    claims a state only when nothing else will do, it is **0 in the same 4,000**. So the
+    refusal is an assertion again, which is what it should always have been: `solvable` builds
+    a triangle, and a triangle has a schedule.
+
+    `BudgetError` is deliberately *not* caught either. It exists to stop a hang from taking
+    the suite with it, and a guard that quietly discarded the draw would hide the next hang
+    the way it hid `causalization-never-returns-on-a-three-equation-linear-ode`. Failing is
+    the point of it.
     """
-    try:
-        return _causalize(source)
-    except (CausalizationError, BudgetError):
-        assume(False)  # noqa: FBT003 - hypothesis's spelling for "discard this draw"
-        raise
+    return _causalize(source)
 
 
 # --------------------------------------------------------------------------------------
@@ -380,20 +382,21 @@ over become the states, so the choice among them *is* state selection".
 """
 
 
-@pytest.mark.xfail(
-    reason="a-triangular-model-is-refused-as-structurally-singular-once-alias-elimination-renames",
-    raises=CausalizationError,
-    strict=True,
-)
 def test_a_model_with_a_causal_order_is_never_refused() -> None:
     """A model built triangular has a perfect matching, so causalization must find one.
 
-    Measured over 120 `solvable` draws on 2026-08-13: 9 refused. Written out as the single
-    shrunk model rather than left as a generated property, because an expected failure that
-    re-searches for its own counterexample on every run is a slow way to say something a
+    Nine of 120 `solvable` draws were refused when this file was written; zero of 400 are
+    now. The shrunk model is kept as its own test rather than left to the generator, because
+    a regression that has to be re-searched for on every run is a slow way to say something a
     three-line model says exactly.
+
+    The answer is asserted, not just the absence of an exception. Refusing was one wrong
+    outcome; matching ``x0`` out of existence so that some *other* variable becomes the state
+    would be another, and the two are one line apart in `_Matching.augment`.
     """
-    _causalize(REFUSED)
+    system = _causalize(REFUSED)
+    assert system.states == ("x0",)
+    _assert_causal(system, REFUSED)
 
 
 HANGS = """model M

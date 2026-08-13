@@ -1,8 +1,8 @@
 ---
 title: A triangular model is refused as structurally singular once alias elimination renames a variable into a derivative
-status: open
+status: in-progress
 area: ir
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-13
 kind: bug
 scope: M
@@ -92,3 +92,60 @@ continuing until the leftovers were state-shaped.
   `der(x0)` is right and is what makes results readable; the failure is downstream of it.
 - Nothing about the hang the same generator found, which is a different defect in the same
   file: `causalization-never-returns-on-a-three-equation-linear-ode`.
+
+## Fixed 2026-08-13
+
+The diagnosis above was right about the mechanism and wrong about where to fix it.
+
+The first attempt did what this entry's Done list suggested -- made `augment` prefer a free
+unknown that nothing integrates, so the equation for `a0 = 2*x0` would displace rather than
+consume `x0`. That fixed the model above and 60 of 60 refusals in one sample. Then the
+property run found another:
+
+```modelica
+  a0 = 2 * x0;
+  a2 = x0 + a1;
+  a1 = 2 * a0;
+  der(x0) = x0;
+  der(x1) = x0;
+```
+
+still refused, because the retreat happens **one level down**: `a2`'s equation displaces
+`a0`'s, and *that* one takes `x0` on its way out. A local preference cannot see it. Measured
+over 4,000 generated triangular models, the local fix took the refusal rate from 10.0 % to
+0.82 % -- twelve times better and still wrong.
+
+### What it is instead
+
+Two passes over the same augmenting search, in `_Matching.run`. A variable that has a
+derivative in the system can be integrated, so leaving it free costs nothing -- it becomes a
+state. A variable with no derivative must be computed or it is determined by nothing. So the
+first pass hides **every** state candidate, and only the equations that failed get a second
+pass with them allowed.
+
+`_Matching` already had `excluded` for exactly this shape ("unknowns no equation may claim --
+the states, when a selection is being *tested*"), so the change adds to it and puts it back.
+
+### Measured
+
+| | refused, 4,000 generated triangular models |
+| --- | --- |
+| before | 400 (10.0 %) |
+| the local fix | 33 (0.82 %) |
+| two passes | **0** |
+
+The same 4,000 draws, derandomized over eight seeds, so the three rows are comparable.
+
+**The corpus is byte-identical**: every one of the 23 models causalizes to the same index, the
+same modes, the same state selection per mode, the same block shapes and torn counts, and the
+same alias set. Dumped as JSON before and after and diffed.
+
+The second pass is load-bearing rather than a formality, and the corpus says exactly where:
+**2 of 23 models need it -- `Pendulum` and `TwoInertias`, six equations each** -- and those
+are the two that are index-reduced. That is the shape to expect, since a dummy derivative is
+precisely an equation that has to solve for something integrable.
+
+`tests/test_causalize_properties.py` stops assuming past refusals: a `solvable` draw that is
+refused is now a test failure, which is what it should always have been.
+
+1465 pass, typecheck 0.
