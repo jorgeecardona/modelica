@@ -1,9 +1,10 @@
 ---
 title: A SciPy ValueError escapes simulate when two crossings sit on zero at the same instant
-status: in-progress
+status: done
 area: sim
 owner: quiet-tars-187f2
 filed: 2026-08-13
+fixed_in: b2537f8
 kind: bug
 scope: S
 verify: test
