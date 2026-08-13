@@ -1,9 +1,10 @@
 ---
 title: Every model pays for observe_jacobian, and it is the largest function in the module
-status: open
+status: done
 area: sim
 owner: null
 filed: 2026-08-13
+fixed_in: 1ca9ead
 kind: story
 scope: M
 verify: probe
