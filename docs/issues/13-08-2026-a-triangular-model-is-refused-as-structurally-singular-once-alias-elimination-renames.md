@@ -1,9 +1,10 @@
 ---
 title: A triangular model is refused as structurally singular once alias elimination renames a variable into a derivative
-status: in-progress
+status: done
 area: ir
 owner: quiet-tars-187f2
 filed: 2026-08-13
+fixed_in: 90aed19
 kind: bug
 scope: M
 verify: test
