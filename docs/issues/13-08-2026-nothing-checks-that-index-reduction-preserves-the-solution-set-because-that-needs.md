@@ -1,8 +1,8 @@
 ---
 title: Nothing checks that index reduction preserves the solution set, because that needs numbers and the generator makes structure
-status: open
+status: in-progress
 area: verify
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-13
 kind: story
 scope: M
@@ -71,3 +71,78 @@ models on purpose with a known consistent point, which is a second piece of work
   `causalization-never-returns-on-a-three-equation-linear-ode` and
   `a-triangular-model-is-refused-as-structurally-singular`, and both would want fixing before
   a numerical property is added on top -- a generator that hangs cannot sample anything.
+
+## Done 2026-08-13
+
+`tests/test_solution_set.py`. Take the flat equations *before* causalization, take the
+trajectory the causalized model produced, evaluate one against the other at twenty points of
+each run. 24 tests, 50 s.
+
+`modelica.ir.evaluate.evaluate` already existed and reads `der(x)` as a lookup of the literal
+key ``der(x)``, so the whole harness is a name map: `Result` carries a row per observed
+variable, and `Mode.derivative` supplies the second spelling for a derivative alias
+elimination renamed.
+
+### The corpus, measured
+
+Every one of the 23 models, at twenty points each. Worst relative residual of any original
+equation anywhere: **6.2e-15** (`AtwoodPendulum`). `DrainingTank` 3.1e-13, everything else at
+or below 1e-15. `Pendulum` is index 3 and its ``x^2 + y^2 = L^2`` holds to **5.6e-17**.
+
+`TOLERANCE = 1e-11`, which is thirty times the worst real reading and five orders below the
+solvers' own ``rtol``. That gap is the argument, not slack: these residuals are not limited by
+the integration tolerance, because an algebraic equation is *solved* at each point rather than
+integrated. A residual anywhere near ``rtol`` means an equation stopped being solved.
+
+### The generator this entry said was needed
+
+Two positions moved by one shared flow and tied by a constraint --
+``der(x) = c1*u + f1``, ``der(y) = c2*u + f2``, ``a*x + b*y = k`` -- with ``k`` computed from
+the drawn starts so the consistent point is built in rather than solved for. This entry
+anticipated that correctly and it is why the generator is 30 lines instead of a study in
+singular matrices.
+
+Two things it found that the entry did not anticipate:
+
+- Only ``x`` may be `fixed`. A constraint between two states leaves one of them to the
+  constraint, and pinning both is an over-determined initialisation rather than an index-2
+  model.
+- **Not both coefficients may be 1.** ``x + y = k`` is an *alias*, the shape `_pair`
+  substitutes away, so it never reaches index reduction and the model comes out index 1.
+  Hypothesis found that on its second draw.
+
+``u`` is checked against its closed form ``-(a*f1 + b*f2)/(a*c1 + b*c2)`` as well as the
+residual, because a reduction that satisfied the constraint by solving for the wrong variable
+would keep the residual at zero and still be wrong.
+
+### Does it have teeth? Five mutations of `d/dt`, measured
+
+Real edits to `modelica.ir.derive._binary`, one rule at a time, not monkeypatches:
+
+| mutation | `Constrained` | `Pendulum` | `TwoInertias` |
+| --- | --- | --- | --- |
+| product rule drops a term | caught | caught | caught |
+| power rule forgets the exponent | passed | **0.39** | passed |
+| sum rule drops the right term | passed | caught | **0.71** |
+| difference becomes a sum | **1.2** | passed | **2.0** |
+| unary minus loses its sign | **1.3** | passed | **1.4** |
+
+**Five of five caught, none by every model.** A number is a residual; "caught" without one is
+a model that stopped being causalizable or divided by zero, which is also an answer. No single
+model is enough, which is the argument for running this over the whole corpus rather than over
+the two index-reduced examples.
+
+And the honest half: **on these five mutations the generated family catches nothing the corpus
+does not.** Its value is being generated -- hundreds of coefficient combinations rather than
+three fixed models -- and holding the index-2 shape on purpose rather than by accident of two
+mechanical examples. That is not evidence of extra coverage and the file says so.
+
+### Deliberately not done
+
+- No mutation testing in CI. The table above was produced by editing `derive.py` and reverting
+  it; automating that is a separate tool and a separate argument about run time.
+- The tolerance is not derived from the solver's. It is deliberately far below it, for the
+  reason stated above, and a model that legitimately needed a looser one would be evidence
+  that something is being integrated that ought to be solved.
+
+1472 pass before this, plus 24 here, typecheck 0.
