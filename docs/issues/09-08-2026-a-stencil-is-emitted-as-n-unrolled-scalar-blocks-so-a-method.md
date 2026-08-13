@@ -1,8 +1,8 @@
 ---
 title: A stencil is emitted as n unrolled scalar blocks, so a method-of-lines model is 230,000 lines of Python at n = 10,000
-status: open
+status: in-progress
 area: sim
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-09
 scope: L
 verify: probe
@@ -85,3 +85,45 @@ Also inferred: the fix is not one change. Three separable ones, in increasing si
   the emitter, not about any device". This is that story.
 - No `field`, `domain` or `pder`. `docs/ideas/pdes.md` argues against them and this issue
   keeps the hand-written method of lines it recommends.
+
+## Re-measured 2026-08-13, and the number got worse
+
+The entry says "the measurement above is re-run and recorded, so the improvement is a number
+and not a claim". Re-run before touching anything, same model, same machine:
+
+| n | lines 08-09 | lines 08-13 | bytes 08-09 | bytes 08-13 |
+| --- | --- | --- | --- | --- |
+| 10 | 322 | 458 | 7 K | 12 K |
+| 100 | 2,392 | 3,608 | 69 K | 113 K |
+| 1000 | 23,092 | 35,108 | 734 K | 1,205 K |
+
+**+52 % at n = 1000**, and `jacobian_sparse` is all of it. Where the source goes now:
+
+| function | lines at n = 1000 |
+| --- | --- |
+| `observe_jacobian` | 6,011 |
+| `jacobian` | 5,008 |
+| `jacobian_sparse` | 5,008 |
+| `observe` | 4,010 |
+
+`the-jacobian-is-emitted-dense` landed an 88x speedup on this exact model and paid for it in
+the currency *this* entry is about. That is not an argument against it — a run that finishes
+beats a source that is short — but it moves the target, and the two entries should be read
+together.
+
+Emitting got slower too, and by more than the size grew: 0.39 s to 1.83 s at n = 1000, so
+about 4.7x. Build (flatten plus causalize) went 0.26 s to 0.50 s, which is the sparsity pass
+earning its keep elsewhere.
+
+### What this hands the next person
+
+**`jacobian` and `jacobian_sparse` are the same expressions gathered two ways**, and at
+n = 1000 that is 5,008 duplicated lines — 14 % of the whole module. The sparse one fills
+`nnz` entries in CSR order; the dense one fills `n` by `n`. One can be had from the other by
+scattering, and only one has to be emitted.
+
+That is measured duplication rather than an inference, it is the cheapest item on this
+entry's list now, and it does not need narrow tangent rows or a surviving array to collect.
+It is not the whole story — a stencil is still `n` unrolled blocks and that is what the
+entry is named for — but it is the first thing to take, and unlike the `_seed` item it has
+not already been disproven.
