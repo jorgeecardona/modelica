@@ -184,6 +184,7 @@ def test_the_original_equations_hold_along_the_trajectory(model: Path) -> None:
         system,
         stop=run["stop"],
         tolerance=run.get("tolerance", 1e-6),
+        absolute=run.get("absolute"),
         method=run.get("method", "Radau"),
     )
     worst, culprit = _worst(flat, system, result)

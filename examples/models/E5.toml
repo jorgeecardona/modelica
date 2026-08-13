@@ -1,0 +1,72 @@
+summary = "E5: chemical pyrolysis over thirteen decades of time, and the corpus model that documents a limit instead of hiding one."
+teaches = ["a badly scaled problem", "why one tolerance is not enough", "cancellation, and the rearrangement that avoids it"]
+requires = []
+
+[parse]
+classes = ["E5"]
+
+[flatten]
+model = "E5"
+states = ["y1", "y2", "y3", "y4"]
+equations = 4
+index = 1
+balanced = true
+
+# Stage 2 of `docs/ideas/benchmarks.md`, and the hard one. Four species, `0 <= t <= 1e13`, and
+# the components are five decades apart at the start and twenty by the end: `y1` begins at
+# 1.76e-3 and is 1e-291 at the horizon, while `y2` and `y3` never exceed 4e-10.
+#
+# `absolute` is separate from `tolerance` for that reason and the source says so in as many
+# words: "a scalar absolute error control is unsuitable and a componentwise scaled absolute
+# error control would be recommendable for this problem" [Sha81, quoted in e5.pdf]. 1.7e-24 is
+# the value the Bari work-precision runs use.
+[simulate]
+stop = 1e13
+tolerance = 1e-10
+absolute = 1.7e-24
+
+# The reference solution at the end of the interval: F. Mazzia and C. Magherini, *Test Set for
+# Initial Value Problem Solvers*, release 2.4, University of Bari and INdAM, February 2008,
+# report `e5.pdf`, Table II.11.3. Computed there by RADAU on an Alphaserver DS20E with
+# uround = 1.01e-19, rtol = h0 = 1.1e-18, atol = 1.7e-24.
+#
+# **`rtol` here is 5e-3, and that is the finding rather than a compromise.** Measured
+# 2026-08-13: this toolchain agrees with the published `y2` and `y3` to 1.1e-3 relative and
+# cannot do better, because the reference was computed at an rtol of 1.1e-18 -- below double
+# precision's eps -- on hardware with a 19-digit uround. Every other point in this corpus is
+# asserted near machine precision; this one is asserted at the accuracy double arithmetic can
+# actually reach, and says so.
+#
+# `y1` is deliberately not asserted. Its published value is 1.15e-291, and a run whose
+# absolute tolerance is 1.7e-24 carries no information about a component that small. Claiming
+# agreement there would be claiming to have integrated 267 decades below the error control.
+[[simulate.point]]
+t = 1e13
+values = { y2 = 0.8867655517642120e-22, y3 = 0.8854814626268838e-22 }
+rtol = 5e-3
+source = "published"
+citation = "F. Mazzia and C. Magherini, Test Set for Initial Value Problem Solvers, release 2.4, University of Bari and INdAM, February 2008 -- report e5.pdf, Table II.11.3"
+
+# The invariant the source names: `y2 - y3 - y4 = 0`, exactly, for all time.
+#
+# It is also why `der(y3) = der(y2) - der(y4)` is written that way rather than as the third
+# row of the published f(y). The report recommends the substitution "in order to avoid
+# eventual cancellation of digits", and the two forms were measured against each other on
+# 2026-08-13 at rtol = 1e-8, atol = 1.7e-24:
+#
+#   f(y) as printed      invariant 9.6e-21    y2 wrong by 100 %
+#   with the substitution   invariant 1.3e-25    y2 wrong by 1.1e-3
+#
+# Four orders on the invariant and three on the answer. `y2` and `y3` are both about 8.9e-23
+# at the horizon and their difference is 1.3e-25, so the cancellation the report warns about
+# is not a subtlety -- it is the whole answer.
+[[simulate.invariant]]
+expr = "y2 - y3 - y4"
+value = 0.0
+atol = 1e-24
+
+# Every concentration stays non-negative, and `y1` never exceeds where it started.
+[[simulate.invariant]]
+expr = "y1"
+min = 0.0
+max = 1.76e-3

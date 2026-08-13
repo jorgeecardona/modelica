@@ -111,6 +111,7 @@ def show(name: str) -> None:
         system,
         stop=run["stop"],
         tolerance=max(run.get("tolerance", 1e-6), 1e-9),
+        absolute=run.get("absolute"),
         method=run.get("method", "Radau"),
     )
 

@@ -71,6 +71,7 @@ def test_the_fused_loop_reaches_the_reference_points(model: Path) -> None:
         system,
         stop=spec["stop"],
         tolerance=spec.get("tolerance", 1e-6),
+        absolute=spec.get("absolute"),
         times=sorted({point["t"] for point in points}),
         jit=False,
     )

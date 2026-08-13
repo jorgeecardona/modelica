@@ -126,3 +126,67 @@ switch to. Not published as a table yet; that is the next paragraph.
   published together, and pasting into a register entry is not that.
 - **Stage 3, `ScalableTestSuite`.** Untouched, and still needing a decision recorded either
   way.
+
+## E5 landed 2026-08-13 — two of three, and the entry's prediction was right
+
+`examples/models/E5.{mo,py,toml}`. Four species, `0 <= t <= 1e13`, from the same Bari release
+2.4, report `e5.pdf`, Table II.11.3.
+
+This entry predicted: "`E5` spans a much wider dynamic range than either stage-1 problem, so
+the same limit will bite sooner and harder." It bit in three places, and none of them was the
+one predicted.
+
+### 1. One tolerance is not enough
+
+`y1` starts at 1.76e-3 and is 1e-291 at the horizon; `y2` and `y3` never exceed 4e-10. The
+source says so directly, quoting Shampine 1981: "a scalar absolute error control is unsuitable
+and a componentwise scaled absolute error control would be recommendable for this problem".
+
+`simulate` already had `absolute`; nothing that reads a spec passed it. **Six runners** --
+`test_examples` (three call sites), `test_verify`, `test_radau`, `test_fold`,
+`test_solution_set`, `scripts/make-gallery` -- integrated from a `.toml` while ignoring half of
+what it said. With `atol` defaulting to `tolerance`, E5 fails as
+``E5: Required step size is less than spacing between numbers`` before `t` is anywhere. A
+runner that integrates a model differently from the way its spec says to is testing a
+different model, so `[simulate] absolute` is now honoured everywhere.
+
+### 2. The rearrangement is the answer, not a nicety
+
+The source recommends writing the third row as `y3' = y2' - y4'` "in order to avoid eventual
+cancellation of digits". Both forms measured at rtol = 1e-8, atol = 1.7e-24:
+
+| | invariant `y2 - y3 - y4` | `y2` against the published value |
+| --- | --- | --- |
+| f(y) as printed | 9.6e-21 | **wrong by 100 %** |
+| with the substitution | 1.3e-25 | 1.1e-3 |
+
+Four orders on the invariant and three on the answer. `y2` and `y3` are both about 8.9e-23 at
+the horizon and their difference is 1.3e-25, so the cancellation is not a subtlety: without
+the rearrangement the difference *is* the round-off. The corpus model is written in the
+recommended form and the `.toml` carries both numbers.
+
+### 3. Double precision cannot reach the published point, and the spec says so
+
+Agreement is **1.1e-3 relative on `y2` and `y3`**, and tightening does not help -- 1e-8, 1e-10
+and 1e-12 all land within a factor of two of each other. The reason is in the report's own run
+characteristics: the reference was computed at ``rtol = h0 = 1.1e-18`` with ``uround =
+1.01e-19``, on an Alphaserver. Both are below double precision's eps.
+
+So the point is asserted at `rtol = 5e-3`, and that is the finding rather than a compromise.
+Every other point in this corpus is asserted near machine precision; this one is asserted at
+the accuracy double arithmetic can actually reach.
+
+`y1` is deliberately not asserted at all. Its published value is 1.15e-291 and the run's
+absolute tolerance is 1.7e-24: claiming agreement there would be claiming to have integrated
+267 decades below the error control.
+
+### Still left
+
+- **`Ring Modulator`.** Untouched. 15 states, and this entry says it is where the linear solve
+  starts to dominate.
+- **The work-precision tables**, still pasted into this register rather than published in the
+  form `docs/ideas/benchmarks.md:94` asks for. E5 is *not* in `scripts/bench.py`'s `PROBLEMS`:
+  the harness grades against a self-computed reference from two methods agreeing, and on a
+  problem where neither method is accurate to better than 1e-3 that reference does not exist.
+  Adding the row would produce an error axis measured against nothing.
+- **Stage 3, `ScalableTestSuite`.** Untouched.

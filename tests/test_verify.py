@@ -86,6 +86,7 @@ def test_event_iteration_settles_at_every_event(model: Path) -> None:
         system,
         stop=run["stop"],
         tolerance=run.get("tolerance", 1e-6),
+        absolute=run.get("absolute"),
         method=run.get("method", "Radau"),
     )
     for report in check_run(system, result):

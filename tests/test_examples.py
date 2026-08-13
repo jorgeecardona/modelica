@@ -126,6 +126,8 @@ def test_simulate_section_is_well_formed(model: Path) -> None:
         return
     stop = simulate["stop"]
     assert stop > 0, "`stop` must be positive"
+    absolute = simulate.get("absolute")
+    assert absolute is None or absolute > 0, "`absolute` must be positive when given"
     assert simulate.get("method", "Radau") in METHODS, f"unknown method {simulate['method']!r}"
 
     for point in simulate.get("point", []):
@@ -487,6 +489,7 @@ def _agrees_with_a_difference_quotient(model: Path, value: str, derivative: str)
         system,
         stop=spec["stop"],
         tolerance=max(spec.get("tolerance", 1e-6), 1e-6),
+        absolute=spec.get("absolute"),
         method=spec.get("method", "Radau"),
     )
     trajectory = np.stack([result[name] for name in system.states])
@@ -639,8 +642,8 @@ def test_simulates_as_specified(model: Path) -> None:
     """The end of the pipeline: numbers, checked against numbers from somewhere else.
 
     Every reference point in a spec says where it came from -- ``analytic`` for a closed
-    form, ``reference`` for a trusted solver -- so a pass here means the toolchain agrees
-    with something that is not itself.
+    form, ``reference`` for a trusted solver, ``published`` for somebody else's printed
+    answer -- so a pass here means the toolchain agrees with something that is not itself.
     """
     spec = _spec(model).get("simulate")
     if spec is None:
@@ -656,6 +659,12 @@ def test_simulates_as_specified(model: Path) -> None:
         system,
         stop=spec["stop"],
         tolerance=spec.get("tolerance", 1e-6),
+        # `absolute` defaults to `tolerance` inside `simulate`, which is right for a model
+        # whose states are all order one and wrong for one whose states are not. `E5` has
+        # `y1` at 2e-3 and everything else below 4e-10, and its source says so in as many
+        # words: "a scalar absolute error control is unsuitable ... for this problem". A spec
+        # that needs the two apart now says so instead of being unable to.
+        absolute=spec.get("absolute"),
         times=sorted({point["t"] for point in spec.get("point", [])}) or None,
         method=spec.get("method", "Radau"),
     )
@@ -698,7 +707,12 @@ def test_the_pendulum_changes_its_mind_about_what_to_integrate() -> None:
     ]
     assert all(trigger.latch is None for trigger in switches)
 
-    result = simulate(system, stop=spec["stop"], tolerance=spec.get("tolerance", 1e-6))
+    result = simulate(
+        system,
+        stop=spec["stop"],
+        tolerance=spec.get("tolerance", 1e-6),
+        absolute=spec.get("absolute"),
+    )
     causes = [event.cause for event in result.events]
     assert causes[:2] == ["switch to (x, vx)", "switch to (y, vy)"], (
         f"the pendulum never left its first state set: {causes}"

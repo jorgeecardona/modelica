@@ -57,11 +57,20 @@ def test_the_two_modes_integrate_to_the_same_trajectory(model: Path) -> None:
     build = pytest.importorskip("modelica.sim.kernel").build
     simulate = pytest.importorskip("modelica.sim.solve").simulate
     system = _system(model)
-    stop = float(_spec(model).get("simulate", {}).get("stop", 1.0))
+    run = _spec(model).get("simulate", {})
+    stop = float(run.get("stop", 1.0))
     grid = numpy.linspace(0.0, stop, 21)
+    # The spec's own absolute tolerance, where it has one. `E5` is the reason: its states are
+    # twenty decades apart, so an `atol` of 1e-10 asks the solver for absolute accuracy on a
+    # component of size 1e-22 and the step size underflows before `t` is anywhere. A test that
+    # integrates a model differently from the way its spec says to is testing a different
+    # model.
+    absolute = run.get("absolute")
 
-    loose = simulate(build(system), stop=stop, times=grid, tolerance=1e-10)
-    tight = simulate(build(system, fold=True), stop=stop, times=grid, tolerance=1e-10)
+    loose = simulate(build(system), stop=stop, times=grid, tolerance=1e-10, absolute=absolute)
+    tight = simulate(
+        build(system, fold=True), stop=stop, times=grid, tolerance=1e-10, absolute=absolute
+    )
 
     assert loose.names == tight.names
     here, there = numpy.searchsorted(loose.time, grid), numpy.searchsorted(tight.time, grid)
