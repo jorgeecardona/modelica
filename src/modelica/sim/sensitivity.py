@@ -624,16 +624,22 @@ def _crossings(kernel: Kernel, p: NDArray[np.float64], w: NDArray[np.float64], n
     )
 
     scratch = np.empty(kernel.events)
+    # Every trigger here has a latch, because `sensitivity` refuses a `when` branch and a mode
+    # switch before reaching this. Read out once and asserted rather than written
+    # `trigger.latch or 0`, which would silently watch slot zero if that ever stopped being
+    # true -- and slot zero is a real latch, so the wrongness would look like a working run.
+    slots = [trigger.latch for trigger in kernel.code.events]
+    assert all(slot is not None for slot in slots)  # noqa: S101 - see above
 
-    def watcher(index: int) -> Callable[[float, NDArray[np.float64]], float]:
+    def watcher(index: int, slot: int) -> Callable[[float, NDArray[np.float64]], float]:
         def crossing(t: float, u: NDArray[np.float64]) -> float:
-            side = _REARM if w[kernel.code.events[index].latch or 0] > HELD else -_REARM
+            side = _REARM if w[slot] > HELD else -_REARM
             return float(kernel.indicators(t, u[:n], p, w, scratch)[index] + side)
 
         crossing.terminal = True  # pyright: ignore[reportFunctionMemberAccess]
         return crossing
 
-    return [watcher(index) for index in range(kernel.events)]
+    return [watcher(index, slot) for index, slot in enumerate(slots) if slot is not None]
 
 
 def _fired(solution: _Solution) -> tuple[int, float] | None:
