@@ -139,3 +139,34 @@ identity. ``g_t`` is still not emitted -- the same walk with ``time`` seeded -- 
 eight `RoastingMachine` schedules it is the *only* term that is non-zero, since ``g_y`` is
 zero there and ``dt*/dp`` is then ``0/g_t``, which is zero. So the schedules need no jump at
 all, and the one crossing that does is ``T_bean > T_dry``.
+
+### The other term is not a substitution, measured 2026-08-13
+
+The note above says ``g_t`` is "the same walk with ``time`` seeded", which is right, and it is
+worth recording why the cheaper route does not exist.
+
+``dt*/dp = -(g_y S) / (g_t + g_y f)``, and the denominator is exactly ``dg/dt`` **along the
+trajectory** -- one quantity rather than two. So the obvious move is to emit it directly:
+`modelica.ir.derive.d_dt` of the indicator, with ``der(v)`` mapped back to whatever
+causalization named that derivative. Tried:
+
+- **`d_dt` of every corpus indicator renders**, with nothing missing from the emitter's scope.
+  `RoastingMachine`'s schedules come out as constants, which is right for ``time < 66.7``.
+- **The mapping does not exist for every model.** `Pendulum` raises ``KeyError: 'x'`` --
+  ``d_dt`` introduces ``der(x)``, and ``x`` is not a state of the chosen mode. It is solved
+  from the constraint, so the schedule computes ``x`` and never computes its derivative.
+
+So a total time derivative of an indicator can reach a variable whose derivative the model
+does not carry, and recovering it means the chain rule through the blocks -- which is
+`Emitter.tangent` again, seeded on ``time`` instead of on the states. That is a **sixth
+seeding**, the same shape as the five that exist, and not a rename of an existing function.
+
+Which is a smaller job than it sounds and a bigger one than "substitute `der(x)`": the walk
+cache is already keyed on ``(mode, seeds)``, so the seeding is the whole of the change, but
+``time`` is not in `Emitter.tangents` and would have to be given a row.
+
+**None of this is needed for a schedule.** Where ``g_y`` is zero -- eight of
+`RoastingMachine`'s nine crossings, and `Setback`'s only one -- ``dt*/dp`` is ``0`` over
+whatever the denominator is, so the crossing does not move and the sensitivity is continuous
+across it. The denominator is only needed for a crossing that ``g_y`` says *does* move, and
+`indicator_jacobian` now names exactly which those are.
