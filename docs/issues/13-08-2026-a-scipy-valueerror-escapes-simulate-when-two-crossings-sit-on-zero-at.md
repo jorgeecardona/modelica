@@ -1,8 +1,8 @@
 ---
 title: A SciPy ValueError escapes simulate when two crossings sit on zero at the same instant
-status: open
+status: in-progress
 area: sim
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-13
 kind: bug
 scope: S
@@ -75,3 +75,46 @@ internal legible on the way out. They are not alternatives.
   identifiable condition.
 - Nothing about the model itself being ill-posed. It is, and that is not the point: a caller
   who writes an ill-posed model is exactly who needs a legible error.
+
+## Fixed 2026-08-13
+
+`_Run._segment` catches `ValueError` from `solve_ivp` and re-raises a `SimulationError` that
+says which relations the root finder could not bracket.
+
+    Fight: no crossing could be located at t = 1e-09 -- 'y > 0', 'x > 0' sit at zero to within
+    the solver's tolerance of 1e-06, so there is no sign change to bracket
+    (scipy: f(a) and f(b) must have different signs)
+
+`ValueError` and not `Exception`, for the reason this entry's Deliberately-not-done gives:
+turning every SciPy failure into a `SimulationError` would hide a genuine bug in the source
+this package generates, and those tracebacks are how such a bug gets found.
+
+### The near-zero test is a tolerance, not `== 0.0`
+
+This entry's inference was "both indicators are exactly zero at `t = 0`". Measured, that is
+true at `t = 0` and **not true where the failure happens**. The failing segment starts at
+`t = 1e-9`, after an event has already fired, with the state at `1e-9` and both indicators
+reading `1e-9` against an `atol` of `1e-6`.
+
+So an exact test would have named nothing in the one case the method exists for. The predicate
+is `abs(value) <= self.absolute` -- what the solver itself cannot tell from zero -- and the
+number is printed, so the reader can see the scale the judgement was made on.
+
+### The must-not-break case, measured
+
+An indicator at exactly zero at `t = 0` is ordinary and is **not** what breaks `Fight`.
+`tests/test_chattering.py::ON_THE_THRESHOLD` carries three models whose watched relation reads
+`0.0` at the start:
+
+| | at `t = 2` |
+| --- | --- |
+| `der(x) = 1 + (if x > 0 then 1 else 0)` | `x = 4` |
+| `der(x) = -1 - (if x > 0 then 1 else 0)` | `x = -2` |
+| `der(q) = if x > 0 then 2 else 0`, `der(x) = 1` | `x = 2`, `q = 4` |
+
+All three simulate and all three are right. What breaks `Fight` is not the zero: it is two
+relations at zero where each decides the flow the other crosses on. Those three models are the
+guard on any future fix here -- a nudge or a bracket guard that broke them would be a cure
+worse than the disease.
+
+1472 pass, typecheck 0.

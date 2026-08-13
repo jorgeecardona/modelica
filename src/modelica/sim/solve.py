@@ -330,6 +330,44 @@ class _Run:
             t = at
         return self._result(times, values, events)
 
+    def _unlocatable(self, t: float, y: NDArray[np.float64], error: ValueError) -> str:
+        """Name the relations sitting on zero, rather than repeat SciPy's arithmetic.
+
+        A root finder that cannot bracket a crossing has almost always been handed one that
+        is already *at* zero, so the useful thing to report is which. Every indicator is
+        evaluated at the start of the failing segment and the ones the solver cannot tell from
+        zero are listed by the Modelica they came from -- `Trigger.condition` is on the public
+        record for the same reason `_chattering` uses `Event.cause`.
+
+        "Cannot tell from zero" is the absolute tolerance and not ``== 0.0``. Measured on the
+        two-relation model in `tests/test_chattering.py`, the failing segment starts with both
+        indicators at 1e-9 against an ``atol`` of 1e-6: they were exactly zero at ``t = 0``, an
+        event fired, and the segment after it begins a nudge away. An exact test names nothing
+        in the case this method exists for.
+
+        SciPy's own message is kept. If the near-zero reading is the wrong explanation for some
+        future failure, the reader still has what the root finder said.
+        """
+        z = self.kernel.indicators(t, y, self.p, self.w, np.empty(self.kernel.events))
+        flat = [
+            trigger.condition
+            for trigger, value in zip(self.kernel.code.events, z, strict=True)
+            if abs(value) <= self.absolute
+        ]
+        sitting = (
+            " -- "
+            + ", ".join(repr(condition) for condition in flat)
+            + (" sits" if len(flat) == 1 else " sit")
+            + f" at zero to within the solver's tolerance of {self.absolute:g}, so there is no"
+            " sign change to bracket"
+            if flat
+            else ""
+        )
+        return (
+            f"{self.kernel.name}: no crossing could be located at t = {t:.12g}{sitting}"
+            f" (scipy: {error})"
+        )
+
     def _chattering(self, at: float, stalled: Sequence[Event]) -> str:
         """Name what kept firing, rather than only that something did.
 
@@ -356,20 +394,32 @@ class _Run:
         """
         chosen = self.sparse_slope if self.sparse else self.slope
         implicit: dict[str, Any] = {"jac": chosen} if self.method in _IMPLICIT else {}
-        solution = cast(
-            "_Solution",
-            solve_ivp(  # pyright: ignore[reportUnknownArgumentType]
-                self.derivative,
-                (t, stop),
-                y,
-                method=self.method,
-                rtol=self.relative,
-                atol=self.absolute,
-                dense_output=True,
-                events=self.triggers or None,
-                **implicit,
-            ),
-        )
+        try:
+            solution = cast(
+                "_Solution",
+                solve_ivp(  # pyright: ignore[reportUnknownArgumentType]
+                    self.derivative,
+                    (t, stop),
+                    y,
+                    method=self.method,
+                    rtol=self.relative,
+                    atol=self.absolute,
+                    dense_output=True,
+                    events=self.triggers or None,
+                    **implicit,
+                ),
+            )
+        except ValueError as error:
+            # SciPy's root finder, not this package's code. `brentq` needs a sign change
+            # across the bracket it is handed and refuses one where the indicator is zero at
+            # both ends -- and a `ValueError` reading "f(a) and f(b) must have different
+            # signs", with a traceback ending in `scipy/optimize/_zeros_py.py`, tells a
+            # modeller nothing about their model. `_unlocatable` says which relation, when.
+            #
+            # `ValueError` and not `Exception`: turning every SciPy failure into a
+            # `SimulationError` would hide a genuine bug in the source this package generates,
+            # and those tracebacks are how such a bug gets found.
+            raise SimulationError(self._unlocatable(t, y, error)) from error
         if not solution.success:
             message = f"{self.kernel.name}: {solution.message}"
             raise SimulationError(message)
