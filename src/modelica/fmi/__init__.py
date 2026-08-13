@@ -12,6 +12,7 @@ FMI is a trademark of the Modelica Association; this is an independent implement
 
 from __future__ import annotations
 
+from modelica.fmi.description import describe
 from modelica.fmi.modes import Interface, Lifecycle, Mode, ModeError, table
 
-__all__ = ["Interface", "Lifecycle", "Mode", "ModeError", "table"]
+__all__ = ["Interface", "Lifecycle", "Mode", "ModeError", "describe", "table"]

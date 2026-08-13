@@ -1,8 +1,8 @@
 ---
 title: FMI 3.0 export — a System as an FMU, and the two routes disagree in the docs
-status: open
+status: in-progress
 area: fmi
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-03
 kind: story
 scope: L
@@ -60,3 +60,46 @@ should be resolved rather than left for a reader to find.
 - Not blocked on the C emitter in the register, deliberately: a Python-backed prototype is a
   legitimate way to learn the XML and the layout. But it does not close this issue, and the
   FMPy leg of the test is what enforces that.
+
+## `modelDescription.xml` landed 2026-08-13 — the half that needs no compiler
+
+`modelica.fmi.describe(system)` writes the description an importer reads *before* it runs a
+step: the variable table, causality and variability, units, start values, and the model
+structure. No zip, no binary, no `fmi3` entry points, and this settles nothing about the two
+routes -- the entry's argument that a Python-backed FMU "is not an FMU in the sense anybody
+else means it" is untouched by writing XML.
+
+`tests/test_fmi_description.py`, 52 tests, corpus-wide rather than against a fixture.
+
+### The three mappings, and why each is the way it is
+
+**Value references are `Code.observed` order.** A variable is a string here and a 32-bit
+integer across the boundary, and every later call refers to it by that number. Taking the
+order the emitted `observe` already fills means a caller holding one array and one description
+needs no second mapping, and a test asserts the two agree for all 25 models.
+
+**`parameter` becomes `fixed`, not `tunable`.** A tunable parameter may be changed in
+Initialization Mode *and* between communication points; Modelica's `parameter` is constant
+through a run by definition. Calling it tunable would promise an importer a change the
+equations do not support.
+
+**A state points at its derivative, which is the opposite direction from `Mode.derivative`.**
+FMI declares a continuous state by naming its derivative's value reference. It is the one
+mapping here that is easy to write backwards, so the test checks it against the schedule and
+not against itself -- and for an aliased model the answer is the modeller's own name rather
+than `der_x`.
+
+### What the corpus found
+
+**A name the model observes but never declared.** `VanDerPol`'s `der_x` is one: `der(x)` is
+`y`, so alias elimination removed the variable while `observe` still fills a slot for it and
+the model structure still points at it. Skipping it left a table with a hole exactly where an
+importer is told to look. Seven models had one; the writer now synthesises the entry.
+
+### Still to do on this entry
+
+Everything else: the binary, the zip, the `fmi3` entry points, the `Lifecycle` guard wired to
+them, and the round trip through FMPy. And the docs disagreement between
+`docs/architecture.md:236` and `docs/ideas/backends.md:42` is **not** resolved -- writing the
+description does not decide whether the deliverable is Python-backed or a C translation unit,
+and that decision should be made in the open rather than by whichever file gets written next.
