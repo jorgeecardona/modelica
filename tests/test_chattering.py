@@ -16,16 +16,17 @@ Measured on 2026-08-13, and both halves of the sentence came out worse than it s
 place. It is the *sequence* that does not progress, which is a liveness property of the run
 and not of the instant.
 
-**The runtime watch does not fire.** 24,273 events in 45 seconds, and the run reached
+**The runtime watch did not fire.** 24,273 events in 45 seconds, and the run reached
 ``t = 1.00004854`` of a 5-second horizon -- it stalled the moment ``x`` reached zero, and
-crawled from there at a thousandth of a nanosecond per event. Every segment advanced by
-1e-9 or 2e-9, which is `_REARM`, the distance the engine itself holds a just-fired crossing
-off zero. `_STANDSTILL` is 1e-12. **Zero of 24,272 segments were short enough to count**, so
-the counter reset on every one and never reached 1 of the 100 it needs.
+crawled from there at a nanosecond per event. Every segment advanced by 1e-9 or 2e-9, which
+is `_REARM`, the distance the engine itself holds a just-fired crossing off zero.
+`_STANDSTILL` was 1e-12, so **zero of 24,272 segments were short enough to count** and the
+counter reset on every one, never reaching 1 of the 100 it needs.
 
-Both bugs are filed. The tests below are the regression hooks and are expected failures until
-they close; neither simulates anything, because a test that proves a run does not terminate by
-waiting for it is a test that does not terminate either.
+Fixed by asking about the *span* of `_CHATTER` consecutive events rather than the length of
+each one: `SLIDING` now raises in 0.19 s, naming ``x > 0``. `FIGHTING` found a second thing on
+the way, still open -- a SciPy `ValueError` out of `simulate` with no model name and no
+time.
 """
 
 from __future__ import annotations
@@ -37,7 +38,6 @@ from modelica.ir.source import flatten
 from modelica.lang import parse
 from modelica.sim.solve import (
     _CHATTER,  # pyright: ignore[reportPrivateUsage]
-    _REARM,  # pyright: ignore[reportPrivateUsage]
     _STANDSTILL,  # pyright: ignore[reportPrivateUsage]
     SimulationError,
     simulate,
@@ -78,28 +78,46 @@ def test_the_relay_is_a_model_with_one_watched_relation() -> None:
     assert [trigger.condition for trigger in kernel.code.events] == ["x > 0"]
 
 
-@pytest.mark.xfail(
-    reason="the-standstill-counter-cannot-fire-because-the-rearm-distance-is-larger",
-    strict=True,
-)
-def test_a_segment_no_longer_than_the_rearm_distance_counts_as_standstill() -> None:
-    """The two constants are three orders of magnitude apart, and the wrong way round.
+def test_a_relay_with_no_hysteresis_is_reported_as_chattering() -> None:
+    """The run stops, in a fraction of a second, and names the relation that kept firing.
 
-    `_REARM` is how far the engine holds a crossing that just fired away from zero, so a
-    segment that advanced by no more than that did not advance on the model's account -- the
-    engine put it there. `_STANDSTILL` is the length below which a segment is called a
-    standstill. With ``1e-12`` against ``1e-9`` no re-arm-paced segment is ever short enough,
-    and a relay with no hysteresis runs forever without the counter reaching 1 of `_CHATTER`.
+    It used to run forever. Every segment of a chattering run advances by `_REARM` over the
+    indicator's slope -- the nudge that keeps a just-fired crossing off zero -- and the
+    standstill test asked whether each segment alone was shorter than ``1e-12 * max(1, |t|)``.
+    A thousandth of the nudge, so nothing ever qualified: 24,273 events in 45 seconds with the
+    counter still on 0 of `_CHATTER`.
 
-    Written as a statement about the constants rather than as a simulation on purpose: the
-    failing run takes 45 seconds to produce 24,273 events and still does not raise, so a test
-    that waited for it would be the same bug in the test suite.
+    The test is a span now, so what is asserted here is the whole chain: the counter reaches
+    `_CHATTER`, `SimulationError` is raised, and `Plan._chattering`'s tally reaches the
+    message with `Event.cause` in it. Naming the relation is the point -- "the model is
+    chattering" alone leaves the modeller to find which one.
     """
-    assert _CHATTER > 0
-    assert _STANDSTILL * 1.0 >= _REARM, (
-        f"a segment of {_REARM:g} is the re-arm distance and counts as progress, because the"
-        f" standstill threshold is {_STANDSTILL:g}"
-    )
+    with pytest.raises(SimulationError) as caught:
+        simulate(_system(SLIDING, "Chattering"), stop=5.0)
+    message = str(caught.value)
+    assert "chattering" in message
+    assert "x > 0" in message, f"the relation is not named: {message}"
+    assert f"x{_CHATTER}" in message or f"x{_CHATTER + 2}" in message, message
+
+
+def test_the_standstill_span_clears_the_corpus_by_orders_of_magnitude() -> None:
+    """`_STANDSTILL` is a chosen number, and these are the two measurements that chose it.
+
+    Both sides in the units the loop computes -- the span of `_CHATTER` consecutive events
+    over ``max(1, |t|)``:
+
+    ======================================  ========
+    tightest 100-event span across the corpus  7.9e-1
+    the relay above                            2.0e-7
+    ======================================  ========
+
+    A test rather than a comment because the margin is the justification. If a future model or
+    a future solver setting narrows it, this is where that shows up, rather than in a run that
+    stops for a reason nobody expected.
+    """
+    assert 2e-7 < _STANDSTILL < 7.9e-1
+    assert _STANDSTILL / 2e-7 > 100, "too close to the model this is meant to catch"
+    assert 7.9e-1 / _STANDSTILL > 100, "too close to a model that is not chattering"
 
 
 @pytest.mark.xfail(

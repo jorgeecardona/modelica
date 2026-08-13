@@ -46,8 +46,34 @@ _IMPLICIT = frozenset({"Radau", "BDF", "LSODA"})
 _CHATTER = 100
 """Consecutive zero-length segments before we call it a Zeno point and give up."""
 
-_STANDSTILL = 1e-12
-"""Relative segment length below which a segment counts as not having advanced at all."""
+_STANDSTILL = 1e-4
+"""How far `_CHATTER` consecutive events must carry the run, relative to where it is.
+
+A *span*, not a segment length, and that is the whole of the fix in `13-08-2026`. The test
+used to ask whether each segment on its own was shorter than ``1e-12 * max(1, |t|)``, and no
+segment of a chattering run ever is: a relay with no hysteresis advances by `_REARM` per
+event, because the nudge that keeps a fired crossing off zero is what decides where the next
+root lands. `_REARM` is ``1e-9``, a thousand times the old threshold, so every segment read as
+progress and the counter reset on every one of them. Measured on the relay in
+`tests/test_chattering.py`: 24,273 events, 45 seconds, ``t`` reached 1.00004854 of a
+5-second horizon, and the counter never got past 0 of 100.
+
+Asking about the span instead needs no knowledge of the indicator's slope, which is what an
+absolute floor tied to `_REARM` would have needed -- the nudge is a distance in *indicator*
+units and becomes a distance in time only after dividing by ``d indicator / dt``, which is
+the model's business and not this loop's.
+
+``1e-4`` is chosen with both sides measured, over the corpus and over the relay, in exactly
+the units the test computes:
+
+    tightest 100-event span, corpus     7.9e-1   (Pendulum; Thermostat 9.9e-1)
+    the relay                           2.0e-7
+
+Six and a half orders of magnitude of daylight, and ``1e-4`` sits near the middle of it on a
+log scale: 500x clear of the relay, 7,900x clear of the tightest real model. No corpus model
+has more than 33 events in its entire run, so none of them comes close to needing 100 inside
+any window at all.
+"""
 
 _ITERATIONS = 100
 """Events allowed to act at one instant before the iteration is called non-convergent."""
@@ -280,7 +306,7 @@ class _Run:
         times: list[NDArray[np.float64]] = []
         values: list[NDArray[np.float64]] = []
         events: list[Event] = []
-        t, chatter, stalled_from = start, 0, 0
+        t, chatter, stalled_from, stalled_at = start, 0, 0, start
         while t < stop:
             segment = self._segment(t, stop, y)
             sampled, trajectory = self._sample(segment, grid)
@@ -289,9 +315,13 @@ class _Run:
             if segment.status != 1:
                 break
             when, at, before = self._fired(segment)
-            if at - t >= _STANDSTILL * max(1.0, abs(at)):
-                # Time moved, so whatever fired before this is not part of a standstill.
-                chatter, stalled_from = 0, len(events)
+            # Measured from where the standstill began, not from the previous event. A
+            # chattering run advances every time -- by `_REARM` over the indicator's slope,
+            # which is the engine's own nudge and not the model making progress -- so a
+            # per-segment test resets on every event and never counts to one. The span is
+            # what does not grow.
+            if at - stalled_at >= _STANDSTILL * max(1.0, abs(at)):
+                chatter, stalled_from, stalled_at = 0, len(events), at
             else:
                 chatter += 1
             y = self._settle(at, before, when, events)

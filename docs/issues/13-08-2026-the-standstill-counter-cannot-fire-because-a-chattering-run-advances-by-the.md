@@ -1,8 +1,8 @@
 ---
 title: The standstill counter cannot fire, because a chattering run advances by the re-arm distance and that is a thousand times the standstill threshold
-status: open
+status: in-progress
 area: sim
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-13
 kind: bug
 scope: S
@@ -95,3 +95,57 @@ with the second term justified rather than picked, since the measured segments w
   [`chattering-across-instants`](03-08-2026-chattering-across-instants.md), which measured
   that `check_iteration` reports `ok` at every point of this model -- correctly, since every
   instant does settle.
+
+## Fixed 2026-08-13
+
+The test asks about the **span** of `_CHATTER` consecutive events rather than the length of
+each one, and `_STANDSTILL` goes 1e-12 to 1e-4.
+
+```python
+if at - stalled_at >= _STANDSTILL * max(1.0, abs(at)):
+    chatter, stalled_from, stalled_at = 0, len(events), at
+else:
+    chatter += 1
+```
+
+A span needs no knowledge of the indicator's slope, which is what the absolute floor this
+entry sketched (`2 * _REARM`) would have needed. `_REARM` is a distance in *indicator* units
+and becomes a distance in time only after dividing by ``d indicator / dt``, which is the
+model's business and not the loop's -- the measured 1e-9 and 2e-9 segments are that quotient
+with a slope of exactly 1, and a relay with a gain of 1000 would have produced 1e-12 instead.
+So the doubling this entry asked to justify turned out not to need justifying: it is the wrong
+quantity to build a rule on.
+
+### The number, with both sides measured
+
+In the units the loop computes -- span of `_CHATTER` consecutive events over `max(1, |t|)`:
+
+| | |
+| --- | --- |
+| tightest 100-event span, corpus | **7.9e-1** (`Pendulum`; `Thermostat` 9.9e-1) |
+| the relay | **2.0e-7** |
+
+Six and a half orders of magnitude of daylight. `1e-4` sits near the middle of it on a log
+scale: 500x clear of the relay, 7,900x clear of the tightest real model. No corpus model has
+more than 33 events in its entire run, so none of them needs 100 inside any window at all.
+`tests/test_chattering.py::test_the_standstill_span_clears_the_corpus_by_orders_of_magnitude`
+asserts the margin, so a future model that narrows it says so there rather than in a run that
+stops for a reason nobody expected.
+
+### After
+
+    Chattering: 102 events at t = 1.000000201 without advancing -- the model is chattering.
+    What kept firing: 'x > 0 changed' x102
+
+0.19 s, against 45 s and still going. The second model in the same file, a relay against a
+setpoint, raises in 0.26 s. `Plan._chattering` was already written and already tallied
+`Event.cause`; nothing had ever reached it.
+
+1468 pass, typecheck 0, and no corpus model changed -- the margin above is why, and the suite
+is the check.
+
+### Not done
+
+The `FIGHTING` model in the same test file still raises SciPy's `ValueError`. That is
+[`a-scipy-valueerror-escapes-simulate`](13-08-2026-a-scipy-valueerror-escapes-simulate-when-two-crossings-sit-on-zero-at.md)
+and it fails before any of this is reached.
