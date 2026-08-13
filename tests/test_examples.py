@@ -471,6 +471,27 @@ def test_the_output_jacobian_agrees_with_a_difference_quotient(model: Path) -> N
     _agrees_with_a_difference_quotient(model, "observe", "observe_jacobian")
 
 
+@pytest.mark.parametrize("model", MODEL_FILES, ids=_ids(MODEL_FILES))
+def test_the_indicator_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
+    """``indicator_jacobian`` against a difference quotient of ``indicators`` -- ``g_y``.
+
+    The third of the same shape, and the newest. It is what an event-crossing sensitivity
+    needs: when a parameter moves, a crossing happens at a different time, and
+    ``dt*/dp = -(g_y S) / (g_t + g_y f)``. Nothing emitted ``g_y`` until
+    `13-08-2026-forward-sensitivity-refuses-a-model-with-events` asked for it.
+
+    Nine corpus models have events and the rest skip. Measured when it landed, worst
+    disagreement 1.8e-9 on `Pendulum` and at or below 2.5e-10 everywhere else.
+
+    The **zero rows are the interesting output**, not a degenerate case. A crossing over
+    ``time`` alone has no state in it, so its row is identically zero and its crossing time
+    does not move when a parameter does. Eight of `RoastingMachine`'s nine are that, and
+    `Setback`'s only one is -- which is the same census that entry took from the IR, arrived
+    at here from the emitted arithmetic instead.
+    """
+    _agrees_with_a_difference_quotient(model, "indicators", "indicator_jacobian")
+
+
 def _agrees_with_a_difference_quotient(model: Path, value: str, derivative: str) -> None:
     """One emitted derivative against a crude one, at points a real run visits."""
     spec = _spec(model).get("simulate")
@@ -495,7 +516,9 @@ def _agrees_with_a_difference_quotient(model: Path, value: str, derivative: str)
     trajectory = np.stack([result[name] for name in system.states])
 
     p, _, w = kernel.start()
-    rows = kernel.observed if value == "observe" else kernel.states
+    rows = {"observe": kernel.observed, "indicators": kernel.events}.get(value, kernel.states)
+    if not rows:
+        pytest.skip(f"{model.stem} has no {value} to differentiate")
     checked, t = 0, 0.0
 
     def evaluate(state: Any) -> Any:

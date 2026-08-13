@@ -136,6 +136,15 @@ class Kernel:
     in the wrong place.
     """
     indicators: _Evaluate
+    indicator_jacobian: _Evaluate
+    """``d(z)/dy``, one row per crossing function.
+
+    What an event-crossing sensitivity needs: when a parameter moves the crossing moves with
+    it, by ``dt*/dp = -(g_y S) / (g_t + g_y f)``, and this is ``g_y``. A row is zero when the
+    crossing is over ``time`` alone, which is the common shape for a schedule and the case
+    where the crossing time does *not* move.
+    """
+
     transition: _Transition
 
     @property
@@ -255,6 +264,7 @@ def _compiled(
         observe=namespace["observe"],
         observe_jacobian=namespace.get("observe_jacobian"),
         indicators=namespace["indicators"],
+        indicator_jacobian=namespace["indicator_jacobian"],
         transition=namespace["transition"],
     )
 

@@ -1,8 +1,8 @@
 ---
 title: Forward sensitivity refuses a model with events, and the shortcut of handling only time-triggered ones buys exactly one corpus model
-status: open
+status: in-progress
 area: sim
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-13
 kind: story
 scope: L
@@ -85,3 +85,57 @@ invisible direction `identifiability` already reports.
 - No adjoint method. Forward sensitivity costs one extra ODE per parameter and this project
   fits a handful; the adjoint pays off in the other regime and would be a second implementation
   to keep agreeing with the first.
+
+## `g_y` is emitted, 2026-08-13
+
+The Inferred section named the missing piece -- "`indicators` emits ``g`` and nothing emits
+``dg/dy``" -- and said it would be the same forward-mode walk read off the indicator
+expressions. It is, and `Emitter.differentiate_indicators` is eleven lines.
+
+`differentiate` reads the carried tangent rows at the state derivatives; this reads them at
+the indicator expressions, which are not variables, so it goes through `combination` the way
+`chain` does for an explicit assignment. `Kernel.indicator_jacobian` is the seventh entry
+point and fills an ``(events, n)`` array.
+
+### Checked the way the other two Jacobians are
+
+`tests/test_examples.py::test_the_indicator_jacobian_agrees_with_a_difference_quotient`, the
+third of that shape, over the nine corpus models with events:
+
+| worst disagreement with a central difference | |
+| --- | --- |
+| `Pendulum` | 1.8e-9 |
+| `PhaseChange` | 2.5e-10 |
+| `BumpStop` | 1.4e-10 |
+| `RoastingMachine` | 6.4e-11 |
+| `Thermostat` | 5.6e-11 |
+| `BouncingBall`, `DrainingTank` | 2.7e-11 |
+| `Setback`, `TwoInertias` | **0** |
+
+### The zero rows reproduce this entry's own census, from the other direction
+
+A crossing over ``time`` alone has no state in it, so ``g_y`` is identically zero and the
+crossing time does not move when a parameter does. Counting the identically-zero rows of the
+emitted Jacobian:
+
+| model | zero rows | of |
+| --- | --- | --- |
+| `RoastingMachine` | **8** | 9 |
+| `PhaseChange` | 2 | 6 |
+| `TwoInertias` | 2 | 2 |
+| `Setback` | 1 | 1 |
+| `Pendulum` | 1 | 2 |
+| the other four | 0 | 1 each |
+
+That is the same table the Measured section took by reading the IR for names, arrived at here
+from the emitted arithmetic instead. Two independent routes to "eight of `RoastingMachine`'s
+nine are schedules", which is the fact the whole entry turns on.
+
+### What is left
+
+The integrator. ``S+ = S- + (f+ - f-) dt*/dp`` at a latch flip, with
+``dt*/dp = -(g_y S-)/(g_t + g_y f-)``, and the `when` case where ``dh/dy`` is not the
+identity. ``g_t`` is still not emitted -- the same walk with ``time`` seeded -- and for the
+eight `RoastingMachine` schedules it is the *only* term that is non-zero, since ``g_y`` is
+zero there and ``dt*/dp`` is then ``0/g_t``, which is zero. So the schedules need no jump at
+all, and the one crossing that does is ``T_bean > T_dry``.

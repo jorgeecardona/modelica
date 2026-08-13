@@ -1506,6 +1506,36 @@ class Emitter:
             body.append(f"z[{k}] = {self.expr(event.indicator) if live else '-1.0'}")
         return [*body, "return z"]
 
+    def differentiate_indicators(
+        self, position: int, mode: Mode, events: tuple[_Event, ...]
+    ) -> list[str]:
+        """``d(z)/dy`` -- how each crossing function moves when the state does.
+
+        The row an event-crossing sensitivity needs. When a parameter moves, a crossing
+        happens at a different time, and ``dt*/dp = -(g_y S) / (g_t + g_y f)`` -- so ``g_y``
+        is this, and nothing emitted it before. `13-08-2026-forward-sensitivity-refuses-a-model-with-events`
+        is the entry.
+
+        The same forward-mode walk as `differentiate`, gathered one step further out.
+        `differentiate` reads the carried rows at the state derivatives; this reads them at
+        the *indicator expressions*, which are not variables, so it goes through
+        `combination` the way `chain` does for an explicit assignment.
+
+        A row is `_null` in exactly two cases and they are different. A crossing over
+        ``time`` alone -- ``time < 66.7``, eight of `RoastingMachine`'s nine -- has no state
+        in it, so ``g_y`` is genuinely zero and its crossing time does not move when a
+        parameter does. A crossing that is not live in this mode already reads ``-1.0`` in
+        `indicators`, and a constant has no tangent either.
+        """
+        if not events:
+            return ["return out"]
+        lines, carried = self.tangent(mode)
+        for k, event in enumerate(events):
+            live = event.origin in (None, position)
+            total = self.combination(event.indicator, carried) if live else None
+            lines.append(f"out[{k}] = {total or '_null'}")
+        return [*lines, "return out"]
+
     def statement(self, statement: ir.Statement, states: Mapping[str, int]) -> str:
         """One line of a ``when`` body: a state reinitialised, or a discrete variable set.
 
@@ -1598,6 +1628,11 @@ class Emitter:
                 "indicators",
                 "t, y, p, w, z",
                 [self.indicators(k, m, events) for k, m in enumerate(modes)],
+            ),
+            self.dispatch(
+                "indicator_jacobian",
+                "t, y, p, w, out",
+                [self.differentiate_indicators(k, m, events) for k, m in enumerate(modes)],
             ),
             self.dispatch(
                 "transition",
