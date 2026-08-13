@@ -97,9 +97,9 @@ cabildo issues show <slug>
 | [A TypeScript backend is a third dialect plus a port of radau.py, and it would put models in the browser](11-08-2026-a-typescript-backend-is-a-third-dialect-plus-a-port-of-radau.md) | sim | idea | L | probe | open | — |
 | [A fixed-step co-simulation schedule never branches, so it could be recorded once](03-08-2026-replay-a-fixed-step-cosimulation-schedule.md) | ssp | idea | M | probe | open | ssp-read-the-archive-and-run-the-master |
 | [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
-| [Chattering across instants is watched by a counter, and the checker cannot see it](03-08-2026-chattering-across-instants.md) | verify | idea | M | probe | open | — |
+| [Chattering across instants is watched by a counter, and the checker cannot see it](03-08-2026-chattering-across-instants.md) | verify | idea | M | probe | in-progress · @quiet-tars-187f2 | — |
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Nothing checks that index reduction preserves the solution set, because that needs numbers and the generator makes structure](13-08-2026-nothing-checks-that-index-reduction-preserves-the-solution-set-because-that-needs.md) | verify | story | M | test | open | — |
 
-_20 open — 16 open, 1 in-progress, 3 blocked; 44 done. Generated; edit the files, then `cabildo issues reindex`._
+_20 open — 15 open, 2 in-progress, 3 blocked; 44 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

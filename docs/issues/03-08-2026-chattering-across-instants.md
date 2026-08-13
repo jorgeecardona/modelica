@@ -1,8 +1,8 @@
 ---
 title: Chattering across instants is watched by a counter, and the checker cannot see it
-status: open
+status: in-progress
 area: verify
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-03
 kind: idea
 scope: M
