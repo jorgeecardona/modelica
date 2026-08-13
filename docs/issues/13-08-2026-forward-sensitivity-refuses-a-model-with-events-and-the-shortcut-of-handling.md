@@ -222,3 +222,52 @@ asserted.
 Only the integrator now. ``S+ = S- + (f+ - f-) dt*/dp`` at a latch flip, and the `when` case
 where ``dh/dy`` is not the identity and `Kernel.transition` is what has to be differentiated.
 Both terms of ``dt*/dp`` are in hand.
+
+## The integrator landed, and `RoastingMachine` goes through
+
+`modelica.sim.sensitivity` integrates segment by segment, stopping at each crossing to move
+``S`` across it:
+
+    S+ = S- + (f- - f+) dt*/dp,   dt*/dp = -(g_y S-) / (dg/dt)
+
+**The order ``f- - f+`` is not a detail and it is how this was caught.** Written the other way
+round the sensitivity still moves in a plausible direction and stays continuous where it
+should; on the closed-form model in `tests/test_sensitivity_forward.py` it gives ``-0.75``
+against the true ``-0.25``, and integrating with *no* jump gives ``-0.5``. Three answers, none
+of them obviously wrong on inspection.
+
+The derivation is that just after the crossing ``x(t) = x(t*) + f+ (t - t*)``, so
+differentiating at fixed ``t`` gives ``S+ = [S- + f- dt*/dp] - f+ dt*/dp``.
+
+### Measured against a central difference
+
+| model | parameter | worst |
+| --- | --- | --- |
+| **`RoastingMachine`** | `UA` | **1.6e-8** |
+| `BumpStop` | `stop.k` | 1.8e-9 |
+| `PhaseChange` | `UA_air` | 2.2e-6 |
+| `Setback` | `T_day` | 5.2e-6 |
+| the closed-form `Crossing` | `k` | exact to 1e-7 |
+
+`RoastingMachine` is the one this entry exists for: nine crossings, eight of them schedules
+whose ``g_y`` is zero and which therefore move ``S`` not at all, and one -- ``T_bean > T_dry``
+-- that genuinely moves. `09-08-2026-nothing-fits-a-parameter-to-data`'s probe is no longer
+blocked on this.
+
+### What is still refused, and what broke
+
+**A `when` branch.** A latch flip leaves ``y`` continuous, so the jump above is the whole
+story; a `when` moves ``y`` itself and needs ``d(transition)/dy``, which nothing emits. Four
+corpus models are `when`-only and are refused with that reason.
+
+**`DrainingTank` leaves the model's domain.** Past the moment the tank runs dry its ``sqrt``
+is of a negative level, and the augmented system reaches further into that region than the
+state alone does -- the Jacobian is evaluated there too. It came out as a raw
+``ValueError: array must not contain infs or NaNs``; it is now a `SimulationError` naming the
+model, the same guard `modelica.sim.solve._segment` already carries. Making it *work* is a
+question about the model's domain rather than about sensitivity.
+
+### Left
+
+The `when` case, which is `d(transition)/dy` -- an eighth entry point, and the same
+forward-mode walk over a transition body instead of over the blocks.

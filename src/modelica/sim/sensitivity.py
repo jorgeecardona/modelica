@@ -37,13 +37,14 @@ parameters can be told apart, and not what values fit a measurement.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from scipy.integrate import (  # pyright: ignore[reportMissingTypeStubs]
     solve_ivp,  # pyright: ignore[reportUnknownVariableType]
 )
 
+from modelica.sim.emit import HELD
 from modelica.sim.kernel import Kernel, build
 from modelica.sim.solve import (
     SimulationError,
@@ -51,7 +52,7 @@ from modelica.sim.solve import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from numpy.typing import NDArray
 
@@ -165,20 +166,25 @@ def sensitivity(  # noqa: PLR0913 - a solver has knobs, and this one has the sam
     if not named:
         message = f"{kernel.name}: no parameters to differentiate against"
         raise SimulationError(message)
-    if kernel.events:
-        # Refused rather than approximated, and for two separate reasons. The latches are set
-        # once here and never refreshed, so a model with a watched relation is integrated on
-        # whichever side of it the run started -- measured on `RoastingMachine`, whose own
-        # trajectory comes out 8.8e-2 from `simulate`'s, before any sensitivity is asked for.
-        # And `S` needs a jump condition at an event: a `when` that reinitialises a state
-        # moves `dy/dp` too, by an amount that depends on the crossing time, which itself
-        # depends on `p`. Neither is hard and both are their own piece of work; returning a
-        # number that is quietly wrong for eight of the corpus models is not an option.
+    unhandled = [
+        trigger.condition
+        for trigger in kernel.code.events
+        if trigger.latch is None or trigger.switch is not None
+    ]
+    if unhandled:
+        # A latch flip is handled below; a `when` body and a mode switch are not, and the
+        # difference is `dh/dy`. A crossing that only flips a latch leaves `y` continuous, so
+        # the jump in `S` is the one term this file computes. A `when` that reinitialises a
+        # state moves `y` itself, and `dh/dy` is `Kernel.transition` differentiated, which
+        # nothing emits. Refused rather than approximated: a number that is quietly wrong is
+        # worse than a sentence.
         message = (
-            f"{kernel.name}: {kernel.events} watched relations, and forward sensitivity here"
-            " does not handle events -- the latches are never refreshed and `S` has no jump"
-            " condition at a crossing"
+            f"{kernel.name}: {unhandled} is a `when` branch or a mode switch, and the"
+            " sensitivity jump at one needs `d(transition)/dy`, which is not emitted"
         )
+        raise SimulationError(message)
+    if len(kernel.code.events) > 0 and len(getattr(kernel.code, "switching", None) or ()) > 0:
+        message = f"{kernel.name}: dynamic state selection is not handled here"
         raise SimulationError(message)
 
     n, m = kernel.states, len(named)
@@ -194,29 +200,23 @@ def sensitivity(  # noqa: PLR0913 - a solver has knobs, and this one has the sam
         kernel.jacobian_parameters(t, y, p, w, partial)
         return np.concatenate([kernel.rhs(t, y, p, w, np.empty(n)), (slope @ s + partial).ravel()])
 
-    solution = cast(
-        "_Solution",
-        solve_ivp(  # pyright: ignore[reportUnknownArgumentType]
-            augmented,
-            (start, stop),
-            np.concatenate([y0, s0.ravel()]),
-            method=method,
-            rtol=tolerance,
-            atol=tolerance if absolute is None else absolute,
-            dense_output=True,
-        ),
+    pieces = _segments(
+        kernel,
+        augmented,
+        np.concatenate([y0, s0.ravel()]),
+        (start, stop),
+        p,
+        w,
+        (n, m),
+        method,
+        tolerance,
+        tolerance if absolute is None else absolute,
     )
-    if not solution.success:
-        message = f"{kernel.name}: {solution.message}"
-        raise SimulationError(message)
 
-    # Requested times are *added* to the solver's own steps and filled in from the
-    # interpolant, which is what `simulate` does. Replacing the steps would be the other
-    # reasonable choice and the two functions disagreeing about it would be a trap.
-    grid = np.asarray(solution.t, dtype=float)
+    grid = np.unique(np.concatenate([piece for piece, _ in pieces]))
     if times is not None:
         grid = np.unique(np.concatenate([grid, np.asarray(times, dtype=float)]))
-    trajectory = solution.sol(grid)
+    trajectory = np.column_stack([_at(pieces, float(t)) for t in grid])
     states, rows = trajectory[:n], trajectory[n:].reshape(n, m, len(grid))
 
     # `d(obs)/dp` closes over the two partials the kernel already carries. `observe_jacobian`
@@ -549,3 +549,155 @@ def fit(  # noqa: PLR0913 - what is being fitted, plus the integration knobs
         iterations=taken_steps,
         conditioning=conditioning(values),
     )
+
+
+def _segments(  # noqa: PLR0913, PLR0917 - the run, and everything one segment is read against
+    kernel: Kernel,
+    augmented: Callable[[float, NDArray[np.float64]], NDArray[np.float64]],
+    u: NDArray[np.float64],
+    span: tuple[float, float],
+    p: NDArray[np.float64],
+    w: NDArray[np.float64],
+    shape: tuple[int, int],
+    method: str,
+    relative: float,
+    absolute: float,
+) -> list[tuple[NDArray[np.float64], _Solution]]:
+    """Integrate to the horizon, stopping at each crossing to move ``S`` across it.
+
+    One segment per crossing, which is what `modelica.sim.solve` does for the state alone. The
+    latches live in ``w`` and are flipped by `Kernel.transition`, so the segment after a
+    crossing integrates the model on the other side of it -- which is the half the refusal
+    this replaced was really about.
+    """
+    n, m = shape
+    start, stop = span
+    pieces: list[tuple[NDArray[np.float64], _Solution]] = []
+    at = start
+    while at < stop:
+        try:
+            solution = cast(
+                "_Solution",
+                solve_ivp(  # pyright: ignore[reportUnknownArgumentType]
+                    augmented,
+                    (at, stop),
+                    u,
+                    method=method,
+                    rtol=relative,
+                    atol=absolute,
+                    dense_output=True,
+                    events=_crossings(kernel, p, w, n) or None,
+                ),
+            )
+        except ValueError as error:
+            # The same guard `modelica.sim.solve._segment` carries, for the same reason: a
+            # `ValueError` out of SciPy's internals tells a modeller nothing. `DrainingTank`
+            # is the case here -- past the moment it runs dry its `sqrt` is of a negative
+            # level, and the augmented system reaches further into that region than the state
+            # alone does because the Jacobian is evaluated there too.
+            message = (
+                f"{kernel.name}: the augmented system left the model's domain (scipy: {error})"
+            )
+            raise SimulationError(message) from error
+        if not solution.success:
+            message = f"{kernel.name}: {solution.message}"
+            raise SimulationError(message)
+        pieces.append((np.asarray(solution.t, dtype=float), solution))
+        fired = _fired(solution)
+        if fired is None:
+            break
+        index, at = fired
+        u = _jump(kernel, index, at, solution.sol(np.array([at]))[:, 0], p, w, n, m)
+    return pieces
+
+
+def _crossings(kernel: Kernel, p: NDArray[np.float64], w: NDArray[np.float64], n: int) -> list[Any]:
+    """One SciPy event function per watched relation, read off the augmented state.
+
+    The indicator is nudged to the side its latch is holding, the same `_REARM` trick
+    `modelica.sim.solve` uses and for the same reason: a segment restarts exactly on the root
+    the previous one located, so the fired indicator reads as zero give or take noise and
+    SciPy is entitled to report that noise as a fresh crossing forever.
+    """
+    from modelica.sim.solve import (  # noqa: PLC0415 - one constant, and it is theirs
+        _REARM,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    scratch = np.empty(kernel.events)
+
+    def watcher(index: int) -> Callable[[float, NDArray[np.float64]], float]:
+        def crossing(t: float, u: NDArray[np.float64]) -> float:
+            side = _REARM if w[kernel.code.events[index].latch or 0] > HELD else -_REARM
+            return float(kernel.indicators(t, u[:n], p, w, scratch)[index] + side)
+
+        crossing.terminal = True  # pyright: ignore[reportFunctionMemberAccess]
+        return crossing
+
+    return [watcher(index) for index in range(kernel.events)]
+
+
+def _fired(solution: _Solution) -> tuple[int, float] | None:
+    """Which crossing ended this segment, and when. ``None`` if it reached the horizon.
+
+    ``t_events`` is `None` and not empty when the model has no crossings to watch, because
+    that is what SciPy returns when ``events=`` was not passed. Nine of the corpus's
+    twenty-five models have events and the other sixteen came through here.
+    """
+    if solution.t_events is None:
+        return None
+    for index, times in enumerate(solution.t_events):
+        if len(times):
+            return index, float(times[0])
+    return None
+
+
+def _jump(  # noqa: PLR0913, PLR0917 - the crossing, and everything it is read against
+    kernel: Kernel,
+    index: int,
+    at: float,
+    u: NDArray[np.float64],
+    p: NDArray[np.float64],
+    w: NDArray[np.float64],
+    n: int,
+    m: int,
+) -> NDArray[np.float64]:
+    """Apply the transition and move ``S`` with it.
+
+    ``S+ = S- + (f- - f+) dt*/dp`` with ``dt*/dp = -(g_y S-) / (dg/dt)``. A latch flip leaves
+    ``y`` continuous, so that product is the whole of the jump -- and where the crossing is a
+    schedule, ``g_y`` is zero and the jump is zero with it, which is why
+    `Kernel.indicator_jacobian`'s zero rows are worth having.
+
+    **``f- - f+``, and the order is not a detail.** Writing it the other way round is the
+    obvious mistake and it is not obviously wrong: it leaves the sensitivity continuous where
+    it should be, and it moves in the right direction. The derivation is that just after the
+    crossing ``x(t) = x(t*) + f+ (t - t*)``, so differentiating at fixed ``t`` gives
+    ``S+ = [S- + f- dt*/dp] - f+ dt*/dp``. On the model in `tests/test_sensitivity_forward.py`
+    the two differ by a factor of three -- -0.75 against the closed form's -0.25 -- which is
+    how this was caught.
+    """
+    y, s = u[:n], u[n:].reshape(n, m)
+    gradient = kernel.indicator_jacobian(at, y, p, w, np.zeros((kernel.events, n)))[index].copy()
+    slope = float(kernel.indicator_slope(at, y, p, w, np.zeros(kernel.events))[index])
+    before = kernel.rhs(at, y, p, w, np.empty(n)).copy()
+    kernel.transition(index, at, y, p, w, np.empty(n))
+    after = kernel.rhs(at, y, p, w, np.empty(n)).copy()
+    if slope == 0.0:  # pragma: no cover - a crossing reached with no speed cannot be located
+        return u
+    moved = -(gradient @ s) / slope
+    jumped = s + np.outer(before - after, moved)
+    return np.concatenate([y, np.asarray(jumped, dtype=float).ravel()])
+
+
+def _at(pieces: list[tuple[NDArray[np.float64], _Solution]], t: float) -> NDArray[np.float64]:
+    """The augmented state at ``t``, from whichever segment covers it.
+
+    The *last* segment whose span reaches ``t``, so a time that is exactly a crossing reads
+    the value after the jump. That is the same convention `modelica.sim.solve` uses for its
+    samples and the reason `tests/test_solution_set.py` skips an event instant: one timestamp
+    names two states and something has to choose.
+    """
+    for grid, solution in reversed(pieces):
+        if grid[0] <= t <= grid[-1]:
+            return np.asarray(solution.sol(np.array([t]))[:, 0], dtype=float)
+    return np.asarray(pieces[-1][1].sol(np.array([t]))[:, 0], dtype=float)

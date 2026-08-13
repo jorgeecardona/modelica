@@ -66,6 +66,10 @@ def _system(stem: str) -> System:
     return causalize(flatten([parse(f.read_text(encoding="utf-8")) for f in files], stem))
 
 
+def _system_from(source: str, name: str) -> System:
+    return causalize(flatten([parse(source)], name))
+
+
 def _spec(stem: str) -> dict[str, Any]:
     return tomllib.loads((MODELS / f"{stem}.toml").read_text(encoding="utf-8"))["simulate"]
 
@@ -132,18 +136,98 @@ def test_a_state_and_an_observed_variable_agree_where_they_are_the_same_thing() 
     np.testing.assert_allclose(output, state, rtol=1e-12, atol=1e-14)
 
 
-def test_a_model_with_events_is_refused_rather_than_approximated() -> None:
-    """`RoastingMachine` has nine watched relations, and this would be quietly wrong for it.
+CROSSING = """model Crossing "A latch flip whose time moves with a parameter, in closed form"
+  parameter Real k = 2;
+  Real x(start = 1, fixed = true);
+equation
+  der(x) = if x > 0 then -k else -1;
+end Crossing;
+"""
+"""``x`` falls at ``k`` until it reaches zero, then at one.
 
-    Measured: integrated through the augmented system with no event handling, its *own
-    trajectory* -- before any sensitivity is read -- comes out 8.8e-2 from `simulate`'s,
-    because the latches are set once and never refreshed. A number that wrong that still looks
-    like a number is the outcome the refusal exists to prevent.
+So ``t* = 1/k`` and ``dt*/dk = -1/k^2``, and after the crossing ``x = -(t - 1/k)``, giving
+``dx/dk = -1/k^2 = -0.25`` for every later ``t``. Before it, ``dx/dk = -t``.
+
+The model earns its place by discriminating. Integrating ``S`` through the crossing with **no
+jump** leaves it at its pre-crossing value of ``-0.5`` and looks perfectly reasonable; getting
+the jump's sign backwards gives ``-0.75``. Both are wrong and neither is obviously wrong.
+"""
+
+
+def test_the_sensitivity_jumps_across_a_crossing_by_the_closed_form_amount() -> None:
+    """The whole of event sensitivity, on a model whose answer is a fraction.
+
+    ``S+ = S- + (f- - f+) dt*/dp``. Here ``S- = -0.5``, ``f- = -2``, ``f+ = -1`` and
+    ``dt*/dp = -0.25``, so the jump is ``+0.25`` and the answer is ``-0.25`` -- which is what
+    differentiating ``-(t - 1/k)`` gives, and what a central difference of two runs gives.
+    """
+    forward = pytest.importorskip("modelica.sim.sensitivity").sensitivity
+    system = _system_from(CROSSING, "Crossing")
+    grid = np.array([0.2, 0.4, 0.6, 1.0])
+    exact = forward(system, ["k"], stop=1.0, times=grid, tolerance=1e-11)
+    taken = np.searchsorted(exact.time, grid)
+    got = exact.state[exact.states.index("x"), 0][taken]
+    np.testing.assert_allclose(got, [-0.2, -0.4, -0.25, -0.25], atol=1e-7)
+
+
+def test_roasting_machine_integrates_through_all_nine_of_its_crossings() -> None:
+    """The model the fitting entry's probe needs, and the reason this work was done.
+
+    Nine watched relations, eight of them schedules whose ``g_y`` is zero and which therefore
+    move ``S`` not at all, and one -- ``T_bean > T_dry`` -- whose crossing time genuinely
+    depends on the parameters. Checked against a central difference over every observed
+    variable at eight points: **1.6e-8**.
+
+    It used to be refused. Integrated with no event handling its own trajectory came out
+    8.8e-2 from `simulate`'s, before any sensitivity was read.
+    """
+    forward = pytest.importorskip("modelica.sim.sensitivity").sensitivity
+    simulate = pytest.importorskip("modelica.sim.solve").simulate
+    build = pytest.importorskip("modelica.sim.kernel").build
+    vector = pytest.importorskip("modelica.sim.sweep").vector
+
+    system = _system("RoastingMachine")
+    stop = float(_spec("RoastingMachine")["stop"])
+    grid = np.linspace(0.0, stop, 9)[1:]
+    exact = forward(system, ["UA"], stop=stop, times=grid, tolerance=1e-10)
+
+    kernel = build(system, sensitivity=("UA",))
+    declared = list(kernel.code.parameters)
+    value = float(kernel.parameters(np.zeros(len(declared)))[declared.index("UA")])
+    step = 1e-6 * abs(value)
+    runs = [
+        simulate(
+            system,
+            stop=stop,
+            times=grid,
+            tolerance=1e-10,
+            parameters=vector(system, {"UA": value + delta}),
+        )
+        for delta in (step, -step)
+    ]
+    columns = [np.searchsorted(run.time, grid) for run in runs]
+    crude = np.array(
+        [
+            (runs[0][name][columns[0]] - runs[1][name][columns[1]]) / (2 * step)
+            for name in kernel.code.observed
+        ]
+    )
+    taken = np.searchsorted(exact.time, grid)
+    scale = np.maximum(1.0, np.abs(crude).max(axis=1, keepdims=True))
+    assert (np.abs(exact.output[:, 0, :][:, taken] - crude) / scale).max() <= 1e-5
+
+
+def test_a_when_branch_is_still_refused() -> None:
+    """A latch flip leaves ``y`` continuous; a `when` moves it, and `dh/dy` is not emitted.
+
+    `BouncingBall` reinitialises its velocity, so the sensitivity jump needs
+    ``d(transition)/dy`` on top of the two terms this file has. Refused with the reason rather
+    than approximated.
     """
     forward = pytest.importorskip("modelica.sim.sensitivity").sensitivity
     error = pytest.importorskip("modelica.sim.solve").SimulationError
-    with pytest.raises(error, match="does not handle events"):
-        forward(_system("RoastingMachine"), ["m_green"], stop=10.0)
+    with pytest.raises(error, match="d\\(transition\\)/dy"):
+        forward(_system("BouncingBall"), ["e"], stop=1.0)
 
 
 def test_asking_for_a_parameter_the_kernel_was_not_built_for_is_refused() -> None:
