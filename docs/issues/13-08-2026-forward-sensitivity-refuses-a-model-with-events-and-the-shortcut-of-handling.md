@@ -170,3 +170,55 @@ cache is already keyed on ``(mode, seeds)``, so the seeding is the whole of the 
 whatever the denominator is, so the crossing does not move and the sensitivity is continuous
 across it. The denominator is only needed for a crossing that ``g_y`` says *does* move, and
 `indicator_jacobian` now names exactly which those are.
+
+## Both terms of `dt*/dp` are emitted, 2026-08-13
+
+`Kernel.indicator_slope` is `dg/dt` **along the trajectory** -- the denominator, as one
+quantity rather than as ``g_t`` and ``g_y f`` separately, which would be two walks for a
+number that is one.
+
+It is the walk's **third seeding** and the only one whose rows are scalars: time moves at one
+and every state moves at its own derivative, which the schedule has already computed. So the
+seed is an expression rather than a row of an identity, and everything downstream of it --
+`chain`, `implicit`, `combination` -- is the same code the other five seedings use.
+`Emitter.tangent(mode, along=True)`, cached on the same `(mode, seeding)` key.
+
+### Two things it cost, both found by running it
+
+**`time` had no tangent row.** It is not an observed variable, so `Emitter.tangents` had no
+entry for it. One line in `__post_init__`, put there rather than in the walk so that every row
+this emitter can name is named in one place.
+
+**The seeds are not constants, so the schedule has to run first.** `DrainingTank` failed with
+``UnboundLocalError: der_level``: a state's ``d/dt`` *is* its derivative variable, which a
+block computes, and the walk read it before that block had run. The blocks are emitted up
+front for this seeding and the walk skips its own `solve` -- so it costs no more source than
+the other five rather than twice as much.
+
+### Checked
+
+`indicator_slope` against a difference quotient taken *along the trajectory* --
+``g(t+h, y+hf)`` against ``g(t-h, y-hf)``, because a partial in ``t`` alone is the wrong thing
+and would agree with a wrong implementation on every model whose crossings are schedules:
+
+| worst | |
+| --- | --- |
+| `PhaseChange`, `RoastingMachine` | 1.9e-8 |
+| `Pendulum` | 9.5e-10 |
+| `Thermostat` | 1.3e-10 |
+| `Setback`, `BouncingBall`, `BumpStop`, `DrainingTank` | 9e-11 or better |
+| `TwoInertias` | **0** |
+
+The two loose ones have constant slopes, so the number is the quotient's own error.
+
+### The contrast is the point, and is a test
+
+`RoastingMachine`'s eight schedules have ``g_y`` identically zero and ``dg/dt = -1``. A caller
+reading one for the other would divide by zero on every schedule in the corpus. Both are
+asserted.
+
+### What is left
+
+Only the integrator now. ``S+ = S- + (f+ - f-) dt*/dp`` at a latch flip, and the `when` case
+where ``dh/dy`` is not the identity and `Kernel.transition` is what has to be differentiated.
+Both terms of ``dt*/dp`` are in hand.

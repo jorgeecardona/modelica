@@ -145,6 +145,14 @@ class Kernel:
     where the crossing time does *not* move.
     """
 
+    indicator_slope: _Evaluate
+    """``dg/dt`` along the trajectory, one scalar per crossing function.
+
+    The denominator of ``dt*/dp = -(g_y S) / (g_t + g_y f)``. Zero exactly where a crossing
+    cannot be reached by moving forward in time, which is not the same as `indicator_jacobian`
+    being zero: a schedule has ``g_y = 0`` and a perfectly good slope.
+    """
+
     transition: _Transition
 
     @property
@@ -265,6 +273,7 @@ def _compiled(
         observe_jacobian=namespace.get("observe_jacobian"),
         indicators=namespace["indicators"],
         indicator_jacobian=namespace["indicator_jacobian"],
+        indicator_slope=namespace["indicator_slope"],
         transition=namespace["transition"],
     )
 

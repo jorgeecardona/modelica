@@ -668,9 +668,9 @@ class Emitter:
     held: dict[ir.Expr, ir.Expr] = field(default_factory=dict[ir.Expr, ir.Expr])
     """Each watched relation, mapped to the test on its latch slot that replaces it."""
 
-    walks: dict[tuple[int, tuple[str, ...] | None], tuple[list[str], dict[str, str]]] = field(
+    walks: dict[tuple[int, tuple[str, ...] | str | None], tuple[list[str], dict[str, str]]] = field(
         default_factory=dict[
-            "tuple[int, tuple[str, ...] | None]", "tuple[list[str], dict[str, str]]"
+            "tuple[int, tuple[str, ...] | str | None]", "tuple[list[str], dict[str, str]]"
         ]
     )
     """The forward-mode walk of each (mode, seeding), computed once.
@@ -681,7 +681,9 @@ class Emitter:
     method-of-lines bar, emit takes 1.8 s against 0.5 s to flatten and causalize.
 
     Keyed on ``id(mode)`` because a `Mode` carries a `Mapping` and is not hashable, and the
-    modes outlive this object anyway.
+    modes outlive this object anyway. The second half of the key is the seeding: the state
+    names, the parameter names, or the string ``"d/dt"`` for the walk along the trajectory,
+    whose rows are scalars rather than rows of an identity.
     """
 
     tangents: dict[str, str] = field(default_factory=dict[str, str])
@@ -751,6 +753,10 @@ class Emitter:
         while any(symbol.startswith(self.prefix) for symbol in taken):
             self.prefix = f"_{self.prefix}"
         self.tangents = {name: _identifier(f"$d_{name}", taken) for name in self.observed}
+        # `time` is not an observed variable and it needs a tangent row all the same: the
+        # `d/dt` seeding in `_walk` carries one for it. Added here rather than there so that
+        # every row this emitter can name is named in one place.
+        self.tangents["time"] = _identifier("$d_time", taken)
         self.symbols["time"] = "t"
         self.slots = {name: slot for slot, name in enumerate(self.observed)}
         self.remembered = _remembered(self.system)
@@ -1111,7 +1117,7 @@ class Emitter:
         return lines
 
     def tangent(
-        self, mode: Mode, seeds: Sequence[str] | None = None
+        self, mode: Mode, seeds: Sequence[str] | None = None, *, along: bool = False
     ) -> tuple[list[str], dict[str, str]]:
         """The walk for one (mode, seeding), from `walks` if it has been asked for before.
 
@@ -1119,16 +1125,16 @@ class Emitter:
         gatherers append their own output rows to them -- so handing out the cached list
         itself would let the second caller read the first one's tail.
         """
-        key = (id(mode), None if seeds is None else tuple(seeds))
+        key = (id(mode), "d/dt" if along else None if seeds is None else tuple(seeds))
         found = self.walks.get(key)
         if found is None:
-            found = self._walk(mode, seeds)
+            found = self._walk(mode, seeds, along=along)
             self.walks[key] = found
         lines, carried = found
         return list(lines), dict(carried)
 
     def _walk(
-        self, mode: Mode, seeds: Sequence[str] | None = None
+        self, mode: Mode, seeds: Sequence[str] | None = None, *, along: bool = False
     ) -> tuple[list[str], dict[str, str]]:
         """Forward mode over the very blocks the right-hand side runs, and what it reached.
 
@@ -1154,26 +1160,26 @@ class Emitter:
         thing from having a tangent that happens to be zero, and the two callers below both
         turn it into the shared zero row rather than into an allocation.
         """
-        seeded = tuple(mode.states) if seeds is None else tuple(seeds)
-        width = len(seeded)
+        seeded = () if along else tuple(mode.states) if seeds is None else tuple(seeds)
+        width = 1 if along else len(seeded)
         matrix = "_seed" if seeds is None else "_pseed"
         head = list(self.unpack(mode))
         carried: dict[str, str] = {}
         for slot, name in enumerate(seeded):
             head.append(f"{self.tangents[name]} = {matrix}[{slot}]")
-        # A parameter may be written in terms of others -- `RoastingMachine` has
-        # `m_dry = m_green * (1 - moisture)` -- and the equations read the *derived* one. The
-        # block walk below starts after `parameters` has run, so without this the chain stops
-        # at the seed and the sensitivity to `m_green` comes out zero where it is not.
         chained: dict[str, str] = {name: self.tangents[name] for name in seeded}
+        if along:
+            # The whole schedule first, and then the seeds. Unlike the other five seedings,
+            # this one's rows are not constants: a state's `d/dt` *is* its derivative
+            # variable, which a block computes. `DrainingTank` found it -- `der_level` was
+            # read by the walk before the block that assigns it had run. So the blocks are
+            # emitted up front and the walk below skips its own `solve`, which is why this
+            # costs no more source than the others rather than twice as much.
+            head.extend(self.blocks(mode))
+            head.append(f"{self.tangents['time']} = 1.0")
+            chained.update(self._along(mode))
         if seeds is not None:
-            for variable in self.ordered():
-                if variable.name in chained or variable.binding is None:
-                    continue
-                total = self.combination(variable.binding, chained)
-                if total is not None:
-                    chained[variable.name] = self.tangents[variable.name]
-                    head.append(f"{self.tangents[variable.name]} = {total}")
+            head.extend(self._derived(chained))
 
         def body() -> list[str]:
             # Rebuilt from scratch on each pass, because `sharing` runs this twice and the
@@ -1182,7 +1188,8 @@ class Emitter:
             carried.update(chained)
             lines: list[str] = []
             for block in mode.blocks:
-                lines.extend(self.solve(block))
+                if not along:
+                    lines.extend(self.solve(block))
                 if block.assignment is not None:
                     lines.extend(self.chain(block.unknowns[0], block.assignment, carried))
                 else:
@@ -1190,6 +1197,38 @@ class Emitter:
             return lines
 
         return [*head, *self.sharing(body)], carried
+
+    def _derived(self, chained: dict[str, str]) -> list[str]:
+        """Tangent rows for parameters written in terms of other parameters.
+
+        `RoastingMachine` has ``m_dry = m_green * (1 - moisture)`` and the equations read the
+        *derived* one. The block walk starts after ``parameters`` has run, so without this the
+        chain stops at the seed and the sensitivity to ``m_green`` comes out zero where it is
+        not. ``chained`` is extended in place, which is what the caller wants.
+        """
+        lines: list[str] = []
+        for variable in self.ordered():
+            if variable.name in chained or variable.binding is None:
+                continue
+            total = self.combination(variable.binding, chained)
+            if total is not None:
+                chained[variable.name] = self.tangents[variable.name]
+                lines.append(f"{self.tangents[variable.name]} = {total}")
+        return lines
+
+    def _along(self, mode: Mode) -> dict[str, str]:
+        """The ``d/dt`` seed: time moves at one, every state at its own derivative.
+
+        The third seeding, and the only one whose rows are *scalars*: this walk carries
+        ``d/dt`` along the trajectory rather than a row of a Jacobian. The state derivatives
+        are what the schedule has already computed, so the seed is an expression rather than a
+        row of an identity -- and everything downstream of it is the same `chain`, `implicit`
+        and `combination` the other five seedings use.
+        """
+        return {
+            "time": self.tangents["time"],
+            **{state: self.symbols[mode.derivative[state]] for state in mode.states},
+        }
 
     def differentiate(self, mode: Mode) -> list[str]:
         """``d(dy)/dy`` -- the Jacobian every implicit solver wants, dense.
@@ -1536,6 +1575,30 @@ class Emitter:
             lines.append(f"out[{k}] = {total or '_null'}")
         return [*lines, "return out"]
 
+    def indicator_slope(self, position: int, mode: Mode, events: tuple[_Event, ...]) -> list[str]:
+        """``dg/dt`` along the trajectory, one scalar per crossing function.
+
+        The denominator of ``dt*/dp = -(g_y S) / (g_t + g_y f)``, as one quantity rather than
+        as ``g_t`` and ``g_y f`` separately -- they are two walks for a number that is one.
+
+        The obvious cheaper route does not exist and the register says why: ``d_dt`` of an
+        indicator introduces ``der(v)`` for variables that are not states, and `Pendulum` is
+        the case -- ``x`` is solved from the constraint, so the schedule computes it and never
+        computes its derivative. Recovering that is the chain rule through the blocks, which
+        is this walk.
+
+        Zero for a crossing that is not live in this mode, matching `indicators`, where it
+        reads a constant ``-1.0``.
+        """
+        if not events:
+            return ["return out"]
+        lines, carried = self.tangent(mode, along=True)
+        for k, event in enumerate(events):
+            live = event.origin in (None, position)
+            total = self.combination(event.indicator, carried) if live else None
+            lines.append(f"out[{k}] = {total or '0.0'}")
+        return [*lines, "return out"]
+
     def statement(self, statement: ir.Statement, states: Mapping[str, int]) -> str:
         """One line of a ``when`` body: a state reinitialised, or a discrete variable set.
 
@@ -1633,6 +1696,11 @@ class Emitter:
                 "indicator_jacobian",
                 "t, y, p, w, out",
                 [self.differentiate_indicators(k, m, events) for k, m in enumerate(modes)],
+            ),
+            self.dispatch(
+                "indicator_slope",
+                "t, y, p, w, out",
+                [self.indicator_slope(k, m, events) for k, m in enumerate(modes)],
             ),
             self.dispatch(
                 "transition",

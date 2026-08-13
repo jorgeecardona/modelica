@@ -359,3 +359,79 @@ def test_a_measurement_after_the_horizon_is_refused() -> None:
     module = pytest.importorskip("modelica.sim.sensitivity")
     with pytest.raises(module.FitError, match=r"leave \[0, 5\]"):
         module.fit(_system("NewtonCooling"), ["k"], {"T": ([1.0, 9.0], [2.0, 3.0])}, stop=5.0)
+
+
+# --------------------------------------------------------------------------------------
+# The two terms an event-crossing sensitivity needs
+# --------------------------------------------------------------------------------------
+
+
+EVENTFUL = ["BouncingBall", "BumpStop", "DrainingTank", "Pendulum", "Thermostat"]
+"""Corpus models with a crossing whose indicator depends on the state.
+
+`RoastingMachine`, `PhaseChange`, `Setback` and `TwoInertias` have events too and are left out
+here only to keep this file quick -- `tests/test_examples.py` runs the ``g_y`` check over all
+nine. What this file adds is the *slope*, and these five are the ones where it is not a
+constant.
+"""
+
+
+@pytest.mark.parametrize("stem", EVENTFUL)
+def test_the_indicator_slope_is_the_total_time_derivative(stem: str) -> None:
+    """``indicator_slope`` against a difference quotient taken *along the trajectory*.
+
+    ``dt*/dp = -(g_y S) / (g_t + g_y f)``, and the denominator is ``dg/dt`` as one quantity.
+    The quotient has to move the state too -- ``g(t + h, y + h f)`` against ``g(t - h, y - h
+    f)`` -- because a partial in ``t`` alone is the wrong thing and would agree with a wrong
+    implementation on every model whose crossings are schedules.
+
+    Measured when it landed: 1.9e-8 worst over all nine event models, and 1.3e-10 or better on
+    the five here. The two loose ones are `RoastingMachine` and `PhaseChange`, whose slopes
+    are constants, so the number is the quotient's own error rather than the emitter's.
+    """
+    build = pytest.importorskip("modelica.sim.kernel").build
+    simulate = pytest.importorskip("modelica.sim.solve").simulate
+    run = _spec(stem)
+    system = _system(stem)
+    kernel = build(system)
+    result = simulate(system, stop=float(run["stop"]), tolerance=1e-9)
+    rows = [result.names.index(name) for name in kernel.code.states]
+    p, _, w = kernel.start()
+
+    worst = 0.0
+    for column in np.unique(np.linspace(1, len(result.time) - 2, 6).astype(int)):
+        t = float(result.time[column])
+        y = np.ascontiguousarray([result.values[row, column] for row in rows])
+        kernel.latch(t, y, p, w)
+        exact = kernel.indicator_slope(t, y, p, w.copy(), np.zeros(kernel.events)).copy()
+        f = kernel.rhs(t, y, p, w.copy(), np.empty(len(y))).copy()
+        step = 1e-6 * max(abs(t), 1.0)
+        ahead = kernel.indicators(
+            t + step, y + step * f, p, w.copy(), np.empty(kernel.events)
+        ).copy()
+        behind = kernel.indicators(
+            t - step, y - step * f, p, w.copy(), np.empty(kernel.events)
+        ).copy()
+        crude = (ahead - behind) / (2 * step)
+        worst = max(worst, float(np.abs(exact - crude).max() / max(1.0, np.abs(crude).max())))
+    assert worst <= 1e-6, f"{stem}: {worst:.2e}"
+
+
+def test_a_schedule_has_no_state_gradient_but_a_perfectly_good_slope() -> None:
+    """The two functions answer different questions, and `RoastingMachine` shows both.
+
+    Eight of its nine crossings are ``time < c``. Their ``g_y`` is identically zero -- the
+    crossing does not move when a parameter does -- while their ``dg/dt`` is ``-1``, because
+    time reaches them at one second per second. A caller that read one for the other would get
+    a division by zero on every schedule in the corpus.
+    """
+    build = pytest.importorskip("modelica.sim.kernel").build
+    kernel = build(_system("RoastingMachine"))
+    p, y, w = kernel.start()
+    gradient = kernel.indicator_jacobian(0.0, y, p, w.copy(), np.zeros((kernel.events, len(y))))
+    slope = kernel.indicator_slope(0.0, y, p, w.copy(), np.zeros(kernel.events))
+
+    flat = [k for k in range(kernel.events) if not gradient[k].any()]
+    assert len(flat) == 8, f"expected the eight schedules, got {flat}"
+    assert all(slope[k] != 0.0 for k in flat), "a schedule is still reached at one per second"
+    np.testing.assert_allclose([slope[k] for k in flat], -1.0)
