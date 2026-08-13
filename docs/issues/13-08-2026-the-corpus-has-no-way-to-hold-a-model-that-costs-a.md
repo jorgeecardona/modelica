@@ -129,3 +129,47 @@ a number somebody can accept or refuse, which is what this entry was filed to ma
 The remaining decision is unchanged in shape and much smaller in stakes: whether the three
 "no" rows should share one cheap trajectory, and whether a spec may name a shorter horizon for
 them than its reference point needs.
+
+## The 150-second estimate was wrong: it is 13 minutes, measured
+
+The table above predicted "about 150 s rather than 520 s" for Ring Modulator once the two
+waste items were removed. The model was then written as a full triple, added to the corpus, and
+every test that touches it run. **All 33 pass**, including the published reference point at
+`rtol = 1e-3`. The cost:
+
+| call site | seconds |
+| --- | --- |
+| `test_radau` (the fused loop) | **292.0** |
+| `test_fold` (two builds) | 149.4 |
+| `test_simulates_as_specified` | 119.8 |
+| difference quotient, `jacobian` | 73.4 |
+| `test_solution_set` | 71.1 |
+| difference quotient, `observe_jacobian` | 70.3 |
+| | **779.7 s total** |
+
+Thirteen minutes, against a suite that is now 4 minutes 30. The estimate was out by a factor
+of five, and the two reasons are worth more than the estimate was.
+
+**The tolerance floor buys nothing here.** Ring Modulator's spec asks for `1e-6`, which is
+already the floor, so the three floored call sites pay full price. The cost is the *horizon*:
+1 ms of a 10 kHz carrier through a stiff circuit is ~120,000 steps at any tolerance a person
+would ask for. Removing waste helped every other model and does not help this one.
+
+**`test_radau` is the largest single item and it cannot be shortened.** 292 s against 120 s for
+the same integration through SciPy -- the fused loop is pure Python, so it is 2.4x the cost of
+the thing it is checked against, and it needs the whole horizon because it checks the reference
+points. A cost-based skip there would remove the model from exactly the test where a 15-state
+stiff circuit is most informative.
+
+So the remaining decision is sharper than the table above made it look:
+
+- **Five call sites could take a shorter horizon** -- a spec saying how far a test that only
+  wants *a* trajectory should integrate. At 1/20 of the horizon those five drop from about
+  484 s to about 25 s.
+- **Two cannot**, and one of them is 292 s on its own. Any answer has to say something about
+  `test_radau` specifically, and "run the fused loop on a shorter horizon and check a
+  self-computed point there" is probably it -- but that changes what that test claims, which
+  is a decision and not a tuning.
+
+The model is not landed and the files are not in `examples/models`. The `.mo` is above,
+verbatim, and the `.toml` it needs is three lines of published reference plus the citation.
