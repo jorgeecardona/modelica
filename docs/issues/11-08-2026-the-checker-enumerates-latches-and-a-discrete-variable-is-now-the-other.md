@@ -1,8 +1,8 @@
 ---
 title: The checker enumerates latches, and a discrete variable is now the other half of the state
-status: open
+status: in-progress
 area: verify
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-11
 kind: story
 scope: M
@@ -69,3 +69,68 @@ is to the state's definition, not to the search.
   instant is still what buys exactness here.
 - No attempt to enumerate a discrete `Real` over its range. A counter has no finite range and
   the reachable set from a start is the only tractable question.
+
+## Done 2026-08-13
+
+`Instant` carries `memory`, the discrete-time variables in `Code.remembered` order, and
+`Code` carries `remembered` so nothing outside `modelica.sim.emit` has to re-derive it from
+the `when` bodies.
+
+### What it was, measured
+
+`Thermostat` at `T = 18`, below `T_low`, so the heat-on branch is enabled. Before:
+
+    latches=- fired=[]      state (18.0,)
+    latches=- fired=[0]     state (18.0,)
+
+Two states that differ only in `fired`, which the outcomes drop -- so the settled state
+compared **equal to the one it started from**, and the report said "settles in one place"
+about a model that had set `heating` and incremented `cycles`. After:
+
+    latches=- memory=0,0 fired=[]     state (18.0,)
+    latches=- memory=1,1 fired=[0]    state (18.0,)
+
+### The "more than one settled configuration" the entry asked for
+
+It is not in the corpus, and that is the honest finding rather than a gap in the work.
+`Thermostat`'s two thresholds are `T <= 19` and `T >= 21`, which cannot both hold at one
+instant, so nothing races. `RoastingMachine` has nine latches and no memory at all.
+
+The shape that *does* diverge is two `when` bodies enabled together where one reads what the
+other writes, and `tests/test_verify.py::CONTESTED` is the smallest legal one -- each variable
+assigned in exactly one `when`, so it is not a single-assignment violation:
+
+      when x <= 2   then a = pre(a) + 1;  end when;
+      when x <= 2.5 then b = a;           end when;
+
+Below `x = 2` both hold. Measured on that model, at `y = 1.0`:
+
+| | report |
+| --- | --- |
+| before | `event iteration settles, and settles in one place, from all 1 configurations` |
+| after | `settles somewhere different depending on the order events are applied in` |
+| | `memory=1,0` \| `memory=1,1`, identical latches |
+
+Red then green, and it is the `docs/ideas/verification.md:118` prediction arriving: "A
+condition can then be driven back and forth within one instant."
+
+It lives in the test file and not in `examples/models`. The corpus is models worth
+simulating; this is order-dependent by construction, which is not a property an example
+should quietly carry.
+
+### `check_run` reads the memory off the trajectory
+
+Starting the counter from `initial` at an instant halfway through a run checks a state the
+run never reached -- `Thermostat` at t = 40 has come on twice. `check_run` now takes the
+remembered variables out of `result.values` at the event's column, the same way it already
+took the continuous state, and `check_iteration`/`iteration` grew a `memory=` keyword for it.
+
+### Deliberately not done
+
+- The memory is a starting *point*, not a set to enumerate. A latch is a bit and there are
+  `2**k`; `cycles` is a counter with no finite range. What is enumerated is the reachable set
+  from the start, which is what `check` already does -- as the entry itself said.
+- Nothing about chattering across instants. Still
+  [`chattering-across-instants`](03-08-2026-chattering-across-instants.md).
+
+1454 pass, typecheck 0.

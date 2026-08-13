@@ -622,6 +622,22 @@ class Code:
     """The workspace slot holding which state set is in use, or ``None`` for a model with
     only one -- which is most of them, and for those the generated source is unchanged."""
 
+    remembered: tuple[str, ...] = ()
+    """The discrete-time variables, in `observed` order -- what a ``when`` body assigned and
+    the model then carries between events.
+
+    On the public record for the same reason `events` is: this is the *other* half of the
+    discrete state. A latch is a cached answer to a question the model can re-ask, so anything
+    reading one can repair it; a remembered variable is memory, and nothing outside a ``when``
+    can reconstruct it. A caller enumerating the discrete state -- `modelica.verify` is the one
+    here -- has to be told which slots those are, and reading them back off the ``when`` bodies
+    would be a second copy of `_remembered` living outside this module.
+
+    The slot is `observed.index(name)`, because ``w`` begins with one slot per observed
+    variable. Kept as names rather than as slot numbers so that it stays readable next to
+    `observed` and cannot disagree with it.
+    """
+
     sensitivity: tuple[str, ...] = ()
     """The parameters ``jacobian_parameters`` differentiates against, in column order."""
 
@@ -650,6 +666,8 @@ class Emitter:
     observed: tuple[str, ...] = ()
     watched: tuple[ir.Binary, ...] = ()
     held: dict[ir.Expr, ir.Expr] = field(default_factory=dict[ir.Expr, ir.Expr])
+    """Each watched relation, mapped to the test on its latch slot that replaces it."""
+
     walks: dict[tuple[int, tuple[str, ...] | None], tuple[list[str], dict[str, str]]] = field(
         default_factory=dict[
             "tuple[int, tuple[str, ...] | None]", "tuple[list[str], dict[str, str]]"
@@ -665,7 +683,6 @@ class Emitter:
     Keyed on ``id(mode)`` because a `Mode` carries a `Mapping` and is not hashable, and the
     modes outlive this object anyway.
     """
-    """Each watched relation, mapped to the test on its latch slot that replaces it."""
 
     tangents: dict[str, str] = field(default_factory=dict[str, str])
     """Each variable, mapped to the local holding its row of the tangent."""
@@ -1595,6 +1612,7 @@ class Emitter:
             parameters=tuple(v.name for v in self.system.parameters),
             observed=self.observed,
             events=tuple(event.trigger for event in events),
+            remembered=self.remembered,
             workspace=len(self.observed) + len(self.watched) + (0 if self.switching is None else 1),
             switching=self.switching,
             sparsity=self.system.mode.sparsity,

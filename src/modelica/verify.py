@@ -2,9 +2,17 @@
 
 Simulating is sampling: one initial condition, one trajectory, one order of events. The
 discrete half of a model deserves better than that, because it is **finite**. At a single
-instant of simulated time the continuous state does not move, so the only thing that can
-change is which watched relations are currently latched true -- and there are two to the
-power of not-very-many of those. Finite means it can be enumerated rather than sampled.
+instant of simulated time the continuous state does not move, so the only things that can
+change are which watched relations are currently latched true -- and there are two to the
+power of not-very-many of those -- and what the ``when`` bodies have written into the
+discrete-time variables. Finite means it can be enumerated rather than sampled.
+
+Those two halves are not the same kind of thing, and :class:`Instant` keeps both because the
+difference is the finding. A latch is a cached answer to a question the model can re-ask, so
+the iteration repairs whatever you set it to: all 512 latch configurations of
+``RoastingMachine`` settle in one place. A discrete-time variable is *memory* -- what the
+last ``when`` left there -- and nothing outside a ``when`` can reconstruct it, so two orders
+of applying the same pending events can leave it holding different values and stay there.
 
 What gets enumerated here is Modelica's *event iteration*: flipping one latch changes the
 blocks that read it, which can leave a second relation disagreeing with its own latch,
@@ -115,9 +123,24 @@ class Instant:
     fired: frozenset[int]
     """The events that have already acted here. An event acts at most once per instant."""
 
+    memory: tuple[float, ...] = ()
+    """The discrete-time variables, in :attr:`~modelica.sim.emit.Code.remembered` order.
+
+    The other half of the discrete state, and it behaves nothing like a latch. A latch is a
+    cached answer to a question the model can re-ask, so the iteration repairs whatever you
+    set it to -- which is why starting from all 512 latch configurations of
+    ``RoastingMachine`` settles in one place. A remembered variable is what a ``when`` body
+    left there and nothing else can reconstruct it, so a move that writes one is a move to a
+    genuinely different state.
+
+    Defaulted, so that an `Instant` written by hand for a model with no memory reads the way
+    it always did.
+    """
+
     def __str__(self) -> str:
         latches = "".join("1" if held else "0" for held in self.latches) or "-"
-        return f"latches={latches} fired={sorted(self.fired)}"
+        memory = " memory=" + ",".join(f"{v:g}" for v in self.memory) if self.memory else ""
+        return f"latches={latches}{memory} fired={sorted(self.fired)}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,7 +199,13 @@ class _Discrete:
     blocks.
     """
 
-    def __init__(self, kernel: Kernel, t: float, y: NDArray[np.float64] | None) -> None:
+    def __init__(
+        self,
+        kernel: Kernel,
+        t: float,
+        y: NDArray[np.float64] | None,
+        memory: NDArray[np.float64] | None = None,
+    ) -> None:
         self.kernel = kernel
         self.t = t
         parameters, start, workspace = kernel.start(t)
@@ -186,19 +215,36 @@ class _Discrete:
         self.slots = tuple(
             trigger.latch for trigger in kernel.code.events if trigger.latch is not None
         )
-        self.cache: dict[tuple[tuple[bool, ...], tuple[float, ...]], NDArray[np.float64]] = {}
+        # Which workspace slots hold discrete-time variables. `w` begins with one slot per
+        # observed variable, and `Code.remembered` names the ones a `when` writes.
+        self.memory = tuple(kernel.code.observed.index(name) for name in kernel.code.remembered)
+        # What they hold at the start: `initial` put it there, unless the caller is checking
+        # an instant part-way through a run and read the values out of the trajectory.
+        self.start = (
+            tuple(float(self.w[slot]) for slot in self.memory)
+            if memory is None
+            else tuple(float(value) for value in memory)
+        )
+        self.cache: dict[
+            tuple[tuple[bool, ...], tuple[float, ...], tuple[float, ...]], NDArray[np.float64]
+        ] = {}
 
     # -- reading a state ----------------------------------------------------------------
 
     def workspace(self, instant: Instant) -> NDArray[np.float64]:
-        """``w`` as it would be with these latches held."""
+        """``w`` as it would be with these latches held and this much remembered."""
         w = self.w.copy()
         for position, slot in enumerate(self.slots):
             w[slot] = 1.0 if instant.latches[position] else 0.0
+        for position, slot in enumerate(self.memory):
+            w[slot] = instant.memory[position]
         return w
 
     def indicators(self, instant: Instant) -> NDArray[np.float64]:
-        key = (instant.latches, instant.state)
+        # The memory is in the key because it can be *read* by a condition -- a `when` that
+        # fires on `cycles > 3` watches a variable another `when` writes. Leaving it out
+        # would serve one instant's answer to a state that had moved.
+        key = (instant.latches, instant.state, instant.memory)
         cached = self.cache.get(key)
         if cached is None:
             cached = self.kernel.indicators(
@@ -247,6 +293,13 @@ class _Discrete:
             latches=tuple(bool(w[slot] > HELD) for slot in self.slots),
             state=tuple(float(value) for value in after),
             fired=instant.fired | {event},
+            # Read back off `w`, the same array `transition` just wrote. A `when` body
+            # assigning a discrete variable is the only way one ever changes, so this is
+            # where the move becomes visible -- and before this it was not visible at all:
+            # firing `Thermostat`'s heat-on branch produced an `Instant` equal to the one it
+            # started from, and the checker reported "settles in one place" about a model
+            # that had incremented a counter.
+            memory=tuple(float(w[slot]) for slot in self.memory),
         )
 
     # -- the pieces musil wants ---------------------------------------------------------
@@ -301,8 +354,13 @@ class _Discrete:
             )
             raise ValueError(message)
         state = tuple(float(value) for value in self.y)
+        # The memory starts at what `initial` put there and is *not* enumerated. A latch is a
+        # bit and there are `2**k` of them; a discrete `Real` is a counter with no finite
+        # range, so the tractable question is what is reachable from a start rather than what
+        # is possible. `check` already answers that one.
+        memory = self.start
         return [
-            Instant(latches=latches, state=state, fired=frozenset())
+            Instant(latches=latches, state=state, fired=frozenset(), memory=memory)
             for latches in product((False, True), repeat=len(self.slots))
         ]
 
@@ -312,6 +370,7 @@ def iteration(
     *,
     t: float = 0.0,
     y: NDArray[np.float64] | None = None,
+    memory: NDArray[np.float64] | None = None,
     start: list[Instant] | None = None,
 ) -> Model[Instant]:
     """The event iteration at ``t``, as a model checker's model.
@@ -319,9 +378,14 @@ def iteration(
     ``start`` defaults to every latch configuration; the settled states are declared
     terminal, so anything else with no way out is reported as a deadlock rather than
     mistaken for an answer.
+
+    ``memory`` is what the discrete-time variables hold, in
+    :attr:`~modelica.sim.emit.Code.remembered` order, and defaults to what ``initial`` put
+    there. It is a starting *point* rather than a set to enumerate, and
+    :meth:`_Discrete.configurations` says why: a latch is a bit, a counter is not.
     """
     kernel = model if isinstance(model, Kernel) else build(model)
-    discrete = _Discrete(kernel, t, y)
+    discrete = _Discrete(kernel, t, y, memory)
     return Model(
         init=discrete.configurations() if start is None else start,
         actions=discrete.actions(),
@@ -340,6 +404,7 @@ def check_iteration(
     *,
     t: float = 0.0,
     y: NDArray[np.float64] | None = None,
+    memory: NDArray[np.float64] | None = None,
     start: list[Instant] | None = None,
 ) -> Report:
     """Prove that the event iteration settles at ``t``, and settles in one place.
@@ -351,19 +416,22 @@ def check_iteration(
     :func:`musil.fixed_points` reports, per initial state.
     """
     kernel = model if isinstance(model, Kernel) else build(model)
-    discrete = _Discrete(kernel, t, y)
-    checkable = iteration(kernel, t=t, y=y, start=start)
+    discrete = _Discrete(kernel, t, y, memory)
+    checkable = iteration(kernel, t=t, y=y, memory=memory, start=start)
     settling = fixed_points(checkable)
     return Report(
         name=kernel.name,
         explored=len(explore(checkable).states),
         # `fired` is bookkeeping for the iteration, not part of where it ended up: the same
         # latches reached by one event or by three are the same answer, so the outcomes are
-        # deduplicated with it dropped.
+        # deduplicated with it dropped. The memory is *not* dropped -- reaching the same
+        # latches with a counter at 1 and at 2 is two answers, and it is the case this
+        # deduplication would hide.
         outcomes={
             configuration: tuple(
                 dict.fromkeys(
-                    Instant(end.latches, end.state, frozenset()) for end in sorted(ends, key=str)
+                    Instant(end.latches, end.state, frozenset(), end.memory)
+                    for end in sorted(ends, key=str)
                 )
             )
             for configuration, ends in settling.by_init.items()
@@ -385,13 +453,20 @@ def check_run(model: System | Code | Kernel, result: Result) -> tuple[Report, ..
     """
     kernel = model if isinstance(model, Kernel) else build(model)
     rows = [result.names.index(name) for name in kernel.code.states]
+    # The discrete-time variables are read out of the trajectory too, and for a stronger
+    # reason than the continuous state. Starting them from `initial` at an instant halfway
+    # through a run would check a model that had never run: `Thermostat` at t = 40 has come
+    # on twice, and a check that starts its counter at zero is asking about a different
+    # state than the one the run reached.
+    held = [result.names.index(name) for name in kernel.code.remembered]
     reports = [check_iteration(kernel)]
     for event in result.events:
         column = int(np.searchsorted(result.time, event.time))
         if column >= len(result.time):  # pragma: no cover - an event past the last sample
             continue
         y = np.array([result.values[row, column] for row in rows], dtype=float)
-        reports.append(check_iteration(kernel, t=event.time, y=y))
+        memory = np.array([result.values[row, column] for row in held], dtype=float)
+        reports.append(check_iteration(kernel, t=event.time, y=y, memory=memory))
     return tuple(reports)
 
 
