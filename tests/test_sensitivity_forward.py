@@ -217,16 +217,64 @@ def test_roasting_machine_integrates_through_all_nine_of_its_crossings() -> None
     assert (np.abs(exact.output[:, 0, :][:, taken] - crude) / scale).max() <= 1e-5
 
 
-def test_a_when_branch_is_still_refused() -> None:
-    """A latch flip leaves ``y`` continuous; a `when` moves it, and `dh/dy` is not emitted.
+def test_a_when_that_only_sets_a_discrete_variable_goes_through() -> None:
+    """What is refused is a crossing that moves ``y``, which is narrower than "has a `when`".
 
-    `BouncingBall` reinitialises its velocity, so the sensitivity jump needs
-    ``d(transition)/dy`` on top of the two terms this file has. Refused with the reason rather
-    than approximated.
+    ``S+ = S- + (f- - f+) dt*/dp`` is the whole story exactly when ``h`` is the identity.
+    `Thermostat`'s two `when` clauses assign ``heating`` and ``cycles`` and touch no state, so
+    they change what ``f`` *is* without moving where ``y`` is -- and the ``f- - f+`` term is
+    precisely that change. Measured against a central difference: **1.2e-8**.
+
+    The first version of the refusal turned away every `when`, which was broader than the
+    mathematics needs. `Trigger.reinitialises` is what tells the two apart, and it had to be
+    put on the record because `latch` cannot: both kinds of `when` have none.
+    """
+    forward = pytest.importorskip("modelica.sim.sensitivity").sensitivity
+    simulate = pytest.importorskip("modelica.sim.solve").simulate
+    build = pytest.importorskip("modelica.sim.kernel").build
+    vector = pytest.importorskip("modelica.sim.sweep").vector
+
+    system = _system("Thermostat")
+    stop = float(_spec("Thermostat")["stop"])
+    grid = np.linspace(0.0, stop, 9)[1:]
+    exact = forward(system, ["k"], stop=stop, times=grid, tolerance=1e-10)
+
+    kernel = build(system, sensitivity=("k",))
+    declared = list(kernel.code.parameters)
+    value = float(kernel.parameters(np.zeros(len(declared)))[declared.index("k")])
+    step = 1e-6 * abs(value)
+    runs = [
+        simulate(
+            system,
+            stop=stop,
+            times=grid,
+            tolerance=1e-10,
+            parameters=vector(system, {"k": value + delta}),
+        )
+        for delta in (step, -step)
+    ]
+    columns = [np.searchsorted(run.time, grid) for run in runs]
+    crude = np.array(
+        [
+            (runs[0][name][columns[0]] - runs[1][name][columns[1]]) / (2 * step)
+            for name in kernel.code.observed
+        ]
+    )
+    taken = np.searchsorted(exact.time, grid)
+    scale = np.maximum(1.0, np.abs(crude).max(axis=1, keepdims=True))
+    assert (np.abs(exact.output[:, 0, :][:, taken] - crude) / scale).max() <= 1e-5
+
+
+def test_a_when_that_reinitialises_a_state_is_still_refused() -> None:
+    """`BouncingBall` turns its velocity round, so ``h`` is not the identity.
+
+    ``dh/dy`` is `Kernel.transition` differentiated and nothing emits it. Refused with the
+    reason rather than approximated -- and the reason now names what is actually wrong,
+    which is the reinitialisation and not the `when`.
     """
     forward = pytest.importorskip("modelica.sim.sensitivity").sensitivity
     error = pytest.importorskip("modelica.sim.solve").SimulationError
-    with pytest.raises(error, match="d\\(transition\\)/dy"):
+    with pytest.raises(error, match="reinitialises a state"):
         forward(_system("BouncingBall"), ["e"], stop=1.0)
 
 

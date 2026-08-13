@@ -364,6 +364,22 @@ class Trigger:
     :mod:`modelica.verify` builds the model checker's state out of exactly these slots.
     """
 
+    reinitialises: bool = False
+    """Whether acting on this crossing moves the continuous state.
+
+    True for a ``when`` branch with a ``reinit`` in it -- `BouncingBall` turning its velocity
+    round -- and false for one that only assigns discrete variables, which `Thermostat` does.
+    The distinction is not visible from :attr:`latch`, since both are ``when`` branches and
+    both have none, and it is the one that decides whether a caller can differentiate through
+    the crossing: a state that moves needs ``d(transition)/dy`` and a discrete variable that
+    changes needs nothing, because it changes what the right-hand side *is* rather than where
+    the state is.
+
+    `modelica.sim.sensitivity` is what asks. On the public record for the same reason
+    :attr:`latch` is: it is a fact about the model's discrete structure, and re-deriving it
+    from the ``when`` bodies outside this module would be a second copy.
+    """
+
     switch: int | None = None
     """The state set this crossing moves the run into, for a mode switch.
 
@@ -1499,7 +1515,13 @@ class Emitter:
         branches = [
             _Event(
                 indicator=_indicator(branch.condition),
-                trigger=Trigger(unparse_expr(branch.condition), 1.0),
+                trigger=Trigger(
+                    unparse_expr(branch.condition),
+                    1.0,
+                    reinitialises=any(
+                        isinstance(statement, ir.Reinit) for statement in branch.body
+                    ),
+                ),
                 body=branch.body,
             )
             for when in self.system.whens

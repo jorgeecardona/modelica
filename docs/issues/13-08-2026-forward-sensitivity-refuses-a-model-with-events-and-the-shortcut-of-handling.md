@@ -271,3 +271,36 @@ question about the model's domain rather than about sensitivity.
 
 The `when` case, which is `d(transition)/dy` -- an eighth entry point, and the same
 forward-mode walk over a transition body instead of over the blocks.
+
+## The refusal was broader than the mathematics, 2026-08-13
+
+`Thermostat` was being turned away and should not have been. What the jump formula needs is
+that ``h`` is the identity -- that ``y`` is continuous across the crossing -- and that is
+narrower than "has no `when`".
+
+Measured over the corpus, every `when` body that survives causalization:
+
+| model | body | ``h`` |
+| --- | --- | --- |
+| `Thermostat` | ``heating = ...``, ``cycles = pre(cycles) + 1`` | **identity** |
+| `BouncingBall` | ``reinit(v, -e * v)`` | not the identity |
+
+Two models, and they are the two cases. `Thermostat`'s assignments change what ``f`` *is*
+without moving where ``y`` is -- which is exactly what the ``f- - f+`` term already accounts
+for. Checked against a central difference once the refusal was narrowed: **1.2e-8**.
+
+`Trigger.reinitialises` is what tells them apart, and it had to go on the public record
+because `Trigger.latch` cannot: both kinds of `when` have none. Same argument as `latch`'s own
+docstring gives -- it is a fact about the model's discrete structure, and re-deriving it from
+the bodies outside the emitter would be a second copy.
+
+Two things the narrowing exposed, both in code written earlier the same day:
+
+- **The crossing watcher assumed every trigger had a latch.** It did while only latch flips
+  got through. The assertion added an hour earlier fired immediately, which is what an
+  assertion in unreachable code is for.
+- **A `when` is watched rising-only.** `Trigger.direction` already carried that and SciPy
+  spells it the same way, so the watcher passes it through rather than deciding again.
+
+So the remaining refusal is one model and one condition: a crossing that reinitialises a
+state, needing ``d(transition)/dy``.

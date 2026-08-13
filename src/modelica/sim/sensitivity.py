@@ -44,7 +44,7 @@ from scipy.integrate import (  # pyright: ignore[reportMissingTypeStubs]
     solve_ivp,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from modelica.sim.emit import HELD
+from modelica.sim.emit import HELD, Trigger
 from modelica.sim.kernel import Kernel, build
 from modelica.sim.solve import (
     SimulationError,
@@ -169,22 +169,24 @@ def sensitivity(  # noqa: PLR0913 - a solver has knobs, and this one has the sam
     unhandled = [
         trigger.condition
         for trigger in kernel.code.events
-        if trigger.latch is None or trigger.switch is not None
+        if trigger.switch is not None or trigger.reinitialises
     ]
     if unhandled:
-        # A latch flip is handled below; a `when` body and a mode switch are not, and the
-        # difference is `dh/dy`. A crossing that only flips a latch leaves `y` continuous, so
-        # the jump in `S` is the one term this file computes. A `when` that reinitialises a
-        # state moves `y` itself, and `dh/dy` is `Kernel.transition` differentiated, which
-        # nothing emits. Refused rather than approximated: a number that is quietly wrong is
-        # worse than a sentence.
+        # What is refused is a crossing that moves ``y`` itself, and that is narrower than
+        # "has a `when`". The jump below is ``S+ = S- + (f- - f+) dt*/dp``, which is the whole
+        # story exactly when ``y`` is continuous across the crossing -- when ``h`` is the
+        # identity. A latch flip is; so is a `when` whose body only assigns *discrete*
+        # variables, because those change what ``f`` is without moving where ``y`` is, and the
+        # ``f- - f+`` term is precisely that.
+        #
+        # Measured over the corpus: `Thermostat`'s two `when` clauses assign `heating` and
+        # `cycles` and touch no state, so it goes through. `BouncingBall` reinitialises ``v``
+        # from ``v``, so its ``dh/dy`` is a real matrix and `Kernel.transition` would have to
+        # be differentiated -- which nothing emits. Refused rather than approximated.
         message = (
-            f"{kernel.name}: {unhandled} is a `when` branch or a mode switch, and the"
+            f"{kernel.name}: {unhandled} reinitialises a state or switches state sets, and the"
             " sensitivity jump at one needs `d(transition)/dy`, which is not emitted"
         )
-        raise SimulationError(message)
-    if len(kernel.code.events) > 0 and len(getattr(kernel.code, "switching", None) or ()) > 0:
-        message = f"{kernel.name}: dynamic state selection is not handled here"
         raise SimulationError(message)
 
     n, m = kernel.states, len(named)
@@ -624,22 +626,24 @@ def _crossings(kernel: Kernel, p: NDArray[np.float64], w: NDArray[np.float64], n
     )
 
     scratch = np.empty(kernel.events)
-    # Every trigger here has a latch, because `sensitivity` refuses a `when` branch and a mode
-    # switch before reaching this. Read out once and asserted rather than written
-    # `trigger.latch or 0`, which would silently watch slot zero if that ever stopped being
-    # true -- and slot zero is a real latch, so the wrongness would look like a working run.
-    slots = [trigger.latch for trigger in kernel.code.events]
-    assert all(slot is not None for slot in slots)  # noqa: S101 - see above
 
-    def watcher(index: int, slot: int) -> Callable[[float, NDArray[np.float64]], float]:
+    def watcher(index: int, trigger: Trigger) -> Callable[[float, NDArray[np.float64]], float]:
         def crossing(t: float, u: NDArray[np.float64]) -> float:
-            side = _REARM if w[slot] > HELD else -_REARM
+            # The side a just-fired crossing restarts on, copied from `solve._offset` rather
+            # than guessed: a latched relation sits on the side its latch is holding, and a
+            # `when` branch fired as its condition became true, so it restarts on the true
+            # side. Writing `trigger.latch or 0` here instead would silently read slot zero,
+            # which is a *real* latch, and the wrongness would look like a working run.
+            side = -_REARM if trigger.latch is not None and not w[trigger.latch] > HELD else _REARM
             return float(kernel.indicators(t, u[:n], p, w, scratch)[index] + side)
 
+        # A `when` fires only as its condition becomes true; a relation is an event whichever
+        # way it turns. `Trigger.direction` already carries that and SciPy spells it the same.
         crossing.terminal = True  # pyright: ignore[reportFunctionMemberAccess]
+        crossing.direction = trigger.direction  # pyright: ignore[reportFunctionMemberAccess]
         return crossing
 
-    return [watcher(index, slot) for index, slot in enumerate(slots) if slot is not None]
+    return [watcher(index, trigger) for index, trigger in enumerate(kernel.code.events)]
 
 
 def _fired(solution: _Solution) -> tuple[int, float] | None:
