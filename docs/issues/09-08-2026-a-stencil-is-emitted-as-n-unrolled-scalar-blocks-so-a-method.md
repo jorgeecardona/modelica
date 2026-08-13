@@ -226,3 +226,26 @@ the single largest and it is `d(observed)/dy`, which exists for state estimators
 integrating a bar never touches it. Not emitting what nobody asked for is a larger saving than
 sharing a walk, and it costs no runtime at all. That is worth its own entry before this one is
 taken further.
+
+## Not emitting what nobody asked for, measured
+
+That last paragraph is now done rather than proposed. `1ca9ead` makes `observe_jacobian`
+opt-out and has `simulate` opt out, since nothing in `modelica.sim.solve` calls it.
+
+| n = 1000 | lines | bytes | emit |
+| --- | --- | --- | --- |
+| 08-09, before the sparse Jacobian | 23,092 | 734 K | 0.39 s |
+| 08-13, after it | 35,108 | 1,205 K | 1.83 s |
+| after `1c784ed` (walk cached) | 35,108 | 1,205 K | 0.30 s |
+| after `4a3c028` (empty sensitivity) | 28,070 | 1,013 K | 0.25 s |
+| after `1ca9ead` (H is opt-out) | 22,064 | 783 K | 0.24 s |
+
+**37 % off the day's peak, and 7.6x off the emit time**, with no change to any number any
+model computes. The bar at n = 1000 is now *smaller* than it was on 08-09, before the sparse
+Jacobian was written -- the size that entry cost has been paid back and then some.
+
+Note what this does and does not do. It is a constant factor: at n = 10,000 the module is
+still linear in n, and the entry is named for the shape, not the constant. What is left on the
+list is the two items that change the shape -- a surviving array through `flatten` so the
+emitter can write a loop, and `_seed`. Every cheap constant-factor item on this entry has now
+been taken.
