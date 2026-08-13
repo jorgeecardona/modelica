@@ -190,3 +190,119 @@ absolute tolerance is 1.7e-24: claiming agreement there would be claiming to hav
   problem where neither method is accurate to better than 1e-3 that reference does not exist.
   Adding the row would produce an error axis measured against nothing.
 - **Stage 3, `ScalableTestSuite`.** Untouched.
+
+## Ring Modulator, 2026-08-13 — written, verified, and deliberately not landed
+
+The third stage-2 problem, from the same Bari release 2.4, report `ringmod.pdf`. Fifteen
+states, four diodes with an `exp` nonlinearity, a 1 kHz signal mixed into a 10 kHz carrier,
+`0 <= t <= 1e-3`. Written out and run:
+
+    15 states, index 1, 23 blocks
+    rtol = atol = 1e-6
+    73.8 s, 119,723 steps
+    worst relative difference from Table II.3.2: 6.35e-5, on y14
+
+**It works, and it agrees.** Two things worth recording beyond that.
+
+`numpy` reports `overflow encountered in exp` twice during the run and the integration
+survives it. That is the condition the test set's own Fortran guards with `IERR = -1`, and
+Table II.3.1 lists RADAU (m = 0..26), RADAU5 (m = 0..9) and VODE as **failed runs** for exactly
+that reason -- "solver cannot handle IERR=-1". Here the overflow produces an infinity, the step
+is rejected, and the solver backs off. Not a claim of superiority: SciPy's Radau is not the
+Fortran RADAU5, and the comparison is between what the two harnesses do with an infinity rather
+than between the methods.
+
+**It is not landed, and the reason is cost, not correctness.** Seven test call sites simulate
+every corpus model, so this one would add about nine minutes to an eight-minute suite. That is
+filed as
+[`the-corpus-has-no-way-to-hold-a-model-that-costs-a-minute`](13-08-2026-the-corpus-has-no-way-to-hold-a-model-that-costs-a.md),
+and landing Ring Modulator is on *that* entry's Done list rather than being forced through
+here.
+
+The model is kept here verbatim so the next person does not rewrite it. It is the report's
+f(y) with the auxiliary voltages and diode currents given names, which is what makes it
+readable as a circuit rather than as fifteen rows.
+
+```modelica
+model RingModulator "A ring modulator mixing a 1 kHz signal into a 10 kHz carrier -- fifteen states and four diodes"
+  parameter Real pi = 3.141592653589793 "Half a turn, since there is no standard library here";
+  parameter Real C = 1.6e-8 "The two output capacitors";
+  parameter Real Cs = 2e-12 "Diode junction capacitance -- what makes this stiff rather than index-2";
+  parameter Real Cp = 1e-8;
+  parameter Real Lh = 4.45 "The two transformer inductances";
+  parameter Real Ls1 = 0.002;
+  parameter Real Ls2 = 5e-4;
+  parameter Real Ls3 = 5e-4;
+  parameter Real gamma = 40.67286402e-9 "Diode saturation current";
+  parameter Real delta = 17.7493332 "Diode exponent, per volt";
+  parameter Real R = 25000;
+  parameter Real Rp = 50;
+  parameter Real Rg1 = 36.3;
+  parameter Real Rg2 = 17.3;
+  parameter Real Rg3 = 17.3;
+  parameter Real Ri = 50;
+  parameter Real Rc = 600;
+  Real y1(start = 0, fixed = true) "U1";
+  Real y2(start = 0, fixed = true) "U2";
+  Real y3(start = 0, fixed = true) "U3";
+  Real y4(start = 0, fixed = true) "U4";
+  Real y5(start = 0, fixed = true) "U5";
+  Real y6(start = 0, fixed = true) "U6";
+  Real y7(start = 0, fixed = true) "U7";
+  Real y8(start = 0, fixed = true) "I1";
+  Real y9(start = 0, fixed = true) "I2";
+  Real y10(start = 0, fixed = true) "I3";
+  Real y11(start = 0, fixed = true) "I4";
+  Real y12(start = 0, fixed = true) "I5";
+  Real y13(start = 0, fixed = true) "I6";
+  Real y14(start = 0, fixed = true) "I7";
+  Real y15(start = 0, fixed = true) "I8";
+  Real Uin1 "The low-frequency signal, 1 kHz";
+  Real Uin2 "The carrier, 10 kHz";
+  Real UD1 "Voltage across diode 1";
+  Real UD2;
+  Real UD3;
+  Real UD4;
+  Real qD1 "Current through diode 1";
+  Real qD2;
+  Real qD3;
+  Real qD4;
+equation
+  Uin1 = 0.5 * sin(2000 * pi * time);
+  Uin2 = 2 * sin(20000 * pi * time);
+  UD1 = y3 - y5 - y7 - Uin2;
+  UD2 = -y4 + y6 - y7 - Uin2;
+  UD3 = y4 + y5 + y7 + Uin2;
+  UD4 = -y3 - y6 + y7 + Uin2;
+  qD1 = gamma * (exp(delta * UD1) - 1);
+  qD2 = gamma * (exp(delta * UD2) - 1);
+  qD3 = gamma * (exp(delta * UD3) - 1);
+  qD4 = gamma * (exp(delta * UD4) - 1);
+  der(y1) = (y8 - 0.5 * y10 + 0.5 * y11 + y14 - y1 / R) / C;
+  der(y2) = (y9 - 0.5 * y12 + 0.5 * y13 + y15 - y2 / R) / C;
+  der(y3) = (y10 - qD1 + qD4) / Cs;
+  der(y4) = (-y11 + qD2 - qD3) / Cs;
+  der(y5) = (y12 + qD1 - qD3) / Cs;
+  der(y6) = (-y13 - qD2 + qD4) / Cs;
+  der(y7) = (-y7 / Rp + qD1 + qD2 - qD3 - qD4) / Cp;
+  der(y8) = -y1 / Lh;
+  der(y9) = -y2 / Lh;
+  der(y10) = (0.5 * y1 - y3 - Rg2 * y10) / Ls2;
+  der(y11) = (-0.5 * y1 + y4 - Rg3 * y11) / Ls3;
+  der(y12) = (0.5 * y2 - y5 - Rg2 * y12) / Ls2;
+  der(y13) = (-0.5 * y2 + y6 - Rg3 * y13) / Ls3;
+  der(y14) = (-y1 + Uin1 - (Ri + Rg1) * y14) / Ls1;
+  der(y15) = (-y2 - (Rc + Rg1) * y15) / Ls1;
+end RingModulator;
+```
+
+The reference point, Table II.3.2, computed there by PSIDE at `atol = rtol = 1e-13`:
+
+    y1  = -0.2339057358486745e-1     y9  = -0.2840029933642329e-7
+    y2  = -0.7367485485540825e-2     y10 =  0.7267198267264553e-3
+    y3  =  0.2582956709291169        y11 =  0.7929487196960840e-3
+    y4  = -0.4064465721283450        y12 = -0.7255283495698965e-3
+    y5  = -0.4039455665149794        y13 = -0.7941401968526521e-3
+    y6  =  0.2607966765422943        y14 =  0.7088945416976114e-4
+    y7  =  0.1106761861269975        y15 =  0.2390059075236570e-4
+    y8  =  0.2939904342435596e-6
