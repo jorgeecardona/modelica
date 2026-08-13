@@ -249,3 +249,50 @@ still linear in n, and the entry is named for the shape, not the constant. What 
 list is the two items that change the shape -- a surviving array through `flatten` so the
 emitter can write a loop, and `_seed`. Every cheap constant-factor item on this entry has now
 been taken.
+
+## `_seed` is not the cheapest item on this list, measured 2026-08-13
+
+This entry names `_seed = np.eye(n)` twice as the cheap one -- "It is the cheapest item on this
+list and it is worth doing alone" -- on the strength of one number: 0.80 GB at `n = 10000`,
+allocated on `exec` whether or not anyone calls `jacobian`. Measured properly, both halves of
+that are weaker than they read.
+
+**It is about a third of the module's memory, not essentially all of it.**
+
+| | `exec` grows RSS by | of which `np.eye(n)` |
+| --- | --- | --- |
+| n = 1000 | 0.07 GB | 0.008 GB (11 %) |
+| n = 3000 | 0.21 GB | 0.072 GB (34 %) |
+
+The 0.80 GB figure at `n = 10000` is right about the identity and wrong about its share: the
+rest of the module grows too. Not re-measured at 10,000 -- the two sizes above are enough to
+show the share is a third and not "essentially all".
+
+**Removing it is a trade on the hot path, not a free win.** The seed rows are read by the
+forward-mode walk, so the identity has to exist somewhere. Building it inside each function
+that needs it -- which is what keeps `jit=True` working, since numba supports `np.eye` in
+nopython mode -- costs:
+
+    n = 1000    one jacobian call 17.1 ms,  np.eye(n) 0.5 ms   =  2.6 %
+    n = 3000    one jacobian call 98.5 ms,  np.eye(n) 5.1 ms   =  5.2 %
+
+Five per cent of every Jacobian evaluation, on the path an implicit solver takes several times
+per step, in exchange for an allocation that only a caller who *never* differentiates is
+paying for nothing.
+
+**And the O(n) trick is closed off.** An identity is expressible as a strided view over
+`2n - 1` floats -- `as_strided` on a zero array with a single one -- which would be the actual
+fix. `numba.njit` does not support `np.lib.stride_tricks.as_strided` in nopython mode, and
+this module is compiled with it. So the representation that would make this free is the one
+the JIT forbids.
+
+### What that leaves
+
+The item is retired rather than done. It is a genuine choice between memory and Jacobian time,
+worth taking only for a caller integrating explicitly at large `n`, and there is no third
+option that avoids the trade.
+
+Which means **every remaining item on this entry is one of the two shape changes**: an array
+that survives `flatten` so the emitter can write a loop, and narrow tangent rows. The
+constant-factor work is finished, and this entry should be read as being about those two from
+here.
