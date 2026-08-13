@@ -18,6 +18,7 @@ until someone actually calls :func:`simulate`.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 import numpy as np
@@ -275,7 +276,7 @@ class _Run:
         times: list[NDArray[np.float64]] = []
         values: list[NDArray[np.float64]] = []
         events: list[Event] = []
-        t, chatter = start, 0
+        t, chatter, stalled_from = start, 0, 0
         while t < stop:
             segment = self._segment(t, stop, y)
             sampled, trajectory = self._sample(segment, grid)
@@ -284,16 +285,33 @@ class _Run:
             if segment.status != 1:
                 break
             when, at, before = self._fired(segment)
+            if at - t >= _STANDSTILL * max(1.0, abs(at)):
+                # Time moved, so whatever fired before this is not part of a standstill.
+                chatter, stalled_from = 0, len(events)
+            else:
+                chatter += 1
             y = self._settle(at, before, when, events)
-            chatter = chatter + 1 if at - t < _STANDSTILL * max(1.0, abs(at)) else 0
             if chatter > _CHATTER:
-                message = (
-                    f"{self.kernel.name}: {_CHATTER} events at t = {at:.12g} without advancing"
-                    " -- the model is chattering"
-                )
-                raise SimulationError(message)
+                raise SimulationError(self._chattering(at, events[stalled_from:]))
             t = at
         return self._result(times, values, events)
+
+    def _chattering(self, at: float, stalled: Sequence[Event]) -> str:
+        """Name what kept firing, rather than only that something did.
+
+        The counter knows which crossings it stopped at -- ``Event.cause`` is the relation in
+        Modelica, kept for exactly this -- so the message can say *which* condition will not
+        settle instead of leaving the modeller to find it. A model chatters because two
+        conditions disagree, or because one sits on its own threshold, and the tally
+        separates those two cases at a glance.
+        """
+        tally = Counter(event.cause for event in stalled)
+        worst = ", ".join(f"{cause!r} x{count}" for cause, count in tally.most_common(4))
+        more = "" if len(tally) <= 4 else f", and {len(tally) - 4} more"  # noqa: PLR2004
+        return (
+            f"{self.kernel.name}: {len(stalled)} events at t = {at:.12g} without advancing"
+            f" -- the model is chattering. What kept firing: {worst}{more}"
+        )
 
     def _segment(self, t: float, stop: float, y: NDArray[np.float64]) -> _Solution:
         """Integrate until the end or until something fires.
