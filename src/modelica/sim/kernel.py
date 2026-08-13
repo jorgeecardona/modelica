@@ -102,16 +102,31 @@ class Kernel:
     latch: _Latch
     rhs: _Evaluate
     jacobian: _Evaluate
-    jacobian_sparse: _Evaluate
-    jacobian_parameters: _Evaluate
-    """``d(der)/dp`` over `Code.sensitivity`. Empty columns when nobody asked for any."""
+    """``d(der)/dy``, filling an ``n x n`` array."""
 
-    observe_jacobian_parameters: _Evaluate
-    """The same Jacobian as ``jacobian``, written as its non-zeros in `Code.sparsity` order.
+    jacobian_sparse: _Evaluate
+    """The same Jacobian as `jacobian`, written as its non-zeros in `Code.sparsity` order.
 
     A separate entry point rather than a mode of the first, because the two fill differently
     shaped arrays and a caller has to know which it allocated.
     """
+
+    jacobian_parameters: _Evaluate
+    """``d(der)/dp`` over `Code.sensitivity`. Empty columns when nobody asked for any."""
+
+    observe_jacobian_parameters: _Evaluate
+    """``d(observed)/dp`` over `Code.sensitivity`, one row per observed variable.
+
+    `jacobian_parameters` read off one step later: the same forward-mode walk seeded on the
+    parameters, gathered at every variable the model has instead of at the state derivatives.
+    `modelica.sim.sensitivity` needs both -- the trajectory sensitivity of a *measurement* is
+    ``(d obs/dy) S + (d obs/dp)``, and this is the second term.
+
+    The docstring here used to be `jacobian_sparse`'s, which had none. Caught by using the
+    function: the chain rule above agrees with a central difference to 1e-7, which it could
+    not if this were the sparse state Jacobian.
+    """
+
     observe: _Evaluate
     observe_jacobian: _Evaluate | None
     """``d(observed)/dy``, or ``None`` when the caller said not to emit it.
