@@ -1,9 +1,10 @@
 ---
 title: Nothing checks that index reduction preserves the solution set, because that needs numbers and the generator makes structure
-status: in-progress
+status: done
 area: verify
 owner: quiet-tars-187f2
 filed: 2026-08-13
+fixed_in: 2e1e0df
 kind: story
 scope: M
 verify: test
