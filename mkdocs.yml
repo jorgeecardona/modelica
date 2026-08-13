@@ -98,6 +98,7 @@ nav:
       - Simulating a model: notebooks/simulating.py
       - Drawing a model: notebooks/drawing.ipynb
       - Turning the knobs: notebooks/exploring.ipynb
+      - Moving a parameter, with no kernel: notebooks/sweeping.ipynb
       - The shape of the equations: notebooks/structure.ipynb
       - Where the smoothness breaks: notebooks/events.ipynb
       - Roasting a batch: notebooks/roasting.ipynb

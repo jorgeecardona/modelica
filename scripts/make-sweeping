@@ -1,0 +1,190 @@
+"""Write docs/notebooks/sweeping.ipynb -- an interactive figure with no kernel behind it."""
+
+import json
+import pathlib
+
+CELLS: list[tuple[str, str]] = []
+
+
+def markdown(text: str) -> None:
+    CELLS.append(("markdown", text.strip("\n")))
+
+
+def code(text: str) -> None:
+    CELLS.append(("code", text.strip("\n")))
+
+
+markdown("""
+# Moving a parameter, on a page with no Python behind it
+
+The other notebooks here are executed when the site is built and then frozen: an
+`ipywidgets` slider keeps whatever value it had at build time, and it only moves again for a
+reader who runs the notebook against a kernel. That is fine for a figure and useless for a
+question like *what does this parameter do*.
+
+This page answers that question without a kernel. The sweep runs at build time —
+`modelica.sim.sweep` integrates the model once per parameter value — and every trajectory is
+written into the page. The slider is then twenty lines of JavaScript picking between curves
+that are already there. Nothing is computed in the browser, so nothing can fail in it.
+
+The cost is honest and worth stating: **you can only see the values that were swept.** A
+reader cannot ask for a resistance nobody precomputed. That is the difference between this
+and a model that runs in the browser, which is filed as its own idea.
+""")
+
+code('''
+from pathlib import Path
+
+ROOT = Path.cwd()
+while not (ROOT / "examples").is_dir():
+    ROOT = ROOT.parent
+
+from modelica.lang import parse
+from modelica.sim import causalize, flatten
+from modelica.sim.sweep import sweep
+
+sources = [
+    ROOT / "examples" / "library" / "Electrical.mo",
+    ROOT / "examples" / "models" / "RLCCircuit.mo",
+]
+system = causalize(
+    flatten([parse(path.read_text(encoding="utf-8")) for path in sources], "RLCCircuit")
+)
+print(system.states)
+''')
+
+markdown("""
+A series RLC circuit is the textbook second-order system, and its resistance is the textbook
+knob: small resistance rings, large resistance crawls, and somewhere between them is critical
+damping. `R = 2 * sqrt(L / C)` is where the two roots meet, which for `L = C = 1` is `R = 2`.
+""")
+
+code('''
+import numpy as np
+
+RESISTANCES = [round(float(v), 3) for v in np.linspace(0.2, 4.0, 39)]
+
+runs = sweep(
+    system,
+    [{"r.R": value} for value in RESISTANCES],
+    stop=20.0,
+    tolerance=1e-8,
+    points=240,
+)
+print(f"{len(runs)} runs, {len(runs[0])} samples each")
+''')
+
+code('''
+import json
+
+from IPython.display import HTML, display
+
+
+def interactive(runs, values, variable, label, unit=""):
+    """One figure, every curve embedded, and a slider that picks between them.
+
+    An inline SVG rather than a canvas: it scales with the page, it prints, and it costs no
+    library. Every stroke is `currentColor`, so the picture reads on a light page and a dark
+    one -- the same rule the diagrams follow.
+    """
+    time = [round(float(t), 4) for t in runs[0].time]
+    curves = [[round(float(v), 6) for v in run[variable]] for run in runs]
+    low = min(min(curve) for curve in curves)
+    high = max(max(curve) for curve in curves)
+    span = (high - low) or 1.0
+
+    width, height, pad = 720, 300, 34
+    def project(curve):
+        points = []
+        for index, value in enumerate(curve):
+            x = pad + (width - 2 * pad) * index / (len(curve) - 1)
+            y = height - pad - (height - 2 * pad) * (value - low) / span
+            points.append(f"{x:.1f},{y:.1f}")
+        return " ".join(points)
+
+    paths = [project(curve) for curve in curves]
+    ident = f"sw{abs(hash((variable, tuple(values)))) % 100000}"
+    display(HTML(f"""
+<div style="max-width:760px">
+  <svg id="{ident}-svg" viewBox="0 0 {width} {height}" style="width:100%;height:auto">
+    <line x1="{pad}" y1="{height - pad}" x2="{width - pad}" y2="{height - pad}"
+          stroke="currentColor" stroke-opacity=".35" stroke-width="1"/>
+    <line x1="{pad}" y1="{pad}" x2="{pad}" y2="{height - pad}"
+          stroke="currentColor" stroke-opacity=".35" stroke-width="1"/>
+    <polyline id="{ident}-ghost" fill="none" stroke="currentColor" stroke-opacity=".18"
+              stroke-width="1.2" points="{paths[0]}"/>
+    <polyline id="{ident}-line" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linejoin="round" points="{paths[0]}"/>
+    <text x="{pad}" y="{pad - 12}" font-size="13" fill="currentColor">{label}</text>
+    <text x="{width - pad}" y="{height - pad + 20}" font-size="11" text-anchor="end"
+          fill="currentColor" opacity=".6">time (s)</text>
+  </svg>
+  <label style="display:flex;gap:.75rem;align-items:center;font-size:.9rem">
+    <span style="white-space:nowrap">{variable if not unit else variable}</span>
+    <input id="{ident}-range" type="range" min="0" max="{len(values) - 1}" value="0" step="1"
+           style="flex:1" aria-label="{variable}">
+    <output id="{ident}-out" style="font-variant-numeric:tabular-nums;min-width:5ch">
+      {values[0]}{unit}</output>
+  </label>
+</div>
+<script>
+(function() {{
+  const paths = {json.dumps(paths)};
+  const values = {json.dumps(values)};
+  const line = document.getElementById("{ident}-line");
+  const out = document.getElementById("{ident}-out");
+  const range = document.getElementById("{ident}-range");
+  range.addEventListener("input", function() {{
+    const k = Number(range.value);
+    line.setAttribute("points", paths[k]);
+    out.textContent = values[k] + "{unit}";
+  }});
+}})();
+</script>
+"""))
+''')
+
+markdown("""
+Move the slider. The faint curve behind is the first value of the sweep, left in place so
+that the change has something to be a change *from*.
+""")
+
+code('''
+interactive(runs, RESISTANCES, "c.v", "capacitor voltage (V)", unit=" ohm")
+''')
+
+markdown("""
+Under about `R = 2` the voltage overshoots and rings back; above it the circuit is
+overdamped and crawls to one volt without ever passing it. The sweep is 39 runs of the same
+compiled kernel — `sweep` builds once and changes only the parameter vector, because a
+parameter is an argument to the generated code rather than part of it.
+
+The same figure for the inductor current, which is the other state:
+""")
+
+code('''
+interactive(runs, RESISTANCES, "l.i", "inductor current (A)", unit=" ohm")
+''')
+
+notebook = {
+    "cells": [
+        {
+            "cell_type": kind,
+            "id": f"c{index}",
+            "metadata": {},
+            "source": [line + "\n" for line in text.split("\n")[:-1]] + [text.split("\n")[-1]],
+            **({"outputs": [], "execution_count": None} if kind == "code" else {}),
+        }
+        for index, (kind, text) in enumerate(CELLS)
+    ],
+    "metadata": {
+        "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+        "language_info": {"name": "python", "version": "3.12"},
+    },
+    "nbformat": 4,
+    "nbformat_minor": 5,
+}
+
+out = pathlib.Path("docs/notebooks/sweeping.ipynb")
+out.write_text(json.dumps(notebook, indent=1) + "\n", encoding="utf-8")
+print("wrote", out, len(CELLS), "cells")
