@@ -116,8 +116,16 @@ class _Solution(Protocol):
     y: NDArray[np.float64]
     """The state at each of them, one row per state."""
 
-    t_events: list[NDArray[np.float64]]
-    y_events: list[NDArray[np.float64]]
+    t_events: list[NDArray[np.float64]] | None
+    """The crossings, or `None` when ``events=`` was not passed at all.
+
+    `None` rather than an empty list, which is a SciPy detail worth writing down here rather
+    than rediscovering: a model with nothing to watch comes back with no list to read. This
+    module always passes events, so it never sees the `None`; `modelica.sim.sensitivity`
+    integrates event-free models through the same protocol and does.
+    """
+
+    y_events: list[NDArray[np.float64]] | None
 
     def sol(self, t: NDArray[np.float64], /) -> NDArray[np.float64]:
         """The dense interpolant, evaluated wherever we ask."""
@@ -511,7 +519,14 @@ class _Run:
         return None
 
     def _fired(self, segment: _Solution) -> tuple[int, float, NDArray[np.float64]]:
-        """Which branch stopped the segment, when, and the state just before it did."""
+        """Which branch stopped the segment, when, and the state just before it did.
+
+        Only reached when a segment stopped on a crossing, so the two event lists are there;
+        the `None` the protocol allows is what SciPy returns when nothing was watched at all,
+        and this loop is what runs when something was.
+        """
+        assert segment.t_events is not None  # noqa: S101 - see the docstring
+        assert segment.y_events is not None  # noqa: S101 - the same
         candidates = [
             (float(found[-1]), index) for index, found in enumerate(segment.t_events) if len(found)
         ]
