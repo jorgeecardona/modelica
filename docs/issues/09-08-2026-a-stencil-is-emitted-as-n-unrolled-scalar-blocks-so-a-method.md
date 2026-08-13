@@ -127,3 +127,33 @@ entry's list now, and it does not need narrow tangent rows or a surviving array 
 It is not the whole story — a stencil is still `n` unrolled blocks and that is what the
 entry is named for — but it is the first thing to take, and unlike the `_seed` item it has
 not already been disproven.
+
+### Correcting yesterday's own suggestion, 2026-08-13
+
+The note above says "one can be had from the other by scattering". **That is wrong**, and it
+is worth correcting here rather than letting the next person spend a day on it.
+
+Read the two bodies. `differentiate` and `differentiate_sparse` both call `self.tangent(mode)`
+-- the whole block walk, which is the 5,000 lines -- and then differ only in their last few
+lines: dense writes `out[slot] = row`, sparse writes `out[a:b] = row[_pattern[slot]]`. So the
+duplication is real and it is the *walk*, not the output.
+
+But deriving the dense one from the sparse one destroys a property the corpus currently has.
+`tests/test_sparsity.py:68` fills the dense Jacobian *independently* and rebuilds it from the
+sparse one, and equality is what proves `Mode.sparsity` is exact -- that no non-zero of the
+real Jacobian falls outside the pattern, on all 22 models. Scatter the dense one out of the
+sparse one and a non-zero outside the pattern is silently dropped, by both, identically. The
+test would pass forever and mean nothing.
+
+Going the other way is worse: gathering CSR out of a dense `n` by `n` fill reintroduces the
+allocation the sparse path exists to avoid.
+
+**The shape that works** is to emit the walk once and gather twice. The tangent rows go into a
+module-level scratch indexed by variable, `jacobian` gathers dense from it and
+`jacobian_sparse` gathers CSR from it, and both gathers stay independent so the pattern check
+keeps its teeth. The working set does not grow: `differentiate_sparse`'s own docstring says
+the rows are already `n` wide and `n` of them are alive whatever the output shape is.
+
+That is a real emitter change rather than a rename, and it is the next thing to take on this
+entry. It is still much smaller than narrow rows, which needs `combination` to align two
+supports on every add.
