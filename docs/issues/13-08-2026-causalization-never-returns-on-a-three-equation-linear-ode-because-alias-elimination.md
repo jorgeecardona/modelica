@@ -1,9 +1,10 @@
 ---
 title: Causalization never returns on a three-equation linear ODE, because alias elimination can put a cycle in the derivative map
-status: in-progress
+status: done
 area: ir
 owner: quiet-tars-187f2
 filed: 2026-08-13
+fixed_in: 490f2bf
 kind: bug
 scope: S
 verify: test
