@@ -1,8 +1,8 @@
 ---
 title: The solution-set check re-decides latched relations instead of reading the latch, so it depends on where the samples fall
-status: open
+status: in-progress
 area: verify
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-13
 kind: bug
 scope: S
@@ -65,3 +65,49 @@ for it at length. The test is the thing making a claim it cannot support.
 - No change to how the engine latches. It is right.
 - Not fixed by sampling away from events. Choosing columns that avoid the crossings would make
   the test pass and would remove the only points where the question is interesting.
+
+## Fixed 2026-08-13 — and this entry's inference was wrong
+
+The Measured section stands. The Inferred section does not: **it is not about latches.**
+
+The fix this entry proposed -- answer a watched relation from `w` rather than re-deciding it --
+was implemented and measured first. `_watched` gives the relations, `Code.events` gives each
+latch slot, and the latch state at any time can be replayed from `Result.events`, since a
+`transition` flips exactly one slot. Written, run, and the four failures came back **byte for
+byte**: `PhaseChange` 1.735, `RoastingMachine` 0.674, `BumpStop` 1.0e-7, `Setback` 0.333.
+
+Because the disagreement is about *timestamps*, not about freezing. An event emits **two rows
+sharing one `t`** -- the left limit and the right -- and a strict relation on `time` cannot
+tell them apart: ``time < 520`` is false at exactly 520, while the left-limit row was computed
+with it true. So the check was comparing one side's values against the other side's branch,
+and it would have done so whether the relation was latched, re-decided, or a constant.
+
+That also explains the thing this entry called luck. Event columns are *always* in the output,
+because the solver stops at them; whether the sampling stride lands on one is what varies.
+
+### What it is instead
+
+`_worst` skips a column whose time is an event instant. Two lines, and the residuals go to
+where they belong:
+
+| | at the floor, before | after |
+| --- | --- | --- |
+| `PhaseChange` | 1.735 at t = 520 | **1.3e-16** |
+| `RoastingMachine` | 0.674 at t = 93 | **1.3e-16** |
+| `Setback` | 0.333 at t = 4 | **0** |
+| `BumpStop` | 1.0e-7 | **0** |
+
+on 18 to 20 columns instead of 20 to 24. The instant before and the instant after are both
+still sampled; what is skipped is the one timestamp that names two states.
+
+### And the tolerance floor it was blocking
+
+`tests/test_solution_set.py` now floors its integration at 1e-6 like the other
+trajectory-only tests, which is what
+[`the-corpus-has-no-way-to-hold-a-model-that-costs-a-minute`](13-08-2026-the-corpus-has-no-way-to-hold-a-model-that-costs-a.md)
+wanted from this entry:
+
+    tests/test_solution_set.py   41.2 s  ->  8.2 s   (-80 %)
+
+The Done list's third item -- the docstring paragraph saying a latched relation is a different
+case -- is met by deleting the claim rather than by softening it. It was never true.

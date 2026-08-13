@@ -108,13 +108,10 @@ an equation stopped being solved and started being merely approximated -- exactl
 this file is for -- so the threshold belongs down here with the arithmetic and not up there
 with the solver.
 
-**An equation containing a latched relation is a different case**, and an earlier version of
-this paragraph did not say so. There the residual depends on where the samples fall relative
-to the events, because the schedule freezes the relation at the last event while `evaluate`
-re-decides it from the values at hand. Loosening the integration was tried on 2026-08-13 and
-four models failed on exactly that -- `PhaseChange` at 1.7, `RoastingMachine` at 0.67 -- so the
-integration here uses the spec's own tolerance rather than a floored one, and the register
-carries the gap.
+**An event instant is the one place the sampling has to be careful**, and it is a question
+about timestamps rather than about tolerance. An event emits two rows sharing one ``t``, and a
+strict relation on ``time`` cannot tell the left limit from the right. `_worst` skips those
+columns and says what it measured; everything either side of them is sampled as usual.
 
 Relative: ``|lhs - rhs| / (1 + max(|lhs|, |rhs|))``. Index reduction on a model whose terms are
 in the thousands has a scale, and an absolute number would be a different test on every model.
@@ -147,10 +144,28 @@ def _environment(flat: FlatModel, system: System, result: Result, column: int) -
 
 
 def _worst(flat: FlatModel, system: System, result: Result) -> tuple[float, str]:
-    """The largest relative residual over the sampled columns, and the equation it came from."""
+    """The largest relative residual over the sampled columns, and the equation it came from.
+
+    Columns at an event instant are not sampled, and that is a statement about timestamps
+    rather than about events. An event emits **two** rows sharing one ``t`` -- the left limit
+    and the right -- and a relation on ``time`` cannot tell them apart: ``time < 520`` is
+    false at exactly 520, while the left-limit row was computed with it true. Evaluating there
+    compares one side's values against the other side's branch.
+
+    Measured 2026-08-13, at a 1e-6 tolerance floor: `PhaseChange` reads 1.735 at t = 520,
+    `RoastingMachine` 0.674 at t = 93, `Setback` 0.333 at t = 4, `BumpStop` 1.0e-7. Dropping
+    the event columns takes all four to machine precision -- 1.3e-16, 1.3e-16, 0, 0 -- on
+    18 to 20 columns instead of 20 to 24.
+
+    The instant *before* and the instant *after* are both still sampled, which is where the
+    interesting question is. What is skipped is the one timestamp that names two states.
+    """
     worst, culprit = 0.0, ""
+    instants = {event.time for event in result.events}
     step = max(1, len(result.time) // SAMPLES)
     for column in range(0, len(result.time), step):
+        if float(result.time[column]) in instants:
+            continue
         env = _environment(flat, system, result, column)
         for equation in flat.equations:
             left = float(evaluate(equation.lhs, env))  # pyright: ignore[reportArgumentType]
@@ -192,15 +207,12 @@ def test_the_original_equations_hold_along_the_trajectory(model: Path) -> None:
     result = simulate(
         system,
         stop=run["stop"],
-        # The spec's own tolerance, and **not** floored at 1e-6 the way `tests/test_fold.py`
-        # and the difference-quotient tests floor theirs. Tried, measured, reverted: four
-        # models fail -- `BumpStop` 1.0e-7, `PhaseChange` 1.7, `RoastingMachine` 0.67,
-        # `Setback` -- and every one of them fails on an equation containing a *latched*
-        # relation. The schedule freezes such a relation at the last event and `evaluate`
-        # re-decides it from the sampled values, so a sample that lands the other side of an
-        # event compares two different models. Filed; until it closes, this file is only as
-        # robust as the spec's own sampling.
-        tolerance=run.get("tolerance", 1e-6),
+        # Floored at 1e-6, the same rule `tests/test_fold.py` and the difference-quotient
+        # tests use. This file needs *a* trajectory, not an accurate one: an algebraic
+        # equation is solved at each point rather than integrated, so how well it holds does
+        # not follow the integration tolerance. `_worst` carries the one place where that was
+        # not true, and it was the timestamps rather than the tolerance.
+        tolerance=max(float(run.get("tolerance", 1e-6)), 1e-6),
         absolute=run.get("absolute"),
         method=run.get("method", "Radau"),
     )
