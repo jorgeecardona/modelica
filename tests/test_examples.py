@@ -46,7 +46,7 @@ MODELS = EXAMPLES / "models"
 MODEL_FILES = sorted(MODELS.glob("*.mo"))
 LIBRARY_FILES = sorted(LIBRARY.glob("*.mo"))
 
-SOURCES = frozenset({"analytic", "reference", "measured"})
+SOURCES = frozenset({"analytic", "reference", "measured", "published"})
 """Where a reference number is allowed to have come from.
 
 ``analytic`` is a closed form and ``reference`` a trusted solver -- both of them things
@@ -56,6 +56,13 @@ only one of the three that says the model is about the world rather than about i
 It buys that with tolerance: a measured point is asserted to within the model's honest
 agreement with the hardware, degrees rather than ulps, so a spec that leans on measured
 points alone will not catch a regression. Carry both kinds where you have both.
+
+``published`` is the fourth and it closes the gap the first sentence admits: a number
+somebody else computed, with somebody else's solver, and printed. It cannot be wrong in
+the same way twice because nothing about it came from here. It carries a ``citation``,
+required below, because a published number with no publication is a ``reference`` point
+wearing a better name -- and the citation has to name *which table*, since a test set
+prints run characteristics beside its solutions and only one of those is the answer.
 """
 METHODS = frozenset({"RK45", "RK23", "DOP853", "Radau", "BDF", "LSODA"})
 
@@ -126,6 +133,11 @@ def test_simulate_section_is_well_formed(model: Path) -> None:
         assert point["values"], "a point with no values asserts nothing"
         assert "rtol" in point or "atol" in point, "a reference point needs a tolerance"
         assert point["source"] in SOURCES, f"unknown source {point['source']!r}"
+        if point["source"] == "published":
+            assert point.get("citation"), (
+                "a published point needs a `citation` naming the work and the table it is"
+                " printed in -- see SOURCES"
+            )
 
     for invariant in simulate.get("invariant", []):
         assert invariant["expr"], "an invariant needs an expression"

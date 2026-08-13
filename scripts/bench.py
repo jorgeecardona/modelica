@@ -99,6 +99,12 @@ MARGIN = 10.0
 PROBLEMS: dict[str, tuple[float, tuple[float, ...]]] = {
     "Robertson": (1.0e4, (1e-4, 1e-6, 1e-8)),
     "VanDerPol": (20.0, (1e-4, 1e-5, 1e-6)),
+    # Stage 2 of `docs/ideas/benchmarks.md`. HIRES is *mildly* stiff -- three decades of
+    # eigenvalue spread against Robertson's nine -- so it is where an explicit method is still
+    # in the race, which is the comparison neither stage-1 problem offers. Its horizon is the
+    # one the Bari test set uses, and unlike the other two its end point has a published
+    # answer, so this row's error axis can be checked against somebody else's arithmetic.
+    "HIRES": (321.8122, (1e-4, 1e-6, 1e-8)),
 }
 
 

@@ -1,0 +1,54 @@
+summary = "HIRES: eight reactants of photomorphogenesis, and the first corpus model checked against a published reference rather than against ourselves."
+teaches = ["mild stiffness", "a published reference solution", "conservation between two species"]
+requires = []
+
+[parse]
+classes = ["HIRES"]
+
+[flatten]
+model = "HIRES"
+states = ["y1", "y2", "y3", "y4", "y5", "y6", "y7", "y8"]
+equations = 8
+index = 1
+balanced = true
+
+# Stage 2 of `docs/ideas/benchmarks.md`. Mildly stiff: the eigenvalues span about three
+# decades rather than Robertson's nine, so an explicit method survives it and a stiff one is
+# merely faster -- which is the point of having it beside Robertson rather than instead of it.
+#
+# The horizon is 321.8122 and that number is not derived from anything: the Bari report says
+# "The end point of the integration interval, 321.8122, was chosen arbitrarily [Wan98]".
+[simulate]
+stop = 321.8122
+tolerance = 1e-10
+
+# The reference solution at the end of the interval, from the Bari test set: F. Mazzia and
+# C. Magherini, *Test Set for Initial Value Problem Solvers*, release 2.4, Department of
+# Mathematics, University of Bari and INdAM, February 2008, report `hires.pdf`, Table II.1.1.
+# Computed there by RADAU5 on a Cray C90 in double precision with uround = 1.01e-19.
+#
+# **This is the first point in the corpus that is not self-computed.** Every other `source =
+# "reference"` in these files means an independent integration by this project, which cannot
+# catch an error the whole project shares. This one can. Measured 2026-08-13: agreement is
+# 7.5e-10 relative at the tolerance below and 5.1e-11 at rtol = 1e-12.
+[[simulate.point]]
+t = 321.8122
+values = { y1 = 0.7371312573325668e-3, y2 = 0.1442485726316185e-3, y3 = 0.5888729740967575e-4, y4 = 0.1175651343283149e-2, y5 = 0.2386356198831331e-2, y6 = 0.6238968252742796e-2, y7 = 0.2849998395185769e-2, y8 = 0.2850001604814231e-2 }
+rtol = 1e-8
+source = "published"
+citation = "F. Mazzia and C. Magherini, Test Set for Initial Value Problem Solvers, release 2.4, University of Bari and INdAM, February 2008 -- report hires.pdf, Table II.1.1"
+
+# The enzyme is conserved: `der(y7) + der(y8) = 0` by inspection, so the complex and the free
+# form always sum to what E started with. Machine precision, not solver precision -- a
+# violation is arithmetic going wrong, not a step being too long.
+[[simulate.invariant]]
+expr = "y7 + y8"
+value = 0.0057
+atol = 1e-12
+
+# Every concentration stays non-negative. y6 is the one that gets close: it decays to about
+# 6e-3 by the end after peaking near 0.75, and it is what the 280*y6*y8 term multiplies.
+[[simulate.invariant]]
+expr = "y6"
+min = 0.0
+max = 1.0
