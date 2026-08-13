@@ -1,9 +1,10 @@
 ---
 title: Forward sensitivity refuses a model with events, and the shortcut of handling only time-triggered ones buys exactly one corpus model
-status: in-progress
+status: done
 area: sim
 owner: quiet-tars-187f2
 filed: 2026-08-13
+fixed_in: 65e3026
 kind: story
 scope: L
 verify: test
@@ -348,3 +349,25 @@ where a varying error would have looked like ordinary numerical disagreement.
 A mode switch, and it is not a jump at all: `Mode.derivative` differs either side, so ``S`` is
 not the same shape. The state vector changes meaning rather than value, which is a different
 piece of work and a different entry if anybody wants it.
+
+## Closed: `RoastingMachine` produces a report
+
+The Done list's third item, which is what the whole entry was for:
+
+    RoastingMachine: 2 parameters from 1 measurements, condition 21.7 -- separable
+    RoastingMachine: 2 parameters from 1 measurements, condition 20.3 -- separable
+    RoastingMachine: 2 parameters from 2 measurements, condition 21.7 -- separable
+
+``UA`` against ``C_mach`` and ``UA`` against ``m_green``, measured through ``T_probe``, and
+the first pair with ``T_bean`` beside it. All separable, around 21 -- which is the answer a
+thermal model measured through a lagged probe should give, and it is an answer rather than a
+refusal for the first time.
+
+`09-08-2026-nothing-fits-a-parameter-to-data` is unblocked: its `verify: probe` is this model
+against a roast log, and nothing in this toolchain stands in the way of it any more. What is
+left there is the log.
+
+Every item on this entry's Done list is met except that the refusal is *narrowed* rather than
+deleted -- a mode switch is still refused, and the entry above argues that one is not a jump
+at all but a change in what the state vector means. That is a different piece of work and
+deserves its own entry if anybody wants it.
