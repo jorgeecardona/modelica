@@ -1,8 +1,8 @@
 ---
 title: Causalization never returns on a three-equation linear ODE, because alias elimination can put a cycle in the derivative map
-status: open
+status: in-progress
 area: ir
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-13
 kind: bug
 scope: S
@@ -117,3 +117,50 @@ called.
   `_Matching`'s job and not this guard's.
 - Nothing about the other refusal the same generator found; that is
   `a-triangular-model-is-refused-when-alias-elimination-renames-a-variable`.
+
+## Fixed 2026-08-13
+
+Two changes, which are the two items this entry's Done list asks for.
+
+**`_permits` walks the chain the substitution would join.** Replacing `der(x)` by `other`
+makes `other` the derivative of `x`, so `other` joins the chain `x` sits at the bottom of. If
+`other` is *already* on that chain, joining it closes a loop:
+
+```python
+base = work.integral[victim]
+if other in work.chain(base):
+    return False
+```
+
+The check that was there is the one-step case of the same idea, and this is the general one.
+
+**`_Work.chain` is bounded, and `level` is written on top of it.** The guard is what keeps
+`integral` a forest; the bound is what makes a mistake in the guard a wrong answer rather
+than a hang. `tests/test_causalize.py::test_walking_the_differentiation_chain_stops_even_if_it_loops`
+pokes a cycle in by hand and asserts the walk returns.
+
+### Measured after
+
+| | before | after |
+| --- | --- | --- |
+| the three-equation model | **> 90 s, gave up** | 2.2 ms |
+| `der(x1) = x0` (scale removed) | 2.0 ms | 1.6 ms |
+| `der(x2) = 3 * x0` (cycle broken) | 1.6 ms | 1.7 ms |
+
+Terminating is not enough, so the answer is checked too. It comes out `index=1` with all three
+of `x0`, `x1`, `x2` as states -- correct, since `x2` is `der(x0)` and `der(x2) = x0` makes the
+pair a second-order ODE whose position and velocity are both states. Simulated to `t = 2`
+against the closed form (`x0 = x2 = e^t`, `x1 = 2e^t - 1`): **4.5e-14 relative**, worst of the
+three.
+
+### What did not change
+
+Nothing in the corpus. 1464 pass. The guard only refuses substitutions that would have
+produced a cycle, and a cycle is exactly the state no model that terminates today can be in.
+
+The other refusal the same generator found is untouched and still open --
+`a-triangular-model-is-refused-as-structurally-singular` -- measured at 10 refusals in 150
+`solvable` draws before and after.
+
+The property file dropped 29 s to 15 s, because a draw that hit this no longer spent its full
+five-second budget before being discarded.

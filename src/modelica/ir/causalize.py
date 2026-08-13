@@ -161,13 +161,32 @@ class _Work:
         reads = _unique([*names(equation.lhs), *names(equation.rhs)])
         return [name for name in reads if self.is_unknown(name)]
 
+    def chain(self, name: str) -> Iterator[str]:
+        """``name``, then what it is the derivative of, and so on down to the state.
+
+        Bounded by the names already seen rather than by trust. ``integral`` is meant to be a
+        forest and `_permits` is what keeps it one, but the two eliminations of
+
+            der(x0) = x2;
+            der(x2) = x0;
+
+        used to make ``x2`` the derivative of ``x0`` and then ``x0`` the derivative of
+        ``x2``, and the unbounded version of this walk never came back -- a three-equation
+        linear ODE that hung the compiler. A walk that stops is a wrong answer somebody can
+        read; a walk that does not is a process nobody can debug.
+        """
+        seen: set[str] = set()
+        while name not in seen:
+            seen.add(name)
+            yield name
+            base = self.integral.get(name)
+            if base is None:
+                return
+            name = base
+
     def level(self, name: str) -> int:
         """How many times ``name`` has been differentiated: ``der_der_x`` is 2."""
-        count = 0
-        while name in self.integral:
-            name = self.integral[name]
-            count += 1
-        return count
+        return sum(1 for _ in self.chain(name)) - 1
 
 
 # --------------------------------------------------------------------------------------
@@ -338,8 +357,17 @@ def _permits(work: _Work, victim: str, other: str, ratio: float, shift: ir.Expr)
     if work.variables[victim].fixed:
         return False
     if victim in work.integral:
-        # Replacing der(x) by another variable renames x's derivative, and a name is all
-        # we have -- a scaled or shifted derivative has nowhere to live.
+        # Replacing der(x) by another variable renames x's derivative, so `other` joins the
+        # chain that `x` is at the bottom of. If `other` is *already* on that chain, joining
+        # it closes a loop: `der(x0) = x2` makes x2 the derivative of x0, and `der(x2) = x0`
+        # then offers to make x0 the derivative of x2. Both substitutions are individually
+        # reasonable and together they make `integral` cyclic, which used to hang
+        # `_Work.level` on a three-equation linear ODE. The check above catches the one-step
+        # version of this and stops one hop short of the two-step one.
+        base = work.integral[victim]
+        if other in work.chain(base):
+            return False
+        # A name is all we have, so a scaled or shifted derivative has nowhere to live.
         return ratio == 1.0 and shift == ZERO and other not in work.integral
     derivative = work.derivative.get(victim)
     # A second derivative of the victim would be left with no first derivative to follow.

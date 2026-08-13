@@ -17,7 +17,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from modelica.ir.causalize import CausalizationError, causalize
+from modelica.ir.causalize import (
+    CausalizationError,
+    _Work,  # pyright: ignore[reportPrivateUsage]
+    causalize,
+)
 from modelica.ir.source import flatten
 from modelica.lang import parse
 
@@ -123,3 +127,20 @@ end M;
 """
     with pytest.raises(CausalizationError):
         _system(source)
+
+
+def test_walking_the_differentiation_chain_stops_even_if_it_loops() -> None:
+    """`_Work.chain` is bounded, so a cycle in ``integral`` is a wrong answer and not a hang.
+
+    `_permits` is what keeps ``integral`` a forest, and it did not always: two eliminations
+    could make ``x2`` the derivative of ``x0`` and then ``x0`` the derivative of ``x2``, and
+    `_Work.level` walked that with an unbounded ``while`` -- a three-equation linear ODE that
+    never came back. The guard is the fix and this is the second half of it.
+
+    The cycle is installed by hand rather than reached through a model, because the point is
+    that the walk survives one however it got there.
+    """
+    work = _Work(name="M", equations=[])
+    work.integral = {"x2": "x0", "x0": "x2"}
+    assert list(work.chain("x2")) == ["x2", "x0"]
+    assert work.level("x2") == 1

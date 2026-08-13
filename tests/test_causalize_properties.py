@@ -25,13 +25,15 @@ The properties are structural. No number is evaluated here and none needs to be:
 matching is perfect, whether a schedule reads only what it has already computed, and whether
 the blocks partition the unknowns are all statements about incidence.
 
-**This file found two bugs on the day it was written**, both in alias elimination and both
-carried below as expected failures with the model each one shrank to:
+**This file found two bugs on the day it was written**, both in alias elimination, and it
+keeps the model each one shrank to:
 
-* a three-equation linear ODE that causalization never returns from, because two eliminations
-  put a cycle in the derivative map and `_Work.level` walks it forever;
+* a three-equation linear ODE that causalization never returned from, because two
+  eliminations put a cycle in the derivative map and `_Work.level` walked it forever.
+  Fixed; `test_a_linear_ode_system_terminates` is the regression test, and the register entry
+  carries the sha.
 * a triangular model refused as structurally singular, because the matching that succeeds is
-  not the one whose leftovers are states.
+  not the one whose leftovers are states. Still open, carried below as an expected failure.
 
 The register has both. The generated properties `assume` past a refusal and past a model that
 exceeds `BUDGET`, so they go on saying what they say about the models that get through rather
@@ -404,33 +406,36 @@ equation
   der(x2) = x0;
 end M;
 """
-"""Three explicit ODEs that causalization does not come back from.
+"""Three explicit ODEs that causalization used to not come back from.
 
 `der(x0) = x2` is an alias, so `x2` becomes *the* derivative of `x0`; `der(x2) = x0` is then
-the same shape, so `x0` becomes the derivative of `x2`. The `integral` map now has a two-cycle
-and `_Work.level` walks it forever. `_permits` guards against exactly this and its check is
-one step long, which is one hop short of a cycle this size.
+the same shape, so `x0` becomes the derivative of `x2`. That made the `integral` map cyclic
+and `_Work.level` walked it forever -- over 90 s before it was given up on. `_permits` guarded
+against the one-step version and stopped one hop short of this one.
 
-Both other lines are load-bearing. Drop the scale on `der(x1) = 2 * x0` and that equation is
-eliminable too, so nothing is left for the matching to walk and `level` is never called: 2.0 ms.
-Break the cycle with `der(x2) = 3 * x0`: 1.6 ms.
+Both other lines are load-bearing, measured by changing one at a time while it still hung:
+drop the scale on `der(x1) = 2 * x0` and that equation is eliminable too, so nothing is left
+for the matching to walk and `level` is never called (2.0 ms); break the cycle with
+`der(x2) = 3 * x0` (1.6 ms).
+
+Fixed in `_permits`, which now walks the chain the substitution would join.
 """
 
 
 @pytest.mark.skipif(not HAS_ALARM, reason="the budget needs signal.setitimer")
-@pytest.mark.xfail(
-    reason="causalization-never-returns-on-a-three-equation-linear-ode",
-    raises=BudgetError,
-    strict=True,
-)
 def test_a_linear_ode_system_terminates() -> None:
-    """Three states, index one, no algebraic loop -- and it never returns.
+    """Three states, index one, no algebraic loop -- and it used to never return.
 
-    Timed at over 90 seconds before it was given up on; `BUDGET` is what stops this test from
-    doing the same. The stack under `faulthandler` is `_match` -> `augment` -> `candidates` ->
-    `_priority` -> `level`, and `level` is a `while` over a map that now has a cycle in it.
+    `BUDGET` is what makes this a test rather than a hung suite: the assertion is that
+    causalization comes back at all, and `_causalize` raises `BudgetError` if it does not.
+    The answer is checked too, because terminating with the wrong states would be a worse
+    outcome than hanging -- `x2` is `der(x0)` and `x0` is `der(x2)`, so all three are states
+    and the model is index 1.
     """
-    _causalize(HANGS)
+    system = _causalize(HANGS)
+    assert system.index == 1
+    assert set(system.states) == {"x0", "x1", "x2"}
+    _assert_causal(system, HANGS)
 
 
 @pytest.mark.parametrize(
