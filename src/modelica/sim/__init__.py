@@ -43,8 +43,11 @@ from modelica.sim.matfile import read as read
 from modelica.sim.result import Event as Event
 from modelica.sim.result import Result as Result
 from modelica.sim.sensitivity import (
+    Fit,
+    FitError,
     Identifiability,
     Sensitivity,
+    fit,
     identifiability,
     sensitivity,
 )
@@ -67,6 +70,8 @@ __all__ = [
     "Divergence",
     "EmitError",
     "Event",
+    "Fit",
+    "FitError",
     "Identifiability",
     "Kernel",
     "Result",
@@ -83,6 +88,7 @@ __all__ = [
     "diverges",
     "emit",
     "emit_expr",
+    "fit",
     "flatten",
     "grid",
     "identifiability",

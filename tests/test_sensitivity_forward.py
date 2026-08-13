@@ -251,3 +251,111 @@ def test_measuring_something_the_model_does_not_have_is_refused() -> None:
     error = pytest.importorskip("modelica.sim.solve").SimulationError
     with pytest.raises(error, match="no variable 'thermocouple'"):
         report(_system("NewtonCooling"), ["k"], ["thermocouple"], stop=1.0)
+
+
+# --------------------------------------------------------------------------------------
+# The fit, and what it refuses
+# --------------------------------------------------------------------------------------
+
+
+def _synthetic(
+    stem: str, moved: dict[str, float], watched: list[str], points: int = 20
+) -> tuple[Any, float, dict[str, tuple[Any, Any]]]:
+    """A run at known parameters, sampled, as if it were a measurement."""
+    simulate = pytest.importorskip("modelica.sim.solve").simulate
+    vector = pytest.importorskip("modelica.sim.sweep").vector
+    system = _system(stem)
+    stop = float(_spec(stem)["stop"])
+    grid = np.linspace(0.0, stop, points + 1)[1:]
+    truth = simulate(
+        system, stop=stop, times=grid, tolerance=1e-10, parameters=vector(system, moved)
+    )
+    columns = np.searchsorted(truth.time, grid)
+    return system, stop, {name: (grid, truth[name][columns]) for name in watched}
+
+
+def test_a_known_parameter_is_recovered_from_its_own_trajectory() -> None:
+    """The modest claim, and the entry that asked for this says it is the modest one.
+
+    Data made by the model at ``k = 0.3``, fit started from the ``0.5`` the model declares.
+    Six Gauss-Newton steps, residual 1e-10, ``k`` back to nine figures. What this shows is
+    that the optimiser converges on an identifiable problem with exact gradients -- not that
+    the procedure recovers parameters from real-shaped data, which is what
+    `docs/issues/09-08-2026-nothing-fits-a-parameter-to-data-and-the-reason-that-is-hard.md`
+    reserves its `verify: probe` for.
+    """
+    fitter = pytest.importorskip("modelica.sim.sensitivity").fit
+    system, stop, data = _synthetic("NewtonCooling", {"k": 0.3}, ["T"])
+    found = fitter(system, ["k"], data, stop=stop)
+    np.testing.assert_allclose(found.values, [0.3], rtol=1e-7)
+    assert found.residual < 1e-8
+    assert found.conditioning.condition < 10
+
+
+def test_the_fit_refuses_the_pair_the_measurement_cannot_separate() -> None:
+    """The whole reason this is beside `identifiability` and not in a caller's script.
+
+    ``R`` and ``C`` from the capacitor voltage would converge -- to *a* pair on the invisible
+    direction, with a residual near zero, and wrong about the current. It is refused with the
+    combination named, so the failure is a sentence rather than a plausible number.
+    """
+    module = pytest.importorskip("modelica.sim.sensitivity")
+    system, stop, data = _synthetic("RCCircuit", {}, ["c.v"])
+    with pytest.raises(module.FitError, match="cannot separate") as caught:
+        module.fit(system, ["r.R", "c.C"], data, stop=stop)
+    message = str(caught.value)
+    assert "invisible combination" in message
+    assert "r.R" in message
+    assert "c.C" in message
+
+
+def test_the_same_pair_fits_once_the_current_is_measured_too() -> None:
+    """And the refusal lifts for the reason it should: the data separates them now.
+
+    Same two parameters, same model, one more sensor. Started from a doubled resistance and a
+    halved capacitance -- which is *exactly* the invisible direction of the previous test, so
+    a fit that could not see it would have no reason to come back.
+    """
+    module = pytest.importorskip("modelica.sim.sensitivity")
+    build = pytest.importorskip("modelica.sim.kernel").build
+
+    # The measurement is made at *doubled* R and *halved* C, which is exactly the direction
+    # the previous test showed the voltage cannot see. Fitting from the model's declared
+    # values has to walk along it, so a fit that could not see it would have no reason to move.
+    system, stop, data = _synthetic("RCCircuit", {"r.R": 200.0, "c.C": 0.005}, ["c.v", "r.i"])
+    found = module.fit(system, ["r.R", "c.C"], data, stop=stop)
+
+    kernel = build(system, sensitivity=("r.R", "c.C"))
+    declared = list(kernel.code.parameters)
+    started = kernel.parameters(np.zeros(len(declared)))
+    assert started[declared.index("r.R")] != 200.0, "the fit would have had nothing to do"
+    np.testing.assert_allclose(found.values, [200.0, 0.005], rtol=1e-5)
+    assert found.conditioning.condition < 10, str(found)
+
+
+def test_fitting_anyway_is_possible_and_says_what_it_did() -> None:
+    """``separable=0`` is a decision a caller may take, and `Fit` carries the consequence.
+
+    Somebody fitting ``R`` and ``C`` to the voltage may genuinely want the product. The
+    refusal is a default, not a prohibition -- and what comes back has the conditioning on it,
+    so the residual can never be read alone.
+    """
+    module = pytest.importorskip("modelica.sim.sensitivity")
+    system, stop, data = _synthetic("RCCircuit", {}, ["c.v"])
+    found = module.fit(system, ["r.R", "c.C"], data, stop=stop, separable=0.0)
+    assert found.residual < 1e-6
+    assert found.conditioning.condition > 1e6, "a fit nobody should trust, and it says so"
+    assert found.conditioning.inseparable(), str(found)
+
+
+def test_measuring_something_the_model_does_not_have_is_refused_by_the_fit_too() -> None:
+    module = pytest.importorskip("modelica.sim.sensitivity")
+    with pytest.raises(module.FitError, match="no variable 'thermocouple'"):
+        module.fit(_system("NewtonCooling"), ["k"], {"thermocouple": ([1.0], [2.0])}, stop=5.0)
+
+
+def test_a_measurement_after_the_horizon_is_refused() -> None:
+    """Silently ignoring it would fit to fewer points than the caller thinks they gave."""
+    module = pytest.importorskip("modelica.sim.sensitivity")
+    with pytest.raises(module.FitError, match=r"leave \[0, 5\]"):
+        module.fit(_system("NewtonCooling"), ["k"], {"T": ([1.0, 9.0], [2.0, 3.0])}, stop=5.0)

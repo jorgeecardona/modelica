@@ -206,3 +206,56 @@ returning a number, when this report says the subset is inseparable. Its input n
 Unchanged from the note above, and both still blocking a complete answer: `dy0/dp` is not
 emitted, and forward sensitivity refuses a model with events -- which `RoastingMachine`, the
 model this entry names for its probe, has nine of.
+
+## The third piece: the fit, and what it refuses
+
+`modelica.sim.fit`. Gauss-Newton on the exact sensitivities, returning a `Fit` that carries
+the fitted values, the residual, and **the conditioning it was fit at** -- the last one
+because a residual read alone is exactly the thing that makes a bad fit look like a good one.
+
+    NewtonCooling: k = 0.3
+      residual 1.003e-10 after 6 iterations, at condition 1
+
+Data made by the model at ``k = 0.3``, fit started from the ``0.5`` the model declares,
+recovered to nine figures.
+
+### It refuses, which is the point of it being here
+
+    RCCircuit: ['c.v'] cannot separate ['r.R', 'c.C'] -- condition 8.56e+11,
+    invisible combination -0.707*r.R +0.707*c.C. Add a measurement, fit fewer parameters,
+    or pass `separable=0` and read the conditioning yourself
+
+That fit would have converged. To *a* pair on the invisible direction, with a residual near
+zero, and wrong about the current -- which is the failure this entry was filed about, in the
+words of the model rather than of a welding post. Add the current as a second measurement and
+the same call fits: started from the model's declared values against data made at doubled
+``R`` and halved ``C`` -- **exactly the invisible direction** -- it walks back to both to
+1e-5.
+
+``separable=0`` fits anyway and is tested. Somebody who wants the product is not making a
+mistake; what they get back still has the conditioning on it, so the residual can never be
+read alone.
+
+### What this closes and what it does not
+
+All three pieces of the Done list are built, and `tests/test_sensitivity_forward.py` has 18
+tests over them. **The entry stays open**, and its own words are why: `verify: probe`,
+deliberately, because "a green test on synthetic data proves the optimiser converges, which is
+not the claim". That is precisely what the recovery test above proves and no more.
+
+What the probe needs, unchanged and now blocking only itself:
+
+- **`RoastingMachine` against a Cropster roast log.** The model this entry names, the data it
+  names, and neither is reachable yet -- forward sensitivity refuses a model with events, and
+  `RoastingMachine` has nine.
+- **`dy0/dp`**, still not emitted, so a model whose starts depend on the fitted parameters
+  needs its `S(0)` by hand.
+
+Two things measured on the way that are worth having written down:
+
+- **Gauss-Newton with an exact Jacobian settles in single-digit steps** on these problems --
+  six for `NewtonCooling` from a 67 % error, one when already at the answer. No line search
+  and no trust region were needed, and adding either without a problem that wants it would be
+  machinery on speculation.
+- **The refusal threshold has an enormous margin.** The refused fit reads 8.56e11 and the
+  accepted one 2.77.

@@ -51,14 +51,22 @@ from modelica.sim.solve import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from numpy.typing import NDArray
 
     from modelica.ir.system import System
     from modelica.sim.emit import Code
 
-__all__ = ["Identifiability", "Sensitivity", "identifiability", "sensitivity"]
+__all__ = [
+    "Fit",
+    "FitError",
+    "Identifiability",
+    "Sensitivity",
+    "fit",
+    "identifiability",
+    "sensitivity",
+]
 
 
 @dataclass(frozen=True)
@@ -72,7 +80,15 @@ class Sensitivity:
 
     states: tuple[str, ...]
     values: NDArray[np.float64]
-    """The trajectory itself, shape ``(len(states), len(time))``."""
+    """The state trajectory, shape ``(len(states), len(time))``."""
+
+    trajectory: NDArray[np.float64]
+    """Every observed variable, shape ``(len(observed), len(time))``.
+
+    Carried because the caller who wants ``d(obs)/dp`` almost always wants ``obs`` beside it
+    -- a fit compares one against a measurement and multiplies by the other -- and running the
+    model a second time to get it would be a second answer to the same question.
+    """
 
     state: NDArray[np.float64]
     """``dy/dp``, shape ``(len(states), len(parameters), len(time))``."""
@@ -115,6 +131,7 @@ def sensitivity(  # noqa: PLR0913 - a solver has knobs, and this one has the sam
     times: Sequence[float] | NDArray[np.float64] | None = None,
     method: str = "Radau",
     initial: NDArray[np.float64] | None = None,
+    values: NDArray[np.float64] | None = None,
 ) -> Sensitivity:
     """Integrate ``dy/dp`` alongside ``y`` and return both.
 
@@ -125,6 +142,10 @@ def sensitivity(  # noqa: PLR0913 - a solver has knobs, and this one has the sam
 
     ``initial`` is ``S(0)``, shape ``(states, parameters)``, and defaults to zero. The module
     docstring says why it is not guessed.
+
+    ``values`` runs the model at a parameter vector other than the one it declares, and is
+    `modelica.sim.sweep.vector`'s output exactly as `simulate` takes it. A fit moves the
+    parameters every iteration and this is how.
 
     The augmented system is integrated as one vector, ``[y; S.ravel()]``, by the same SciPy
     method `simulate` uses. Its Jacobian is *not* supplied: the augmented Jacobian is block
@@ -161,7 +182,7 @@ def sensitivity(  # noqa: PLR0913 - a solver has knobs, and this one has the sam
         raise SimulationError(message)
 
     n, m = kernel.states, len(named)
-    p, y0, w = kernel.start(start)
+    p, y0, w = kernel.start(start, values)
     s0 = np.zeros((n, m)) if initial is None else np.asarray(initial, dtype=float).reshape(n, m)
 
     slope = np.zeros((n, n))
@@ -203,13 +224,15 @@ def sensitivity(  # noqa: PLR0913 - a solver has knobs, and this one has the sam
     # than wrong -- a caller who wants measurements differentiated has to ask for H.
     observed = kernel.code.observed
     output = np.zeros((len(observed), m, len(grid)))
-    if kernel.observe_jacobian is not None:
-        d_obs_dy = np.zeros((len(observed), n))
-        d_obs_dp = np.zeros((len(observed), m))
-        for column, t in enumerate(grid):
-            y = np.ascontiguousarray(states[:, column])
-            scratch = w.copy()
-            kernel.latch(float(t), y, p, scratch)
+    seen = np.zeros((len(observed), len(grid)))
+    d_obs_dy = np.zeros((len(observed), n))
+    d_obs_dp = np.zeros((len(observed), m))
+    for column, t in enumerate(grid):
+        y = np.ascontiguousarray(states[:, column])
+        scratch = w.copy()
+        kernel.latch(float(t), y, p, scratch)
+        seen[:, column] = kernel.observe(float(t), y, p, scratch, np.empty(len(observed)))
+        if kernel.observe_jacobian is not None:
             kernel.observe_jacobian(float(t), y, p, scratch, d_obs_dy)
             kernel.observe_jacobian_parameters(float(t), y, p, scratch, d_obs_dp)
             output[:, :, column] = d_obs_dy @ rows[:, :, column] + d_obs_dp
@@ -220,6 +243,7 @@ def sensitivity(  # noqa: PLR0913 - a solver has knobs, and this one has the sam
         parameters=named,
         states=kernel.code.states,
         values=states,
+        trajectory=seen,
         state=rows,
         observed=observed,
         output=output,
@@ -289,6 +313,7 @@ def identifiability(  # noqa: PLR0913 - the integration knobs, spelled out rathe
     absolute: float | None = None,
     method: str = "Radau",
     initial: NDArray[np.float64] | None = None,
+    values: NDArray[np.float64] | None = None,
 ) -> Identifiability:
     """Which of ``parameters`` the ``measurements`` can separate -- **no data required**.
 
@@ -332,12 +357,13 @@ def identifiability(  # noqa: PLR0913 - the integration knobs, spelled out rathe
         absolute=absolute,
         method=method,
         initial=initial,
+        values=values,
     )
     taken = np.searchsorted(exact.time, grid)
 
     kernel = model if isinstance(model, Kernel) else build(model, sensitivity=named)
     declared = list(kernel.code.parameters)
-    values = kernel.parameters(np.zeros(len(declared)))
+    scale = kernel.parameters(np.zeros(len(declared))) if values is None else values
 
     blocks: list[NDArray[np.float64]] = []
     for measurement in watched:
@@ -345,7 +371,7 @@ def identifiability(  # noqa: PLR0913 - the integration knobs, spelled out rathe
             message = f"{kernel.name} has no variable {measurement!r} to measure"
             raise SimulationError(message)
         block = exact.output[exact.observed.index(measurement)][:, taken]
-        scaled = block * np.array([values[declared.index(name)] for name in named])[:, None]
+        scaled = block * np.array([scale[declared.index(name)] for name in named])[:, None]
         blocks.append(scaled.T / max(float(np.abs(scaled).max()), np.finfo(float).tiny))
 
     matrix = np.vstack(blocks)
@@ -357,4 +383,169 @@ def identifiability(  # noqa: PLR0913 - the integration knobs, spelled out rathe
         measurements=watched,
         singular=singular,
         directions=directions,
+    )
+
+
+@dataclass(frozen=True)
+class Fit:
+    """Fitted parameters, the residual they leave, and the conditioning they were fit at."""
+
+    name: str
+    parameters: tuple[str, ...]
+    values: NDArray[np.float64]
+    """The fitted values, in :attr:`parameters` order."""
+
+    residual: float
+    """Root-mean-square of the *scaled* residual over every measurement and every sample.
+
+    Each measurement is scaled by its own spread, the way `identifiability` scales its rows,
+    so a kelvin and a milliamp weigh the same. An unscaled residual is a number about units.
+    """
+
+    iterations: int
+    conditioning: Identifiability
+    """What `identifiability` said **at the fitted values**, carried rather than summarised.
+
+    This is why `Fit` is a record and not a vector. A residual on its own is exactly the thing
+    that makes a bad fit look like a good one: parameters that move every measurement together
+    drive the residual to nothing and land anywhere along the invisible direction. The two
+    numbers only mean something read together, so they are returned together.
+    """
+
+    def __str__(self) -> str:
+        fitted = ", ".join(
+            f"{name} = {value:.6g}"
+            for name, value in zip(self.parameters, self.values, strict=True)
+        )
+        return (
+            f"{self.name}: {fitted}\n  residual {self.residual:.3e} after {self.iterations}"
+            f" iterations, at condition {self.conditioning.condition:.3g}"
+        )
+
+
+class FitError(Exception):
+    """A fit that was refused, or that did not settle, and why."""
+
+
+ITERATIONS = 40
+"""Gauss-Newton steps before giving up. One step is one sensitivity integration."""
+
+SETTLED = 1e-10
+"""Relative parameter movement below which the iteration has stopped moving."""
+
+
+def fit(  # noqa: PLR0913 - what is being fitted, plus the integration knobs
+    model: System | Code | Kernel,
+    parameters: Sequence[str],
+    measurements: Mapping[str, tuple[Sequence[float], Sequence[float]]],
+    *,
+    stop: float,
+    tolerance: float = 1e-8,
+    method: str = "Radau",
+    separable: float = 1e-6,
+) -> Fit:
+    """Fit ``parameters`` to ``measurements`` by Gauss-Newton on exact sensitivities.
+
+    ``measurements`` maps an observed variable to ``(times, values)``. The times must lie in
+    ``[0, stop]``; they need not be the same for two measurements, and are not resampled.
+
+    **A parameter set the measurements cannot separate is refused**, which is the reason this
+    lives beside `identifiability` rather than in a caller's script. The report is taken at the
+    starting parameters, and a subset whose weakest direction falls below ``separable`` gets a
+    `FitError` naming the invisible combination instead of a number that looks like an answer.
+    ``separable=0`` fits anyway: the refusal is a default and not a prohibition, because a
+    caller who knows the product is what they want is not making a mistake.
+
+    Gauss-Newton, on an exact Jacobian, which is the case it is for. Not a global optimiser and
+    not a trust region: the entry that asked for this rules the first out because a global
+    search on an unidentifiable problem only finds one of the many answers faster, and the
+    second is machinery this has no evidence of needing. When Gauss-Newton fails it fails by
+    not settling, and that is reported rather than returned.
+    """
+    named, watched = tuple(parameters), tuple(measurements)
+    kernel = model if isinstance(model, Kernel) else build(model, sensitivity=named)
+    for measurement in watched:
+        if measurement not in kernel.code.observed:
+            message = f"{kernel.name} has no variable {measurement!r} to measure"
+            raise FitError(message)
+
+    grid = np.unique(
+        np.concatenate([np.asarray(times, dtype=float) for times, _ in measurements.values()])
+    )
+    if grid.min() < 0.0 or grid.max() > stop:
+        message = (
+            f"{kernel.name}: measurement times {grid.min():g}..{grid.max():g} leave [0, {stop:g}]"
+        )
+        raise FitError(message)
+
+    declared = list(kernel.code.parameters)
+    slots = [declared.index(name) for name in named]
+    point = kernel.parameters(np.zeros(len(declared)))
+
+    def moved(current: NDArray[np.float64]) -> NDArray[np.float64]:
+        vector = point.copy()
+        vector[slots] = current
+        return vector
+
+    def conditioning(current: NDArray[np.float64]) -> Identifiability:
+        return identifiability(
+            kernel,
+            named,
+            watched,
+            stop=stop,
+            points=max(len(grid), 8),
+            tolerance=tolerance,
+            method=method,
+            values=moved(current),
+        )
+
+    values = point[slots].astype(float)
+    start = conditioning(values)
+    if separable and start.inseparable(separable):
+        combination = " ".join(f"{w:+.3f}*{n}" for n, w in start.inseparable(separable))
+        message = (
+            f"{kernel.name}: {list(watched)} cannot separate {list(named)} -- condition"
+            f" {start.condition:.3g}, invisible combination {combination}. Add a measurement,"
+            " fit fewer parameters, or pass `separable=0` and read the conditioning yourself"
+        )
+        raise FitError(message)
+
+    residual = np.zeros(0)
+    taken_steps = 0
+    for taken_steps in range(1, ITERATIONS + 1):  # noqa: B007 - the count is reported
+        exact = sensitivity(
+            kernel,
+            named,
+            stop=stop,
+            times=grid,
+            tolerance=tolerance,
+            method=method,
+            values=moved(values),
+        )
+        taken = np.searchsorted(exact.time, grid)
+        errors: list[NDArray[np.float64]] = []
+        rows: list[NDArray[np.float64]] = []
+        for measurement, (times, wanted) in measurements.items():
+            row = exact.observed.index(measurement)
+            where = np.searchsorted(grid, np.asarray(times, dtype=float))
+            target = np.asarray(wanted, dtype=float)
+            spread = max(float(np.ptp(target)), 1.0)
+            errors.append((exact.trajectory[row][taken][where] - target) / spread)
+            rows.append(exact.output[row][:, taken][:, where].T / spread)
+        residual = np.concatenate(errors)
+        step, *_ = np.linalg.lstsq(np.vstack(rows), -residual, rcond=None)
+        values = values + step
+        if float(np.max(np.abs(step) / np.maximum(np.abs(values), 1e-30))) < SETTLED:
+            break
+    else:
+        message = f"{kernel.name}: {ITERATIONS} Gauss-Newton steps without settling"
+        raise FitError(message)
+
+    return Fit(
+        name=kernel.name,
+        parameters=named,
+        values=values,
+        residual=float(np.sqrt(np.mean(residual**2))),
+        iterations=taken_steps,
+        conditioning=conditioning(values),
     )
