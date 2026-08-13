@@ -1204,6 +1204,12 @@ class Emitter:
     def differentiate_parameters(self, mode: Mode) -> list[str]:
         """``d(der)/dp`` -- the sensitivity, for the parameters the caller asked about.
 
+        Nobody asked, nothing to write. With no parameters named, ``_pseed`` is ``eye(0)`` and
+        every row is ``_pnull`` of width zero, so ``out`` has no elements to fill and the
+        honest body is one line. Without this the walk over every block is emitted in full to
+        produce an array with no columns in it: 605 lines on a 200-cell bar, and the same
+        again for the observed one.
+
         The same forward mode as `differentiate` with the seed moved: rows start on the
         parameters instead of on the states, and every block downstream carries them the
         same way. Identification and uncertainty propagation are what want this, and both
@@ -1214,6 +1220,8 @@ class Emitter:
         width of every tangent row in the function. A model with forty parameters asked about
         three emits three columns.
         """
+        if not self.sensitivity:
+            return ["return out"]
         lines, carried = self.tangent(mode, self.sensitivity)
         lines.extend(
             f"out[{slot}] = {carried.get(mode.derivative[state]) or '_pnull'}"
@@ -1223,6 +1231,8 @@ class Emitter:
 
     def differentiate_observed_parameters(self, mode: Mode) -> list[str]:
         """``d(observed)/dp``. `differentiate_parameters` read off one step earlier."""
+        if not self.sensitivity:
+            return ["return out"]
         lines, carried = self.tangent(mode, self.sensitivity)
         lines.extend(
             f"{self.symbols[name]} = {self.expr(node)}"
