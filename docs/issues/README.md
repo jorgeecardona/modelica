@@ -96,11 +96,10 @@ cabildo issues show <slug>
 | [Stages 2 and 3 of the benchmark: HIRES, E5, Ring Modulator, and ScalableTestSuite](10-08-2026-stages-2-and-3-of-the-benchmark-hires-e5-ring-modulator-and.md) | sim | story | L | probe | open | — |
 | [A TypeScript backend is a third dialect plus a port of radau.py, and it would put models in the browser](11-08-2026-a-typescript-backend-is-a-third-dialect-plus-a-port-of-radau.md) | sim | idea | L | probe | open | — |
 | [A SciPy ValueError escapes simulate when two crossings sit on zero at the same instant](13-08-2026-a-scipy-valueerror-escapes-simulate-when-two-crossings-sit-on-zero-at.md) | sim | bug | S | test | open | — |
-| [The standstill counter cannot fire, because a chattering run advances by the re-arm distance and that is a thousand times the standstill threshold](13-08-2026-the-standstill-counter-cannot-fire-because-a-chattering-run-advances-by-the.md) | sim | bug | S | test | open | — |
 | [A fixed-step co-simulation schedule never branches, so it could be recorded once](03-08-2026-replay-a-fixed-step-cosimulation-schedule.md) | ssp | idea | M | probe | open | ssp-read-the-archive-and-run-the-master |
 | [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Nothing checks that index reduction preserves the solution set, because that needs numbers and the generator makes structure](13-08-2026-nothing-checks-that-index-reduction-preserves-the-solution-set-because-that-needs.md) | verify | story | M | test | open | — |
 
-_21 open — 17 open, 1 in-progress, 3 blocked; 45 done. Generated; edit the files, then `cabildo issues reindex`._
+_20 open — 16 open, 1 in-progress, 3 blocked; 46 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

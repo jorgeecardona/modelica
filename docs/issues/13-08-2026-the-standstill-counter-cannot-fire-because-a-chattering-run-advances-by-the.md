@@ -1,9 +1,10 @@
 ---
 title: The standstill counter cannot fire, because a chattering run advances by the re-arm distance and that is a thousand times the standstill threshold
-status: in-progress
+status: done
 area: sim
 owner: quiet-tars-187f2
 filed: 2026-08-13
+fixed_in: fcef55c
 kind: bug
 scope: S
 verify: test
