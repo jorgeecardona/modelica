@@ -157,3 +157,28 @@ the rows are already `n` wide and `n` of them are alive whatever the output shap
 That is a real emitter change rather than a rename, and it is the next thing to take on this
 entry. It is still much smaller than narrow rows, which needs `combination` to align two
 supports on every add.
+
+### What the shared-walk change actually costs, read off the code
+
+Two details found while reading `emit.py` for it, both of which decide the shape and neither
+of which is visible from the docstrings.
+
+**The row index has to be computed once and shared, not derived twice.** `tangent(mode)`
+returns `(lines, carried)`, and `carried` is a mapping from variable name to the *local
+symbol* holding its row. A scratch indexed by variable needs a name-to-slot order, and the
+writer and both gatherers must agree on it. Deriving it by calling `tangent(mode)` again in
+each gatherer would agree -- the walk is deterministic -- but it re-runs the whole symbolic
+walk three times per mode at emit time, and emit is already the slow half (1.83 s at
+n = 1000, against 0.50 s to build). So `Emitter` needs the walk cached per mode, which it
+does not have today: `differentiate` and `differentiate_sparse` each call `tangent` fresh.
+
+**`seeds` means there are five walkers, not two.** `tangent(mode, seeds=...)` is also what
+`differentiate_parameters`, `differentiate_observed` and `differentiate_observed_parameters`
+use -- the whole of the difference is which rows are seeded. So a scratch shared by the two
+state-seeded gatherers is the narrow version of this change; the general version is one
+scratch per seeding, and `observe_jacobian` at 6,011 lines is the largest single function in
+the module and is *not* covered by the narrow one.
+
+Neither is a reason not to do it. They are the reason it is an emitter change with a cache in
+it rather than three lines moved, and whoever takes it should know before starting that the
+narrow version leaves the biggest function untouched.
