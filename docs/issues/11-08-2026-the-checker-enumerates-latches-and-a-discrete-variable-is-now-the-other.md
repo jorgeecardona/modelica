@@ -1,9 +1,10 @@
 ---
 title: The checker enumerates latches, and a discrete variable is now the other half of the state
-status: in-progress
+status: done
 area: verify
 owner: quiet-tars-187f2
 filed: 2026-08-11
+fixed_in: 3f44912
 kind: story
 scope: M
 verify: test

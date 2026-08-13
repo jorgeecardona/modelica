@@ -100,7 +100,6 @@ cabildo issues show <slug>
 | [Chattering across instants is watched by a counter, and the checker cannot see it](03-08-2026-chattering-across-instants.md) | verify | idea | M | probe | open | — |
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 | [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
-| [The checker enumerates latches, and a discrete variable is now the other half of the state](11-08-2026-the-checker-enumerates-latches-and-a-discrete-variable-is-now-the-other.md) | verify | story | M | test | open | — |
 
-_21 open — 17 open, 1 in-progress, 3 blocked; 40 done. Generated; edit the files, then `cabildo issues reindex`._
+_20 open — 16 open, 1 in-progress, 3 blocked; 41 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->
