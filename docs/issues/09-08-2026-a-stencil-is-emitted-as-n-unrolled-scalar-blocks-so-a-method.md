@@ -296,3 +296,40 @@ Which means **every remaining item on this entry is one of the two shape changes
 that survives `flatten` so the emitter can write a loop, and narrow tangent rows. The
 constant-factor work is finished, and this entry should be read as being about those two from
 here.
+
+## What the loop would actually save, measured 2026-08-13
+
+This entry now has two items left and both change the growth rather than the constant. The
+larger is "an array that survives `flatten` so the emitter can write a loop". Before anybody
+starts it, here is the size of the prize, taken by normalising every cell index out of each
+emitted line and counting how many *distinct shapes* remain.
+
+| n = 1000 | lines | distinct shapes | in a shape repeated 3+ times |
+| --- | --- | --- | --- |
+| `jacobian` | 5,004 | **11** | 99.8 % |
+| `jacobian_sparse` | 5,004 | **11** | 99.8 % |
+| `observe` | 4,005 | **9** | 99.8 % |
+| `initial` | 3,005 | **6** | 99.8 % |
+| `rhs` | 3,004 | **7** | 99.8 % |
+| `indicators` | 1,004 | **3** | 99.6 % |
+| whole module | 22,043 | -- | **95.2 %** |
+
+Eleven shapes in a five-thousand-line function. At `n = 200` the same functions have the same
+eleven, and the module reads 94.3 % rather than 95.2 % -- the boundary rows are a fixed cost
+and everything else is one shape per turn of a loop.
+
+So the loop is not a constant-factor win with a good ratio. **It takes the uniform part of the
+module from `O(n)` to `O(1)`**, and what would be left at any `n` is the two boundary
+equations and the handful of shapes above. That is the whole of this entry's title.
+
+### And the first version of this measurement said 27 %
+
+Worth recording because it was wrong for an ordinary reason. The normalisation replaced
+`T_37_` with `T_#_` and left the subscript in `y[36]` alone, so `T_1_ = y[0]` and
+`T_2_ = y[1]` counted as two shapes and the unpack block -- 600 of `initial`'s 605 lines --
+scored zero repetition. A cell index appears in three forms in this source, the flattened
+name, a subscript and a slice, and a measurement of "how uniform is this" is exactly as good
+as its notion of sameness.
+
+The correction is three narrow patterns rather than one `\d+`, because `0.4` must not become
+`#.#`. 27 % to 95.2 % on the same source.
