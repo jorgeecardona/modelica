@@ -650,6 +650,21 @@ class Emitter:
     observed: tuple[str, ...] = ()
     watched: tuple[ir.Binary, ...] = ()
     held: dict[ir.Expr, ir.Expr] = field(default_factory=dict[ir.Expr, ir.Expr])
+    walks: dict[tuple[int, tuple[str, ...] | None], tuple[list[str], dict[str, str]]] = field(
+        default_factory=dict[
+            "tuple[int, tuple[str, ...] | None]", "tuple[list[str], dict[str, str]]"
+        ]
+    )
+    """The forward-mode walk of each (mode, seeding), computed once.
+
+    Five methods differentiate, and the seeding is the whole of what separates them --
+    `differentiate` and `differentiate_sparse` do not even differ in that, so the walk was
+    running twice for one answer. It is the expensive half of emitting: at n = 1000 on a
+    method-of-lines bar, emit takes 1.8 s against 0.5 s to flatten and causalize.
+
+    Keyed on ``id(mode)`` because a `Mode` carries a `Mapping` and is not hashable, and the
+    modes outlive this object anyway.
+    """
     """Each watched relation, mapped to the test on its latch slot that replaces it."""
 
     tangents: dict[str, str] = field(default_factory=dict[str, str])
@@ -1067,6 +1082,23 @@ class Emitter:
         return lines
 
     def tangent(
+        self, mode: Mode, seeds: Sequence[str] | None = None
+    ) -> tuple[list[str], dict[str, str]]:
+        """The walk for one (mode, seeding), from `walks` if it has been asked for before.
+
+        Fresh copies out, every time. Callers *extend* the lines they get back -- the
+        gatherers append their own output rows to them -- so handing out the cached list
+        itself would let the second caller read the first one's tail.
+        """
+        key = (id(mode), None if seeds is None else tuple(seeds))
+        found = self.walks.get(key)
+        if found is None:
+            found = self._walk(mode, seeds)
+            self.walks[key] = found
+        lines, carried = found
+        return list(lines), dict(carried)
+
+    def _walk(
         self, mode: Mode, seeds: Sequence[str] | None = None
     ) -> tuple[list[str], dict[str, str]]:
         """Forward mode over the very blocks the right-hand side runs, and what it reached.
