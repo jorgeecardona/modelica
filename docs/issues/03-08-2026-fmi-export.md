@@ -103,3 +103,24 @@ them, and the round trip through FMPy. And the docs disagreement between
 `docs/architecture.md:236` and `docs/ideas/backends.md:42` is **not** resolved -- writing the
 description does not decide whether the deliverable is Python-backed or a C translation unit,
 and that decision should be made in the open rather than by whichever file gets written next.
+
+### Unit definitions, and the schema order that hides a mistake
+
+`UnitDefinitions` is the Done list's fourth item and it landed with the description. Two things
+in it are worth having written down.
+
+**The order is fixed and invisible.** FMI 3.0's schema puts `UnitDefinitions` *before*
+`ModelVariables`, and a document with the right content in the wrong order reads perfectly
+fine to a person while a validating importer rejects it. The first version had it after. A
+test asserts the order rather than the content.
+
+**The table of decompositions is deliberately short.** The corpus uses 37 distinct unit
+strings; `_BASE` knows 21. The rest -- ``W/K``, ``N.m.s/rad``, ``1/(K.s)`` -- get a `<Unit>`
+with a name and no `<BaseUnit>`, which is legal and says exactly what is true: this is the
+string the model used and nothing here claims to convert it. Parsing Modelica's unit grammar
+to derive exponents is a real piece of work; guessing is worse than declining.
+
+``degC`` is why the table exists rather than being skipped entirely. It is the only unit in the
+corpus that is not a product of powers -- converting it to kelvin means adding 273.15, the
+``offset`` attribute is the only place that can be said, and getting it wrong is a
+twenty-degree error in somebody else's plot.

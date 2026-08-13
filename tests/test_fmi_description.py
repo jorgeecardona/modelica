@@ -145,3 +145,57 @@ def test_the_document_is_fmi_three() -> None:
     assert root.get("fmiVersion") == "3.0"
     assert root.get("instantiationToken") is None
     assert root.find("./ModelExchange") is not None
+
+
+def test_every_unit_a_variable_names_is_defined_before_the_variables() -> None:
+    """A dangling unit reference, and the schema order that hides one.
+
+    Two claims. Every ``unit=`` on a variable resolves to a ``<Unit>`` -- an importer reading
+    one that does not is entitled to reject the FMU. And ``UnitDefinitions`` comes *before*
+    ``ModelVariables``, because FMI 3.0 fixes the order of these children and a document with
+    the right content in the wrong order is rejected by a validating reader while looking
+    perfectly fine to a person.
+    """
+    root = _described("RoastingMachine")
+    order = [child.tag for child in root]
+    assert order.index("UnitDefinitions") < order.index("ModelVariables")
+    assert order.index("ModelVariables") < order.index("ModelStructure")
+
+    defined = {unit.get("name", "") for unit in root.iterfind("./UnitDefinitions/Unit")}
+    used = {
+        element.get("unit", "")
+        for element in root.iterfind("./ModelVariables/*")
+        if element.get("unit")
+    }
+    assert used <= defined, f"undefined units: {sorted(used - defined)}"
+
+
+def test_degrees_celsius_carries_its_offset() -> None:
+    """The one unit in the corpus that is not a product of powers.
+
+    Converting ``degC`` to kelvin means adding 273.15, and ``offset`` is the only place that
+    can be said. Getting it wrong is a twenty-degree error in somebody else's plot, which is
+    exactly the kind of mistake an exporter makes silently.
+    """
+    root = _described("NewtonCooling")
+    celsius = next(
+        unit for unit in root.iterfind("./UnitDefinitions/Unit") if unit.get("name") == "degC"
+    )
+    base = celsius.find("./BaseUnit")
+    assert base is not None
+    assert base.get("K") == "1"
+    assert base.get("offset") == "273.15"
+
+
+def test_a_unit_this_package_cannot_decompose_is_named_and_not_guessed() -> None:
+    """``W/K`` gets a `<Unit>` with no `<BaseUnit>`, which is legal and honest.
+
+    Parsing Modelica's unit grammar to derive exponents is a real piece of work; guessing them
+    is worse than declining. A named unit with no decomposition says what is true -- this is
+    the string the model used -- and claims nothing about converting it.
+    """
+    root = _described("TwoBodyHeat")
+    named = {unit.get("name", ""): unit for unit in root.iterfind("./UnitDefinitions/Unit")}
+    assert "W/K" in named, sorted(named)
+    assert named["W/K"].find("./BaseUnit") is None
+    assert named["K"].find("./BaseUnit") is not None, "the ones we do know still carry theirs"
