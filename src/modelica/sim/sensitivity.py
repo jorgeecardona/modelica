@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from modelica.ir.system import System
     from modelica.sim.emit import Code
 
-__all__ = ["Sensitivity", "sensitivity"]
+__all__ = ["Identifiability", "Sensitivity", "identifiability", "sensitivity"]
 
 
 @dataclass(frozen=True)
@@ -223,4 +223,138 @@ def sensitivity(  # noqa: PLR0913 - a solver has knobs, and this one has the sam
         state=rows,
         observed=observed,
         output=output,
+    )
+
+
+@dataclass(frozen=True)
+class Identifiability:
+    """Which parameters a set of measurements can tell apart, from the model alone."""
+
+    name: str
+    parameters: tuple[str, ...]
+    measurements: tuple[str, ...]
+    singular: NDArray[np.float64]
+    """Singular values of the scaled sensitivity matrix, descending."""
+
+    directions: NDArray[np.float64]
+    """Right singular vectors, one per row, in the same order as :attr:`singular`.
+
+    The last row is the combination of parameters the measurements see *least*. When
+    :attr:`condition` is large that row is the answer to "which two cannot be separated": it
+    says how to move the parameters so that nothing measured changes.
+    """
+
+    @property
+    def condition(self) -> float:
+        """Largest singular value over smallest. Infinite when a direction is invisible."""
+        smallest = float(self.singular[-1])
+        return float("inf") if smallest == 0.0 else float(self.singular[0]) / smallest
+
+    def inseparable(self, threshold: float = 1e-6) -> tuple[tuple[str, float], ...]:
+        """The parameters in the weakest direction, largest weight first, or nothing.
+
+        Empty when every direction is seen -- when the smallest singular value is more than
+        ``threshold`` of the largest. The two corpus readings that bracket the default are
+        `RCCircuit`'s ``R`` and ``C`` from the capacitor voltage at **5.1e-15** and
+        `MassSpringDamper`'s stiffness and damping from the position at **2.0e-1**. Fourteen
+        orders of daylight, so the default sits in the middle of it on a log scale rather than
+        at either edge.
+        """
+        if float(self.singular[-1]) > threshold * float(self.singular[0]):
+            return ()
+        weights = self.directions[-1]
+        order: list[int] = [int(index) for index in np.argsort(-np.abs(weights))]
+        return tuple((self.parameters[index], float(weights[index])) for index in order)
+
+    def __str__(self) -> str:
+        weak = self.inseparable()
+        head = (
+            f"{self.name}: {len(self.parameters)} parameters from"
+            f" {len(self.measurements)} measurements, condition {self.condition:.3g}"
+        )
+        if not weak:
+            return head + " -- separable"
+        combination = " ".join(f"{value:+.3f}*{name}" for name, value in weak)
+        return head + f"\n  invisible combination: {combination}"
+
+
+def identifiability(  # noqa: PLR0913 - the integration knobs, spelled out rather than **kwargs
+    model: System | Code | Kernel,
+    parameters: Sequence[str],
+    measurements: Sequence[str],
+    *,
+    stop: float,
+    points: int = 40,
+    tolerance: float = 1e-6,
+    absolute: float | None = None,
+    method: str = "Radau",
+    initial: NDArray[np.float64] | None = None,
+) -> Identifiability:
+    """Which of ``parameters`` the ``measurements`` can separate -- **no data required**.
+
+    This is the diagnostic the fit is dangerous without. A least-squares fit over parameters
+    that move every measurement together converges to *a* pair, matches the data it was shown,
+    is wrong everywhere else, and reports a small residual while being wrong. Whether that can
+    happen is a property of the model and the sensor set, not of the data, so it is answerable
+    before any data exists.
+
+    The matrix is ``d(measurement)/d(log p)`` stacked over parameters and sample times, and
+    the two scalings are the whole of what makes the condition number mean anything.
+
+    **Columns are scaled by the parameter's own value**, which makes them
+    ``d m / d log p`` -- a resistance in ohms and a capacitance in farads are otherwise being
+    compared by their units, and the condition number would say more about SI than about the
+    model.
+
+    **Each measurement's rows are scaled by that measurement's own largest sensitivity.** A
+    bath temperature in kelvin and a current in milliamps would otherwise be weighted by how
+    big their numbers happen to be, and a well-placed small sensor would count for nothing.
+
+    ``points`` samples the trajectory uniformly. More rows cannot make a visible direction
+    invisible; they can only fill in a direction that a coarse grid missed.
+
+    **A large condition number is bounded by ``tolerance``, and a caller reading one should
+    know it.** When a direction is genuinely invisible its singular value is round-off, so
+    what comes out is how accurately the sensitivity was integrated rather than a property of
+    the model: `RCCircuit`'s ``R`` and ``C`` from the voltage read 1.7e10 at the default 1e-6
+    and 1.9e14 at 1e-9. The *conclusion* is the same at both -- fourteen orders from anything
+    separable -- and the number is not a measurement of the model. A condition number in the
+    single digits, which is the useful other answer, does not move with the tolerance.
+    """
+    named, watched = tuple(parameters), tuple(measurements)
+    grid = np.linspace(0.0, stop, points + 1)[1:]
+    exact = sensitivity(
+        model,
+        named,
+        stop=stop,
+        times=grid,
+        tolerance=tolerance,
+        absolute=absolute,
+        method=method,
+        initial=initial,
+    )
+    taken = np.searchsorted(exact.time, grid)
+
+    kernel = model if isinstance(model, Kernel) else build(model, sensitivity=named)
+    declared = list(kernel.code.parameters)
+    values = kernel.parameters(np.zeros(len(declared)))
+
+    blocks: list[NDArray[np.float64]] = []
+    for measurement in watched:
+        if measurement not in exact.observed:
+            message = f"{kernel.name} has no variable {measurement!r} to measure"
+            raise SimulationError(message)
+        block = exact.output[exact.observed.index(measurement)][:, taken]
+        scaled = block * np.array([values[declared.index(name)] for name in named])[:, None]
+        blocks.append(scaled.T / max(float(np.abs(scaled).max()), np.finfo(float).tiny))
+
+    matrix = np.vstack(blocks)
+    singular = np.linalg.svd(matrix, compute_uv=False)
+    _, _, directions = np.linalg.svd(matrix, full_matrices=False)
+    return Identifiability(
+        name=kernel.name,
+        parameters=named,
+        measurements=watched,
+        singular=singular,
+        directions=directions,
     )

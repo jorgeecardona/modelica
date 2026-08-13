@@ -42,7 +42,12 @@ from modelica.sim.kernel import build as build
 from modelica.sim.matfile import read as read
 from modelica.sim.result import Event as Event
 from modelica.sim.result import Result as Result
-from modelica.sim.sensitivity import Sensitivity, sensitivity
+from modelica.sim.sensitivity import (
+    Identifiability,
+    Sensitivity,
+    identifiability,
+    sensitivity,
+)
 from modelica.sim.steady import Steady as Steady
 from modelica.sim.steady import SteadyError as SteadyError
 from modelica.sim.steady import steady as steady
@@ -62,6 +67,7 @@ __all__ = [
     "Divergence",
     "EmitError",
     "Event",
+    "Identifiability",
     "Kernel",
     "Result",
     "Sensitivity",
@@ -79,6 +85,7 @@ __all__ = [
     "emit_expr",
     "flatten",
     "grid",
+    "identifiability",
     "read",
     "sensitivity",
     "simulate",

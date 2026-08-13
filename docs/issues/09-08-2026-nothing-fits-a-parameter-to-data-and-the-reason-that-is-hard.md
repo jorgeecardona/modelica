@@ -143,3 +143,66 @@ Also new, and both blocking a *complete* answer rather than the next piece:
   names for its probe -- cannot be built until forward sensitivity crosses an event.
 
 1554 pass, typecheck 0.
+
+## The second piece landed the same day: the identifiability report
+
+`modelica.sim.identifiability`. The scaled sensitivity matrix over a parameter set and a
+measurement set, its singular values, and the combination the measurements see least. **No
+data required**, which is this entry's own argument for building it before the fit.
+
+### The failure this entry describes, on a corpus model, with the exact answer
+
+`RCCircuit`, fitting `r.R` and `c.C` from the capacitor voltage:
+
+    RCCircuit: 2 parameters from 1 measurements, condition 1.95e+14
+      invisible combination: -0.707*r.R +0.707*c.C
+
+``c.v`` decays as ``exp(-t/(R*C))``, so it sees the *product* and nothing else. Double ``R``
+and halve ``C`` and every sample is unchanged. The weakest direction comes out at exactly 45
+degrees -- ``sqrt(1/2)`` to three places -- which is the analytic null of ``log R + log C``
+rather than an approximation of it, because the columns are scaled to ``d/d log p``.
+
+That is the welding failure from the LinkedIn post, in four lines and without a workpiece: a
+least-squares fit over both would converge to whichever pair the optimiser wandered into,
+report a small residual, and be wrong about the current.
+
+### And the advice, arrived at from the model
+
+His procedure is two staged fits ordered by sensitivity -- the far thermocouple first, where
+the shape barely matters. The same shape here. ``r.i`` is ``C * d(c.v)/dt``, so it carries
+``C`` on its own:
+
+| measured | condition |
+| --- | --- |
+| `c.v` | **1.95e14** |
+| `c.v` and `r.i` | **3.32** |
+
+Nothing was measured to find that out. It is a statement about the model and the sensor set,
+which is what this entry inferred it would be.
+
+### The negative case, so the report is not a machine for finding something
+
+`NewtonCooling`'s ``k`` and ``T_amb`` from ``T`` read **2.92**; `MassSpringDamper`'s stiffness
+and damping from the position read **5.06**. Fourteen orders from the RC reading, which is the
+gap `Identifiability.inseparable`'s default threshold of 1e-6 sits in the middle of on a log
+scale.
+
+### One thing a caller has to know
+
+**A large condition number is bounded by the integration tolerance.** An invisible direction's
+singular value is round-off, so what comes out measures how accurately the sensitivity was
+integrated: the RC reading is 1.7e10 at the default `rtol = 1e-6` and 1.9e14 at 1e-9. The
+*conclusion* is identical at both and the separable numbers do not move at all -- but the big
+number is not a property of the model and the docstring says so.
+
+`tests/test_sensitivity_forward.py`, 12 tests.
+
+### What is left
+
+The third piece: a fit that takes measurements and a parameter subset, holds the rest, and
+reports the residual *together with* the conditioning it fit at -- refusing, rather than
+returning a number, when this report says the subset is inseparable. Its input now exists.
+
+Unchanged from the note above, and both still blocking a complete answer: `dy0/dp` is not
+emitted, and forward sensitivity refuses a model with events -- which `RoastingMachine`, the
+model this entry names for its probe, has nine of.

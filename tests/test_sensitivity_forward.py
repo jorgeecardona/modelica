@@ -158,3 +158,96 @@ def test_asking_for_a_parameter_the_kernel_was_not_built_for_is_refused() -> Non
     system = _system("NewtonCooling")
     with pytest.raises(error, match="build it with `sensitivity=`"):
         forward(build(system), ["k"], stop=1.0)
+
+
+# --------------------------------------------------------------------------------------
+# Which parameters the measurements can tell apart
+# --------------------------------------------------------------------------------------
+
+
+def test_a_resistance_and_a_capacitance_cannot_be_separated_from_the_voltage_alone() -> None:
+    """The failure the fit has to be protected from, on a corpus model, with the exact answer.
+
+    ``c.v`` decays as ``exp(-t / (R*C))``, so the voltage sees the *product* and nothing else.
+    Double ``R`` and halve ``C`` and every sample is unchanged, which means the direction
+    ``log C - log R`` is invisible and a least-squares fit over both would converge to
+    whichever pair the optimiser wandered into, report a small residual, and be wrong about
+    the current.
+
+    The report says so from the model alone: condition **1.95e14** at ``rtol = 1e-9``, and the
+    weakest direction
+    comes out ``[-0.707, +0.707]`` -- the analytic answer, not an approximation of it, since
+    the columns are scaled to ``d/d log p`` and the null direction of ``log R + log C`` is
+    exactly the difference at 45 degrees.
+    """
+    report = pytest.importorskip("modelica.sim.sensitivity").identifiability
+    found = report(
+        _system("RCCircuit"),
+        ["r.R", "c.C"],
+        ["c.v"],
+        stop=float(_spec("RCCircuit")["stop"]),
+        tolerance=TOLERANCE,
+    )
+    assert found.condition > 1e12
+    weak = dict(found.inseparable())
+    assert set(weak) == {"r.R", "c.C"}
+    assert weak["r.R"] * weak["c.C"] < 0, "the invisible move is a trade, not a scaling"
+    np.testing.assert_allclose([abs(v) for v in weak.values()], np.sqrt(0.5), rtol=1e-3)
+
+
+def test_measuring_the_current_as_well_separates_them() -> None:
+    """And this is the advice the entry's source gives, arrived at from the model.
+
+    His procedure is two staged fits ordered by sensitivity, because "temperatures close to
+    the weld line are influenced by both the thermal efficiency and the heat source shape".
+    The same shape here: ``r.i`` is ``C * d(c.v)/dt``, so it carries ``C`` on its own and
+    breaks the tie the voltage cannot.
+
+    Condition 1.95e14 with the voltage alone, **3.32** with the current beside it. Nothing was
+    measured to find that out -- it is a statement about the model and the sensor set.
+
+    Both are read at ``rtol = 1e-9`` rather than the default, and that matters for the first
+    number only: an invisible direction's singular value is round-off, so it is bounded by how
+    accurately the sensitivity was integrated. The same call at the default 1e-6 reads 1.7e10
+    instead of 1.9e14. The *separable* number does not move.
+    """
+    report = pytest.importorskip("modelica.sim.sensitivity").identifiability
+    stop = float(_spec("RCCircuit")["stop"])
+    alone = report(_system("RCCircuit"), ["r.R", "c.C"], ["c.v"], stop=stop, tolerance=TOLERANCE)
+    both = report(
+        _system("RCCircuit"), ["r.R", "c.C"], ["c.v", "r.i"], stop=stop, tolerance=TOLERANCE
+    )
+    assert both.condition < 10
+    assert alone.condition / both.condition > 1e12
+    assert both.inseparable() == (), str(both)
+
+
+@pytest.mark.parametrize(
+    ("stem", "parameters", "measured"),
+    [
+        ("NewtonCooling", ["k", "T_amb"], ["T"]),
+        ("MassSpringDamper", ["spring.c", "damper.d"], ["mass.s"]),
+    ],
+    ids=["cooling", "oscillator"],
+)
+def test_parameters_that_are_separable_are_reported_as_separable(
+    stem: str, parameters: list[str], measured: list[str]
+) -> None:
+    """The negative case, which is what stops the report from always finding something.
+
+    `NewtonCooling` reads 2.92 and `MassSpringDamper` 5.06 -- a rate and an ambient move the
+    trajectory in different shapes, and so do a stiffness and a damping. Both are fourteen
+    orders away from the RC reading above, which is the gap `Identifiability.inseparable`'s
+    default threshold sits in the middle of.
+    """
+    report = pytest.importorskip("modelica.sim.sensitivity").identifiability
+    found = report(_system(stem), parameters, measured, stop=float(_spec(stem)["stop"]))
+    assert found.condition < 100
+    assert found.inseparable() == (), str(found)
+
+
+def test_measuring_something_the_model_does_not_have_is_refused() -> None:
+    report = pytest.importorskip("modelica.sim.sensitivity").identifiability
+    error = pytest.importorskip("modelica.sim.solve").SimulationError
+    with pytest.raises(error, match="no variable 'thermocouple'"):
+        report(_system("NewtonCooling"), ["k"], ["thermocouple"], stop=1.0)
