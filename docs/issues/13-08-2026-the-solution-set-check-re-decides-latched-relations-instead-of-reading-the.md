@@ -1,9 +1,10 @@
 ---
 title: The solution-set check re-decides latched relations instead of reading the latch, so it depends on where the samples fall
-status: in-progress
+status: done
 area: verify
 owner: quiet-tars-187f2
 filed: 2026-08-13
+fixed_in: d4ff5e6
 kind: bug
 scope: S
 verify: test
