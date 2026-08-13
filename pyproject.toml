@@ -127,6 +127,12 @@ dev = [
     "numpy>=2.0",
     "scipy>=1.13",
     "musil>=0.7",
+    # Property-based testing, for `modelica.ir.causalize` only. `docs/ideas/verification.md`
+    # argues that matching, BLT sorting and Pantelides are graph algorithms over unbounded
+    # inputs, so a model checker is the wrong instrument and generated models are the right
+    # one. Dev-only and not an extra: unlike `musil`, this answers a question about *this
+    # package*, never about a caller's model.
+    "hypothesis>=6.100",
 ]
 
 [tool.pytest.ini_options]

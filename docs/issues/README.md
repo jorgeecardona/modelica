@@ -87,6 +87,8 @@ cabildo issues show <slug>
 | [The Association has not been told this exists, and the trademark note assumes they will be](03-08-2026-tell-the-modelica-association.md) | docs | idea | XS | inspect | open | — |
 | [FMI 3.0 export — a System as an FMU, and the two routes disagree in the docs](03-08-2026-fmi-export.md) | fmi | story | L | test | open | — |
 | [FMI 3.0 import — the mode table exists, the FMU reader does not](03-08-2026-fmi-import.md) | fmi | story | L | test | open | — |
+| [A triangular model is refused as structurally singular once alias elimination renames a variable into a derivative](13-08-2026-a-triangular-model-is-refused-as-structurally-singular-once-alias-elimination-renames.md) | ir | bug | M | test | open | — |
+| [Causalization never returns on a three-equation linear ODE, because alias elimination can put a cycle in the derivative map](13-08-2026-causalization-never-returns-on-a-three-equation-linear-ode-because-alias-elimination.md) | ir | bug | S | test | open | — |
 | [RoastingMachine's moisture is assumed, and Cropster has it measured per lot](03-08-2026-green-moisture-as-a-measurement.md) | sim | idea | S | probe | blocked · @jorge | — |
 | [`spatialDistribution()` — the one PDE the Association standardized, and we do not have it](03-08-2026-spatialdistribution.md) | sim | story | L | test | blocked | — |
 | [A stencil is emitted as n unrolled scalar blocks, so a method-of-lines model is 230,000 lines of Python at n = 10,000](09-08-2026-a-stencil-is-emitted-as-n-unrolled-scalar-blocks-so-a-method.md) | sim | story | L | probe | in-progress · @quiet-tars-187f2 | — |
@@ -99,7 +101,7 @@ cabildo issues show <slug>
 | [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
 | [Chattering across instants is watched by a counter, and the checker cannot see it](03-08-2026-chattering-across-instants.md) | verify | idea | M | probe | open | — |
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
-| [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | open | — |
+| [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | in-progress · @quiet-tars-187f2 | — |
 
-_20 open — 16 open, 1 in-progress, 3 blocked; 41 done. Generated; edit the files, then `cabildo issues reindex`._
+_22 open — 17 open, 2 in-progress, 3 blocked; 41 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->
