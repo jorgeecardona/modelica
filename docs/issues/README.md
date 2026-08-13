@@ -81,7 +81,7 @@ cabildo issues show <slug>
 | Issue | Area | Kind | Scope | Verify | Status | Waiting on |
 |---|---|---|---|---|---|---|
 | [There is no honest number for how much Modelica this reads, because the corpus is ours](03-08-2026-reachability-and-agreement-against-a-reference-tool.md) | ci | story | L | probe | open | — |
-| [The corpus has no way to hold a model that costs a minute to simulate, and Ring Modulator costs 74 seconds](13-08-2026-the-corpus-has-no-way-to-hold-a-model-that-costs-a.md) | ci | story | M | probe | in-progress · @quiet-tars-187f2 | — |
+| [The corpus has no way to hold a model that costs a minute to simulate, and Ring Modulator costs 74 seconds](13-08-2026-the-corpus-has-no-way-to-hold-a-model-that-costs-a.md) | ci | story | M | probe | open | — |
 | [Diagrams draw boxes, and the icons that would make them read like circuits now survive parsing](04-08-2026-diagrams-draw-boxes-not-icons.md) | diagram | story | L | inspect | open | — |
 | [Straightness is a placement property, and the layouts here decide it in the router](10-08-2026-straightness-is-a-placement-property-and-the-layouts-here-decide-it-in.md) | diagram | story | L | probe | open | — |
 | [The EKF results live in a log and a deleted scratch file, not in the documentation](03-08-2026-an-estimation-notebook.md) | docs | story | M | inspect | open | — |
@@ -93,13 +93,13 @@ cabildo issues show <slug>
 | [A stencil is emitted as n unrolled scalar blocks, so a method-of-lines model is 230,000 lines of Python at n = 10,000](09-08-2026-a-stencil-is-emitted-as-n-unrolled-scalar-blocks-so-a-method.md) | sim | story | L | probe | in-progress · @quiet-tars-187f2 | — |
 | [No component reads a measured signal, so nothing computed elsewhere can drive a model](09-08-2026-no-component-reads-a-measured-signal-so-nothing-computed-elsewhere-can-drive.md) | sim | story | S | test | blocked | — |
 | [No corpus model is worth solving two ways — nothing has several zones under one schedule](09-08-2026-no-corpus-model-is-worth-solving-two-ways-nothing-has-several-zones.md) | sim | idea | M | test | open | — |
-| [Nothing fits a parameter to data, and the reason that is hard is that parameters trade off](09-08-2026-nothing-fits-a-parameter-to-data-and-the-reason-that-is-hard.md) | sim | idea | L | probe | in-progress · @quiet-tars-187f2 | — |
-| [Stages 2 and 3 of the benchmark: HIRES, E5, Ring Modulator, and ScalableTestSuite](10-08-2026-stages-2-and-3-of-the-benchmark-hires-e5-ring-modulator-and.md) | sim | story | L | probe | in-progress · @quiet-tars-187f2 | — |
+| [Nothing fits a parameter to data, and the reason that is hard is that parameters trade off](09-08-2026-nothing-fits-a-parameter-to-data-and-the-reason-that-is-hard.md) | sim | idea | L | probe | open | forward-sensitivity-refuses-a-model-with-events-and-the-shortcut-of-handling |
+| [Stages 2 and 3 of the benchmark: HIRES, E5, Ring Modulator, and ScalableTestSuite](10-08-2026-stages-2-and-3-of-the-benchmark-hires-e5-ring-modulator-and.md) | sim | story | L | probe | open | — |
 | [A TypeScript backend is a third dialect plus a port of radau.py, and it would put models in the browser](11-08-2026-a-typescript-backend-is-a-third-dialect-plus-a-port-of-radau.md) | sim | idea | L | probe | open | — |
 | [Forward sensitivity refuses a model with events, and the shortcut of handling only time-triggered ones buys exactly one corpus model](13-08-2026-forward-sensitivity-refuses-a-model-with-events-and-the-shortcut-of-handling.md) | sim | story | L | test | open | — |
 | [A fixed-step co-simulation schedule never branches, so it could be recorded once](03-08-2026-replay-a-fixed-step-cosimulation-schedule.md) | ssp | idea | M | probe | open | ssp-read-the-archive-and-run-the-master |
 | [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 
-_20 open — 13 open, 4 in-progress, 3 blocked; 49 done. Generated; edit the files, then `cabildo issues reindex`._
+_20 open — 16 open, 1 in-progress, 3 blocked; 49 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

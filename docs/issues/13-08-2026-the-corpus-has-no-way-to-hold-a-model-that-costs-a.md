@@ -1,8 +1,8 @@
 ---
 title: The corpus has no way to hold a model that costs a minute to simulate, and Ring Modulator costs 74 seconds
-status: in-progress
+status: open
 area: ci
-owner: quiet-tars-187f2
+owner: null
 filed: 2026-08-13
 kind: story
 scope: M

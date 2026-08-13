@@ -1,11 +1,11 @@
 ---
 title: Nothing fits a parameter to data, and the reason that is hard is that parameters trade off
-status: in-progress
+status: open
 area: sim
-owner: quiet-tars-187f2
+owner: null
 filed: 2026-08-09
 blocked_by:
-  - the-parameter-derivative-has-a-name-reserved-for-it-in-the-emitter
+  - forward-sensitivity-refuses-a-model-with-events-and-the-shortcut-of-handling
 kind: idea
 scope: L
 verify: probe

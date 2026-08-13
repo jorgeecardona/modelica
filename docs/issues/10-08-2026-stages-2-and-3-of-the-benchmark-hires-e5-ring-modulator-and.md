@@ -1,8 +1,8 @@
 ---
 title: "Stages 2 and 3 of the benchmark: HIRES, E5, Ring Modulator, and ScalableTestSuite"
-status: in-progress
+status: open
 area: sim
-owner: quiet-tars-187f2
+owner: null
 filed: 2026-08-10
 scope: L
 verify: probe
