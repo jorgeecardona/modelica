@@ -73,15 +73,26 @@ def test_event_iteration_settles_at_every_event(model: Path) -> None:
     A model that cannot be simulated yet has no instants to offer; the reason it cannot is
     recorded once, in ``test_examples.UNSIMULATED``, and read from there so the two suites
     cannot disagree about what is still missing.
+
+    A model with no watched relations has none either, and skipping it is not a weakening.
+    Read `check_run`: it returns ``[check_iteration(kernel)]`` and then loops over
+    ``result.events``. With no events the loop body never runs, so the whole trajectory is
+    computed and thrown away and what is left is exactly what
+    `test_event_iteration_settles` already asserts, above. It was a duplicate that paid for a
+    full integration -- **31.7 s on `AtwoodPendulum` alone**, of a 144.6 s file, for an
+    assertion made two functions up.
     """
     if model.stem in UNSIMULATED:
         pytest.skip(UNSIMULATED[model.stem])
+    build = _require("modelica.sim", "build")
     simulate = _require("modelica.sim", "simulate")
     spec = tomllib.loads(model.with_suffix(".toml").read_text(encoding="utf-8"))
     run = spec.get("simulate")
     if run is None:
         pytest.skip("no simulate section")
     system = _system(model)
+    if not build(system).events:
+        pytest.skip("no watched relations, so `check_run` would only repeat the check at t = 0")
     result = simulate(
         system,
         stop=run["stop"],

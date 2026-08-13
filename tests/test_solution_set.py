@@ -100,12 +100,21 @@ relative residual of any original equation at any sampled point is **6.2e-15**
 about thirty times above the worst real reading and five orders of magnitude below the
 solvers' own ``rtol``, which is 1e-6 for most of the corpus.
 
-That gap is not slack, it is the point. These residuals are *not* limited by the integration
-tolerance: an algebraic equation is solved at each point rather than integrated, so it holds
-to arithmetic precision, and a constraint the reduction kept in the schedule holds for the
-same reason. A residual that climbs to anywhere near ``rtol`` means an equation stopped being
-solved and started being merely approximated -- exactly the failure this file is for -- so the
-threshold belongs down here with the arithmetic and not up there with the solver.
+That gap is not slack, it is the point. For a *continuous* equation the residual is not
+limited by the integration tolerance: an algebraic equation is solved at each point rather
+than integrated, so it holds to arithmetic precision, and a constraint the reduction kept in
+the schedule holds for the same reason. A residual that climbs to anywhere near ``rtol`` means
+an equation stopped being solved and started being merely approximated -- exactly the failure
+this file is for -- so the threshold belongs down here with the arithmetic and not up there
+with the solver.
+
+**An equation containing a latched relation is a different case**, and an earlier version of
+this paragraph did not say so. There the residual depends on where the samples fall relative
+to the events, because the schedule freezes the relation at the last event while `evaluate`
+re-decides it from the values at hand. Loosening the integration was tried on 2026-08-13 and
+four models failed on exactly that -- `PhaseChange` at 1.7, `RoastingMachine` at 0.67 -- so the
+integration here uses the spec's own tolerance rather than a floored one, and the register
+carries the gap.
 
 Relative: ``|lhs - rhs| / (1 + max(|lhs|, |rhs|))``. Index reduction on a model whose terms are
 in the thousands has a scale, and an absolute number would be a different test on every model.
@@ -183,6 +192,14 @@ def test_the_original_equations_hold_along_the_trajectory(model: Path) -> None:
     result = simulate(
         system,
         stop=run["stop"],
+        # The spec's own tolerance, and **not** floored at 1e-6 the way `tests/test_fold.py`
+        # and the difference-quotient tests floor theirs. Tried, measured, reverted: four
+        # models fail -- `BumpStop` 1.0e-7, `PhaseChange` 1.7, `RoastingMachine` 0.67,
+        # `Setback` -- and every one of them fails on an equation containing a *latched*
+        # relation. The schedule freezes such a relation at the last event and `evaluate`
+        # re-decides it from the sampled values, so a sample that lands the other side of an
+        # event compares two different models. Filed; until it closes, this file is only as
+        # robust as the spec's own sampling.
         tolerance=run.get("tolerance", 1e-6),
         absolute=run.get("absolute"),
         method=run.get("method", "Radau"),

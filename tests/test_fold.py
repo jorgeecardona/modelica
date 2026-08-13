@@ -67,9 +67,20 @@ def test_the_two_modes_integrate_to_the_same_trajectory(model: Path) -> None:
     # model.
     absolute = run.get("absolute")
 
-    loose = simulate(build(system), stop=stop, times=grid, tolerance=1e-10, absolute=absolute)
+    # The tolerance the model asks for, floored at 1e-6, which is the same rule
+    # `tests/test_examples.py::_agrees_with_a_difference_quotient` uses and for the same
+    # reason: this test needs *a* trajectory through the model's arithmetic, not an accurate
+    # one. The claim is that two builds agree bit for bit, and two builds that take the same
+    # steps agree or do not agree whatever those steps are worth.
+    #
+    # It was 1e-10 for every model, and that is where the time went: 182 s for this file, of
+    # which `VanDerPol` was 107 s and `AtwoodPendulum` 52 s, each integrated twice at a
+    # tolerance neither the claim nor the spec asks for.
+    tolerance = max(float(run.get("tolerance", 1e-6)), 1e-6)
+
+    loose = simulate(build(system), stop=stop, times=grid, tolerance=tolerance, absolute=absolute)
     tight = simulate(
-        build(system, fold=True), stop=stop, times=grid, tolerance=1e-10, absolute=absolute
+        build(system, fold=True), stop=stop, times=grid, tolerance=tolerance, absolute=absolute
     )
 
     assert loose.names == tight.names

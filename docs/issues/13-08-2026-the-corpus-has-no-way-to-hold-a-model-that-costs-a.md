@@ -1,8 +1,8 @@
 ---
 title: The corpus has no way to hold a model that costs a minute to simulate, and Ring Modulator costs 74 seconds
-status: open
+status: in-progress
 area: ci
-owner: null
+owner: quiet-tars-187f2
 filed: 2026-08-13
 kind: story
 scope: M
@@ -72,3 +72,60 @@ the corpus's job is to hold models that are *interesting*, not models that are *
 - Nothing about making the integration faster. `jit=True` would help and is not the point: the
   suite runs interpreted on purpose, and a corpus that only holds models fast enough to run
   seven times is a corpus shaped by its harness.
+
+## Two of the seven were pure waste, 2026-08-13
+
+Before deciding how the corpus should hold an expensive model, two of the seven call sites
+turned out not to need what they were paying for. Neither change weakens anything.
+
+### `test_verify` ran a duplicate on every model with no events
+
+Read `check_run`: it returns ``[check_iteration(kernel)]`` and then loops over
+``result.events``. With no events the loop body never runs, so the trajectory is computed and
+thrown away and what remains is exactly what `test_event_iteration_settles` already asserts two
+functions above. Sixteen of 25 corpus models are event-free.
+
+    tests/test_verify.py     144.6 s  ->  97.1 s      (-33 %)
+    AtwoodPendulum alone      31.7 s  ->  skipped
+
+### `test_fold` integrated twice at 1e-10, for a claim that needs no accuracy at all
+
+Its assertion is that the folded and unfolded builds agree **bit for bit**. Two builds that
+take the same steps agree or do not agree whatever those steps are worth, so the tolerance was
+buying nothing. Floored at 1e-6, the same rule the difference-quotient tests already use:
+
+    tests/test_fold.py       182.4 s  ->  24.1 s      (-87 %)
+    VanDerPol                107.1 s  ->  12.6 s
+    AtwoodPendulum            51.9 s  ->   5.3 s
+
+All 53 tests still pass, and the claim is unchanged.
+
+### The same floor is *not* safe for `test_solution_set`, which is a finding
+
+Tried, measured, reverted. Four models fail at the floor -- `PhaseChange` 1.7,
+`RoastingMachine` 0.67, `BumpStop` 1.0e-7, `Setback` -- and every one on an equation containing
+a *latched* relation, at an event instant. The schedule freezes such a relation at the last
+event and the check re-decides it from the sampled values, so a sample the other side of an
+event compares two different models. Filed as
+[`the-solution-set-check-re-decides-latched-relations`](13-08-2026-the-solution-set-check-re-decides-latched-relations-instead-of-reading-the.md).
+
+## What the remaining five cost, and what each actually needs
+
+With those two done, this is the table the decision should be made from:
+
+| call site | needs the whole horizon | needs the spec's tolerance |
+| --- | --- | --- |
+| `test_simulates_as_specified` | **yes** -- the reference point is at the end | **yes** |
+| `test_radau` (fused loop) | **yes** -- same reason | **yes** |
+| `test_solution_set` | no -- 20 samples | yes, until the latch issue closes |
+| difference quotient x2 | no -- 12 plausible states | no, already floored |
+| `test_fold` x2 | no -- bit for bit | no, now floored |
+| `test_verify` | only if the model has events | yes |
+
+**Two call sites genuinely need the expensive run; five do not.** For Ring Modulator that is
+about 150 s rather than 520 s, which is a 30 % increase on the suite rather than a doubling --
+a number somebody can accept or refuse, which is what this entry was filed to make possible.
+
+The remaining decision is unchanged in shape and much smaller in stakes: whether the three
+"no" rows should share one cheap trajectory, and whether a spec may name a shorter horizon for
+them than its reference point needs.
