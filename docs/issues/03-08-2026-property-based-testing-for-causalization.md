@@ -1,9 +1,10 @@
 ---
 title: Causalization is tested by examples only, and its properties are stateable
-status: in-progress
+status: done
 area: verify
 owner: quiet-tars-187f2
 filed: 2026-08-03
+fixed_in: eb0a75b
 kind: story
 scope: M
 verify: test

@@ -101,7 +101,7 @@ cabildo issues show <slug>
 | [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
 | [Chattering across instants is watched by a counter, and the checker cannot see it](03-08-2026-chattering-across-instants.md) | verify | idea | M | probe | open | — |
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
-| [Causalization is tested by examples only, and its properties are stateable](03-08-2026-property-based-testing-for-causalization.md) | verify | story | M | test | in-progress · @quiet-tars-187f2 | — |
+| [Nothing checks that index reduction preserves the solution set, because that needs numbers and the generator makes structure](13-08-2026-nothing-checks-that-index-reduction-preserves-the-solution-set-because-that-needs.md) | verify | story | M | test | open | — |
 
-_22 open — 17 open, 2 in-progress, 3 blocked; 41 done. Generated; edit the files, then `cabildo issues reindex`._
+_22 open — 18 open, 1 in-progress, 3 blocked; 42 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->
