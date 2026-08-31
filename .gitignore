@@ -14,6 +14,9 @@ logs/
 # `.local` file, which is the one meant to stay out of git.
 .claude/settings.local.json
 .cache/
+# What `moon run :coverage` writes: per-model detail behind the two numbers the docs
+# record. The MSL itself lands under .cache/, covered above.
+coverage.json
 # What `examples/animate.py` writes. The scenes are in the specs and the renderer is in
 # the tree, so the videos are reproducible in a command -- committing tens of megabytes of
 # them would be committing a build artefact.

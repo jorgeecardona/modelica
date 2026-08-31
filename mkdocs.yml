@@ -105,6 +105,7 @@ nav:
       - Enumerating the discrete half: notebooks/verifying.py
   - Ideas:
       - What else exists in Python: ideas/landscape.md
+      - Reachability and agreement: ideas/coverage.md
       - Drawing a graph: ideas/layout.md
       - Backends: ideas/backends.md
       - Benchmarks: ideas/benchmarks.md

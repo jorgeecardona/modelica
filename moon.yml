@@ -71,6 +71,17 @@ tasks:
       cache: false
       runInCI: false
 
+  # Reachability and agreement over the Modelica Standard Library, not a gate. The number
+  # moves as language coverage moves, and gating on it would make a green pipeline a matter
+  # of taste -- the reachability-and-agreement entry in `docs/issues` argues this at length.
+  # Somebody runs this and records the two numbers in the docs with the date and the MSL
+  # version beside them, the way `:bench` timings are recorded with the machine.
+  coverage:
+    command: 'uv run --extra sim python -u scripts/coverage.py --out coverage.json'
+    options:
+      cache: false
+      runInCI: false
+
   # The notebooks under docs/notebooks import the package and run it, so the numerics and the
   # model checker have to be here too -- this task builds the docs *and* executes them, which
   # is why `src/**/*.py` and `examples/**/*` are inputs: a change to either can break a page.
