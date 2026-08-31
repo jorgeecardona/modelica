@@ -330,7 +330,9 @@ def _parse_blocker(example: Example, library: Library) -> str | None:
 
 
 _NO_NESTED = re.compile(r"'([\w.]+)' has no nested class '(\w+)'")
-_RESOLVING = re.compile(r"nothing named '([\w.]+)'|\(resolving '([\w.]+)'\)")
+_RESOLVING = re.compile(
+    r"nothing named '([\w.]+)'|\(resolving '([\w.]+)'\)|imports '([\w.]+\*?)'",
+)
 
 
 def _blame_dependency(message: str, library: Library) -> str | None:

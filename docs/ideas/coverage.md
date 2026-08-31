@@ -40,9 +40,35 @@ text carries an `experiment` annotation, named by its path —
 * Measuring and improving are different jobs. The run changes nothing; `coverage.json`
   holds the per-model detail for whoever picks up the work list.
 
-## The measurement
+## The measurements, newest first
 
-Taken **2026-08-31**, against **MSL v4.1.0**, with `modelica` 0.0.96. The library is
+### 2026-08-31, after `expandable connector` parses
+
+Same day, one construct later: the parser now reads `expandable connector` (instantiating
+one is still refused in flattening, where it would mean something). Reachability did not
+move — that is the expected shape of this curve for a while — but the *work list* did,
+which is the half that matters. The 258 models that all stopped at `Modelica/Icons.mo:629`
+spread out to their next blockers:
+
+| models | stage | refusal |
+| -----: | ----- | ------- |
+|    173 | parse | operator overloading — `operator record`, mostly reached through `import Modelica.Units.SI` (`Units.mo:1090`) |
+|     72 | parse | arrays of connectors |
+|     53 | parse | `expected ';', found keyword 'if'` — conditional components |
+|     40 | parse | `expected ']', found operator ':'` — array slices |
+|     32 | parse | `expected name, found keyword 'final'` |
+|     24 | parse | matrix expressions |
+|      8 | flatten | a composite component cannot have a value (media bindings) |
+|     28 | parse | eleven rarer refusals; `coverage.json` has every model |
+
+The stage table is unchanged from the first measurement below (parsed counts a model's
+own file and ancestor packages, and those did not move). The harness also learned to
+trace one more failure shape back to its cause: an `import` that does not resolve
+because the imported file refused.
+
+### 2026-08-31, first measurement
+
+Against **MSL v4.1.0**, with `modelica` 0.0.96. The library is
 2157 `.mo` files; 484 of them refuse to parse. Of the **430 example models**:
 
 | stage      | models | of 430 |
@@ -57,7 +83,7 @@ therefore vacuous: nothing reached the reference. "Parsed" counts a model whose 
 and ancestor packages parse; every one of the 261 then dies looking up a dependency whose
 file refused, which the harness traces back to the construct that refused it.
 
-The work list, first refusal per model:
+The work list, first refusal per model — kept as taken; a measurement keeps its date:
 
 | models | stage | refusal |
 | -----: | ----- | ------- |

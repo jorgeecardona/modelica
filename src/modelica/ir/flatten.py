@@ -1282,6 +1282,10 @@ class _Flattener:
         variability = _tighten(component.variability, floor)
         if isinstance(resolved, Found) and resolved.cls.restriction != "type":
             if resolved.cls.restriction == "connector":
+                if resolved.cls.expandable:
+                    raise FlattenError(
+                        f"{'.'.join(path)}: expandable connectors are not supported yet",
+                    )
                 self.connectors[path] = resolved
             self.instantiate(resolved, member.scope, path, total, variability, inners)
             return

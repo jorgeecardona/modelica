@@ -83,7 +83,10 @@ if set(_INFIX) | {"not"} != set(BINARY):  # pragma: no cover - guards against dr
 _SECTION_END: Final = frozenset(
     {"end", "equation", "initial", "algorithm", "public", "protected", "annotation"},
 )
-_ELEMENT_PREFIX: Final = frozenset({"encapsulated", "partial", "final"})
+# `expandable` is here for the lookahead's sake: it can only sit directly before
+# `connector`, and `class_definition` enforces that; the lookahead only needs to know a
+# class is coming.
+_ELEMENT_PREFIX: Final = frozenset({"encapsulated", "partial", "final", "expandable"})
 _OPEN: Final = frozenset("([{")
 _CLOSE: Final = frozenset(")]}")
 
@@ -920,7 +923,10 @@ class _Parser:
         self._accept(Kind.KEYWORD, "encapsulated")
         self._accept(Kind.KEYWORD, "final")
         partial = self._accept(Kind.KEYWORD, "partial") is not None
+        expandable = self._accept(Kind.KEYWORD, "expandable") is not None
         keyword = self.token
+        if expandable and not (keyword.kind is Kind.KEYWORD and keyword.text == "connector"):
+            raise self._error("`expandable` qualifies only a connector")
         if keyword.kind is not Kind.KEYWORD or keyword.text not in _RESTRICTIONS:
             raise self._error(f"expected a class definition, found {keyword.describe()}")
         self.at += 1
@@ -941,12 +947,13 @@ class _Parser:
                 name=name,
                 restriction=restriction,
                 partial=partial,
+                expandable=expandable,
                 constraining=constraining,
                 comment=comment,
                 annotation=annotation,
                 extends=(base,),
             )
-        return self._long_definition(name, restriction, partial=partial)
+        return self._long_definition(name, restriction, partial=partial, expandable=expandable)
 
     def _long_definition(  # noqa: C901, PLR0912, PLR0915 -- one flat dispatch, one arm per
         # element kind. Modelica has eleven of them and they share nothing but the loop that
@@ -957,6 +964,7 @@ class _Parser:
         restriction: ir.Restriction,
         *,
         partial: bool,
+        expandable: bool = False,
     ) -> ir.Class:
         comment = self._string_comment()
         nested: list[ir.Class] = []
@@ -1028,6 +1036,7 @@ class _Parser:
             name=name,
             restriction=restriction,
             partial=partial,
+            expandable=expandable,
             comment=comment,
             imports=tuple(imports),
             extends=tuple(extends),

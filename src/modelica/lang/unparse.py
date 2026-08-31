@@ -378,13 +378,17 @@ def unparse_class(node: ir.Class, indent: int = 0) -> list[str]:
     if _is_short_definition(node):
         base = node.extends[0]
         keyword = "type" if not node.replaceable else node.restriction
+        if node.expandable:
+            keyword = f"expandable {node.restriction}"
         modification = _modification(base.modification)
         comment = _comment(node.comment)
         annotation = _annotation(node.annotation)
         body = f"{modification}{constraining}{comment}{annotation}"
         return [f"{pad}{head}{keyword} {node.name} = {base.type_name}{body};"]
 
-    header = f"{pad}{head}{'partial ' if node.partial else ''}{node.restriction} {node.name}"
+    partial = "partial " if node.partial else ""
+    expandable = "expandable " if node.expandable else ""
+    header = f"{pad}{head}{partial}{expandable}{node.restriction} {node.name}"
     lines = [f"{header}{_comment(node.comment)}"]
     lines += _members(node, indent)
     lines += _sections(node, indent)

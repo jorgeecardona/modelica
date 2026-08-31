@@ -541,6 +541,13 @@ class Class:
     name: str
     restriction: Restriction
     partial: bool = False
+    expandable: bool = False
+    """``expandable connector`` -- a bus whose members exist by being connected.
+
+    Only a connector can carry it. It is read and written faithfully so a library that
+    declares one still parses; *instantiating* one is refused in flattening until the
+    expansion semantics exist, the same accept-then-refuse two-step the array syntax uses.
+    """
     replaceable: bool = False
     """``replaceable package Medium = PartialMedium`` -- a class a modification may replace."""
     constraining: str = ""
