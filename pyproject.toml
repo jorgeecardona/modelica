@@ -177,6 +177,8 @@ ignore = [
     "INP001",  # a notebook is not part of a package; there is nothing to import it
     "T201",    # `print` is how a cell says something
     "E402",    # imports sit in the cell that first needs them, after the prose explaining why
+    "A004",    # `from IPython.display import display` is IPython's own idiom; the "builtin"
+               # it shadows is the one IPython injects, and that is exactly the intent
     "B018",    # a bare expression on the last line is how a cell displays a value
     # The rest are the plotting notebooks, where the figures are the output:
     "ANN",     # a helper defined in one cell and called in the next takes its types from the
