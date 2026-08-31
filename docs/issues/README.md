@@ -80,7 +80,6 @@ cabildo issues show <slug>
 <!-- BEGIN GENERATED INDEX — `cabildo issues reindex` -->
 | Issue | Area | Kind | Scope | Verify | Status | Waiting on |
 |---|---|---|---|---|---|---|
-| [There is no honest number for how much Modelica this reads, because the corpus is ours](03-08-2026-reachability-and-agreement-against-a-reference-tool.md) | ci | story | L | probe | open | — |
 | [The corpus has no way to hold a model that costs a minute to simulate, and Ring Modulator costs 74 seconds](13-08-2026-the-corpus-has-no-way-to-hold-a-model-that-costs-a.md) | ci | story | M | probe | open | — |
 | [Diagrams draw boxes, and the icons that would make them read like circuits now survive parsing](04-08-2026-diagrams-draw-boxes-not-icons.md) | diagram | story | L | inspect | open | — |
 | [Straightness is a placement property, and the layouts here decide it in the router](10-08-2026-straightness-is-a-placement-property-and-the-layouts-here-decide-it-in.md) | diagram | story | L | probe | open | — |
@@ -100,5 +99,5 @@ cabildo issues show <slug>
 | [SSP 2.0 — the master's protocol is specified and checked, and nothing reads an .ssp](03-08-2026-ssp-read-the-archive-and-run-the-master.md) | ssp | story | L | test | open | fmi-import |
 | [Composed FMUs with rollback is the workload that would justify partial-order reduction](03-08-2026-partial-order-reduction-for-composed-fmus.md) | verify | idea | L | probe | open | ssp-read-the-archive-and-run-the-master |
 
-_19 open — 14 open, 2 in-progress, 3 blocked; 50 done. Generated; edit the files, then `cabildo issues reindex`._
+_18 open — 13 open, 2 in-progress, 3 blocked; 51 done. Generated; edit the files, then `cabildo issues reindex`._
 <!-- END GENERATED INDEX -->

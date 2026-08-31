@@ -1,9 +1,10 @@
 ---
 title: There is no honest number for how much Modelica this reads, because the corpus is ours
-status: open
+status: done
 area: ci
-owner: null
+owner: cobalt-asimo-27bd9
 filed: 2026-08-03
+fixed_in: e50486f
 kind: story
 scope: L
 verify: probe
