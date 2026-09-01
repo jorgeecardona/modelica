@@ -42,6 +42,24 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after conditional components work
+
+`Sensor s if useSensor;` is implemented, not merely accepted: the condition is evaluated
+during flattening — structural the way a dimension is — and a false one removes the
+component together with every `connect()` touching it. The 53 models this construct
+blocked moved to their next refusals; one now parses end-to-end (262 / 430, 60.9 %).
+Reachability still 0 %.
+
+| models | stage | refusal |
+| -----: | ----- | ------- |
+|    183 | parse | operator overloading (`operator record`, mostly via `Modelica.Units`) |
+|     72 | parse | arrays of connectors |
+|     66 | parse | matrix expressions |
+|     41 | parse | array slices (`[:]`) |
+|     32 | parse | `expected name, found keyword 'final'` |
+|      8 | flatten | a composite component cannot have a value (media bindings) |
+|     28 | parse | ten rarer refusals; `coverage.json` has every model |
+
 ### 2026-08-31, after `expandable connector` parses
 
 Same day, one construct later: the parser now reads `expandable connector` (instantiating

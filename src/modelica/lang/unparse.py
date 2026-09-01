@@ -279,13 +279,14 @@ def _component(component: ir.Component) -> str:
         else ""
     )
     modification = _modification(component.modification)
+    condition = f" if {unparse_expr(component.condition)}" if component.condition else ""
     constraining = f" constrainedby {component.constraining}" if component.constraining else ""
     comment = _comment(component.comment)
     annotation = _annotation(component.annotation)
     head = "replaceable " if component.replaceable else ""
     return (
         f"{head}{prefix}{component.type_name} {component.name}{shape}"
-        f"{modification}{constraining}{comment}{annotation};"
+        f"{modification}{condition}{constraining}{comment}{annotation};"
     )
 
 

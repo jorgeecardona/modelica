@@ -877,6 +877,9 @@ class _Parser:
             name = named.text
             dimensions = self._bracketed()
             modification = self._modification()
+            # `Sensor s if useSensor;` -- in a declaration the keyword can only start the
+            # condition-attribute, so there is nothing to disambiguate.
+            condition = self.expression() if self._accept(Kind.KEYWORD, "if") else None
             # The constraining clause belongs to the *clause*, after the last name, so a
             # declaration reads it and the loop keeps whichever one it found.
             constraining = self._constraining() or constraining
@@ -887,6 +890,7 @@ class _Parser:
                     span=self._at(named),
                     dimensions=dimensions,
                     modification=modification,
+                    condition=condition,
                     variability=variability,
                     causality=causality,
                     connector=connector,

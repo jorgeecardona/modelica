@@ -474,6 +474,14 @@ class Component:
     further out -- the ``World`` object, the ambient conditions -- and flattening resolves it
     to the nearest enclosing ``inner`` of the same name.
     """
+    condition: Expr | None = None
+    """``Sensor s if useSensor;`` -- the component exists only when this holds.
+
+    The expression must be evaluable when the model is flattened (it decides how many
+    variables and equations exist, the same way a dimension does). A disabled component
+    disappears together with every ``connect()`` that touches it, which is the one kind of
+    reference the specification allows to survive the removal.
+    """
     comment: str = ""
     annotation: Modification = EMPTY
     """Where the component sits in the enclosing diagram: ``Placement(transformation(...))``."""

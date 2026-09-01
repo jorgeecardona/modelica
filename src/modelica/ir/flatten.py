@@ -408,6 +408,22 @@ def _integer(node: ir.Expr, values: Mapping[str, float], what: str) -> int:
     return int(value)
 
 
+def _boolean(node: ir.Expr, values: Mapping[str, float], what: str) -> bool:
+    """Evaluate ``node`` to a Boolean, or say why it is not one.
+
+    The condition on a conditional component is structural the way a shape is: it decides
+    whether the component's variables and equations exist at all, so it has to be known
+    here and not at run time.
+    """
+    try:
+        value = evaluate(node, values)
+    except EvaluationError as failure:
+        raise FlattenError(f"{what} must be known when the model is flattened: {failure}") from None
+    if not isinstance(value, bool):
+        raise FlattenError(f"{what} must be a Boolean, and this one is {value!r}")
+    return value
+
+
 def _prefix_expr(  # noqa: PLR0911, PLR0913 -- one case per node type, one flag per rule
     node: ir.Expr,
     prefix: _Path,
@@ -1160,6 +1176,13 @@ class _Flattener:
     initial_equations: list[ir.Equal] = field(default_factory=list[ir.Equal])
     connections: _Connections = field(default_factory=_Connections)
     connectors: dict[_Path, Found] = field(default_factory=dict[_Path, "Found"])
+    disabled: set[_Path] = field(default_factory=set[_Path])
+    """Conditional components whose condition came out false, by instance path.
+
+    Read by the ``connect()`` handling: a connect whose endpoint sits inside a disabled
+    component is removed with it, which is the one reference the specification allows to
+    outlive the removal.
+    """
     values: dict[str, float] = field(default_factory=dict[str, float])
     """What every parameter and constant declared so far is worth, by flat name.
 
@@ -1267,6 +1290,17 @@ class _Flattener:
             member = _redeclared(member, outer, writer, path)
             outer = replace(outer, redeclare=None)
         component = member.component
+        if component.condition is not None:
+            # Evaluated here for the same reason a dimension is: whether the component
+            # exists decides how many variables and equations the model has.
+            held = _boolean(
+                _prefix_expr(component.condition, path[:-1], local, values=self.values),
+                self.values,
+                f"the condition on {'.'.join(path)!r}",
+            )
+            if not held:
+                self.disabled.add(path)
+                return
         if component.dimensions:
             self._array(member, path, outer, floor, local, writer=writer, inners=inners)
             return
@@ -1380,8 +1414,10 @@ class _Flattener:
         )
         self.variables.append(variable)
         if variability in ("parameter", "constant") and isinstance(
-            binding, (ir.IntLiteral, ir.RealLiteral)
+            binding, (ir.IntLiteral, ir.RealLiteral, ir.BoolLiteral)
         ):
+            # A Boolean lands here too: the condition on a conditional component reads it
+            # the way a dimension reads an Integer.
             self.values[name] = binding.value
         if binding is not None and variability not in ("parameter", "constant"):
             # A declaration equation on a non-constant is an ordinary equation.
@@ -1469,9 +1505,13 @@ class _Flattener:
                 # is the difference between "block 7" and a line a reader can open.
                 sink.append(ir.Equal(carry(lhs), carry(rhs), span))
             case ir.Connect(a=a, b=b):
-                self.connections.join(
-                    self._endpoint(a, prefix, local), self._endpoint(b, prefix, local)
-                )
+                # A connect whose endpoint sits inside a disabled conditional component
+                # is removed together with the component, silently: that is the one
+                # reference the specification allows to survive the removal.
+                if not self._severed(a, prefix, local) and not self._severed(b, prefix, local):
+                    self.connections.join(
+                        self._endpoint(a, prefix, local), self._endpoint(b, prefix, local)
+                    )
             case ir.When(branches=branches):
                 self.whens.append(
                     ir.When(
@@ -1533,6 +1573,11 @@ class _Flattener:
                     outer=outer,
                     initial=initial,
                 )
+
+    def _severed(self, ref: ir.Ref, prefix: _Path, local: frozenset[str]) -> bool:
+        """Whether this connect endpoint sits inside a disabled conditional component."""
+        path = _prefix_ref(ref, prefix, local).parts
+        return any(path[:length] in self.disabled for length in range(1, len(path) + 1))
 
     def _endpoint(self, ref: ir.Ref, prefix: _Path, local: frozenset[str]) -> _Endpoint:
         path = _prefix_ref(ref, prefix, local).parts
