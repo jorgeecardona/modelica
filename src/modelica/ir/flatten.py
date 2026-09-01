@@ -1502,6 +1502,13 @@ class _Flattener:
             raise FlattenError("only `a = b` equations may appear in initial equation")
 
         match equation:
+            case ir.CallEquation(targets=(), call=call):
+                # The no-output form is the connection-graph operators and `terminate`,
+                # and neither has a meaning here yet. Refused by name, so the work list
+                # can count it, rather than fed to `_results` to fail as a lookup.
+                raise FlattenError(
+                    f"a call equation is not supported yet: {call.name}()",
+                )
             case ir.CallEquation(targets=targets, call=call, span=span):
                 # One equation in, one equation per wanted output out. Everything after
                 # flattening then sees the shape it already knows -- one equation, one

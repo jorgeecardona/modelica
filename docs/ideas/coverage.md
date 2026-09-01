@@ -42,6 +42,24 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after bare call equations parse
+
+`Connections.root(a.b);` is a function call as an equation — specification 8.3.1 with an
+empty output list. It now parses into `CallEquation` with no targets, and flattening
+refuses the form by name; the connection-graph semantics behind `Connections.root` and
+`Connections.branch` are a separate job. The QuasiStatic interface files load, and
+**parsed jumped 277 → 314 (73.0 %)**. Reachability still 0 %; operator overloading now
+blocks over half the library on its own.
+
+| models | stage | refusal |
+| -----: | ----- | ------- |
+|    226 | parse | operator overloading |
+|     83 | parse | arrays of connectors |
+|     44 | parse | array slices (`[:]`) |
+|     35 | parse | `expected name, found keyword 'final'` |
+|      7 | flatten | a composite component cannot have a value (media bindings) |
+|     35 | parse | four rarer refusals; `coverage.json` has every model |
+
 ### 2026-09-01, after `assert` equations carry
 
 `assert(condition, message);` in an equation section parses and flattens into a new

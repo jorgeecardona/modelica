@@ -600,6 +600,12 @@ class _Parser:
             if outputs is not None:
                 return self._call_equation(outputs, where)
         lhs = self.expression()
+        if isinstance(lhs, ir.Call) and self._check(Kind.OP, ";"):
+            # `Connections.root(a.b);` or `terminate("done");` -- a function call as an
+            # equation, specification 8.3.1 with an empty output list. The semicolon is
+            # the tell: an `=` would have made it the left side of an `Equal`.
+            self._terminate()
+            return ir.CallEquation((), lhs, where)
         self._expect(Kind.OP, "=")
         rhs = self.expression()
         self._terminate()

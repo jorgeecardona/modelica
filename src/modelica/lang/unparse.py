@@ -221,6 +221,8 @@ def unparse_equation(  # noqa: C901, PLR0911 -- one arm and one return per equat
     match node:
         case ir.Equal(lhs=lhs, rhs=rhs):
             return [f"{pad}{unparse_expr(lhs)} = {unparse_expr(rhs)};"]
+        case ir.CallEquation(targets=(), call=call):
+            return [f"{pad}{unparse_expr(call)};"]
         case ir.CallEquation(targets=targets, call=call):
             named = ", ".join("" if t is None else t.name for t in targets)
             return [f"{pad}({named}) = {unparse_expr(call)};"]
