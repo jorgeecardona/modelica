@@ -639,6 +639,13 @@ class Class:
     """
     replaceable: bool = False
     """``replaceable package Medium = PartialMedium`` -- a class a modification may replace."""
+    causality: Causality = "none"
+    """``connector RealInput = input Real`` -- the base prefix of a short definition.
+
+    Every instance of such a class is an input (or output) without writing the keyword at
+    the declaration; flattening applies it to the component where the component says
+    nothing itself.
+    """
     constraining: str = ""
     """The ``constrainedby`` of a replaceable class; empty when none was written."""
     comment: str = ""

@@ -516,3 +516,18 @@ def test_final_on_a_component_clause_is_accepted() -> None:
     m = program.find("M")
     assert m is not None
     assert m.components[0].variability == "parameter"
+
+
+def test_a_short_class_carries_its_base_prefix_causality() -> None:
+    """``connector RealInput = input Real "..."`` -- the MSL's most-used connector.
+
+    The causality can only come from a short definition (the long grammar has no slot
+    for it), so the class round-trips through the short form.
+    """
+    source = 'connector RealInput = input Real "input Real as connector";\n'
+    program = parse(source)
+    cls = program.classes[0]
+    assert cls.restriction == "connector"
+    assert cls.causality == "input"
+    assert parse(unparse(program)) == program
+    assert unparse(program) == source

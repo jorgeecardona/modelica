@@ -1089,6 +1089,16 @@ class _Parser:
         if self._accept(Kind.OP, "="):
             if self._check(Kind.KEYWORD, "enumeration"):
                 return self._enumeration(name, partial=partial, terminated=terminated)
+            for word in ("flow", "stream", "discrete", "parameter", "constant"):
+                if self._keyword(word):
+                    raise self._error(
+                        f"'{word}' on a short class definition is not supported yet",
+                    )
+            causality: ir.Causality = "none"
+            if self._accept(Kind.KEYWORD, "input"):
+                causality = "input"
+            elif self._accept(Kind.KEYWORD, "output"):
+                causality = "output"
             base = ir.Extends(self._type_name(), self._modification())
             # Read here rather than by the caller, because the short form owns its own
             # semicolon and the constraining clause sits in front of it.
@@ -1102,6 +1112,7 @@ class _Parser:
                 restriction=restriction,
                 partial=partial,
                 expandable=expandable,
+                causality=causality,
                 constraining=constraining,
                 comment=comment,
                 annotation=annotation,

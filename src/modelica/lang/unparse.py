@@ -340,7 +340,9 @@ def _is_short_definition(node: ir.Class) -> bool:
     into an ``extends`` that means something else.
     """
     return (
-        (node.restriction == "type" or node.replaceable)
+        # A class carrying a base-prefix causality can only have come from a short
+        # definition -- the long grammar has no slot for it -- so it prints as one.
+        (node.restriction == "type" or node.replaceable or node.causality != "none")
         and len(node.extends) == 1
         and not node.components
         and not node.equations
@@ -424,14 +426,16 @@ def unparse_class(node: ir.Class, indent: int = 0) -> list[str]:
         return [f"{pad}{head}type {node.name} = {body}{tail};"]
     if _is_short_definition(node):
         base = node.extends[0]
-        keyword = "type" if not node.replaceable else node.restriction
+        short_keyword = node.replaceable or node.causality != "none"
+        keyword = node.restriction if short_keyword else "type"
         if node.expandable:
             keyword = f"expandable {node.restriction}"
+        prefix = f"{node.causality} " if node.causality != "none" else ""
         modification = _modification(base.modification)
         comment = _comment(node.comment)
         annotation = _annotation(node.annotation)
         body = f"{modification}{constraining}{comment}{annotation}"
-        return [f"{pad}{head}{keyword} {node.name} = {base.type_name}{body};"]
+        return [f"{pad}{head}{keyword} {node.name} = {prefix}{base.type_name}{body};"]
 
     partial = "partial " if node.partial else ""
     expandable = "expandable " if node.expandable else ""

@@ -1345,6 +1345,15 @@ class _Flattener:
         inherited = tuple(_prefix_modification(mod, here, local) for mod in member.mods)
         total = _merged(own, *inherited, outer)
         resolved = member.scope.resolve(component.type_name)
+        if (
+            isinstance(resolved, Found)
+            and resolved.cls.causality != "none"
+            and component.causality == "none"
+        ):
+            # `connector RealInput = input Real`: the class carries the causality, and
+            # every instance is an input without writing the keyword at the declaration.
+            component = replace(component, causality=resolved.cls.causality)
+            member = replace(member, component=component)
         variability = _tighten(component.variability, floor)
         if isinstance(resolved, Found) and resolved.cls.restriction != "type":
             if resolved.cls.restriction == "connector":

@@ -42,6 +42,15 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after the base prefix on short classes
+
+`connector RealInput = input Real` — the MSL's most-used connector. The causality is
+carried on the class (it can only come from a short definition, so the class round-trips
+through the short form), and flattening applies it to every instance whose declaration
+says nothing itself. The 58-model row cleared; ten Clocked models now fail in *flatten*,
+resolving the `Clock` builtin — the first models to get that far. Parsed holds at
+410 / 430 (95.3 %); a `:=`-versus-`=` parse point (48) surfaced behind it.
+
 ### 2026-09-01, after bare call statements
 
 `isValidTable(table);` — the statement twin of the bare call equation, with the same
