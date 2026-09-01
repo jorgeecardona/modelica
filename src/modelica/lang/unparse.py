@@ -152,7 +152,7 @@ def _annotation(mod: ir.Modification) -> str:
     return f" annotation{_modification(mod)}" if mod else ""
 
 
-def unparse_statement(  # noqa: PLR0911 -- one return per statement form, like the expressions
+def unparse_statement(  # noqa: C901, PLR0911 -- one arm and one return per statement form
     node: ir.Statement,
     indent: int = 0,
     *,
@@ -173,6 +173,14 @@ def unparse_statement(  # noqa: PLR0911 -- one return per statement form, like t
             return [f"{pad}{target.name} {assign} {unparse_expr(value)};"]
         case ir.Reinit(target=target, value=value):
             return [f"{pad}reinit({target.name}, {unparse_expr(value)});"]
+        case ir.Assert(condition=condition, message=message, level=level):
+            arguments = [unparse_expr(condition), unparse_expr(message)]
+            if level is not None:
+                arguments.append(unparse_expr(level))
+            return [f"{pad}assert({', '.join(arguments)});"]
+        case ir.CallStatement(targets=targets, call=call):
+            named = ", ".join("" if t is None else t.name for t in targets)
+            return [f"{pad}({named}) := {unparse_expr(call)};"]
         case ir.Break():
             return [f"{pad}break;"]
         case ir.Return():

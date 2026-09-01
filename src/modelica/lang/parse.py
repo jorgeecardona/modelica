@@ -775,6 +775,32 @@ class _Parser:
         statements is all the specification allows; the compound forms belong to an
         ``algorithm`` section and are read by :meth:`_algorithm_statement`.
         """
+        if (
+            self._check(Kind.NAME, "assert")
+            and self._ahead(1).kind is Kind.OP
+            and self._ahead(1).text == "("
+        ):
+            return self._assert_equation(self._at(self.token))
+        if self._check(Kind.OP, "("):
+            # `(a, b) := f(x);` -- the statement twin of the call equation, and the only
+            # way an algorithm reads two results from one call.
+            where = self._at(self.token)
+            self.at += 1
+            targets: list[ir.Ref | None] = []
+            while True:
+                if self._check(Kind.OP, ",") or self._check(Kind.OP, ")"):
+                    targets.append(None)
+                else:
+                    targets.append(self._reference())
+                if not self._accept(Kind.OP, ","):
+                    break
+            self._expect(Kind.OP, ")")
+            self._expect(Kind.OP, ":=")
+            call = self.expression()
+            if not isinstance(call, ir.Call):
+                raise self._error("an output list is assigned from a function call")
+            self._terminate()
+            return ir.CallStatement(tuple(targets), call, where)
         if self._check(Kind.NAME, "reinit") and self._ahead(1).text == "(":
             self.at += 2
             target = self._reference()

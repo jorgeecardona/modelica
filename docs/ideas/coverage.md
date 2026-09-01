@@ -42,6 +42,13 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after the statement twins
+
+`assert(...)` as a statement and `(a, b) := f(x)` — the statement twins of the equation
+forms that already existed — parse, round-trip, and are refused by name where a model's
+section folds into equations. The Blocks.Sources chain advanced one more construct, to
+`when` inside an algorithm section (31 models, next). Parsed holds at 405 / 430 (94.2 %).
+
 ### 2026-09-01, after `initial algorithm` folds
 
 `initial algorithm` is to `initial equation` what `algorithm` is to `equation`, and it

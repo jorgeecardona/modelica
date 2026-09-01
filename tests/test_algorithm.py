@@ -385,3 +385,32 @@ def test_an_initial_algorithm_folds_into_the_initial_equations() -> None:
     flat = flatten([program], "M")
     assert len(flat.initial_equations) == 1
     assert len(flat.equations) == 1
+
+
+def test_an_assert_statement_is_read_and_round_trips() -> None:
+    """``assert(...)`` in an algorithm section, met at Blocks/Sources.mo:1468."""
+    source = 'model M\n  Real x;\nalgorithm\n  assert(x > 0, "gone");\nend M;\n'
+    program = parse(source)
+    m = program.find("M")
+    assert m is not None
+    assert isinstance(m.algorithms[0][0], ir.Assert)
+    assert parse(unparse(program)) == program
+
+
+def test_an_output_list_assignment_is_read_and_round_trips() -> None:
+    """``(a, b) := f(x);`` -- the statement twin of the call equation."""
+    source = "model M\n  Real a;\n  Real b;\nalgorithm\n  (a, b) := f(1);\nend M;\n"
+    program = parse(source)
+    m = program.find("M")
+    assert m is not None
+    statement = m.algorithms[0][0]
+    assert isinstance(statement, ir.CallStatement)
+    assert statement.targets == (ir.Ref(("a",)), ir.Ref(("b",)))
+    assert parse(unparse(program)) == program
+
+
+def test_both_are_refused_by_name_when_a_section_folds() -> None:
+    """A model's algorithm section becomes equations, and these two cannot yet."""
+    source = 'model M\n  Real x;\nalgorithm\n  assert(x > 0, "gone");\nend M;\n'
+    with pytest.raises(FlattenError, match="uses 'assert'"):
+        flatten([parse(source)], "M")

@@ -648,6 +648,8 @@ def _literal_modification(
 _INLINE_DEPTH: Final = 16
 
 _SPELLING: Final[dict[type, str]] = {
+    ir.Assert: "'assert'",
+    ir.CallStatement: "an output list assignment",
     ir.ForStatement: "a 'for' loop",
     ir.WhileStatement: "a 'while' loop",
     ir.Break: "'break'",

@@ -375,7 +375,30 @@ class WhileStatement:
     body: tuple[Statement, ...]
 
 
-type Statement = Assign | Reinit | Break | Return | IfStatement | ForStatement | WhileStatement
+@dataclass(frozen=True, slots=True)
+class CallStatement:
+    """``(a, b) := f(x);`` -- the statement twin of :class:`CallEquation`.
+
+    The only way an algorithm reads two results from one call, and the same rule about
+    skipped outputs: ``targets`` may hold ``None``.
+    """
+
+    targets: tuple[Ref | None, ...]
+    call: Call
+    span: Span | None = field(default=None, compare=False, repr=False)
+
+
+type Statement = (
+    Assign
+    | Reinit
+    | Break
+    | Return
+    | IfStatement
+    | ForStatement
+    | WhileStatement
+    | Assert
+    | CallStatement
+)
 
 
 # --------------------------------------------------------------------------------------
