@@ -53,6 +53,9 @@ from modelica.ir.nodes import (
     Class as Class,
 )
 from modelica.ir.nodes import (
+    Colon as Colon,
+)
+from modelica.ir.nodes import (
     Component as Component,
 )
 from modelica.ir.nodes import (
@@ -173,6 +176,7 @@ __all__ = [
     "Call",
     "Causality",
     "Class",
+    "Colon",
     "Component",
     "Connect",
     "ConnectorKind",

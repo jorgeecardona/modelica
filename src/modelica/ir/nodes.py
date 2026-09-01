@@ -171,6 +171,15 @@ class Matrix:
 
 
 @dataclass(frozen=True, slots=True)
+class Colon:
+    """The bare ``:`` subscript -- every index of its dimension, as in ``A[:, 1]``.
+
+    Carried the way :class:`Array` and :class:`Matrix` are, so the file that writes one
+    loads; the semantic layers refuse it beside them at the point of use.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class Subscript:
     """``T[i]``, ``A[i, j]`` -- a reference with indices, before flattening scalarises it.
 
@@ -241,6 +250,7 @@ type Expr = (
     | StringLiteral
     | Array
     | Matrix
+    | Colon
     | Subscript
     | Range
     | Binary

@@ -185,7 +185,7 @@ def evaluate(node: ir.Expr, env: Mapping[str, Value]) -> Value:
             | ir.StringLiteral(value=value)
         ):
             return value
-        case ir.Array() | ir.Subscript() | ir.Range():
+        case ir.Array() | ir.Subscript() | ir.Range() | ir.Colon():
             raise EvaluationError("array equations are not supported yet")
         case ir.Matrix():
             raise EvaluationError("matrix expressions are not supported yet")

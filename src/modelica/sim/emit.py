@@ -291,7 +291,7 @@ def _render(  # noqa: C901, PLR0911, PLR0912 - one case per node type, two of th
             return dialect.true if value else dialect.false
         case ir.StringLiteral(value=value):
             return repr(value)
-        case ir.Array() | ir.Subscript() | ir.Range():
+        case ir.Array() | ir.Subscript() | ir.Range() | ir.Colon():
             raise EmitError("array equations are not supported yet")
         case ir.Matrix():
             raise EmitError("matrix expressions are not supported yet")

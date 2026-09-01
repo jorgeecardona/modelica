@@ -360,11 +360,22 @@ class _Parser:
         """
         if not self._accept(Kind.OP, "["):
             return ()
-        found = [self.expression()]
+        found = [self._subscript()]
         while self._accept(Kind.OP, ","):
-            found.append(self.expression())
+            found.append(self._subscript())
         self._expect(Kind.OP, "]")
         return tuple(found)
+
+    def _subscript(self) -> ir.Expr:
+        """One index: ``2``, ``i + 1``, the slice ``1:3``, or the bare ``:``.
+
+        The bare colon means every index of its dimension, and it can only be the whole
+        subscript -- ``[:2]`` is not Modelica -- so one token decides.
+        """
+        if self._check(Kind.OP, ":"):
+            self.at += 1
+            return ir.Colon()
+        return self._range()
 
     def _arguments(self) -> tuple[tuple[ir.Expr, ...], tuple[tuple[str, ir.Expr], ...]]:
         """The arguments of a call, positional first and then the ones given by name.
@@ -676,7 +687,7 @@ class _Parser:
     def _range(self) -> ir.Expr:
         """``a:b``, and ``a:s:b`` where the *step* is the middle term.
 
-        Read only where a range is expected, which today is the header of a ``for``. The
+        Read only where a range is expected: the header of a ``for``, a subscript. The
         colon is deliberately not in the precedence table: putting it there would give every
         expression in the language a new operator to be parenthesised against, for one
         construct that knows exactly where it is.

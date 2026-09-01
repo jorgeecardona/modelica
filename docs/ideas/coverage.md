@@ -42,6 +42,16 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after slices read where the grammar expects them
+
+`x[1:3]` and `A[:, 1]` parse: a range was already readable — but only in the header of a
+`for`, and a subscript is the other place the grammar expects one. The bare `:` gets its
+own node (`Colon`), because it can only ever be the whole subscript. Both are carried the
+way `Array` is and refused beside it at the point of use. **Parsed rose 359 → 405
+(94.2 %).** The remaining list is operator overloading (305 — now 71 % of the library on
+one construct) plus the function-declaration rows (`algorithm` 32, `input` 25, `impure`
+19) that are its own prerequisites, and tails of a few models each.
+
 ### 2026-09-01, after `final` on a component clause
 
 `final parameter Real THD1 = V3/V1` — the element prefix, accepted and discarded the way

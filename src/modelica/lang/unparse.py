@@ -78,6 +78,8 @@ def _render_expr(node: ir.Expr) -> str:  # noqa: C901, PLR0911, PLR0912 -- one p
         case ir.Matrix(rows=rows):
             body = "; ".join(", ".join(unparse_expr(e) for e in row) for row in rows)
             return f"[{body}]"
+        case ir.Colon():
+            return ":"
         case ir.Subscript(base=base, indices=indices):
             return f"{base.name}[{', '.join(unparse_expr(i) for i in indices)}]"
         case ir.Range(start=start, stop=stop, step=step):
