@@ -42,6 +42,13 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after ranges become expressions
+
+`parameter Integer columns[:] = 2:size(table, 2)` — a range as a binding value. The range
+tail now reads in `expression()` itself, where the specification's `simple_expression`
+puts it, and the `for` header stopped being special. Parsed 405 → 406 (94.4 %); the
+Tables/Sources chain advanced to array comprehensions (37, next).
+
 ### 2026-09-01, after `when` in a statement position
 
 The when-statement reuses the when-equation's node — branches of statements either way —

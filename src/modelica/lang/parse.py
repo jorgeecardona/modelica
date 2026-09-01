@@ -221,10 +221,23 @@ class _Parser:
     # -- expressions ----------------------------------------------------------------
 
     def expression(self) -> ir.Expr:
-        """Parse one expression."""
+        """Parse one expression, range tail included: ``a:b``, and ``a:s:b``.
+
+        The range reads at this one level rather than through the precedence table --
+        ``:`` is not an operator every expression must parenthesise against; it is a tail
+        the grammar allows exactly here (specification: simple_expression). The parts are
+        read below the tail, so a branch of an ``if`` may be a range but a range part may
+        not be a bare ``if``, which is what the specification says.
+        """
         if self._keyword("if"):
             return self._if_expression()
-        return self._binary(IF + 1)
+        first = self._binary(IF + 1)
+        if not self._accept(Kind.OP, ":"):
+            return first
+        second = self._binary(IF + 1)
+        if self._accept(Kind.OP, ":"):
+            return ir.Range(first, self._binary(IF + 1), second)
+        return ir.Range(first, second)
 
     def whole_expression(self) -> ir.Expr:
         """Parse one expression and insist it is the entire input."""
@@ -375,7 +388,7 @@ class _Parser:
         if self._check(Kind.OP, ":"):
             self.at += 1
             return ir.Colon()
-        return self._range()
+        return self.expression()
 
     def _arguments(self) -> tuple[tuple[ir.Expr, ...], tuple[tuple[str, ir.Expr], ...]]:
         """The arguments of a call, positional first and then the ones given by name.
@@ -672,7 +685,7 @@ class _Parser:
         if self._check(Kind.OP, ","):
             raise self._error("a 'for' over several indices is not supported yet")
         self._expect(Kind.KEYWORD, "in")
-        over = self._range()
+        over = self.expression()
         self._expect(Kind.KEYWORD, "loop")
         body: list[ir.Equation] = []
         while not self._keyword("end"):
@@ -683,22 +696,6 @@ class _Parser:
         self._expect(Kind.KEYWORD, "for")
         self._terminate()
         return ir.ForEquation(index, over, tuple(body))
-
-    def _range(self) -> ir.Expr:
-        """``a:b``, and ``a:s:b`` where the *step* is the middle term.
-
-        Read only where a range is expected: the header of a ``for``, a subscript. The
-        colon is deliberately not in the precedence table: putting it there would give every
-        expression in the language a new operator to be parenthesised against, for one
-        construct that knows exactly where it is.
-        """
-        first = self.expression()
-        if not self._accept(Kind.OP, ":"):
-            return first
-        second = self.expression()
-        if self._accept(Kind.OP, ":"):
-            return ir.Range(first, self.expression(), second)
-        return ir.Range(first, second)
 
     def _assert_equation(self, where: ir.Span) -> ir.Assert:
         """``assert(condition, "message");`` -- the one call the equation grammar names.
@@ -898,7 +895,7 @@ class _Parser:
         if self._check(Kind.OP, ","):
             raise self._error("a 'for' over several indices is not supported yet")
         self._expect(Kind.KEYWORD, "in")
-        over = self._range()
+        over = self.expression()
         self._expect(Kind.KEYWORD, "loop")
         body = self._loop_body(opening, "for")
         self._closing(opening, "for")

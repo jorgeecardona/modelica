@@ -15,7 +15,7 @@ import pytest
 from modelica import ir
 from modelica.ir.evaluate import EvaluationError, evaluate
 from modelica.ir.flatten import FlattenError, flatten
-from modelica.lang import parse, parse_expression, unparse_expr
+from modelica.lang import parse, parse_expression, unparse, unparse_expr
 
 
 def test_a_slice_subscript_is_read_and_round_trips() -> None:
@@ -44,3 +44,17 @@ def test_a_sliced_equation_is_refused_by_name() -> None:
     source = "model M\n  Real x[3];\nequation\n  x[1:3] = {0, 0, 0};\nend M;\n"
     with pytest.raises(FlattenError, match="a range is read only in the header of a 'for'"):
         flatten(parse(source), "M")
+
+
+def test_a_range_is_an_expression_wherever_one_is_expected() -> None:
+    """``parameter Integer columns[:] = 2:size(table, 2)`` — Blocks/Tables.mo:33.
+
+    The range tail reads in ``expression()`` itself (specification: simple_expression),
+    so a binding, an argument, or a subscript all take one; the ``for`` header stopped
+    being special the moment it could not be the only place.
+    """
+    node = parse_expression("2:size(table, 2)")
+    assert isinstance(node, ir.Range)
+    source = "model M\n  parameter Integer columns[:] = 2:size(table, 2);\nend M;\n"
+    program = parse(source)
+    assert parse(unparse(program)) == program
