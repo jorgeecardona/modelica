@@ -352,18 +352,32 @@ class _Parser:
         self._expect(Kind.OP, "]")
         return ir.Matrix(tuple(rows))
 
-    def _array(self) -> ir.Array:
-        """``{a, b, c}``, nested as deep as it goes: a point is one, an extent is two."""
+    def _array(self) -> ir.Array | ir.Comprehension:
+        """``{a, b, c}`` nested as deep as it goes -- or ``{f(i) for i in 1:n}``."""
         self._expect(Kind.OP, "{")
         if self._accept(Kind.OP, "}"):
             return ir.Array(())
         elements: list[ir.Expr] = [self.expression()]
         if self._keyword("for"):
-            raise self._error("array comprehensions are not supported yet")
+            body = ir.Comprehension(elements[0], self._iterators())
+            self._expect(Kind.OP, "}")
+            return body
         while self._accept(Kind.OP, ","):
             elements.append(self.expression())
         self._expect(Kind.OP, "}")
         return ir.Array(tuple(elements))
+
+    def _iterators(self) -> tuple[tuple[str, ir.Expr | None], ...]:
+        """``for i in 1:n, j in 1:m`` -- the range may be omitted, and is ``None`` then."""
+        self._expect(Kind.KEYWORD, "for")
+        found: list[tuple[str, ir.Expr | None]] = []
+        while True:
+            name = self._expect(Kind.NAME).text
+            over = self.expression() if self._accept(Kind.KEYWORD, "in") else None
+            found.append((name, over))
+            if not self._accept(Kind.OP, ","):
+                break
+        return tuple(found)
 
     def _bracketed(self) -> tuple[ir.Expr, ...]:
         """``[n]`` or ``[i, j]`` -- a declared shape after a name, or a subscript after one.
@@ -414,6 +428,11 @@ class _Parser:
                 raise self._error("a positional argument cannot follow a named one")
             else:
                 args.append(self.expression())
+            if len(args) == 1 and not named and self._keyword("for"):
+                # `sum(x[i] for i in 1:n)` -- the brace-less spelling of a comprehension,
+                # legal only as the whole argument list of a reduction call.
+                args = [ir.Comprehension(args[0], self._iterators())]
+                break
             if not self._accept(Kind.OP, ","):
                 break
         self._expect(Kind.OP, ")")

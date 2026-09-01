@@ -58,3 +58,23 @@ def test_a_range_is_an_expression_wherever_one_is_expected() -> None:
     source = "model M\n  parameter Integer columns[:] = 2:size(table, 2);\nend M;\n"
     program = parse(source)
     assert parse(unparse(program)) == program
+
+
+def test_a_comprehension_is_read_in_both_spellings() -> None:
+    """``{x[i] for i in 1:n}`` and ``sum(x[i] for i in 1:n)`` are one node.
+
+    The printer always writes the braces, and the braced form parses back to the same
+    value, so the round trip holds structurally even where the text differs.
+    """
+    braced = parse_expression("{x[i] for i in 1:3}")
+    assert isinstance(braced, ir.Comprehension)
+    assert braced.iterators[0][0] == "i"
+    reduction = parse_expression("sum(x[i] for i in 1:3)")
+    assert reduction == ir.Call("sum", (braced,), ())
+    assert parse_expression(unparse_expr(braced)) == braced
+    assert parse_expression(unparse_expr(reduction)) == reduction
+
+
+def test_a_comprehension_is_refused_at_the_point_of_use() -> None:
+    with pytest.raises(EvaluationError, match="array comprehensions are not supported yet"):
+        evaluate(parse_expression("{i for i in 1:3}"), {})

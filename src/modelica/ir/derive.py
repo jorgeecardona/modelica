@@ -269,7 +269,9 @@ def _power(base: ir.Expr, exponent: ir.Expr, leaf: Callable[[ir.Ref], ir.Expr]) 
     return mul(pow_(base, exponent), general)
 
 
-def _derive(node: ir.Expr, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:
+def _derive(  # noqa: C901 -- one case per node type
+    node: ir.Expr, leaf: Callable[[ir.Ref], ir.Expr]
+) -> ir.Expr:
     match node:
         case ir.Ref():
             return leaf(node)
@@ -279,6 +281,8 @@ def _derive(node: ir.Expr, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:
             raise DerivativeError("array equations are not supported yet")
         case ir.Matrix():
             raise DerivativeError("matrix expressions are not supported yet")
+        case ir.Comprehension():
+            raise DerivativeError("array comprehensions are not supported yet")
         case ir.Binary():
             return _binary(node, leaf)
         case ir.Unary(op=op, operand=operand):

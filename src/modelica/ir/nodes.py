@@ -171,6 +171,20 @@ class Matrix:
 
 
 @dataclass(frozen=True, slots=True)
+class Comprehension:
+    """``{f(i) for i in 1:n}``, and the same iteration inside a reduction call.
+
+    ``sum(x[i] for i in 1:n)`` is the brace-less spelling of the same node; the printer
+    always writes the braces, which parses back to the same value. Carried the way
+    :class:`Array` is, and refused beside it at the point of use. An iterator's range may
+    be omitted in source; it is ``None`` here.
+    """
+
+    body: Expr
+    iterators: tuple[tuple[str, Expr | None], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Colon:
     """The bare ``:`` subscript -- every index of its dimension, as in ``A[:, 1]``.
 
@@ -250,6 +264,7 @@ type Expr = (
     | StringLiteral
     | Array
     | Matrix
+    | Comprehension
     | Colon
     | Subscript
     | Range

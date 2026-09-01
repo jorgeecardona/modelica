@@ -493,6 +493,11 @@ def _substitute(  # noqa: C901, PLR0911 -- one case per node type
             return ir.Array(tuple(go(e) for e in elements))
         case ir.Matrix(rows=rows):
             return ir.Matrix(tuple(tuple(go(e) for e in row) for row in rows))
+        case ir.Comprehension(body=body, iterators=iterators):
+            return ir.Comprehension(
+                go(body),
+                tuple((n, None if over is None else go(over)) for n, over in iterators),
+            )
         case ir.Range(start=start, stop=stop, step=step):
             return ir.Range(go(start), go(stop), None if step is None else go(step))
         case _:
@@ -609,6 +614,11 @@ def _literals(  # noqa: C901, PLR0911 -- one case per node type, as its neighbou
             return ir.Array(tuple(go(e) for e in elements))
         case ir.Matrix(rows=rows):
             return ir.Matrix(tuple(tuple(go(e) for e in row) for row in rows))
+        case ir.Comprehension(body=body, iterators=iterators):
+            return ir.Comprehension(
+                go(body),
+                tuple((n, None if over is None else go(over)) for n, over in iterators),
+            )
         case _:
             return node
 
@@ -682,6 +692,11 @@ def _inline_calls(  # noqa: PLR0911 -- one case per node type, as its neighbours
             return ir.Array(tuple(go(e) for e in elements))
         case ir.Matrix(rows=rows):
             return ir.Matrix(tuple(tuple(go(e) for e in row) for row in rows))
+        case ir.Comprehension(body=body, iterators=iterators):
+            return ir.Comprehension(
+                go(body),
+                tuple((n, None if over is None else go(over)) for n, over in iterators),
+            )
         case ir.Subscript(base=base, indices=indices):
             return ir.Subscript(base, tuple(go(i) for i in indices))
         case _:

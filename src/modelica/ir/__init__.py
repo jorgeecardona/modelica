@@ -62,6 +62,9 @@ from modelica.ir.nodes import (
     Component as Component,
 )
 from modelica.ir.nodes import (
+    Comprehension as Comprehension,
+)
+from modelica.ir.nodes import (
     Connect as Connect,
 )
 from modelica.ir.nodes import (
@@ -181,6 +184,7 @@ __all__ = [
     "Class",
     "Colon",
     "Component",
+    "Comprehension",
     "Connect",
     "ConnectorKind",
     "Equal",

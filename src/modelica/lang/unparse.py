@@ -78,6 +78,12 @@ def _render_expr(node: ir.Expr) -> str:  # noqa: C901, PLR0911, PLR0912 -- one p
         case ir.Matrix(rows=rows):
             body = "; ".join(", ".join(unparse_expr(e) for e in row) for row in rows)
             return f"[{body}]"
+        case ir.Comprehension(body=body, iterators=iterators):
+            spans = ", ".join(
+                name if over is None else f"{name} in {unparse_expr(over)}"
+                for name, over in iterators
+            )
+            return f"{{{unparse_expr(body)} for {spans}}}"
         case ir.Colon():
             return ":"
         case ir.Subscript(base=base, indices=indices):

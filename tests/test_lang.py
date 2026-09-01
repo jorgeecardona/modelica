@@ -373,8 +373,9 @@ def test_the_step_of_a_range_is_the_middle_term() -> None:
     assert equation.over == ir.Range(ir.IntLiteral(1), ir.Ref(("n",)), ir.IntLiteral(2))
 
 
+# ("comprehension", ...) moved with the frontier: `{i for i in 1:3}` parses now, and
+# tests/test_slices.py pins the new behaviour.
 ARRAY_REFUSALS = [
-    ("comprehension", "{i for i in 1:3}"),
     ("several indices", "model M\nequation\n  for i, j in 1:3 loop\n  end for;\nend M;\n"),
     ("inner subscript", "a[1].b"),
 ]

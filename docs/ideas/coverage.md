@@ -42,6 +42,14 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after comprehensions, in both spellings
+
+`{x[i] for i in 1:n}` and the reduction call `sum(x[i] for i in 1:n)` are one
+`Comprehension` node; the printer always writes the braces, which parses back to the same
+value. Carried like `Array`, refused beside it at the point of use. **Parsed 406 → 409
+(95.1 %).** The tail rows keep trading places; operator overloading (311) is now
+three-quarters of everything left.
+
 ### 2026-09-01, after ranges become expressions
 
 `parameter Integer columns[:] = 2:size(table, 2)` — a range as a binding value. The range
