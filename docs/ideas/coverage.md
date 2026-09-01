@@ -42,6 +42,18 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after `assert` equations carry
+
+`assert(condition, message);` in an equation section parses and flattens into a new
+`FlatModel.asserts` — prefixed like every equation, never counted by causalization,
+because an assert binds no unknown. The simulator does not evaluate asserts yet; the node
+records that instead of the model losing its diagnostics. `Modelica.Electrical.Analog.
+Basic.Resistor` and its neighbours load now; the `expected '=', found ';'` row shrank
+48 → 44, and what remains under that message is a different construct
+(`Modelica.Electrical.QuasiStatic` interfaces — likely the overconstrained-connector
+operators `Connections.branch/root`). Parsed holds at 277 / 430; the cleared models
+redistribute (operator overloading 190 → 193).
+
 ### 2026-09-01, after matrix expressions parse
 
 `[1, 2; 3, 4]` becomes an `ir.Matrix`, following `ir.Array`'s design exactly: it survives

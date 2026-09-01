@@ -453,7 +453,23 @@ class ForEquation:
     body: tuple[Equation, ...]
 
 
-type Equation = Equal | CallEquation | Connect | When | IfEquation | ForEquation
+@dataclass(frozen=True, slots=True)
+class Assert:
+    """``assert(condition, message);`` -- a runtime check, not a binding.
+
+    It constrains no unknown, so matching and causalization never see it: flattening
+    carries it into ``FlatModel.asserts`` instead of the equation list. The simulator does
+    not evaluate asserts yet -- the node is kept so a model's diagnostics stay part of its
+    value instead of being dropped on the floor.
+    """
+
+    condition: Expr
+    message: Expr
+    level: Expr | None = None
+    span: Span | None = field(default=None, compare=False, repr=False)
+
+
+type Equation = Equal | CallEquation | Assert | Connect | When | IfEquation | ForEquation
 
 
 # --------------------------------------------------------------------------------------

@@ -82,6 +82,11 @@ class FlatModel:
     """The continuous equations, ``connect()`` already expanded."""
     whens: tuple[ir.When, ...] = ()
     """Event clauses, kept apart from the continuous part they interrupt."""
+    asserts: tuple[ir.Assert, ...] = ()
+    """Runtime checks, carried but not yet evaluated by the simulator.
+
+    Apart from the equations because they bind nothing: an assert is a diagnostic on the
+    solution, not a constraint that shapes it."""
     initial_equations: tuple[ir.Equal, ...] = ()
 
     def __getitem__(self, name: str) -> FlatVariable:

@@ -212,7 +212,10 @@ def _if_statement(node: ir.IfStatement, indent: int) -> list[str]:
     return lines
 
 
-def unparse_equation(node: ir.Equation, indent: int = 0) -> list[str]:
+def unparse_equation(  # noqa: C901, PLR0911 -- one arm and one return per equation form
+    node: ir.Equation,
+    indent: int = 0,
+) -> list[str]:
     """Render one equation as a list of lines, indented by ``indent`` levels."""
     pad = "  " * indent
     match node:
@@ -221,6 +224,11 @@ def unparse_equation(node: ir.Equation, indent: int = 0) -> list[str]:
         case ir.CallEquation(targets=targets, call=call):
             named = ", ".join("" if t is None else t.name for t in targets)
             return [f"{pad}({named}) = {unparse_expr(call)};"]
+        case ir.Assert(condition=condition, message=message, level=level):
+            arguments = [unparse_expr(condition), unparse_expr(message)]
+            if level is not None:
+                arguments.append(unparse_expr(level))
+            return [f"{pad}assert({', '.join(arguments)});"]
         case ir.Connect(a=a, b=b, annotation=annotation):
             return [f"{pad}connect({a.name}, {b.name}){_annotation(annotation)};"]
         case ir.When(branches=branches):

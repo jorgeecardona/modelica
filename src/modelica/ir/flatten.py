@@ -527,6 +527,8 @@ def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir
     match node:
         case ir.Equal(lhs=lhs, rhs=rhs, span=span):
             return ir.Equal(go(lhs), go(rhs), span)
+        case ir.Assert(condition=condition, message=message, level=level, span=span):
+            return ir.Assert(go(condition), go(message), None if level is None else go(level), span)
         case ir.CallEquation(targets=targets, call=call, span=span):
             # The targets are names of the enclosing class and the loop index is not one of
             # them, so only the arguments can carry it. A subscripted target -- `(a[i], b) =
@@ -1179,6 +1181,7 @@ class _Flattener:
     variables: list[FlatVariable] = field(default_factory=list[FlatVariable])
     equations: list[ir.Equal] = field(default_factory=list[ir.Equal])
     whens: list[ir.When] = field(default_factory=list[ir.When])
+    asserts: list[ir.Assert] = field(default_factory=list[ir.Assert])
     initial_equations: list[ir.Equal] = field(default_factory=list[ir.Equal])
     connections: _Connections = field(default_factory=_Connections)
     connectors: dict[_Path, Found] = field(default_factory=dict[_Path, "Found"])
@@ -1473,7 +1476,8 @@ class _Flattener:
             if target is not None
         ]
 
-    def _equation(  # noqa: PLR0913 -- the scope resolves a call, the outer map a name
+    def _equation(  # noqa: C901, PLR0913 -- one arm per equation form; the scope
+        # resolves a call, the outer map a name
         self,
         equation: ir.Equation,
         prefix: _Path,
@@ -1510,6 +1514,17 @@ class _Flattener:
                 # holds is still the one the modeller wrote, and saying where it was written
                 # is the difference between "block 7" and a line a reader can open.
                 sink.append(ir.Equal(carry(lhs), carry(rhs), span))
+            case ir.Assert(condition=condition, message=message, level=level, span=span):
+                # No unknown is bound here, so it goes beside the equations, not among
+                # them: causalization must never count an assert.
+                self.asserts.append(
+                    ir.Assert(
+                        carry(condition),
+                        carry(message),
+                        None if level is None else carry(level),
+                        span,
+                    )
+                )
             case ir.Connect(a=a, b=b):
                 # A connect whose endpoint sits inside a disabled conditional component
                 # is removed together with the component, silently: that is the one
@@ -1707,5 +1722,6 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
         variables=tuple(flattener.variables),
         equations=tuple(flattener.equations),
         whens=tuple(flattener.whens),
+        asserts=tuple(flattener.asserts),
         initial_equations=tuple(flattener.initial_equations),
     )

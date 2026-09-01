@@ -571,7 +571,7 @@ class _Parser:
             found.append(self.equation())
         return found
 
-    def equation(self) -> ir.Equation:
+    def equation(self) -> ir.Equation:  # noqa: PLR0911 -- one return per equation form
         """Parse one equation, including its terminating semicolon."""
         if self.token.kind is Kind.KEYWORD:
             match self.token.text:
@@ -586,6 +586,15 @@ class _Parser:
                 case _:
                     self._refuse_unsupported()
         where = self._at(self.token)
+        token = self.token
+        ahead = self._ahead(1)
+        if (
+            token.kind is Kind.NAME
+            and token.text == "assert"
+            and ahead.kind is Kind.OP
+            and ahead.text == "("
+        ):
+            return self._assert_equation(where)
         if self._check(Kind.OP, "("):
             outputs = self._output_list()
             if outputs is not None:
@@ -673,6 +682,29 @@ class _Parser:
         if self._accept(Kind.OP, ":"):
             return ir.Range(first, self.expression(), second)
         return ir.Range(first, second)
+
+    def _assert_equation(self, where: ir.Span) -> ir.Assert:
+        """``assert(condition, "message");`` -- the one call the equation grammar names.
+
+        The third argument, positional or written ``level = ...``, is the assertion level.
+        Anything else in the call is a mistake worth naming here rather than a shape for
+        flattening to trip over.
+        """
+        self.at += 1
+        args, named = self._arguments()
+        self._terminate()
+        extras = dict(named)
+        level = extras.pop("level", None)
+        positional = list(args)
+        # Two shapes are legal: (condition, message) and (condition, message, level).
+        condition_and_message = 2
+        if len(positional) == condition_and_message + 1 and level is None:
+            level = positional.pop()
+        if len(positional) != condition_and_message or extras:
+            raise self._error(
+                "assert takes a condition, a message, and optionally a level",
+            )
+        return ir.Assert(positional[0], positional[1], level, where)
 
     def _connect(self) -> ir.Connect:
         self._expect(Kind.KEYWORD, "connect")
