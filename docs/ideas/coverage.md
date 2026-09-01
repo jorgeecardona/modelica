@@ -42,6 +42,14 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after `initial algorithm` folds
+
+`initial algorithm` is to `initial equation` what `algorithm` is to `equation`, and it
+now parses into `Class.initial_algorithms` and folds into the initial equations during
+flattening. The 32 models blocked on the section header advanced one construct deeper
+(their chain now meets `expected '=', found '('`, 34 models — next). Parsed holds at
+405 / 430 (94.2 %): these were dependency cascades, and the frontier inside them moved.
+
 ### 2026-09-01, after slices read where the grammar expects them
 
 `x[1:3]` and `A[:, 1]` parse: a range was already readable — but only in the header of a

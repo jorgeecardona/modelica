@@ -161,9 +161,12 @@ def test_the_python_front_end_prints_the_same_source() -> None:
 # --------------------------------------------------------------------------------------
 
 
-def test_initial_algorithm_is_refused_by_name() -> None:
-    with pytest.raises(ModelicaSyntaxError, match="initial algorithm"):
-        parse("model M\ninitial algorithm\n  x := 1.0;\nend M;\n")
+def test_initial_algorithm_parses_now() -> None:
+    """This test used to pin the refusal; the construct moved with the frontier."""
+    program = parse("model M\n  Real x;\ninitial algorithm\n  x := 1.0;\nend M;\n")
+    m = program.find("M")
+    assert m is not None
+    assert len(m.initial_algorithms) == 1
 
 
 def test_an_external_body_is_still_refused() -> None:
@@ -368,3 +371,17 @@ def test_a_builtin_call_is_left_alone() -> None:
     """``sqrt`` names no class, and asking the scope about it must not become an error."""
     source = "model M\n  Real z;\nequation\n  z = sqrt(2.0) + der(time);\nend M;\n"
     assert _equation_text(source, "M") == ["z = sqrt(2.0) + der(time);"]
+
+
+def test_an_initial_algorithm_folds_into_the_initial_equations() -> None:
+    """The same statements as an ``initial equation`` section, holding at initialization.
+
+    MSL's Pulse source (Blocks/Sources.mo) computes its period count this way, and 32
+    example models' first refusal was this section header.
+    """
+    source = "model M\n  Real x;\ninitial algorithm\n  x := 2;\nequation\n  der(x) = -x;\nend M;\n"
+    program = parse(source)
+    assert parse(unparse(program)) == program
+    flat = flatten([program], "M")
+    assert len(flat.initial_equations) == 1
+    assert len(flat.equations) == 1

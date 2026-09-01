@@ -1052,6 +1052,7 @@ class _Parser:
         equations: list[ir.Equation] = []
         initial_equations: list[ir.Equation] = []
         algorithms: list[tuple[ir.Statement, ...]] = []
+        initial_algorithms: list[tuple[ir.Statement, ...]] = []
         annotation = ir.EMPTY
 
         while not self._keyword("end"):
@@ -1069,8 +1070,9 @@ class _Parser:
                 self._expect(Kind.OP, ";")
                 continue
             if self._accept(Kind.KEYWORD, "initial"):
-                if self._check(Kind.KEYWORD, "algorithm"):
-                    raise self._error("'initial algorithm' sections are not supported yet")
+                if self._accept(Kind.KEYWORD, "algorithm"):
+                    initial_algorithms.append(tuple(self._statements(until=_SECTION_END)))
+                    continue
                 self._expect(Kind.KEYWORD, "equation")
                 initial_equations += self._equations()
                 continue
@@ -1121,6 +1123,7 @@ class _Parser:
             components=tuple(components),
             equations=tuple(equations),
             initial_equations=tuple(initial_equations),
+            initial_algorithms=tuple(initial_algorithms),
             algorithms=tuple(algorithms),
             classes=tuple(nested),
             annotation=annotation,

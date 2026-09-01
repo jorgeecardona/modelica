@@ -1255,6 +1255,11 @@ class _Flattener:
         for section in found.cls.algorithms:
             for equation in _section_equations(section, found.cls.name):
                 self._equation(equation, prefix, local, scope=inner, outer=resolved_outer)
+        for section in found.cls.initial_algorithms:
+            for equation in _section_equations(section, found.cls.name):
+                self._equation(
+                    equation, prefix, local, scope=inner, outer=resolved_outer, initial=True
+                )
 
     def _scoping(
         self, merged: Effective, prefix: _Path, inherited: Mapping[str, _Path]

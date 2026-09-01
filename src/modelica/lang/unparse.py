@@ -320,6 +320,7 @@ def _is_short_definition(node: ir.Class) -> bool:
         and not node.components
         and not node.equations
         and not node.algorithms
+        and not node.initial_algorithms
         and not node.classes
         and not node.imports
         and not node.redeclarations
@@ -376,6 +377,10 @@ def _sections(node: ir.Class, indent: int) -> list[str]:
         lines.append(f"{pad}{keyword}")
         for equation in equations:
             lines += unparse_equation(equation, indent + 1)
+    for section in node.initial_algorithms:
+        lines.append(f"{pad}initial algorithm")
+        for statement in section:
+            lines += unparse_statement(statement, indent + 1)
     for section in node.algorithms:
         lines.append(f"{pad}algorithm")
         for statement in section:

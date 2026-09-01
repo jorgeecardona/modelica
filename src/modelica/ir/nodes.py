@@ -632,6 +632,13 @@ class Class:
     components: tuple[Component, ...] = ()
     equations: tuple[Equation, ...] = ()
     initial_equations: tuple[Equation, ...] = ()
+    initial_algorithms: tuple[tuple[Statement, ...], ...] = ()
+    """The ``initial algorithm`` sections: assignments that hold at initialization.
+
+    Kept sectioned for the same reason :attr:`algorithms` is, and folded into the
+    initial equations by flattening the same way the plain sections fold into the
+    continuous ones.
+    """
     algorithms: tuple[tuple[Statement, ...], ...] = ()
     """The ``algorithm`` sections, each kept whole rather than merged into one list.
 
