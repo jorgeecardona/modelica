@@ -398,6 +398,7 @@ type Statement = (
     | WhileStatement
     | Assert
     | CallStatement
+    | When
 )
 
 

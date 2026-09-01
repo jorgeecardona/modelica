@@ -825,7 +825,7 @@ class _Parser:
             found.append(self._algorithm_statement())
         return found
 
-    def _algorithm_statement(self) -> ir.Statement:
+    def _algorithm_statement(self) -> ir.Statement:  # noqa: PLR0911 -- one per form
         """One statement of an ``algorithm`` section, compound forms included."""
         if self.token.kind is Kind.KEYWORD:
             match self.token.text:
@@ -835,6 +835,8 @@ class _Parser:
                     return self._for_statement()
                 case "while":
                     return self._while_statement()
+                case "when":
+                    return self._when_statement()
                 case "break":
                     self.at += 1
                     self._terminate()
@@ -846,6 +848,32 @@ class _Parser:
                 case _:
                     self._refuse_unsupported()
         return self._statement()
+
+    def _when_statement(self) -> ir.When:
+        """``when`` in an algorithm section: the same node, the other spelling.
+
+        The IR reuses :class:`~modelica.ir.When` -- branches of statements either way --
+        and the *section* decides how an assignment inside it prints, exactly as the
+        existing note on ``:=`` versus ``=`` says. The bodies here are full algorithm
+        statements, where a when-equation's body is the simple half.
+        """
+        opening = self.token
+        branches: list[ir.WhenBranch] = []
+        keyword = "when"
+        while self._accept(Kind.KEYWORD, keyword):
+            condition = self.expression()
+            self._expect(Kind.KEYWORD, "then")
+            body: list[ir.Statement] = []
+            while not self._keyword("elsewhen", "end"):
+                if self._check(Kind.END):
+                    raise self._error("unterminated 'when': expected 'end when;'", opening)
+                body.append(self._algorithm_statement())
+            branches.append(ir.WhenBranch(condition, tuple(body)))
+            keyword = "elsewhen"
+        self._expect(Kind.KEYWORD, "end")
+        self._expect(Kind.KEYWORD, "when")
+        self._terminate()
+        return ir.When(tuple(branches))
 
     def _if_statement(self) -> ir.IfStatement:
         opening = self.token

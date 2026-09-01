@@ -42,6 +42,14 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after `when` in a statement position
+
+The when-statement reuses the when-equation's node — branches of statements either way —
+and the *section* decides how an assignment inside it prints, extending the existing
+`:=`/`=` note. Bodies are full algorithm statements. The fold refuses it by name. The
+Sources/Tables chain advanced again, to `expected ';', found ':'` (32). Parsed holds at
+405 / 430 (94.2 %).
+
 ### 2026-09-01, after the statement twins
 
 `assert(...)` as a statement and `(a, b) := f(x)` — the statement twins of the equation

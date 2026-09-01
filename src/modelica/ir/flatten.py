@@ -649,6 +649,7 @@ _INLINE_DEPTH: Final = 16
 
 _SPELLING: Final[dict[type, str]] = {
     ir.Assert: "'assert'",
+    ir.When: "a 'when'",
     ir.CallStatement: "an output list assignment",
     ir.ForStatement: "a 'for' loop",
     ir.WhileStatement: "a 'while' loop",

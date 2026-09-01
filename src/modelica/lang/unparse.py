@@ -152,7 +152,7 @@ def _annotation(mod: ir.Modification) -> str:
     return f" annotation{_modification(mod)}" if mod else ""
 
 
-def unparse_statement(  # noqa: C901, PLR0911 -- one arm and one return per statement form
+def unparse_statement(  # noqa: C901, PLR0911, PLR0912 -- one arm per statement form
     node: ir.Statement,
     indent: int = 0,
     *,
@@ -181,6 +181,15 @@ def unparse_statement(  # noqa: C901, PLR0911 -- one arm and one return per stat
         case ir.CallStatement(targets=targets, call=call):
             named = ", ".join("" if t is None else t.name for t in targets)
             return [f"{pad}({named}) := {unparse_expr(call)};"]
+        case ir.When(branches=branches):
+            lines: list[str] = []
+            for position, branch in enumerate(branches):
+                keyword = "when" if position == 0 else "elsewhen"
+                lines.append(f"{pad}{keyword} {unparse_expr(branch.condition)} then")
+                for inner in branch.body:
+                    lines += unparse_statement(inner, indent + 1, assign=assign)
+            lines.append(f"{pad}end when;")
+            return lines
         case ir.Break():
             return [f"{pad}break;"]
         case ir.Return():

@@ -414,3 +414,40 @@ def test_both_are_refused_by_name_when_a_section_folds() -> None:
     source = 'model M\n  Real x;\nalgorithm\n  assert(x > 0, "gone");\nend M;\n'
     with pytest.raises(FlattenError, match="uses 'assert'"):
         flatten([parse(source)], "M")
+
+
+WHEN_SECTION = """\
+model M
+  discrete Real y;
+  Real x;
+equation
+  der(x) = 1.0;
+algorithm
+  when x > 1.0 then
+    y := 2.0 * x;
+  elsewhen x > 2.0 then
+    y := 0.0;
+  end when;
+end M;
+"""
+
+
+def test_a_when_statement_is_read_and_round_trips_with_its_own_spelling() -> None:
+    """``when`` in an algorithm: the same node as the when-equation, printed with ``:=``.
+
+    Blocks/Sources.mo interpolates its tables inside one, and 31 example models' first
+    refusal was this keyword in a statement position.
+    """
+    program = parse(WHEN_SECTION)
+    m = program.find("M")
+    assert m is not None
+    statement = m.algorithms[0][0]
+    assert isinstance(statement, ir.When)
+    assert len(statement.branches) == 2
+    assert parse(unparse(program)) == program
+    assert unparse(program) == WHEN_SECTION
+
+
+def test_a_when_statement_is_refused_by_name_when_the_section_folds() -> None:
+    with pytest.raises(FlattenError, match="uses a 'when'"):
+        flatten(parse(WHEN_SECTION), "M")
