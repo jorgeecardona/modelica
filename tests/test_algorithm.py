@@ -451,3 +451,15 @@ def test_a_when_statement_is_read_and_round_trips_with_its_own_spelling() -> Non
 def test_a_when_statement_is_refused_by_name_when_the_section_folds() -> None:
     with pytest.raises(FlattenError, match="uses a 'when'"):
         flatten(parse(WHEN_SECTION), "M")
+
+
+def test_a_bare_call_statement_is_read_and_round_trips() -> None:
+    """``isValidTable(table);`` -- Blocks/Sources.mo checks its table this way."""
+    source = "model M\n  Real x;\nalgorithm\n  check(x);\nend M;\n"
+    program = parse(source)
+    m = program.find("M")
+    assert m is not None
+    statement = m.algorithms[0][0]
+    assert statement == ir.CallStatement((), ir.Call("check", (ir.Ref(("x",)),), ()))
+    assert parse(unparse(program)) == program
+    assert unparse(program) == source

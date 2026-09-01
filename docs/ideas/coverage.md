@@ -42,6 +42,13 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after bare call statements
+
+`isValidTable(table);` — the statement twin of the bare call equation, with the same
+empty output list. Parsed 409 → 410 (95.3 %). The work list is three rows now: operator
+overloading (311), `input` on a short class definition (58 — the
+`connector RealInput = input Real` family), and `impure` (19).
+
 ### 2026-09-01, after comprehensions, in both spellings
 
 `{x[i] for i in 1:n}` and the reduction call `sum(x[i] for i in 1:n)` are one

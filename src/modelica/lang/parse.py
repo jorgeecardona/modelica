@@ -826,6 +826,13 @@ class _Parser:
             self._terminate()
             return ir.Reinit(target, value)
         target = self._reference()
+        if self._check(Kind.OP, "("):
+            # `isValidTable(table);` -- a bare call as a statement, the twin of the bare
+            # call equation, and the same empty output list.
+            where = self._at(self.token)
+            args, named = self._arguments()
+            self._terminate()
+            return ir.CallStatement((), ir.Call(target.name, args, named), where)
         if self._accept(Kind.OP, ":=") is None:
             self._expect(Kind.OP, "=")
         value = self.expression()

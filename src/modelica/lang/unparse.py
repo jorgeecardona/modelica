@@ -184,6 +184,8 @@ def unparse_statement(  # noqa: C901, PLR0911, PLR0912 -- one arm per statement 
             if level is not None:
                 arguments.append(unparse_expr(level))
             return [f"{pad}assert({', '.join(arguments)});"]
+        case ir.CallStatement(targets=(), call=call):
+            return [f"{pad}{unparse_expr(call)};"]
         case ir.CallStatement(targets=targets, call=call):
             named = ", ".join("" if t is None else t.name for t in targets)
             return [f"{pad}({named}) := {unparse_expr(call)};"]
