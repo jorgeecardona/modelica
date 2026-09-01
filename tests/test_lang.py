@@ -503,3 +503,15 @@ def test_a_span_does_not_change_what_a_node_equals_or_hashes_to() -> None:
 def test_the_printer_does_not_print_a_span() -> None:
     """It is metadata, not syntax, so the round trip cannot see it."""
     assert unparse(parse(SPANNED, "Motor.mo")) == unparse(parse(SPANNED))
+
+
+def test_final_on_a_component_clause_is_accepted() -> None:
+    """``final parameter Real THD1 = V3/V1`` -- MSL writes it on 90 example models' path.
+
+    Discarded like every other ``final`` this parser meets: finality forbids later
+    modification, and nothing downstream modifies further yet.
+    """
+    program = parse("model M\n  final parameter Real x = 1;\nend M;\n")
+    m = program.find("M")
+    assert m is not None
+    assert m.components[0].variability == "parameter"

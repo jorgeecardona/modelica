@@ -42,6 +42,15 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after `final` on a component clause
+
+`final parameter Real THD1 = V3/V1` — the element prefix, accepted and discarded the way
+the parser's four other `final` sites already do: finality forbids later modification,
+and nothing downstream modifies further yet. One branch in the prefix loop; **parsed
+345 → 359 (83.5 %)**. The remaining work list now reads as one story: the function
+declaration chain (`algorithm` sections 32, `input` 25, `impure` 19) feeding into
+operator overloading (258), plus array slices (51 + 9).
+
 ### 2026-09-01, after connector-array elements wire
 
 `connect(plug.pin[2], x)` is implemented, not merely parsed: the subscript is structural

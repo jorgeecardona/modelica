@@ -921,6 +921,11 @@ class _Parser:
                     # rule rather than the two together. Refused rather than half-read.
                     raise self._error("'inner outer' is not supported yet")
                 scoping = _SCOPING[token.text]
+            elif token.text == "final":
+                # Accepted and discarded, as every other `final` in this parser is:
+                # finality forbids later modification, and nothing downstream modifies
+                # further, so there is nothing yet for the flag to forbid.
+                pass
             else:
                 break
             self.at += 1
