@@ -409,8 +409,11 @@ class Connect:
     not three pairwise ones.
     """
 
-    a: Ref
-    b: Ref
+    a: Ref | Subscript
+    b: Ref | Subscript
+    """An endpoint is a component reference, subscripted when it names one element of an
+    array of connectors: ``connect(plug.pin[2], x)``. The subscript sits on the last name
+    only -- flattening resolves it to the element the array expansion already declared."""
     annotation: Modification = EMPTY
     """Where the line was drawn. ``Line(points = {{0, 0}, {10, 0}}, color = {0, 0, 255})``."""
 

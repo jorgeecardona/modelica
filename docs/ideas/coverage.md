@@ -42,6 +42,26 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after connector-array elements wire
+
+`connect(plug.pin[2], x)` is implemented, not merely parsed: the subscript is structural
+the way a dimension is, evaluated during flattening, and the wire lands on the element
+the array expansion already declared. Connecting a whole array at once, a subscript
+anywhere but the last name, and a `connect` inside a `for` loop stay refused by name.
+**Parsed rose 314 → 345 (80.2 %).** The frontier is now two constructs: operator
+overloading (240) and whatever `expected name, found keyword 'final'` turns out to be
+(90, suddenly visible now that `Modelica.Blocks.Tables` loads this far).
+
+| models | stage | refusal |
+| -----: | ----- | ------- |
+|    240 | parse | operator overloading |
+|     90 | parse | `expected name, found keyword 'final'` |
+|     47 | parse | array slices (`[:]`) |
+|     10 | parse | `expected name, found keyword 'input'` |
+|      7 | flatten | a composite component cannot have a value (media bindings) |
+|      7 | parse | `expected an expression, found operator ':'` |
+|     29 | parse/flatten | rarer refusals; `coverage.json` has every model |
+
 ### 2026-09-01, after bare call equations parse
 
 `Connections.root(a.b);` is a function call as an equation — specification 8.3.1 with an

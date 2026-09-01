@@ -1602,15 +1602,37 @@ class _Flattener:
                     initial=initial,
                 )
 
-    def _severed(self, ref: ir.Ref, prefix: _Path, local: frozenset[str]) -> bool:
+    def _severed(self, end: ir.Ref | ir.Subscript, prefix: _Path, local: frozenset[str]) -> bool:
         """Whether this connect endpoint sits inside a disabled conditional component."""
+        ref = end.base if isinstance(end, ir.Subscript) else end
         path = _prefix_ref(ref, prefix, local).parts
         return any(path[:length] in self.disabled for length in range(1, len(path) + 1))
 
-    def _endpoint(self, ref: ir.Ref, prefix: _Path, local: frozenset[str]) -> _Endpoint:
+    def _endpoint(
+        self, end: ir.Ref | ir.Subscript, prefix: _Path, local: frozenset[str]
+    ) -> _Endpoint:
+        ref = end.base if isinstance(end, ir.Subscript) else end
         path = _prefix_ref(ref, prefix, local).parts
+        if isinstance(end, ir.Subscript):
+            # A subscript picks one element of an array of connectors, and the element it
+            # names is the one `_array` already declared -- so the index is structural,
+            # evaluated here the way a dimension is.
+            indices = tuple(
+                _integer(
+                    _prefix_expr(index, prefix, local, values=self.values),
+                    self.values,
+                    f"a subscript on connect() endpoint {'.'.join(ref.parts)!r}",
+                )
+                for index in end.indices
+            )
+            path = (*path[:-1], element(path[-1], indices))
         role: _Role = "outside" if len(ref.parts) == 1 else "inside"
         if path not in self.connectors:
+            if (*path[:-1], element(path[-1], (1,))) in self.connectors:
+                raise FlattenError(
+                    f"connect() over a whole array of connectors is not supported yet"
+                    f" ({'.'.join(path)!r}; connect the elements)",
+                )
             raise FlattenError(f"connect() endpoint {'.'.join(path)!r} is not a connector")
         return (path, role)
 

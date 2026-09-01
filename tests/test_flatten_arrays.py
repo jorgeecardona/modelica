@@ -20,7 +20,6 @@ import pytest
 from modelica.ir.flatten import FlattenError
 from modelica.ir.source import flatten
 from modelica.lang import parse
-from modelica.lang.lexer import ModelicaSyntaxError
 from modelica.lang.unparse import unparse_equation
 
 if TYPE_CHECKING:
@@ -180,11 +179,14 @@ def test_a_range_that_steps_by_zero_is_refused() -> None:
         flat("  Real T[3];\nequation\n  for i in 1:0:3 loop\n    T[i] = 0;\n  end for;\n")
 
 
-def test_an_array_of_connectors_is_refused_by_name() -> None:
-    """Arrays of connectors are the next thing after this, and are refused at the parser.
+def test_a_connect_inside_a_for_loop_is_refused_by_name() -> None:
+    """A subscripted endpoint parses now; the loop around it is the remaining refusal.
 
-    Without that, the bracket met a parser expecting a comma and the model was blamed for a
-    syntax error it did not have.
+    This test used to pin the parser's "arrays of connectors" refusal. That construct is
+    implemented -- ``connect(p[k], q)`` wires the element -- so the same source now walks
+    one stage further and meets the ``for``-loop expansion, which still refuses a
+    ``connect`` by name. When that lands too, this test moves again: it is a progress
+    meter, not a fence.
     """
     source = (
         "package P\n"
@@ -201,5 +203,5 @@ def test_an_array_of_connectors_is_refused_by_name() -> None:
         "  end M;\n"
         "end P;\n"
     )
-    with pytest.raises(ModelicaSyntaxError, match="arrays of connectors"):
+    with pytest.raises(FlattenError, match="connect\\(\\) inside a 'for' equation"):
         flatten([parse(source)], "P.M")

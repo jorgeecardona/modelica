@@ -226,13 +226,20 @@ class _Schematic:
                 )
         self.sets.extend(union.sets())
 
-    def _endpoint(self, ref: ir.Ref, by_name: dict[str, _Drawn], path: str) -> tuple[str, str]:
+    def _endpoint(
+        self, ref: ir.Ref | ir.Subscript, by_name: dict[str, _Drawn], path: str
+    ) -> tuple[str, str]:
         """Map ``r.p`` to the node that owns it and the port on that node.
+
+        A subscripted endpoint draws to its base: the picture shows the port, and which
+        element of it carries the wire is the flattener's business, not the reader's.
 
         A connector on the boundary of the drawn class is a node of its own, so
         ``connect(p, r.p)`` attaches to the node ``p`` with no port. A connector on a
         component that stayed closed attaches to the component with the port named.
         """
+        if isinstance(ref, ir.Subscript):
+            ref = ref.base
         if ref.parts[0] not in by_name:
             raise FlattenError(f"connect() endpoint {ref.name!r} names nothing in scope")
         full = _join(path, ref.name)

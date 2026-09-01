@@ -232,7 +232,8 @@ def unparse_equation(  # noqa: C901, PLR0911 -- one arm and one return per equat
                 arguments.append(unparse_expr(level))
             return [f"{pad}assert({', '.join(arguments)});"]
         case ir.Connect(a=a, b=b, annotation=annotation):
-            return [f"{pad}connect({a.name}, {b.name}){_annotation(annotation)};"]
+            ends = f"{unparse_expr(a)}, {unparse_expr(b)}"
+            return [f"{pad}connect({ends}){_annotation(annotation)};"]
         case ir.When(branches=branches):
             lines: list[str] = []
             for position, branch in enumerate(branches):

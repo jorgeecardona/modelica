@@ -721,16 +721,21 @@ class _Parser:
         self._expect(Kind.OP, ")")
         return ir.Connect(a, b, self._terminate())
 
-    def _endpoint(self) -> ir.Ref:
+    def _endpoint(self) -> ir.Ref | ir.Subscript:
         """One side of a ``connect``, which is a component and not an expression.
 
-        A subscripted endpoint -- ``connect(p[k], q)`` -- is an array of connectors, and it
-        is refused here by name. Without this the bracket meets a parser expecting a comma
-        and the model is blamed for a syntax error it does not have.
+        A trailing subscript names one element of an array of connectors --
+        ``connect(p[k], q)`` -- and parses to a :class:`~modelica.ir.Subscript` on the
+        reference. A subscript anywhere but the end is still refused by name.
         """
         reference = self._reference()
         if self._check(Kind.OP, "["):
-            raise self._error("arrays of connectors are not supported yet")
+            indices = self._bracketed()
+            if self._check(Kind.OP, "."):
+                raise self._error(
+                    "a subscript inside a connect endpoint must be on the last name",
+                )
+            return ir.Subscript(reference, indices)
         return reference
 
     def _when(self) -> ir.When:
