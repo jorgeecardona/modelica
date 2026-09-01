@@ -301,7 +301,7 @@ class _Parser:
             case Kind.OP if token.text == "{":
                 return self._array()
             case Kind.OP if token.text == "[":
-                raise self._error("matrix expressions are not supported yet")
+                return self._matrix()
             case Kind.KEYWORD if token.text in ("true", "false"):
                 self.at += 1
                 return ir.BoolLiteral(token.text == "true")
@@ -324,6 +324,20 @@ class _Parser:
             case _:
                 self._refuse_unsupported()
         raise self._error(f"expected an expression, found {token.describe()}")
+
+    def _matrix(self) -> ir.Matrix:
+        """``[1, 2; 3, 4]`` -- at least one row, each row at least one expression."""
+        self._expect(Kind.OP, "[")
+        rows: list[tuple[ir.Expr, ...]] = []
+        while True:
+            row = [self.expression()]
+            while self._accept(Kind.OP, ","):
+                row.append(self.expression())
+            rows.append(tuple(row))
+            if not self._accept(Kind.OP, ";"):
+                break
+        self._expect(Kind.OP, "]")
+        return ir.Matrix(tuple(rows))
 
     def _array(self) -> ir.Array:
         """``{a, b, c}``, nested as deep as it goes: a point is one, an extent is two."""

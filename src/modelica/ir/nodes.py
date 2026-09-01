@@ -159,6 +159,18 @@ class Array:
 
 
 @dataclass(frozen=True, slots=True)
+class Matrix:
+    """``[1, 2; 3, 4]`` -- rows split by semicolons, elements by commas.
+
+    Read and carried for the same reason :class:`Array` is: the construct must survive the
+    parser for the file holding it to load at all. Nothing gives a matrix a meaning yet --
+    the semantic layers refuse the node by name where one would be needed.
+    """
+
+    rows: tuple[tuple[Expr, ...], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Subscript:
     """``T[i]``, ``A[i, j]`` -- a reference with indices, before flattening scalarises it.
 
@@ -228,6 +240,7 @@ type Expr = (
     | BoolLiteral
     | StringLiteral
     | Array
+    | Matrix
     | Subscript
     | Range
     | Binary

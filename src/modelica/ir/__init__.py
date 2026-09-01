@@ -95,6 +95,9 @@ from modelica.ir.nodes import (
     IntLiteral as IntLiteral,
 )
 from modelica.ir.nodes import (
+    Matrix as Matrix,
+)
+from modelica.ir.nodes import (
     Modification as Modification,
 )
 from modelica.ir.nodes import (
@@ -181,6 +184,7 @@ __all__ = [
     "IfStatement",
     "Import",
     "IntLiteral",
+    "Matrix",
     "Modification",
     "Program",
     "Range",

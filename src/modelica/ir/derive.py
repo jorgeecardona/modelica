@@ -277,6 +277,8 @@ def _derive(node: ir.Expr, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:
             return ZERO
         case ir.Array() | ir.Subscript() | ir.Range():
             raise DerivativeError("array equations are not supported yet")
+        case ir.Matrix():
+            raise DerivativeError("matrix expressions are not supported yet")
         case ir.Binary():
             return _binary(node, leaf)
         case ir.Unary(op=op, operand=operand):

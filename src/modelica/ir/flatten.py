@@ -462,7 +462,7 @@ def _prefix_expr(  # noqa: PLR0911, PLR0913 -- one case per node type, one flag 
             return node
 
 
-def _substitute(  # noqa: PLR0911 -- one case per node type
+def _substitute(  # noqa: C901, PLR0911 -- one case per node type
     node: ir.Expr, values: Mapping[str, ir.Expr]
 ) -> ir.Expr:
     """Replace whole references by their dotted name.
@@ -491,6 +491,8 @@ def _substitute(  # noqa: PLR0911 -- one case per node type
             return ir.IfExpr(go(condition), go(then), go(otherwise))
         case ir.Array(elements=elements):
             return ir.Array(tuple(go(e) for e in elements))
+        case ir.Matrix(rows=rows):
+            return ir.Matrix(tuple(tuple(go(e) for e in row) for row in rows))
         case ir.Range(start=start, stop=stop, step=step):
             return ir.Range(go(start), go(stop), None if step is None else go(step))
         case _:
@@ -570,7 +572,7 @@ def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir
             )
 
 
-def _literals(  # noqa: PLR0911 -- one case per node type, as its neighbours have
+def _literals(  # noqa: C901, PLR0911 -- one case per node type, as its neighbours have
     node: ir.Expr, scope: Scope, local: frozenset[str]
 ) -> ir.Expr:
     """``Mode.day`` becomes ``1`` -- an enumeration literal is its position, counted from one.
@@ -603,6 +605,8 @@ def _literals(  # noqa: PLR0911 -- one case per node type, as its neighbours hav
             return ir.IfExpr(go(condition), go(then), go(otherwise))
         case ir.Array(elements=elements):
             return ir.Array(tuple(go(e) for e in elements))
+        case ir.Matrix(rows=rows):
+            return ir.Matrix(tuple(tuple(go(e) for e in row) for row in rows))
         case _:
             return node
 
@@ -671,6 +675,8 @@ def _inline_calls(  # noqa: PLR0911 -- one case per node type, as its neighbours
             return ir.IfExpr(go(condition), go(then), go(otherwise))
         case ir.Array(elements=elements):
             return ir.Array(tuple(go(e) for e in elements))
+        case ir.Matrix(rows=rows):
+            return ir.Matrix(tuple(tuple(go(e) for e in row) for row in rows))
         case ir.Subscript(base=base, indices=indices):
             return ir.Subscript(base, tuple(go(i) for i in indices))
         case _:

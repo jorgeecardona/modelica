@@ -42,6 +42,24 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-01, after matrix expressions parse
+
+`[1, 2; 3, 4]` becomes an `ir.Matrix`, following `ir.Array`'s design exactly: it survives
+parsing and flattening so the file that holds it loads, and evaluate, derive and emit
+refuse it by name at the point of use. One matrix in one file had been keeping whole
+packages from loading; with those files in, **parsed rose 262 → 277 (64.4 %)**.
+Reachability still 0 %.
+
+| models | stage | refusal |
+| -----: | ----- | ------- |
+|    190 | parse | operator overloading |
+|     80 | parse | arrays of connectors |
+|     48 | parse | `expected '=', found operator ';'` |
+|     44 | parse | array slices (`[:]`) |
+|     32 | parse | `expected name, found keyword 'final'` |
+|      8 | flatten | a composite component cannot have a value (media bindings) |
+|     28 | parse | six rarer refusals; `coverage.json` has every model |
+
 ### 2026-09-01, after conditional components work
 
 `Sensor s if useSensor;` is implemented, not merely accepted: the condition is evaluated

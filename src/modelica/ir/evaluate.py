@@ -187,6 +187,8 @@ def evaluate(node: ir.Expr, env: Mapping[str, Value]) -> Value:
             return value
         case ir.Array() | ir.Subscript() | ir.Range():
             raise EvaluationError("array equations are not supported yet")
+        case ir.Matrix():
+            raise EvaluationError("matrix expressions are not supported yet")
         case ir.Binary():
             return _binary(node, env)
         case ir.Unary():

@@ -293,6 +293,8 @@ def _render(  # noqa: C901, PLR0911, PLR0912 - one case per node type, two of th
             return repr(value)
         case ir.Array() | ir.Subscript() | ir.Range():
             raise EmitError("array equations are not supported yet")
+        case ir.Matrix():
+            raise EmitError("matrix expressions are not supported yet")
         case ir.Binary(op="^", lhs=lhs, rhs=rhs) if dialect.power is not None:
             return dialect.power(
                 emit_expr(lhs, symbols, dialect=dialect),
