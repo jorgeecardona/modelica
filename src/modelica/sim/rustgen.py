@@ -6,17 +6,17 @@ makes no modelling decisions. It asks `modelica.sim.emit` for the same lines wit
 :data:`modelica.sim.dialect.RUST` selected, and writes the Rust *structure* -- the part a
 dialect table cannot hold -- around them.
 
-It grows one kernel function at a time. A single state set, blocks that are assignments or a
-linear solve (the dialect's ``md_solve`` carries the dense LU), and the five kernel functions
-``rhs``, ``observe``, ``indicators``, ``transition`` and ``jacobian`` -- for a model with events
-too, so ``indicators`` reads real zero-crossing functions and ``transition`` writes the reset.
-A block that has to be iterated on -- Newton -- is refused, because its loop is structure the
-emitter writes rather than spelling the dialect holds; several state sets are refused for want
-of a mode dispatcher. Everything refused raises an `EmitError` that names the missing piece,
-exactly as `cgen` does, so a model moving off the refused set fails the test and gets its check
-turned on rather than staying quietly untested. What is left: Newton, the mode dispatcher, and
-the integrator's event loop -- root-finding on ``indicators`` then applying ``transition`` --
-so an event model can actually be integrated and not only have its kernel checked.
+It grows one kernel function at a time. Blocks that are assignments or a linear solve (the
+dialect's ``md_solve`` carries the dense LU), and the five kernel functions ``rhs``, ``observe``,
+``indicators``, ``transition`` and ``jacobian`` -- for a model with events too, so ``indicators``
+reads real zero-crossing functions and ``transition`` writes the reset. A model with several
+state sets gets one function per set behind a dispatcher that reads which set is in use, so a
+mode switch is emitted like `cgen`. A block that has to be iterated on -- Newton -- is refused,
+because its loop is structure the emitter writes rather than spelling the dialect holds. The
+refusal raises an `EmitError` that names the missing piece, exactly as `cgen` does, so a model
+moving off the refused set fails the test and gets its check turned on rather than staying
+quietly untested. What is left: Newton (iterated blocks), which is the last thing between this
+and every corpus model.
 """
 
 from __future__ import annotations
@@ -53,6 +53,17 @@ _SIGNATURES: Final = {
     "indicators": "t: f64, y: &[f64], p: &[f64], w: &mut [f64], z: &mut [f64]",
     "transition": "event: usize, t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]",
     "jacobian": "t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]",
+}
+
+#: The order the functions are written in, and the argument names a dispatcher forwards to the
+#: per-mode function it picks -- the parameter names of `_SIGNATURES` without their types.
+_FUNCTIONS: Final = ("rhs", "observe", "indicators", "transition", "jacobian")
+_CALLS: Final = {
+    "rhs": "t, y, p, w, dy",
+    "observe": "t, y, p, w, out",
+    "indicators": "t, y, p, w, z",
+    "transition": "event, t, y, p, w, out",
+    "jacobian": "t, y, p, w, out",
 }
 
 
@@ -162,15 +173,15 @@ def _indicators(emitter: Emitter, position: int, mode: Mode) -> list[str]:
     return _bind(_live(lines))
 
 
-def _transition(emitter: Emitter, mode: Mode) -> list[str]:
+def _transition(emitter: Emitter, position: int, system: System, mode: Mode) -> list[str]:
     """The post-event state: copy ``y`` through, then let each event's branch overwrite its slots.
 
     ``out[:] = y`` first (Rust has no slice assignment here either, so it is written out), and
     *before* the branches, so a crossing that reinitialises one state leaves the others exactly
     where they were. Then one ``if event == k`` per crossing runs that branch's `reinit` and
-    discrete assignments and flips its latch -- the same body `cgen` writes. Single state set
-    only, so there is no destination mode to rebase into: `_guard` refuses several sets, and a
-    single-set model's crossings never carry a switch.
+    discrete assignments, flips its latch, and -- for a crossing that switches state sets, and
+    only from the set it leaves (``event.origin == position``) -- rebases the trajectory into the
+    destination's variables and writes the new set into ``w``. The same body `cgen` writes.
     """
     events = emitter.events()
     slots = {name: slot for slot, name in enumerate(mode.states)}
@@ -183,6 +194,10 @@ def _transition(emitter: Emitter, mode: Mode) -> list[str]:
         taken = [emitter.statement(statement, slots) for statement in event.body]
         if event.latch is not None:
             taken.append(f"    w[{event.latch}] = 1.0 - w[{event.latch}]")
+        moving = event.trigger.switch
+        if moving is not None and event.origin == position:
+            taken.extend(emitter.rebase(system.modes[moving]))
+            taken.append(f"    w[{emitter.switching}] = {float(moving)}")
         lines.append(f"if event == {k} {{")
         lines.extend(taken)
         lines.append("}")
@@ -343,20 +358,21 @@ def _jacobian(emitter: Emitter, mode: Mode) -> list[str]:
     return _bind(_live([*emitter.unpack(mode), *_reached(_tangent(emitter, mode, width))]))
 
 
-def _guard(system: System) -> tuple[Emitter, Mode]:
+def _guard(system: System) -> Emitter:
     """Refuse what this increment does not yet write, each with the piece it is missing."""
-    if len(system.modes) != 1:
-        raise EmitError("rust: several state sets are not emitted yet (no mode dispatcher)")
     emitter = Emitter(system, dialect=RUST)
-    mode = system.modes[0]
-    for block in mode.blocks:
-        if block.assignment is None and iterated(block):
-            raise EmitError("rust: Newton iteration is not emitted yet (no iterated blocks)")
-    return emitter, mode
+    for mode in system.modes:
+        for block in mode.blocks:
+            if block.assignment is None and iterated(block):
+                raise EmitError("rust: Newton iteration is not emitted yet (no iterated blocks)")
+    return emitter
 
 
-def _function(name: str, body: list[str]) -> list[str]:
+def _function(name: str, signature: str, body: list[str]) -> list[str]:
     """One Rust function, with the lints a generated entry point trips deliberately allowed.
+
+    ``name`` is the emitted name, which for a multi-mode model is ``rhs_0`` and the like, so it
+    is passed rather than reused as the `_SIGNATURES` key -- ``signature`` carries that.
 
     ``non_snake_case`` because the locals are Modelica-derived names (``source.V`` becomes
     ``source_V``), so the casing is the model's and not ours to normalise -- the C side gets
@@ -369,29 +385,67 @@ def _function(name: str, body: list[str]) -> list[str]:
     """
     return [
         "#[allow(dead_code, non_snake_case, unused_variables)]",
-        f"fn {name}({_SIGNATURES[name]}) {{",
+        f"fn {name}({signature}) {{",
         *(f"    {line}" for line in body),
         "}",
         "",
     ]
 
 
+def _dispatch(name: str, switching: int, count: int) -> list[str]:
+    """The picker in front of one function per state set, `cgen._dispatch` in Rust.
+
+    ``w`` holds which set is in use as a float, so the slot is compared against ``k + 0.5``
+    rather than converted to an integer -- the same comparison the Python and C emitters write.
+    Each arm forwards this function's own arguments to the mode's, and the last set is the
+    fall-through with no test.
+    """
+    call = _CALLS[name]
+    body = [
+        f"if w[{switching}] < {k + 0.5} {{ {name}_{k}({call}); return; }}" for k in range(count - 1)
+    ]
+    body.append(f"{name}_{count - 1}({call});")
+    return _function(name, _SIGNATURES[name], body)
+
+
+def _body(name: str, emitter: Emitter, system: System, mode: Mode, position: int) -> list[str]:
+    """The body of one kernel function for one state set."""
+    if name == "rhs":
+        return _rhs(emitter, mode)
+    if name == "observe":
+        return _observe(emitter, system, mode)
+    if name == "indicators":
+        return _indicators(emitter, position, mode)
+    if name == "transition":
+        return _transition(emitter, position, system, mode)
+    return _jacobian(emitter, mode)
+
+
 def unit(system: System) -> str:
     """``rhs``, ``observe``, ``indicators``, ``transition`` and ``jacobian``, as one Rust file.
 
     The workspace layout is the Python and C one, unchanged: ``y`` the states, ``p`` the
-    parameters in `System.parameters` order, ``w`` one slot per observed variable. A backend
-    that laid its arrays out differently would need its own reader and its own bugs.
+    parameters in `System.parameters` order, ``w`` one slot per observed variable, then the
+    latches, then the state set in use. A model with several state sets gets one function per set
+    named ``rhs_0``, ``rhs_1``, ... behind a dispatcher that reads that last slot, exactly as
+    `cgen` does; a single-set model gets the bare names and no dispatcher. A backend that laid
+    its arrays out differently would need its own reader and its own bugs.
     """
-    emitter, mode = _guard(system)
+    emitter = _guard(system)
     lines = [
         f"// Generated from {system.name} by modelica.sim.rustgen. Do not edit.",
         *RUST.preamble,
         "",
-        *_function("rhs", _rhs(emitter, mode)),
-        *_function("observe", _observe(emitter, system, mode)),
-        *_function("indicators", _indicators(emitter, 0, mode)),
-        *_function("transition", _transition(emitter, mode)),
-        *_function("jacobian", _jacobian(emitter, mode)),
     ]
+    for name in _FUNCTIONS:
+        bodies = [_body(name, emitter, system, mode, k) for k, mode in enumerate(system.modes)]
+        if len(bodies) == 1:
+            lines += _function(name, _SIGNATURES[name], bodies[0])
+            continue
+        for k, body in enumerate(bodies):
+            lines += _function(f"{name}_{k}", _SIGNATURES[name], body)
+        switching = emitter.switching
+        if switching is None:  # pragma: no cover - several sets always carry a switching slot
+            raise EmitError("rust: several state sets without a switching slot")
+        lines += _dispatch(name, switching, len(bodies))
     return "\n".join(lines) + "\n"

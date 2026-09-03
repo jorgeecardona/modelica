@@ -98,18 +98,20 @@ _EVENT_GAPS = frozenset({"PhaseChange"})
 
 
 def _event_models() -> list[Path]:
-    """Single-mode event models the Rust event loop reproduces against the interpreter today.
+    """Event models the Rust event loop reproduces against the interpreter today.
 
-    One state set (rustgen already refuses the rest), at least one crossing, and no switch (a
-    single-set model has none). Both a ``when`` branch and a latched relation are handled: the
-    loop applies the transition, iterates over any latch it makes stale, and rearms on the side
-    the crossing settled. The known gaps in `_EVENT_GAPS` are left out until their increment.
+    At least one crossing, minus the known gaps in `_EVENT_GAPS`. Both a ``when`` branch and a
+    latched relation are handled: the loop applies the transition, iterates over any latch it
+    makes stale, and rearms on the side the crossing settled. Multi-mode models are in too --
+    their dispatcher and mode-0 dynamics are checked -- though the only one rustgen emits so far
+    (TwoInertias) does not actually switch within its horizon, so the trajectory comparison keyed
+    on the first set's states stays valid; a model that switches at runtime needs Newton first.
     """
     out: list[Path] = []
     for model in _supported():
         system = _system(model)
         events = Emitter(system, dialect=RUST).events()
-        if not events or len(system.modes) != 1 or model.stem in _EVENT_GAPS:
+        if not events or model.stem in _EVENT_GAPS:
             continue
         out.append(model)
     return out
