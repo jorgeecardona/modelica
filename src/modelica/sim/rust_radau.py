@@ -221,10 +221,13 @@ CONSTANTS: Final = (
     f"const MD_TI: [[f64; 3]; 3] = {_rmat(_TI)};",
     f"const MD_P: [[f64; 3]; 3] = {_rmat(_P)};",
     # The nudge that holds a fired crossing off zero for the segment after it, so the root
-    # finder does not report the same instant forever. `solve.py`'s `_REARM`, same value; a
-    # latch-free `when` restarts on the true side, so the offset is +this for every event the
-    # integrator handles today (a latched relation, whose side depends on `w`, is not one yet).
+    # finder does not report the same instant forever. `solve.py`'s `_REARM`, same value. The
+    # side depends on where the crossing settled: a latch-free `when` restarts on the true side
+    # (+this), a latched relation on whichever side its latch was left holding (see `_offset`).
     "const MD_REARM: f64 = 1e-9;",
+    # A latch slot in `w` reads true above this and false below, the `HELD` threshold `emit`
+    # writes: a latch is a float that carries a boolean, so it is compared against a half.
+    "const MD_HELD: f64 = 0.5;",
     "",
 )
 
@@ -460,12 +463,13 @@ FIRST_STEP: Final = (
 #: factorisation, the Newton solve, the embedded error estimate, Gustafsson step control,
 #: stale-Jacobian detection, and dense output through ``P``. Over each accepted step it also
 #: watches the indicators for a crossing, locates the earliest with `md_locate`, applies the
-#: model's transition and restarts. One long function on purpose, as `radau.py:489` argues:
-#: splitting the controller from the step would put a call on the hot path for every quantity
-#: they pass. It handles a single state set whose crossings are latch-free ``when`` branches --
-#: the subset `rustgen` emits a transition for -- so there is no mode switch to rebase into and
-#: no latch whose side a restart must read; the rearm nudge is +``MD_REARM`` for every event.
-#: It fills ``out`` (grid.len() by n, row-major) and returns the run's counters, events included.
+#: model's transition (iterating over any latch it makes stale, `solve.py`'s `_settle`) and
+#: restarts. One long function on purpose, as `radau.py:489` argues: splitting the controller
+#: from the step would put a call on the hot path for every quantity they pass. It handles a
+#: single state set -- the subset `rustgen` emits a transition for -- with ``when`` branches and
+#: latched relations both, so there is no mode switch to rebase into; the rearm nudge is
+#: +``MD_REARM`` for a `when` and the side the latch settled on for a relation. It fills ``out``
+#: (grid.len() by n, row-major) and returns the run's counters, events included.
 _INTEGRATE_SRC = """\
 // Locate, along one accepted step's dense polynomial, where indicator `k` crosses zero.
 // The step is y(x) = y + x*(q0 + x*(q1 + x*q2)) for x in [0, 1], and g(x) = z_k(y(x)) + nudge
@@ -518,6 +522,7 @@ fn md_integrate(
     rtol: f64,
     atol: f64,
     directions: &[f64],
+    latches: &[i64],
     grid: &[f64],
     out: &mut [f64],
 ) -> (i32, usize, usize, usize, usize, usize, usize, f64) {
@@ -563,6 +568,7 @@ fn md_integrate(
     let mut z_ev = vec![0.0f64; nevents];
     let mut ev_y = vec![0.0f64; n];
     let mut rearm = vec![0.0f64; nevents];
+    let mut fired_flags = vec![false; nevents];
     let mut events_total = 0usize;
 
     let points = grid.len();
@@ -733,7 +739,6 @@ fn md_integrate(
             // the root, apply the model's transition, hold the fired crossing off its zero, and
             // restart the stepper there: state moved discontinuously, so the old Jacobian, the
             // extrapolation polynomial and the step-size history are all stale.
-            let k = fired as usize;
             let te = t + fired_x * h;
             while cursor < points && grid[cursor] <= te {
                 let x = (grid[cursor] - t) / h;
@@ -747,12 +752,50 @@ fn md_integrate(
                 ev_y[q] = y[q]
                     + fired_x * (quad[q * 3] + fired_x * (quad[q * 3 + 1] + fired_x * quad[q * 3 + 2]));
             }
-            transition(k, te, &ev_y, p, w, &mut y_new);
-            events_total += 1;
+
+            // Modelica's event iteration (`solve.py`'s `_settle`): apply the crossing that
+            // fired, then everything its latch flip made stale. A latched relation holds its
+            // value between events, so flipping one latch can leave another on the wrong side of
+            // its own -- and the integrator would never catch that second one, since on the next
+            // segment its indicator starts already past zero instead of crossing it. So the
+            // instant is not over until no latch disagrees with the relation it holds. An event
+            // acts at most once per instant (`fired_flags`), which is what makes this terminate.
+            for flag in fired_flags.iter_mut() { *flag = false; }
+            let mut pending: isize = fired;
+            while pending >= 0 {
+                let e = pending as usize;
+                transition(e, te, &ev_y, p, w, &mut y_new);
+                for q in 0..n { ev_y[q] = y_new[q]; }
+                fired_flags[e] = true;
+                events_total += 1;
+                pending = -1;
+                indicators(te, &ev_y, p, w, &mut z_ev);
+                for j in 0..nevents {
+                    if latches[j] < 0 || fired_flags[j] {
+                        continue;
+                    }
+                    let held = w[latches[j] as usize] > MD_HELD;
+                    if (z_ev[j] > 0.0) != held {
+                        pending = j as isize;
+                        break;
+                    }
+                }
+            }
+            // Rearm every crossing that fired, on the side it settled: a latch-free `when` on the
+            // true side (+), a latched relation on whichever side its latch was left holding.
             for e in rearm.iter_mut() { *e = 0.0; }
-            rearm[k] = MD_REARM;
+            for j in 0..nevents {
+                if !fired_flags[j] {
+                    continue;
+                }
+                rearm[j] = if latches[j] < 0 || w[latches[j] as usize] > MD_HELD {
+                    MD_REARM
+                } else {
+                    -MD_REARM
+                };
+            }
             t = te;
-            for q in 0..n { y[q] = y_new[q]; }
+            for q in 0..n { y[q] = ev_y[q]; }
             rhs(t, &y, p, w, &mut f);
             evaluations += 1;
             for e in jac.iter_mut() { *e = 0.0; }

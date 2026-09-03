@@ -89,21 +89,27 @@ def _reference_models() -> list[Path]:
 _REFERENCE_MODELS = _reference_models()
 
 
-def _event_models() -> list[Path]:
-    """Supported models the Rust event loop handles today.
+#: Single-mode event models the Rust loop does not yet reproduce, with why. PhaseChange has two
+#: crossings on a shared threshold (``T > Ms`` and ``T < Ms``) and a relation (``T > Ac1``) that
+#: T re-crosses near the phase-change kink; the loop finds two more crossings there than SciPy's
+#: segment-based detection does, so its event count and trajectory diverge. The fix is a
+#: later increment; naming it here keeps the gap greppable rather than silently dropped.
+_EVENT_GAPS = frozenset({"PhaseChange"})
 
-    One state set (rustgen already refuses the rest), at least one crossing, and every crossing
-    a latch-free ``when`` branch: a single transition apply with no event iteration, a rearm of
-    ``+MD_REARM``, and no mode to switch into. BouncingBall and Thermostat are these; a latched
-    relation, whose restart side depends on the workspace, waits for the next increment.
+
+def _event_models() -> list[Path]:
+    """Single-mode event models the Rust event loop reproduces against the interpreter today.
+
+    One state set (rustgen already refuses the rest), at least one crossing, and no switch (a
+    single-set model has none). Both a ``when`` branch and a latched relation are handled: the
+    loop applies the transition, iterates over any latch it makes stale, and rearms on the side
+    the crossing settled. The known gaps in `_EVENT_GAPS` are left out until their increment.
     """
     out: list[Path] = []
     for model in _supported():
         system = _system(model)
         events = Emitter(system, dialect=RUST).events()
-        if not events or len(system.modes) != 1:
-            continue
-        if any(event.latch is not None for event in events):
+        if not events or len(system.modes) != 1 or model.stem in _EVENT_GAPS:
             continue
         out.append(model)
     return out
@@ -387,7 +393,8 @@ def test_the_rust_integrator_reproduces_the_toml_reference(model: Path) -> None:
             f"    let grid: [f64; {len(times)}] = [{_floats(times)}];",
             f"    let mut out = [0.0f64; {len(times) * n}];",
             "    let dirs: [f64; 0] = [];",
-            f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &grid, &mut out);",
+            "    let lat: [i64; 0] = [];",
+            f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &grid, &mut out);",
             "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
             '    println!("{}", printed.join(" "));',
             "}",
@@ -404,11 +411,12 @@ def test_the_rust_integrator_reproduces_the_toml_reference(model: Path) -> None:
             )
 
 
-def _integrate_events_in_rust(
+def _integrate_events_in_rust(  # noqa: PLR0913, PLR0917 - the runtime's call surface, spelled out
     system: System,
     stop: float,
     grid: list[float],
     directions: list[float],
+    latches: list[int],
     start: tuple[object, object, object],
 ) -> tuple[int, list[float]]:
     """Integrate a model with events through the whole radau runtime, on a grid.
@@ -437,9 +445,10 @@ def _integrate_events_in_rust(
             f"    let p: [f64; {len(numpy.asarray(parameters))}] = [{_floats(parameters)}];",
             f"    let mut w: [f64; {len(numpy.asarray(workspace))}] = [{_floats(workspace)}];",
             f"    let dirs: [f64; {len(directions)}] = [{_floats(directions)}];",
+            f"    let lat: [i64; {len(latches)}] = [{', '.join(f'{int(v)}i64' for v in latches)}];",
             f"    let grid: [f64; {len(grid)}] = [{_floats(grid)}];",
             f"    let mut out = [0.0f64; {len(grid) * n}];",
-            f"    let r = md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &grid, &mut out);",
+            f"    let r = md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &grid, &mut out);",
             '    println!("{}", r.6);',
             "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
             '    println!("{}", printed.join(" "));',
@@ -457,13 +466,14 @@ def test_the_rust_integrator_matches_the_interpreter_on_events(model: Path) -> N
     """A model with events, integrated by the Rust runtime, against the Python one it ports.
 
     The event-loop milestone. rustgen emits indicators and transition, the radau runtime watches
-    the indicators over each step and applies the transition, and rustc compiles the whole into
-    one binary that bounces the ball and switches the thermostat. There is no .toml reference for
-    these -- neither latch-free model records state points -- so the reference is the interpreter
-    tier itself: `modelica.sim.simulate`, sampled on the same grid. The count of crossings has to
-    agree exactly, and the trajectory to within the slack two independent adaptive integrators
-    leave near a switch kink (BouncingBall's simple arcs agree to 1e-14; Thermostat's, sampled
-    right after a switch, to a few 1e-5 on a state of order 300, so rel ~1e-7).
+    the indicators over each step, applies the transition (iterating over any latch it makes
+    stale), and rustc compiles the whole into one binary that bounces the ball, switches the
+    thermostat, drains the tank and runs the roaster's schedule. There is no .toml state
+    reference for these, so the reference is the interpreter tier itself: `modelica.sim.simulate`,
+    sampled on the same grid. The count of crossings has to agree exactly, and the trajectory to
+    within the slack two independent adaptive integrators leave near a kink: BouncingBall's and
+    DrainingTank's simple arcs agree to 1e-14, and the switched models (Thermostat, BumpStop,
+    Setback, RoastingMachine) to a few 1e-5 on states of order hundreds, so rel ~1e-6.
     """
     numpy = pytest.importorskip("numpy")
     simulate = pytest.importorskip("modelica.sim").simulate
@@ -474,6 +484,7 @@ def test_the_rust_integrator_matches_the_interpreter_on_events(model: Path) -> N
     kernel = build(system)
     names = system.modes[0].states
     directions = [float(event.direction) for event in kernel.code.events]
+    latches = [event.latch if event.latch is not None else -1 for event in kernel.code.events]
 
     grid = numpy.linspace(0.0, stop, 41)
     reference = simulate(system, stop=stop, times=grid)
@@ -484,7 +495,7 @@ def test_the_rust_integrator_matches_the_interpreter_on_events(model: Path) -> N
 
     parameters, states, workspace = kernel.start(0.0)
     events, flat = _integrate_events_in_rust(
-        system, stop, list(grid), directions, (states, parameters, workspace)
+        system, stop, list(grid), directions, latches, (states, parameters, workspace)
     )
     found = numpy.array(flat).reshape(len(grid), len(names))
     assert events == len(reference.events), (
