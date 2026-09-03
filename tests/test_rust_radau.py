@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from modelica.sim.rust_radau import CONSTANTS, LINALG, STEP
+from modelica.sim.rust_radau import CONSTANTS, LINALG, NEWTON, STEP
 
 COMPILER = shutil.which("rustc")
 needs_rustc = pytest.mark.skipif(COMPILER is None, reason="no rustc on this machine")
@@ -279,3 +279,79 @@ def test_md_factor_pair_matches_radau(n: int) -> None:
     numpy.testing.assert_allclose(found[:n], x_real, rtol=1e-12, atol=1e-12)
     got_complex = numpy.array(found[n : 2 * n]) + 1j * numpy.array(found[2 * n :])
     numpy.testing.assert_allclose(got_complex, x_complex, rtol=1e-12, atol=1e-12)
+
+
+@needs_rustc
+def test_md_newton_matches_radau() -> None:
+    """One Newton solve of the collocation stages matches `radau._newton`.
+
+    A linear right-hand side ``y' = A y`` makes the collocation system linear, so simplified
+    Newton with the exact factored Jacobian lands the stage increments in one iteration; both
+    tiers have to agree on those increments and on the convergence verdict. The rhs is defined
+    in the program because the integrator and the model compile together -- md_newton calls it
+    by name, not through a pointer.
+    """
+    numpy = pytest.importorskip("numpy")
+    radau = pytest.importorskip("modelica.sim.radau")
+
+    n = 2
+    a = numpy.array([[-2.0, 1.0], [1.0, -2.0]])
+    h = 0.1
+    y = numpy.array([1.0, 0.0])
+    scale = numpy.array([1.0, 1.0])
+    tol = 1e-8
+
+    def rhs(_t: float, yy: object, _p: object, _w: object, out: object) -> None:
+        out[:] = a @ yy  # type: ignore[operator, index]
+
+    ar = numpy.empty((n, n))
+    pr = numpy.empty(n, dtype=numpy.int64)
+    ac = numpy.empty((n, n), dtype=numpy.complex128)
+    pc = numpy.empty(n, dtype=numpy.int64)
+    radau._factor_pair(a.copy(), h, ar, pr, ac, pc)  # noqa: SLF001
+    z_py = numpy.zeros((3, n))
+    conv, iters, _rate, _calls = radau._newton(  # noqa: SLF001
+        rhs, 0.0, y, h, numpy.zeros(0), numpy.zeros(0), z_py, scale, tol, ar, pr, ac, pc
+    )
+
+    program = "\n".join(
+        [
+            *CONSTANTS,
+            *LINALG,
+            *STEP,
+            *NEWTON,
+            "fn rhs(_t: f64, y: &[f64], _p: &[f64], _w: &mut [f64], dy: &mut [f64]) {",
+            "    let a = [[-2.0f64, 1.0], [1.0, -2.0]];",
+            "    for i in 0..y.len() {",
+            "        let mut s = 0.0;",
+            "        for j in 0..y.len() { s += a[i][j] * y[j]; }",
+            "        dy[i] = s;",
+            "    }",
+            "}",
+            "fn main() {",
+            "    let y = [1.0f64, 0.0];",
+            "    let p: [f64; 0] = [];",
+            "    let mut w: [f64; 0] = [];",
+            "    let jac = [-2.0f64, 1.0, 1.0, -2.0];",
+            f"    let h = {h!r}f64;",
+            "    let mut ar = [0.0f64; 4];",
+            "    let mut pr = [0usize; 2];",
+            "    let mut acr = [0.0f64; 4];",
+            "    let mut aci = [0.0f64; 4];",
+            "    let mut pc = [0usize; 2];",
+            "    assert!(md_factor_pair(2, &jac, h, &mut ar, &mut pr, &mut acr, &mut aci, &mut pc));",
+            "    let mut z = [0.0f64; 6];",
+            "    let scale = [1.0f64, 1.0];",
+            f"    let (conv, iters, _rate, _calls) = md_newton(0.0, &y, h, &p, &mut w, &mut z, &scale, {tol!r}f64, &ar, &pr, &acr, &aci, &pc);",
+            "    let mut printed: Vec<String> = z.iter().map(|v| v.to_string()).collect();",
+            "    printed.push(if conv { 1.0 } else { 0.0 }.to_string());",
+            "    printed.push((iters as f64).to_string());",
+            '    println!("{}", printed.join(" "));',
+            "}",
+            "",
+        ]
+    )
+    found = _run(program)
+    numpy.testing.assert_allclose(found[:6], z_py.ravel(), rtol=1e-10, atol=1e-12)
+    assert int(found[6]) == int(conv)
+    assert int(found[7]) == iters
