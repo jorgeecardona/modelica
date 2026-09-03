@@ -1,0 +1,17 @@
+{
+  "name": "pymodelica-scope",
+  "displayName": "pymodelica Simulation Scope",
+  "description": "Browse the pymodelica model corpus, simulated to its reference points, in an interactive chart inside VS Code.",
+  "version": "0.0.1",
+  "publisher": "jorgeecardona",
+  "license": "MIT",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Visualization", "Data Science"],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "pymodelica.openScope", "title": "pymodelica: Open Simulation Scope" }
+    ]
+  }
+}
