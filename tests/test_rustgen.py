@@ -64,11 +64,18 @@ def _floats(values: object) -> str:
     return ", ".join(f"{float(v)!r}f64" for v in values)  # type: ignore[union-attr]
 
 
-def _rhs_in_rust(
-    system: System, states: object, parameters: object, workspace: object
+def _call_in_rust(
+    system: System, name: str, out_len: int, start: tuple[object, object, object]
 ) -> list[float]:
-    """Emit the unit, wrap it in a main that runs `rhs` at the start point, compile, run."""
+    """Emit the unit, wrap it in a main that runs one function at the start point, compile, run.
+
+    ``name`` is the generated function to call (``rhs`` or ``observe``), ``out_len`` is the
+    length of the output vector it fills -- the states for ``rhs``, the observed variables for
+    ``observe`` -- and ``start`` is ``(states, parameters, workspace)``, the shared workspace the
+    two functions read and differ only in that last argument.
+    """
     numpy = pytest.importorskip("numpy")
+    states, parameters, workspace = start
     n = len(numpy.asarray(states))
     program = "\n".join(
         [
@@ -77,10 +84,10 @@ def _rhs_in_rust(
             f"    let y: [f64; {n}] = [{_floats(states)}];",
             f"    let p: [f64; {len(numpy.asarray(parameters))}] = [{_floats(parameters)}];",
             f"    let mut w: [f64; {len(numpy.asarray(workspace))}] = [{_floats(workspace)}];",
-            f"    let mut dy = [0.0f64; {n}];",
-            "    rhs(0.0, &y, &p, &mut w, &mut dy);",
-            "    let out: Vec<String> = dy.iter().map(|v| v.to_string()).collect();",
-            '    println!("{}", out.join(" "));',
+            f"    let mut out = [0.0f64; {out_len}];",
+            f"    {name}(0.0, &y, &p, &mut w, &mut out);",
+            "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
+            '    println!("{}", printed.join(" "));',
             "}",
             "",
         ]
@@ -140,5 +147,23 @@ def test_the_rust_right_hand_side_answers_what_the_python_one_answers(model: Pat
 
     wanted = numpy.zeros(len(states))
     kernel.rhs(0.0, states, parameters, workspace, wanted)
-    found = _rhs_in_rust(system, states, parameters, workspace)
+    found = _call_in_rust(system, "rhs", len(states), (states, parameters, workspace))
+    assert found == pytest.approx(list(wanted), rel=1e-12, abs=1e-12)
+
+
+@needs_rustc
+@pytest.mark.parametrize("model", _supported(), ids=[m.stem for m in _supported()])
+def test_the_rust_observation_answers_what_the_python_one_answers(model: Path) -> None:
+    """Every observed variable, at the start point: `rhs`'s blocks plus the aliases, in order."""
+    numpy = pytest.importorskip("numpy")
+    build = pytest.importorskip("modelica.sim.kernel").build
+    system = _system(model)
+    kernel = build(system)
+    parameters, states, workspace = kernel.start(0.0)
+
+    wanted = numpy.zeros(len(kernel.code.observed))
+    kernel.observe(0.0, states, parameters, workspace, wanted)
+    found = _call_in_rust(
+        system, "observe", len(kernel.code.observed), (states, parameters, workspace)
+    )
     assert found == pytest.approx(list(wanted), rel=1e-12, abs=1e-12)

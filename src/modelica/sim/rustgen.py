@@ -36,11 +36,13 @@ The others are already places -- ``dy[0]``, ``w[3]`` -- and a `let` in front of 
 be valid Rust.
 """
 
-#: The one function written so far. Slices rather than raw pointers: this is a Rust-native
-#: interface a `main` (and later the ported integrator) calls directly. A C ABI surface for
-#: FMU export is a later increment, and a separate decision.
+#: The functions written so far, with their parameter lists. Slices rather than raw pointers:
+#: this is a Rust-native interface a `main` (and later the ported integrator) calls directly.
+#: A C ABI surface for FMU export is a later increment, and a separate decision. The last
+#: parameter is the output the function fills; the others are the shared workspace layout.
 _SIGNATURES: Final = {
     "rhs": "_t: f64, y: &[f64], p: &[f64], w: &mut [f64], dy: &mut [f64]",
+    "observe": "_t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]",
 }
 
 
@@ -102,6 +104,22 @@ def _rhs(emitter: Emitter, mode: Mode) -> list[str]:
     return _bind(_live(lines))
 
 
+def _observe(emitter: Emitter, system: System, mode: Mode) -> list[str]:
+    """Every observed variable: `rhs`'s blocks, then the aliases, then store into ``out``.
+
+    The same body `rhs` runs, extended with the alias equations `rhs` did not need and the
+    stores into ``out`` in `Emitter.observed` order. `_live` then prunes it to what an
+    observation actually reads, which is a different set than the derivative did.
+    """
+    lines = [
+        *emitter.unpack(mode),
+        *emitter.blocks(mode),
+        *(f"{emitter.symbols[name]} = {emitter.expr(node)}" for name, node in system.aliases.items()),
+        *(f"out[{slot}] = {emitter.symbols[name]}" for slot, name in enumerate(emitter.observed)),
+    ]
+    return _bind(_live(lines))
+
+
 def _guard(system: System) -> tuple[Emitter, Mode]:
     """Refuse what this increment does not yet write, each with the piece it is missing."""
     if len(system.modes) != 1:
@@ -117,17 +135,19 @@ def _guard(system: System) -> tuple[Emitter, Mode]:
 
 
 def _function(name: str, body: list[str]) -> list[str]:
-    """One Rust function, with the two lints a generated body trips deliberately allowed.
+    """One Rust function, with the lints a generated entry point trips deliberately allowed.
 
     ``non_snake_case`` because the locals are Modelica-derived names (``source.V`` becomes
     ``source_V``), so the casing is the model's and not ours to normalise -- the C side gets
     this for free, C has no such lint. ``unused_variables`` because the signature is fixed
     while a given model may touch neither ``t`` nor ``w``, and ``-Wall`` does not warn on an
-    unused parameter either. Dead *locals* are still pruned by `_live`; this only forgives the
-    fixed parameters and the inherited names.
+    unused parameter either. ``dead_code`` because a unit defines every entry point and a given
+    caller -- a test's `main`, later the integrator -- may use only some, exactly as the C
+    shared object exports all five whether or not a consumer calls them. Dead *locals* are
+    still pruned by `_live`; this only forgives the fixed parameters and the whole functions.
     """
     return [
-        "#[allow(non_snake_case, unused_variables)]",
+        "#[allow(dead_code, non_snake_case, unused_variables)]",
         f"fn {name}({_SIGNATURES[name]}) {{",
         *(f"    {line}" for line in body),
         "}",
@@ -136,7 +156,7 @@ def _function(name: str, body: list[str]) -> list[str]:
 
 
 def unit(system: System) -> str:
-    """``rhs`` for ``system``, as one Rust source file.
+    """``rhs`` and ``observe`` for ``system``, as one Rust source file.
 
     The workspace layout is the Python and C one, unchanged: ``y`` the states, ``p`` the
     parameters in `System.parameters` order, ``w`` one slot per observed variable. A backend
@@ -148,5 +168,6 @@ def unit(system: System) -> str:
         *RUST.preamble,
         "",
         *_function("rhs", _rhs(emitter, mode)),
+        *_function("observe", _observe(emitter, system, mode)),
     ]
     return "\n".join(lines) + "\n"
