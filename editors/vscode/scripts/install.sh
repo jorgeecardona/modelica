@@ -1,7 +1,7 @@
 #!/bin/sh
-# Install the packaged .vsix into VS Code. Finds the `code` CLI even when it is not on PATH
-# (macOS binds nothing to install it by default), and if it truly cannot be found, prints how
-# to install from the UI instead of failing the script.
+# Install the packaged .vsix into every VS Code variant found (stable and Insiders). macOS
+# ships no `code`/`code-insiders` on PATH by default, so also look inside the app bundles; if
+# none is found, print the Install-from-VSIX UI steps instead of failing.
 set -e
 cd "$(dirname "$0")/.."
 
@@ -11,27 +11,32 @@ if [ -z "$VSIX" ]; then
   exit 1
 fi
 
-CODE="$(command -v code 2>/dev/null || true)"
-if [ -z "$CODE" ]; then
-  for candidate in \
-    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
-    "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code" \
-    "$HOME/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
-    "/usr/share/code/bin/code" \
-    "/usr/bin/code" \
-    "/snap/bin/code"; do
-    if [ -x "$candidate" ]; then CODE="$candidate"; break; fi
-  done
-fi
+found=""
+for cli in \
+  "code" \
+  "code-insiders" \
+  "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
+  "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders" \
+  "$HOME/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
+  "$HOME/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders" \
+  "/usr/share/code/bin/code" \
+  "/snap/bin/code"; do
+  # `code`/`code-insiders` (bare names) resolve via PATH; absolute paths must be executable.
+  case "$cli" in
+    /*) [ -x "$cli" ] || continue ;;
+    *) command -v "$cli" >/dev/null 2>&1 || continue ;;
+  esac
+  echo "installing into: $cli"
+  "$cli" --install-extension "$VSIX" || true
+  found="yes"
+done
 
-if [ -z "$CODE" ]; then
+if [ -z "$found" ]; then
   echo ""
   echo "Built: $(pwd)/${VSIX#./}"
-  echo "The 'code' CLI was not found, so install it from the UI:"
+  echo "No 'code' or 'code-insiders' CLI found. Install from the UI instead:"
   echo "  Extensions (Cmd+Shift+X) -> the ... menu -> Install from VSIX... -> ${VSIX#./}"
-  echo "Or add the CLI once: VS Code -> Cmd+Shift+P -> \"Shell Command: Install 'code' command in PATH\", then rerun."
+  echo "  (do this in the SAME window you use -- stable and Insiders are separate installs)"
   exit 0
 fi
-
-"$CODE" --install-extension "$VSIX"
-echo "Installed. In VS Code: Cmd+Shift+P -> 'pymodelica: Open Simulation Scope'"
+echo "done. In VS Code: Cmd+Shift+P -> 'pymodelica: Open Simulation Scope'"
