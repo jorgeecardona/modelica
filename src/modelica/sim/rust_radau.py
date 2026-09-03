@@ -220,6 +220,11 @@ CONSTANTS: Final = (
     f"const MD_T: [[f64; 3]; 3] = {_rmat(_T)};",
     f"const MD_TI: [[f64; 3]; 3] = {_rmat(_TI)};",
     f"const MD_P: [[f64; 3]; 3] = {_rmat(_P)};",
+    # The nudge that holds a fired crossing off zero for the segment after it, so the root
+    # finder does not report the same instant forever. `solve.py`'s `_REARM`, same value; a
+    # latch-free `when` restarts on the true side, so the offset is +this for every event the
+    # integrator handles today (a latched relation, whose side depends on `w`, is not one yet).
+    "const MD_REARM: f64 = 1e-9;",
     "",
 )
 
@@ -448,14 +453,61 @@ FIRST_STEP: Final = (
 )
 
 
-#: The Radau IIA driver loop, ported from `radau.py`'s `integrate`. It calls ``rhs`` and
-#: ``jacobian`` by name -- the integrator and the model compile together, which is the whole
-#: point -- and ties together every piece above: the starting step, the pair factorisation, the
-#: Newton solve, the embedded error estimate, Gustafsson step control, stale-Jacobian detection,
-#: and dense output through ``P``. One long function on purpose, as `radau.py:489` argues:
+#: The Radau IIA driver loop, ported from `radau.py`'s `integrate`, with the event handling
+#: `solve.py`'s `_Run.run` wraps around SciPy folded in. It calls ``rhs``, ``jacobian``,
+#: ``indicators`` and ``transition`` by name -- the integrator and the model compile together,
+#: which is the whole point -- and ties together every piece above: the starting step, the pair
+#: factorisation, the Newton solve, the embedded error estimate, Gustafsson step control,
+#: stale-Jacobian detection, and dense output through ``P``. Over each accepted step it also
+#: watches the indicators for a crossing, locates the earliest with `md_locate`, applies the
+#: model's transition and restarts. One long function on purpose, as `radau.py:489` argues:
 #: splitting the controller from the step would put a call on the hot path for every quantity
-#: they pass. It fills ``out`` (grid.len() by n, row-major) and returns the run's counters.
+#: they pass. It handles a single state set whose crossings are latch-free ``when`` branches --
+#: the subset `rustgen` emits a transition for -- so there is no mode switch to rebase into and
+#: no latch whose side a restart must read; the rearm nudge is +``MD_REARM`` for every event.
+#: It fills ``out`` (grid.len() by n, row-major) and returns the run's counters, events included.
 _INTEGRATE_SRC = """\
+// Locate, along one accepted step's dense polynomial, where indicator `k` crosses zero.
+// The step is y(x) = y + x*(q0 + x*(q1 + x*q2)) for x in [0, 1], and g(x) = z_k(y(x)) + nudge
+// is the crossing function the loop watches. Called only when the segment ends bracket a
+// directional crossing, so g(0) and g(1) straddle zero and plain bisection converges to the
+// root -- the same instant `solve.py` gets from SciPy's brentq, to f64 precision in 60 halvings.
+#[allow(dead_code)]
+fn md_locate(
+    k: usize,
+    t: f64,
+    h: f64,
+    y: &[f64],
+    quad: &[f64],
+    p: &[f64],
+    w: &mut [f64],
+    nudge: f64,
+    g0: f64,
+    ev: &mut [f64],
+    z: &mut [f64],
+) -> f64 {
+    if g0 == 0.0 {
+        return 0.0;
+    }
+    let n = y.len();
+    let mut lo = 0.0f64;
+    let mut hi = 1.0f64;
+    for _ in 0..60 {
+        let mid = 0.5 * (lo + hi);
+        for q in 0..n {
+            ev[q] = y[q] + mid * (quad[q * 3] + mid * (quad[q * 3 + 1] + mid * quad[q * 3 + 2]));
+        }
+        indicators(t + mid * h, ev, p, w, z);
+        let gm = z[k] + nudge;
+        if (gm < 0.0) == (g0 < 0.0) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
 #[allow(dead_code)]
 fn md_integrate(
     t0: f64,
@@ -465,9 +517,10 @@ fn md_integrate(
     w: &mut [f64],
     rtol: f64,
     atol: f64,
+    directions: &[f64],
     grid: &[f64],
     out: &mut [f64],
-) -> (i32, usize, usize, usize, usize, usize, f64) {
+) -> (i32, usize, usize, usize, usize, usize, usize, f64) {
     let n = y0.len();
     let mut y = y0.to_vec();
     let mut t = t0;
@@ -500,6 +553,17 @@ fn md_integrate(
     let mut combined = vec![0.0f64; n];
     let mut scale = vec![0.0f64; n];
     let mut scaled = vec![0.0f64; n];
+
+    // Event bookkeeping: the crossing values at the two ends of a step, a scratch state and
+    // indicator vector for the bisection, the per-event rearm nudge, and the count. Empty for a
+    // model with no indicators, so its stepping stays exactly what it was before events landed.
+    let nevents = directions.len();
+    let mut z0 = vec![0.0f64; nevents];
+    let mut z1 = vec![0.0f64; nevents];
+    let mut z_ev = vec![0.0f64; nevents];
+    let mut ev_y = vec![0.0f64; n];
+    let mut rearm = vec![0.0f64; nevents];
+    let mut events_total = 0usize;
 
     let points = grid.len();
     let mut cursor = 0usize;
@@ -632,6 +696,78 @@ fn md_integrate(
                 quad[q * 3 + j] = total;
             }
         }
+
+        // Did an indicator cross within this step? Compare the crossing functions at the two
+        // ends (x = 0 is y, x = 1 is y_new), in each event's own direction, and locate the
+        // earliest root. `find_active_events` in SciPy, spelled out: an up-crossing is watched
+        // by a rising event, a down-crossing by a falling one, either by an equation relation,
+        // and an indicator that is zero at both ends is not a crossing at all.
+        let mut fired: isize = -1;
+        let mut fired_x = 1.0f64;
+        if nevents > 0 {
+            indicators(t, &y, p, w, &mut z0);
+            indicators(t_new, &y_new, p, w, &mut z1);
+            for k in 0..nevents {
+                let g0 = z0[k] + rearm[k];
+                let g1 = z1[k] + rearm[k];
+                let up = g0 <= 0.0 && g1 >= 0.0;
+                let down = g0 >= 0.0 && g1 <= 0.0;
+                let active = ((directions[k] > 0.0 && up)
+                    || (directions[k] < 0.0 && down)
+                    || (directions[k] == 0.0 && (up || down)))
+                    && !(g0 == 0.0 && g1 == 0.0);
+                if !active {
+                    continue;
+                }
+                let x = md_locate(k, t, h, &y, &quad, p, w, rearm[k], g0, &mut ev_y, &mut z_ev);
+                if x < fired_x {
+                    fired_x = x;
+                    fired = k as isize;
+                }
+            }
+        }
+
+        if fired >= 0 {
+            // The instant one crossing fires. Sample the grid up to it from this segment's own
+            // polynomial (those points belong to the pre-event trajectory), take the state at
+            // the root, apply the model's transition, hold the fired crossing off its zero, and
+            // restart the stepper there: state moved discontinuously, so the old Jacobian, the
+            // extrapolation polynomial and the step-size history are all stale.
+            let k = fired as usize;
+            let te = t + fired_x * h;
+            while cursor < points && grid[cursor] <= te {
+                let x = (grid[cursor] - t) / h;
+                for q in 0..n {
+                    out[cursor * n + q] =
+                        y[q] + x * (quad[q * 3] + x * (quad[q * 3 + 1] + x * quad[q * 3 + 2]));
+                }
+                cursor += 1;
+            }
+            for q in 0..n {
+                ev_y[q] = y[q]
+                    + fired_x * (quad[q * 3] + fired_x * (quad[q * 3 + 1] + fired_x * quad[q * 3 + 2]));
+            }
+            transition(k, te, &ev_y, p, w, &mut y_new);
+            events_total += 1;
+            for e in rearm.iter_mut() { *e = 0.0; }
+            rearm[k] = MD_REARM;
+            t = te;
+            for q in 0..n { y[q] = y_new[q]; }
+            rhs(t, &y, p, w, &mut f);
+            evaluations += 1;
+            for e in jac.iter_mut() { *e = 0.0; }
+            jacobian(t, &y, p, w, &mut jac);
+            jacobians += 1;
+            fresh = true;
+            factored = false;
+            extrapolate = false;
+            h_prop = md_first_step(t, &y, p, w, &f, rtol, atol, t1 - t);
+            evaluations += 1;
+            h_old = -1.0;
+            error_old = -1.0;
+            continue;
+        }
+
         while cursor < points && grid[cursor] <= t_new {
             let x = (grid[cursor] - t) / h;
             for q in 0..n {
@@ -678,7 +814,7 @@ fn md_integrate(
         for q in 0..n { out[cursor * n + q] = y[q]; }
         cursor += 1;
     }
-    (status, steps, rejected_total, evaluations, jacobians, factorisations, t)
+    (status, steps, rejected_total, evaluations, jacobians, factorisations, events_total, t)
 }
 """
 

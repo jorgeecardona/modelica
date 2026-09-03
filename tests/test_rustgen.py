@@ -89,6 +89,29 @@ def _reference_models() -> list[Path]:
 _REFERENCE_MODELS = _reference_models()
 
 
+def _event_models() -> list[Path]:
+    """Supported models the Rust event loop handles today.
+
+    One state set (rustgen already refuses the rest), at least one crossing, and every crossing
+    a latch-free ``when`` branch: a single transition apply with no event iteration, a rearm of
+    ``+MD_REARM``, and no mode to switch into. BouncingBall and Thermostat are these; a latched
+    relation, whose restart side depends on the workspace, waits for the next increment.
+    """
+    out: list[Path] = []
+    for model in _supported():
+        system = _system(model)
+        events = Emitter(system, dialect=RUST).events()
+        if not events or len(system.modes) != 1:
+            continue
+        if any(event.latch is not None for event in events):
+            continue
+        out.append(model)
+    return out
+
+
+_EVENT_MODELS = _event_models()
+
+
 def _floats(values: object) -> str:
     return ", ".join(f"{float(v)!r}f64" for v in values)  # type: ignore[union-attr]
 
@@ -156,7 +179,8 @@ def _transition_in_rust(
     return both[:n], both[n:]
 
 
-def _compile_and_run(program: str, name: str) -> list[float]:
+def _compile_and_run_lines(program: str, name: str) -> list[str]:
+    """Compile one generated program with ``-D warnings``, run it, return its stdout lines."""
     assert COMPILER is not None
     with tempfile.TemporaryDirectory() as tmp:
         unit_path = Path(tmp) / f"{name}.rs"
@@ -178,7 +202,14 @@ def _compile_and_run(program: str, name: str) -> list[float]:
             capture_output=True,
         )
         done = subprocess.run([str(binary)], check=True, capture_output=True, text=True)  # noqa: S603
-    return [float(token) for token in done.stdout.split()]
+    return done.stdout.splitlines()
+
+
+def _compile_and_run(program: str, name: str) -> list[float]:
+    """The whitespace-separated floats a single-line program prints."""
+    return [
+        float(token) for line in _compile_and_run_lines(program, name) for token in line.split()
+    ]
 
 
 @pytest.mark.parametrize("model", MODELS, ids=[m.stem for m in MODELS])
@@ -355,7 +386,8 @@ def test_the_rust_integrator_reproduces_the_toml_reference(model: Path) -> None:
             f"    let mut w: [f64; {len(workspace)}] = [{_floats(workspace)}];",
             f"    let grid: [f64; {len(times)}] = [{_floats(times)}];",
             f"    let mut out = [0.0f64; {len(times) * n}];",
-            f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &grid, &mut out);",
+            "    let dirs: [f64; 0] = [];",
+            f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &grid, &mut out);",
             "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
             '    println!("{}", printed.join(" "));',
             "}",
@@ -370,3 +402,92 @@ def test_the_rust_integrator_reproduces_the_toml_reference(model: Path) -> None:
             assert out[i * n + q] == pytest.approx(point["values"][name], rel=1e-6, abs=1e-9), (
                 f"{system.name} t={point['t']} {name}"
             )
+
+
+def _integrate_events_in_rust(
+    system: System,
+    stop: float,
+    grid: list[float],
+    directions: list[float],
+    start: tuple[object, object, object],
+) -> tuple[int, list[float]]:
+    """Integrate a model with events through the whole radau runtime, on a grid.
+
+    Returns ``(events, trajectory)``: the number of crossings the run applied and the state at
+    every grid point, row-major. The count comes back on its own line so the test can check it
+    tolerance-free -- a wrong event tally is a structural bug the trajectory tolerance might
+    absorb, and the strongest single signal that the loop found the same crossings the
+    interpreter did.
+    """
+    numpy = pytest.importorskip("numpy")
+    states, parameters, workspace = start
+    n = len(numpy.asarray(states))
+    program = "\n".join(
+        [
+            "#![allow(dead_code)]",
+            unit(system),
+            *CONSTANTS,
+            *LINALG,
+            *STEP,
+            *NEWTON,
+            *FIRST_STEP,
+            *INTEGRATE,
+            "fn main() {",
+            f"    let y0: [f64; {n}] = [{_floats(states)}];",
+            f"    let p: [f64; {len(numpy.asarray(parameters))}] = [{_floats(parameters)}];",
+            f"    let mut w: [f64; {len(numpy.asarray(workspace))}] = [{_floats(workspace)}];",
+            f"    let dirs: [f64; {len(directions)}] = [{_floats(directions)}];",
+            f"    let grid: [f64; {len(grid)}] = [{_floats(grid)}];",
+            f"    let mut out = [0.0f64; {len(grid) * n}];",
+            f"    let r = md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &grid, &mut out);",
+            '    println!("{}", r.6);',
+            "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
+            '    println!("{}", printed.join(" "));',
+            "}",
+            "",
+        ]
+    )
+    lines = _compile_and_run_lines(program, system.name)
+    return int(lines[0]), [float(token) for token in lines[1].split()]
+
+
+@needs_rustc
+@pytest.mark.parametrize("model", _EVENT_MODELS, ids=[m.stem for m in _EVENT_MODELS])
+def test_the_rust_integrator_matches_the_interpreter_on_events(model: Path) -> None:
+    """A model with events, integrated by the Rust runtime, against the Python one it ports.
+
+    The event-loop milestone. rustgen emits indicators and transition, the radau runtime watches
+    the indicators over each step and applies the transition, and rustc compiles the whole into
+    one binary that bounces the ball and switches the thermostat. There is no .toml reference for
+    these -- neither latch-free model records state points -- so the reference is the interpreter
+    tier itself: `modelica.sim.simulate`, sampled on the same grid. The count of crossings has to
+    agree exactly, and the trajectory to within the slack two independent adaptive integrators
+    leave near a switch kink (BouncingBall's simple arcs agree to 1e-14; Thermostat's, sampled
+    right after a switch, to a few 1e-5 on a state of order 300, so rel ~1e-7).
+    """
+    numpy = pytest.importorskip("numpy")
+    simulate = pytest.importorskip("modelica.sim").simulate
+    build = pytest.importorskip("modelica.sim.kernel").build
+    spec = tomllib.loads(model.with_suffix(".toml").read_text(encoding="utf-8"))
+    stop = float(spec["simulate"]["stop"])
+    system = _system(model)
+    kernel = build(system)
+    names = system.modes[0].states
+    directions = [float(event.direction) for event in kernel.code.events]
+
+    grid = numpy.linspace(0.0, stop, 41)
+    reference = simulate(system, stop=stop, times=grid)
+    columns = numpy.clip(
+        numpy.searchsorted(reference.time, grid, side="left"), 0, len(reference.time) - 1
+    )
+    wanted = numpy.array([[reference[name][column] for name in names] for column in columns])
+
+    parameters, states, workspace = kernel.start(0.0)
+    events, flat = _integrate_events_in_rust(
+        system, stop, list(grid), directions, (states, parameters, workspace)
+    )
+    found = numpy.array(flat).reshape(len(grid), len(names))
+    assert events == len(reference.events), (
+        f"{system.name}: rust applied {events} events, interpreter {len(reference.events)}"
+    )
+    numpy.testing.assert_allclose(found, wanted, rtol=1e-4, atol=1e-3)
