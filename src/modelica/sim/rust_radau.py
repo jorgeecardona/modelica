@@ -212,14 +212,14 @@ def _rmat(rows: list[list[float]]) -> str:
 #: the controller read these; the test compiles them and checks each against `radau.py` to full
 #: ``f64`` precision, which is the whole point of generating rather than hand-typing them.
 CONSTANTS: Final = (
-    f"const C: [f64; 3] = {_rrow(_C)};",
-    f"const E: [f64; 3] = {_rrow(_E)};",
-    f"const MU_REAL: f64 = {_lit(_MU_REAL)};",
-    f"const MU_COMPLEX_R: f64 = {_lit(_MU_COMPLEX_R)};",
-    f"const MU_COMPLEX_I: f64 = {_lit(_MU_COMPLEX_I)};",
-    f"const T: [[f64; 3]; 3] = {_rmat(_T)};",
-    f"const TI: [[f64; 3]; 3] = {_rmat(_TI)};",
-    f"const P: [[f64; 3]; 3] = {_rmat(_P)};",
+    f"const MD_C: [f64; 3] = {_rrow(_C)};",
+    f"const MD_E: [f64; 3] = {_rrow(_E)};",
+    f"const MD_MU_REAL: f64 = {_lit(_MU_REAL)};",
+    f"const MD_MU_COMPLEX_R: f64 = {_lit(_MU_COMPLEX_R)};",
+    f"const MD_MU_COMPLEX_I: f64 = {_lit(_MU_COMPLEX_I)};",
+    f"const MD_T: [[f64; 3]; 3] = {_rmat(_T)};",
+    f"const MD_TI: [[f64; 3]; 3] = {_rmat(_TI)};",
+    f"const MD_P: [[f64; 3]; 3] = {_rmat(_P)};",
     "",
 )
 
@@ -271,9 +271,9 @@ STEP: Final = (
     "    aci: &mut [f64],",
     "    pc: &mut [usize],",
     ") -> bool {",
-    "    let mu_real = MU_REAL / h;",
-    "    let mu_complex_r = MU_COMPLEX_R / h;",
-    "    let mu_complex_i = MU_COMPLEX_I / h;",
+    "    let mu_real = MD_MU_REAL / h;",
+    "    let mu_complex_r = MD_MU_COMPLEX_R / h;",
+    "    let mu_complex_i = MD_MU_COMPLEX_I / h;",
     "    for i in 0..n {",
     "        for j in 0..n {",
     "            ar[i * n + j] = -jac[i * n + j];",
@@ -321,9 +321,9 @@ NEWTON: Final = (
     "    pc: &[usize],",
     ") -> (bool, usize, f64, usize) {",
     "    let n = y.len();",
-    "    let mu_real = MU_REAL / h;",
-    "    let mu_complex_r = MU_COMPLEX_R / h;",
-    "    let mu_complex_i = MU_COMPLEX_I / h;",
+    "    let mu_real = MD_MU_REAL / h;",
+    "    let mu_complex_r = MD_MU_COMPLEX_R / h;",
+    "    let mu_complex_i = MD_MU_COMPLEX_I / h;",
     "    let mut stages = vec![0.0f64; 3 * n];",
     "    let mut point = vec![0.0f64; n];",
     "    let mut wm = vec![0.0f64; 3 * n];",
@@ -331,11 +331,11 @@ NEWTON: Final = (
     "    let mut br = vec![0.0f64; n];",
     "    let mut bcr = vec![0.0f64; n];",
     "    let mut bci = vec![0.0f64; n];",
-    "    // wm[i] = sum_j TI[i][j] * z[j]",
+    "    // wm[i] = sum_j MD_TI[i][j] * z[j]",
     "    for i in 0..3 {",
     "        for q in 0..n {",
     "            let mut total = 0.0;",
-    "            for j in 0..3 { total += TI[i][j] * z[j * n + q]; }",
+    "            for j in 0..3 { total += MD_TI[i][j] * z[j * n + q]; }",
     "            wm[i * n + q] = total;",
     "        }",
     "    }",
@@ -348,7 +348,7 @@ NEWTON: Final = (
     "        iterations = k + 1;",
     "        for i in 0..3 {",
     "            for q in 0..n { point[q] = y[q] + z[i * n + q]; }",
-    "            rhs(t + h * C[i], &point, p, w, &mut stages[i * n..(i + 1) * n]);",
+    "            rhs(t + h * MD_C[i], &point, p, w, &mut stages[i * n..(i + 1) * n]);",
     "        }",
     "        calls += 3;",
     "        let mut finite = true;",
@@ -359,9 +359,9 @@ NEWTON: Final = (
     "            let mut imag_r = 0.0;",
     "            let mut imag_i = 0.0;",
     "            for i in 0..3 {",
-    "                real += TI[0][i] * stages[i * n + q];",
-    "                imag_r += TI[1][i] * stages[i * n + q];",
-    "                imag_i += TI[2][i] * stages[i * n + q];",
+    "                real += MD_TI[0][i] * stages[i * n + q];",
+    "                imag_r += MD_TI[1][i] * stages[i * n + q];",
+    "                imag_i += MD_TI[2][i] * stages[i * n + q];",
     "            }",
     "            br[q] = real - mu_real * wm[q];",
     "            bcr[q] = imag_r - (mu_complex_r * wm[n + q] - mu_complex_i * wm[2 * n + q]);",
@@ -388,7 +388,7 @@ NEWTON: Final = (
     "        for i in 0..3 {",
     "            for q in 0..n {",
     "                let mut total = 0.0;",
-    "                for j in 0..3 { total += T[i][j] * wm[j * n + q]; }",
+    "                for j in 0..3 { total += MD_T[i][j] * wm[j * n + q]; }",
     "                z[i * n + q] = total;",
     "            }",
     "        }",
@@ -544,7 +544,7 @@ fn md_integrate(
 
             for i in 0..3 {
                 if extrapolate {
-                    let x = (t + h * C[i] - t_poly) / h_poly;
+                    let x = (t + h * MD_C[i] - t_poly) / h_poly;
                     for q in 0..n {
                         z[i * n + q] = y_poly[q]
                             + x * (quad[q * 3] + x * (quad[q * 3 + 1] + x * quad[q * 3 + 2]))
@@ -591,7 +591,7 @@ fn md_integrate(
 
             for q in 0..n {
                 y_new[q] = y[q] + z[2 * n + q];
-                combined[q] = f[q] + (E[0] * z[q] + E[1] * z[n + q] + E[2] * z[2 * n + q]) / h;
+                combined[q] = f[q] + (MD_E[0] * z[q] + MD_E[1] * z[n + q] + MD_E[2] * z[2 * n + q]) / h;
                 error[q] = combined[q];
             }
             md_lu_solve(n, &ar, &pr, &mut error);
@@ -628,7 +628,7 @@ fn md_integrate(
         for q in 0..n {
             for j in 0..3 {
                 let mut total = 0.0;
-                for i in 0..3 { total += z[i * n + q] * P[i][j]; }
+                for i in 0..3 { total += z[i * n + q] * MD_P[i][j]; }
                 quad[q * 3 + j] = total;
             }
         }
