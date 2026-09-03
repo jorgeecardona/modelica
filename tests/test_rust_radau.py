@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from modelica.sim.rust_radau import COMPLEX_SOLVE, CONSTANTS
+from modelica.sim.rust_radau import CONSTANTS, LINALG
 
 COMPILER = shutil.which("rustc")
 needs_rustc = pytest.mark.skipif(COMPILER is None, reason="no rustc on this machine")
@@ -45,40 +45,83 @@ def _run(program: str) -> list[float]:
 
 @needs_rustc
 @pytest.mark.parametrize("n", [1, 2, 3, 4])
-def test_md_csolve_answers_what_numpy_answers(n: int) -> None:
-    """A random complex system solved in Rust matches ``numpy.linalg.solve`` to 1e-12.
+def test_md_lu_factor_solve_answers_what_numpy_answers(n: int) -> None:
+    """A real system factored once and solved for two right-hand sides matches numpy to 1e-12.
 
-    Random, and seeded so a failure is reproducible: the interleaved-versus-permuted swap bug
-    `radau.py:252` records survived every corpus model and failed the first random 4x4, so a
-    complex LU has to be shown a matrix that actually pivots, not only a diagonally dominant one.
+    Two right-hand sides against one factorisation, because that is how a step uses it -- every
+    Newton iteration solves against the same factors. Random and seeded so a failure repeats:
+    the swap bug `radau.py:252` records survived every corpus model and failed the first random
+    4x4, so the LU must be shown a matrix that actually pivots, not only a diagonal-dominant one.
     """
     numpy = pytest.importorskip("numpy")
     rng = numpy.random.default_rng(20260903 + n)
-    a = rng.standard_normal((n, n)) + 1j * rng.standard_normal((n, n))
-    b = rng.standard_normal(n) + 1j * rng.standard_normal(n)
-    wanted = numpy.linalg.solve(a, b)
+    a = rng.standard_normal((n, n))
+    b1 = rng.standard_normal(n)
+    b2 = rng.standard_normal(n)
 
     program = "\n".join(
         [
-            *COMPLEX_SOLVE,
+            *LINALG,
             "fn main() {",
-            f"    let mut ar: [f64; {n * n}] = [{_floats(a.real.ravel())}];",
-            f"    let mut ai: [f64; {n * n}] = [{_floats(a.imag.ravel())}];",
-            f"    let mut br: [f64; {n}] = [{_floats(b.real)}];",
-            f"    let mut bi: [f64; {n}] = [{_floats(b.imag)}];",
-            f"    let mut xr = [0.0f64; {n}];",
-            f"    let mut xi = [0.0f64; {n}];",
-            f"    md_csolve({n}, &mut ar, &mut ai, &mut br, &mut bi, &mut xr, &mut xi);",
-            "    let mut printed: Vec<String> = xr.iter().map(|v| v.to_string()).collect();",
-            "    printed.extend(xi.iter().map(|v| v.to_string()));",
+            f"    let mut a: [f64; {n * n}] = [{_floats(a.ravel())}];",
+            f"    let mut piv: [usize; {n}] = [0; {n}];",
+            f"    assert!(md_lu_factor({n}, &mut a, &mut piv));",
+            f"    let mut b1: [f64; {n}] = [{_floats(b1)}];",
+            f"    md_lu_solve({n}, &a, &piv, &mut b1);",
+            f"    let mut b2: [f64; {n}] = [{_floats(b2)}];",
+            f"    md_lu_solve({n}, &a, &piv, &mut b2);",
+            "    let mut printed: Vec<String> = b1.iter().map(|v| v.to_string()).collect();",
+            "    printed.extend(b2.iter().map(|v| v.to_string()));",
             '    println!("{}", printed.join(" "));',
             "}",
             "",
         ]
     )
     flat = _run(program)
-    found = numpy.array(flat[:n]) + 1j * numpy.array(flat[n:])
-    numpy.testing.assert_allclose(found, wanted, rtol=1e-12, atol=1e-12)
+    numpy.testing.assert_allclose(flat[:n], numpy.linalg.solve(a, b1), rtol=1e-12, atol=1e-12)
+    numpy.testing.assert_allclose(flat[n:], numpy.linalg.solve(a, b2), rtol=1e-12, atol=1e-12)
+
+
+@needs_rustc
+@pytest.mark.parametrize("n", [1, 2, 3, 4])
+def test_md_clu_factor_solve_answers_what_numpy_answers(n: int) -> None:
+    """The complex twin: one factorisation, two right-hand sides, matched against numpy."""
+    numpy = pytest.importorskip("numpy")
+    rng = numpy.random.default_rng(20260904 + n)
+    a = rng.standard_normal((n, n)) + 1j * rng.standard_normal((n, n))
+    b1 = rng.standard_normal(n) + 1j * rng.standard_normal(n)
+    b2 = rng.standard_normal(n) + 1j * rng.standard_normal(n)
+
+    def system(b: object) -> list[str]:
+        return [
+            f"    let mut br: [f64; {n}] = [{_floats(b.real)}];",  # type: ignore[union-attr]
+            f"    let mut bi: [f64; {n}] = [{_floats(b.imag)}];",  # type: ignore[union-attr]
+            f"    md_clu_solve({n}, &ar, &ai, &piv, &mut br, &mut bi);",
+            "    printed.extend(br.iter().map(|v| v.to_string()));",
+            "    printed.extend(bi.iter().map(|v| v.to_string()));",
+        ]
+
+    program = "\n".join(
+        [
+            *LINALG,
+            "fn main() {",
+            f"    let mut ar: [f64; {n * n}] = [{_floats(a.real.ravel())}];",
+            f"    let mut ai: [f64; {n * n}] = [{_floats(a.imag.ravel())}];",
+            f"    let mut piv: [usize; {n}] = [0; {n}];",
+            f"    assert!(md_clu_factor({n}, &mut ar, &mut ai, &mut piv));",
+            "    let mut printed: Vec<String> = Vec::new();",
+            *system(b1),
+            *system(b2),
+            '    println!("{}", printed.join(" "));',
+            "}",
+            "",
+        ]
+    )
+    flat = _run(program)
+    got1 = numpy.array(flat[:n]) + 1j * numpy.array(flat[n : 2 * n])
+    got2 = numpy.array(flat[2 * n : 3 * n]) + 1j * numpy.array(flat[3 * n :])
+    numpy.testing.assert_allclose(got1, numpy.linalg.solve(a, b1), rtol=1e-12, atol=1e-12)
+    numpy.testing.assert_allclose(got2, numpy.linalg.solve(a, b2), rtol=1e-12, atol=1e-12)
 
 
 @needs_rustc
