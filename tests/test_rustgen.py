@@ -26,6 +26,7 @@ import pytest
 from modelica.ir.causalize import causalize
 from modelica.lang import parse
 from modelica.sim.emit import EmitError
+from modelica.sim.rust_radau import CONSTANTS, FIRST_STEP, INTEGRATE, LINALG, NEWTON, STEP
 from modelica.sim.rustgen import unit
 
 if TYPE_CHECKING:
@@ -215,3 +216,59 @@ def test_the_rust_jacobian_answers_what_the_python_one_answers(model: Path) -> N
     numpy.testing.assert_allclose(
         numpy.array(found).reshape(width, width), wanted, rtol=1e-12, atol=1e-12, equal_nan=True
     )
+
+
+@needs_rustc
+def test_the_rust_integrator_reproduces_the_toml_reference() -> None:
+    """The milestone: emit RLCCircuit, bundle the radau runtime, integrate, match the .toml.
+
+    The AOT "integrator and model compile together" unit. rustgen emits rhs and jacobian, the
+    radau runtime calls them by name, and rustc compiles the whole into one binary that
+    integrates from the model's start to its stop. The reference is the model's own recorded
+    trajectory in RLCCircuit.toml, at the tolerance (1e-8) that reproduces it to well within the
+    file's 1e-6 comparison bar -- so this checks the Rust integrator against a number neither it
+    nor the Python radau invented.
+    """
+    pytest.importorskip("numpy")
+    build = pytest.importorskip("modelica.sim.kernel").build
+    model = EXAMPLES / "models" / "RLCCircuit.mo"
+    spec = tomllib.loads(model.with_suffix(".toml").read_text(encoding="utf-8"))
+    refs = [pt for pt in spec["simulate"]["point"] if pt.get("source") == "reference"]
+    times = [float(pt["t"]) for pt in refs]
+
+    system = _system(model)
+    kernel = build(system)
+    parameters, states, workspace = kernel.start(0.0)
+    names = system.modes[0].states
+    n = len(states)
+    stop = float(spec["simulate"]["stop"])
+
+    program = "\n".join(
+        [
+            "#![allow(dead_code)]",
+            unit(system),
+            *CONSTANTS,
+            *LINALG,
+            *STEP,
+            *NEWTON,
+            *FIRST_STEP,
+            *INTEGRATE,
+            "fn main() {",
+            f"    let y0 = [{_floats(states)}];",
+            f"    let p = [{_floats(parameters)}];",
+            f"    let mut w: [f64; {len(workspace)}] = [{_floats(workspace)}];",
+            f"    let grid = [{_floats(times)}];",
+            f"    let mut out = [0.0f64; {len(times) * n}];",
+            f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &grid, &mut out);",
+            "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
+            '    println!("{}", printed.join(" "));',
+            "}",
+            "",
+        ]
+    )
+    out = _compile_and_run(program, system.name)
+    for i, point in enumerate(refs):
+        for q, name in enumerate(names):
+            assert out[i * n + q] == pytest.approx(point["values"][name], rel=1e-6, abs=1e-9), (
+                f"t={point['t']} {name}"
+            )

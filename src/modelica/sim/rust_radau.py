@@ -236,6 +236,11 @@ STEP: Final = (
     "const NEWTON_ORDER: f64 = 3.0;",
     "const TRIVIAL: f64 = 1e-5;",
     "const NEGLIGIBLE: f64 = 1e-15;",
+    "const STALE_ITERATIONS: usize = 2;",
+    "const STALE_RATE: f64 = 1e-3;",
+    "const WORTH_CHANGING: f64 = 1.2;",
+    "const TOO_SMALL: i32 = 1;",
+    "const NO_CONVERGENCE: i32 = 2;",
     "",
     "// Scaled root-mean-square norm: sqrt(mean(x*x)). radau.py:273.",
     "#[allow(dead_code)]",
@@ -441,3 +446,240 @@ FIRST_STEP: Final = (
     "}",
     "",
 )
+
+
+#: The Radau IIA driver loop, ported from `radau.py`'s `integrate`. It calls ``rhs`` and
+#: ``jacobian`` by name -- the integrator and the model compile together, which is the whole
+#: point -- and ties together every piece above: the starting step, the pair factorisation, the
+#: Newton solve, the embedded error estimate, Gustafsson step control, stale-Jacobian detection,
+#: and dense output through ``P``. One long function on purpose, as `radau.py:489` argues:
+#: splitting the controller from the step would put a call on the hot path for every quantity
+#: they pass. It fills ``out`` (grid.len() by n, row-major) and returns the run's counters.
+_INTEGRATE_SRC = """\
+#[allow(dead_code)]
+fn md_integrate(
+    t0: f64,
+    t1: f64,
+    y0: &[f64],
+    p: &[f64],
+    w: &mut [f64],
+    rtol: f64,
+    atol: f64,
+    grid: &[f64],
+    out: &mut [f64],
+) -> (i32, usize, usize, usize, usize, usize, f64) {
+    let n = y0.len();
+    let mut y = y0.to_vec();
+    let mut t = t0;
+    let mut f = vec![0.0f64; n];
+    rhs(t, &y, p, w, &mut f);
+    let mut evaluations = 1usize;
+
+    let mut jac = vec![0.0f64; n * n];
+    jacobian(t, &y, p, w, &mut jac);
+    let mut jacobians = 1usize;
+    let mut fresh = true;
+
+    let mut ar = vec![0.0f64; n * n];
+    let mut acr = vec![0.0f64; n * n];
+    let mut aci = vec![0.0f64; n * n];
+    let mut pr = vec![0usize; n];
+    let mut pc = vec![0usize; n];
+    let mut factored = false;
+    let mut factorisations = 0usize;
+
+    let mut z = vec![0.0f64; 3 * n];
+    let mut quad = vec![0.0f64; n * 3];
+    let mut y_poly = vec![0.0f64; n];
+    let mut t_poly = t0;
+    let mut h_poly = 1.0;
+    let mut extrapolate = false;
+    let mut y_new = vec![0.0f64; n];
+    let mut f_new = vec![0.0f64; n];
+    let mut error = vec![0.0f64; n];
+    let mut combined = vec![0.0f64; n];
+    let mut scale = vec![0.0f64; n];
+    let mut scaled = vec![0.0f64; n];
+
+    let points = grid.len();
+    let mut cursor = 0usize;
+    while cursor < points && grid[cursor] <= t0 {
+        for q in 0..n { out[cursor * n + q] = y[q]; }
+        cursor += 1;
+    }
+
+    let tol = (10.0 * f64::EPSILON / rtol).max((0.03f64).min(rtol.sqrt()));
+    let mut h_prop = md_first_step(t0, &y, p, w, &f, rtol, atol, t1 - t0);
+    evaluations += 1;
+    let mut h_old = -1.0;
+    let mut error_old = -1.0;
+
+    let mut steps = 0usize;
+    let mut rejected_total = 0usize;
+    let mut status = 0i32;
+    while t < t1 {
+        let floor = 10.0 * (t.next_up() - t).abs();
+        let mut h_abs = h_prop;
+        let mut h_previous = h_old;
+        let mut error_previous = error_old;
+        if h_abs < floor {
+            h_abs = floor;
+            h_previous = -1.0;
+            error_previous = -1.0;
+        }
+
+        let mut rejected = false;
+        let mut accepted = false;
+        let mut iterations = 0usize;
+        let mut rate = -1.0;
+        let mut error_norm = 0.0;
+        let mut h = h_abs;
+        let mut t_new = t;
+        while !accepted {
+            if h_abs < floor { status = TOO_SMALL; break; }
+            h = h_abs;
+            t_new = (t + h).min(t1);
+            h = t_new - t;
+            h_abs = h;
+
+            for i in 0..3 {
+                if extrapolate {
+                    let x = (t + h * C[i] - t_poly) / h_poly;
+                    for q in 0..n {
+                        z[i * n + q] = y_poly[q]
+                            + x * (quad[q * 3] + x * (quad[q * 3 + 1] + x * quad[q * 3 + 2]))
+                            - y[q];
+                    }
+                } else {
+                    for q in 0..n { z[i * n + q] = 0.0; }
+                }
+            }
+            for q in 0..n { scale[q] = atol + rtol * y[q].abs(); }
+
+            let mut converged = false;
+            while !converged {
+                if !factored {
+                    if !md_factor_pair(n, &jac, h, &mut ar, &mut pr, &mut acr, &mut aci, &mut pc) {
+                        status = NO_CONVERGENCE;
+                        break;
+                    }
+                    factored = true;
+                    factorisations += 1;
+                }
+                let result =
+                    md_newton(t, &y, h, p, w, &mut z, &scale, tol, &ar, &pr, &acr, &aci, &pc);
+                converged = result.0;
+                iterations = result.1;
+                rate = result.2;
+                evaluations += result.3;
+                if !converged {
+                    if fresh { break; }
+                    for e in jac.iter_mut() { *e = 0.0; }
+                    jacobian(t, &y, p, w, &mut jac);
+                    jacobians += 1;
+                    fresh = true;
+                    factored = false;
+                }
+            }
+            if status != 0 { break; }
+            if !converged {
+                h_abs *= 0.5;
+                factored = false;
+                rejected = true;
+                continue;
+            }
+
+            for q in 0..n {
+                y_new[q] = y[q] + z[2 * n + q];
+                combined[q] = f[q] + (E[0] * z[q] + E[1] * z[n + q] + E[2] * z[2 * n + q]) / h;
+                error[q] = combined[q];
+            }
+            md_lu_solve(n, &ar, &pr, &mut error);
+            for q in 0..n { scale[q] = atol + rtol * y[q].abs().max(y_new[q].abs()); }
+            for q in 0..n { scaled[q] = error[q] / scale[q]; }
+            error_norm = md_norm(&scaled);
+            let safety =
+                0.9 * (2 * NEWTON_MAXITER + 1) as f64 / (2 * NEWTON_MAXITER + iterations) as f64;
+
+            if rejected && error_norm > 1.0 {
+                for q in 0..n { y_new[q] = y[q] + error[q]; }
+                rhs(t, &y_new, p, w, &mut f_new);
+                evaluations += 1;
+                for q in 0..n { error[q] = f_new[q] + combined[q] - f[q]; }
+                md_lu_solve(n, &ar, &pr, &mut error);
+                for q in 0..n { scaled[q] = error[q] / scale[q]; }
+                error_norm = md_norm(&scaled);
+                for q in 0..n { y_new[q] = y[q] + z[2 * n + q]; }
+            }
+
+            if error_norm > 1.0 {
+                let factor = md_predict(h_abs, h_previous, error_norm, error_previous);
+                h_abs *= MIN_FACTOR.max(safety * factor);
+                factored = false;
+                rejected = true;
+                rejected_total += 1;
+            } else {
+                accepted = true;
+            }
+        }
+        if !accepted { break; }
+
+        steps += 1;
+        for q in 0..n {
+            for j in 0..3 {
+                let mut total = 0.0;
+                for i in 0..3 { total += z[i * n + q] * P[i][j]; }
+                quad[q * 3 + j] = total;
+            }
+        }
+        while cursor < points && grid[cursor] <= t_new {
+            let x = (grid[cursor] - t) / h;
+            for q in 0..n {
+                out[cursor * n + q] =
+                    y[q] + x * (quad[q * 3] + x * (quad[q * 3 + 1] + x * quad[q * 3 + 2]));
+            }
+            cursor += 1;
+        }
+
+        let safety =
+            0.9 * (2 * NEWTON_MAXITER + 1) as f64 / (2 * NEWTON_MAXITER + iterations) as f64;
+        let again = iterations > STALE_ITERATIONS && rate > STALE_RATE;
+        let mut factor =
+            MAX_FACTOR.min(safety * md_predict(h_abs, h_previous, error_norm, error_previous));
+        if !again && factor < WORTH_CHANGING {
+            factor = 1.0;
+        } else {
+            factored = false;
+        }
+
+        rhs(t_new, &y_new, p, w, &mut f_new);
+        evaluations += 1;
+        if again {
+            for e in jac.iter_mut() { *e = 0.0; }
+            jacobian(t_new, &y_new, p, w, &mut jac);
+            jacobians += 1;
+            fresh = true;
+        } else {
+            fresh = false;
+        }
+
+        h_old = h_prop;
+        error_old = error_norm;
+        h_prop = h_abs * factor;
+        for q in 0..n { y_poly[q] = y[q]; }
+        t_poly = t;
+        h_poly = h;
+        extrapolate = true;
+        t = t_new;
+        for q in 0..n { y[q] = y_new[q]; f[q] = f_new[q]; }
+    }
+
+    while cursor < points {
+        for q in 0..n { out[cursor * n + q] = y[q]; }
+        cursor += 1;
+    }
+    (status, steps, rejected_total, evaluations, jacobians, factorisations, t)
+}
+"""
+
+INTEGRATE: Final = (*_INTEGRATE_SRC.splitlines(), "")
