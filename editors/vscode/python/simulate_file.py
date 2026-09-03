@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tomllib
 from pathlib import Path
 
 import numpy as np
@@ -95,18 +96,33 @@ def _run(path: Path, name: str, stop: float, libraries: list[str]) -> dict[str, 
     }
 
 
+def _default_stop(path: Path) -> float:
+    """The model's own stop time: a sibling ``<name>.toml``'s ``[simulate].stop``, else 10."""
+    toml = path.with_suffix(".toml")
+    if toml.exists():
+        try:
+            spec = tomllib.loads(toml.read_text(encoding="utf-8"))
+            stop = spec.get("simulate", {}).get("stop")
+            if stop is not None:
+                return float(stop)
+        except (tomllib.TOMLDecodeError, ValueError, TypeError):
+            pass
+    return 10.0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Simulate one .mo file to JSON.")
     ap.add_argument("path", help="the .mo file")
-    ap.add_argument("--stop", type=float, default=10.0, help="stop time (default 10)")
+    ap.add_argument("--stop", type=float, default=None, help="stop time (default: the model's own)")
     ap.add_argument("--model", default=None, help="model class name (default: the file stem)")
     ap.add_argument("--library", action="append", default=[], help="extra .mo file or folder")
     args = ap.parse_args()
 
     path = Path(args.path)
     name = args.model or path.stem
+    stop = args.stop if args.stop is not None else _default_stop(path)
     try:
-        record = _run(path, name, args.stop, args.library)
+        record = _run(path, name, stop, args.library)
         print(json.dumps({"models": [record]}, separators=(",", ":"), allow_nan=False))
     except Exception as error:  # noqa: BLE001 - report every failure to the panel, never crash silently
         print(
