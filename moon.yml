@@ -110,6 +110,15 @@ tasks:
     options:
       cache: false
 
+  # The origin/main-anchored guard: HEAD's version must be strictly greater than
+  # main's whenever src/ python differs from main. Complements version-guard (which
+  # checks a bump landed within the CI diff range) with "ahead of main", the invariant
+  # behind "every push carries a new patch". Fetches origin/main, so not cacheable.
+  version-ahead:
+    command: 'sh scripts/check-version-ahead'
+    options:
+      cache: false
+
   # The single aggregate gate: the whole CI check graph in one target.
   # format-check IS in the gate — the tree is a fresh rewrite, so it starts format-clean
   # and gating it from day one beats retrofitting it later (musil's lesson).
@@ -125,6 +134,7 @@ tasks:
       - '~:build'
       - '~:docs'
       - '~:version-guard'
+      - '~:version-ahead'
 
   # Mint a PyPI OIDC token and upload dist/*. Invoked by release (or by hand).
   publish:

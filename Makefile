@@ -1,7 +1,7 @@
 # modelica -- task runner. uv is the only tool needed.
 # One-time setup after cloning:  make install-hooks
 .DEFAULT_GOAL := help
-.PHONY: help install-hooks format lint typecheck test check bump build docs docs-prose
+.PHONY: help install-hooks format lint typecheck test check version-ahead bump build docs docs-prose
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -26,6 +26,9 @@ test: ## run the test suite
 	uv run pytest -q
 
 check: lint typecheck test ## the full CI test stage: lint + typecheck + test
+
+version-ahead: ## fail unless pyproject version is greater than origin/main (when src/ changed)
+	sh scripts/check-version-ahead
 
 docs: ## build the site the way CI does -- notebooks re-executed, cache dropped first
 	rm -rf .cache/mkdocs-jupyter
