@@ -105,3 +105,62 @@ COMPLEX_SOLVE: Final = (
     "}",
     "",
 )
+
+
+# The method's constants, computed here from the same formulas `radau.py` uses so a
+# transcription error cannot creep in, then emitted as Rust literals. Pure Python (no numpy),
+# so this module stays importable without the `sim` extra, the way `cgen` does.
+_S6 = 6.0**0.5
+_C = [(4.0 - _S6) / 10.0, (4.0 + _S6) / 10.0, 1.0]
+_E = [(-13.0 - 7.0 * _S6) / 3.0, (-13.0 + 7.0 * _S6) / 3.0, -1.0 / 3.0]
+_MU_REAL = 3.0 + 3.0 ** (2.0 / 3.0) - 3.0 ** (1.0 / 3.0)
+_MU_COMPLEX_R = 3.0 + 0.5 * (3.0 ** (1.0 / 3.0) - 3.0 ** (2.0 / 3.0))
+_MU_COMPLEX_I = -0.5 * (3.0 ** (5.0 / 6.0) + 3.0 ** (7.0 / 6.0))
+# T and TI are the published diagonalising transform `A = T L T^-1`, copied verbatim from
+# `radau.py` (Hairer and Wanner's tabulated values), not recomputed.
+_T = [
+    [0.09443876248897524, -0.14125529502095421, 0.03002919410514742],
+    [0.25021312296533332, 0.20412935229379994, -0.38294211275726192],
+    [1.0, 1.0, 0.0],
+]
+_TI = [
+    [4.17871859155190428, 0.32768282076106237, 0.52337644549944951],
+    [-4.17871859155190428, -0.32768282076106237, 0.47662355450055044],
+    [0.50287263494578682, -2.57192694985560522, 0.59603920482822492],
+]
+_P = [
+    [13.0 / 3.0 + 7.0 * _S6 / 3.0, -23.0 / 3.0 - 22.0 * _S6 / 3.0, 10.0 / 3.0 + 5.0 * _S6],
+    [13.0 / 3.0 - 7.0 * _S6 / 3.0, -23.0 / 3.0 + 22.0 * _S6 / 3.0, 10.0 / 3.0 - 5.0 * _S6],
+    [1.0 / 3.0, -8.0 / 3.0, 10.0 / 3.0],
+]
+
+
+def _lit(value: float) -> str:
+    """A Rust ``f64`` literal that round-trips the exact bits of ``value``."""
+    return f"{float(value)!r}f64"
+
+
+def _rrow(values: list[float]) -> str:
+    return "[" + ", ".join(_lit(v) for v in values) + "]"
+
+
+def _rmat(rows: list[list[float]]) -> str:
+    return "[" + ", ".join(_rrow(row) for row in rows) + "]"
+
+
+#: The Radau IIA constants as Rust ``const`` declarations: the collocation nodes ``C``, the
+#: embedded error weights ``E``, the real and complex inverse-Butcher eigenvalues, the
+#: diagonalising transforms ``T``/``TI``, and the dense-output polynomial ``P``. The step and
+#: the controller read these; the test compiles them and checks each against `radau.py` to full
+#: ``f64`` precision, which is the whole point of generating rather than hand-typing them.
+CONSTANTS: Final = (
+    f"const C: [f64; 3] = {_rrow(_C)};",
+    f"const E: [f64; 3] = {_rrow(_E)};",
+    f"const MU_REAL: f64 = {_lit(_MU_REAL)};",
+    f"const MU_COMPLEX_R: f64 = {_lit(_MU_COMPLEX_R)};",
+    f"const MU_COMPLEX_I: f64 = {_lit(_MU_COMPLEX_I)};",
+    f"const T: [[f64; 3]; 3] = {_rmat(_T)};",
+    f"const TI: [[f64; 3]; 3] = {_rmat(_TI)};",
+    f"const P: [[f64; 3]; 3] = {_rmat(_P)};",
+    "",
+)

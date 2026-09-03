@@ -7,7 +7,7 @@
 # abandoned Modelon/JModelica.org upload (version "trunk"). The git repo keeps the
 # historical name; the import package matches the distribution.
 name = "modelica"
-version = "0.0.117"
+version = "0.0.118"
 description = "Pure-Python Modelica toolchain: parse, flatten, simulate, and exchange via FMI 3.0 and SSP 2.0"
 readme = "README.md"
 # 3.12+, no compatibility shims: this is a full rewrite of a 2010 Python 2 codebase, and

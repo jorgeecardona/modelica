@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from modelica.sim.rust_radau import COMPLEX_SOLVE
+from modelica.sim.rust_radau import COMPLEX_SOLVE, CONSTANTS
 
 COMPILER = shutil.which("rustc")
 needs_rustc = pytest.mark.skipif(COMPILER is None, reason="no rustc on this machine")
@@ -78,4 +78,47 @@ def test_md_csolve_answers_what_numpy_answers(n: int) -> None:
     )
     flat = _run(program)
     found = numpy.array(flat[:n]) + 1j * numpy.array(flat[n:])
+    numpy.testing.assert_allclose(found, wanted, rtol=1e-12, atol=1e-12)
+
+
+@needs_rustc
+def test_the_constants_match_radau() -> None:
+    """The emitted Rust constants equal `radau.py`'s to full f64 precision.
+
+    Generated from the same formulas rather than hand-typed, so this is a transcription check:
+    a wrong digit in a transform matrix would make every step subtly wrong and nothing else
+    would notice.
+    """
+    numpy = pytest.importorskip("numpy")
+    radau = pytest.importorskip("modelica.sim.radau")
+    program = "\n".join(
+        [
+            *CONSTANTS,
+            "fn main() {",
+            "    let mut v: Vec<f64> = Vec::new();",
+            "    v.extend_from_slice(&C);",
+            "    v.extend_from_slice(&E);",
+            "    v.push(MU_REAL);",
+            "    v.push(MU_COMPLEX_R);",
+            "    v.push(MU_COMPLEX_I);",
+            "    for r in T.iter() { v.extend_from_slice(r); }",
+            "    for r in TI.iter() { v.extend_from_slice(r); }",
+            "    for r in P.iter() { v.extend_from_slice(r); }",
+            "    let printed: Vec<String> = v.iter().map(|x| x.to_string()).collect();",
+            '    println!("{}", printed.join(" "));',
+            "}",
+            "",
+        ]
+    )
+    found = _run(program)
+    wanted = [
+        *radau.C.tolist(),
+        *radau.E.tolist(),
+        radau.MU_REAL,
+        radau.MU_COMPLEX.real,
+        radau.MU_COMPLEX.imag,
+        *radau.T.ravel().tolist(),
+        *radau.TI.ravel().tolist(),
+        *radau.P.ravel().tolist(),
+    ]
     numpy.testing.assert_allclose(found, wanted, rtol=1e-12, atol=1e-12)
