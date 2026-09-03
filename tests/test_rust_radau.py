@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from modelica.sim.rust_radau import CONSTANTS, LINALG, NEWTON, STEP
+from modelica.sim.rust_radau import CONSTANTS, FIRST_STEP, LINALG, NEWTON, STEP
 
 COMPILER = shutil.which("rustc")
 needs_rustc = pytest.mark.skipif(COMPILER is None, reason="no rustc on this machine")
@@ -355,3 +355,50 @@ def test_md_newton_matches_radau() -> None:
     numpy.testing.assert_allclose(found[:6], z_py.ravel(), rtol=1e-10, atol=1e-12)
     assert int(found[6]) == int(conv)
     assert int(found[7]) == iters
+
+
+@needs_rustc
+def test_md_first_step_matches_radau() -> None:
+    """The starting-step size equals `radau._first_step` on a linear system."""
+    numpy = pytest.importorskip("numpy")
+    radau = pytest.importorskip("modelica.sim.radau")
+
+    a = numpy.array([[-2.0, 1.0], [1.0, -2.0]])
+    y = numpy.array([1.0, 0.0])
+    f0 = a @ y
+    rtol, atol, span, t0 = 1e-6, 1e-6, 10.0, 0.0
+
+    def rhs(_t: float, yy: object, _p: object, _w: object, out: object) -> None:
+        out[:] = a @ yy  # type: ignore[operator, index]
+
+    wanted, _probes = radau._first_step(  # noqa: SLF001
+        rhs, t0, y, numpy.zeros(0), numpy.zeros(0), f0, rtol, atol, span
+    )
+
+    program = "\n".join(
+        [
+            *CONSTANTS,
+            *LINALG,
+            *STEP,
+            *FIRST_STEP,
+            "fn rhs(_t: f64, y: &[f64], _p: &[f64], _w: &mut [f64], dy: &mut [f64]) {",
+            "    let a = [[-2.0f64, 1.0], [1.0, -2.0]];",
+            "    for i in 0..y.len() {",
+            "        let mut s = 0.0;",
+            "        for j in 0..y.len() { s += a[i][j] * y[j]; }",
+            "        dy[i] = s;",
+            "    }",
+            "}",
+            "fn main() {",
+            "    let y = [1.0f64, 0.0];",
+            "    let p: [f64; 0] = [];",
+            "    let mut w: [f64; 0] = [];",
+            f"    let f0 = [{_floats(f0)}];",
+            f"    let h = md_first_step(0.0, &y, &p, &mut w, &f0, {rtol!r}f64, {atol!r}f64, {span!r}f64);",
+            '    println!("{}", h);',
+            "}",
+            "",
+        ]
+    )
+    found = _run(program)
+    assert found[0] == pytest.approx(float(wanted), rel=1e-12, abs=1e-12)

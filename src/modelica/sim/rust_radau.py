@@ -231,7 +231,11 @@ CONSTANTS: Final = (
 #: for it exercises the whole linear-algebra path a step takes before the Newton iteration.
 STEP: Final = (
     "const MAX_FACTOR: f64 = 10.0;",
+    "const MIN_FACTOR: f64 = 0.2;",
     "const NEWTON_MAXITER: usize = 6;",
+    "const NEWTON_ORDER: f64 = 3.0;",
+    "const TRIVIAL: f64 = 1e-5;",
+    "const NEGLIGIBLE: f64 = 1e-15;",
     "",
     "// Scaled root-mean-square norm: sqrt(mean(x*x)). radau.py:273.",
     "#[allow(dead_code)]",
@@ -390,6 +394,50 @@ NEWTON: Final = (
     "        previous = size;",
     "    }",
     "    (converged, iterations, rate, calls)",
+    "}",
+    "",
+)
+
+
+#: Hairer and Wanner's starting-step heuristic, ported from `radau.py`'s `_first_step`: one
+#: explicit-Euler probe, then a curvature guess. Calls ``rhs`` once, so it is rhs-dependent like
+#: `NEWTON`. Getting it wrong is not fatal -- the controller recovers -- but a first step far too
+#: large is rejected repeatedly where no Jacobian has been reused yet, the most expensive place.
+FIRST_STEP: Final = (
+    "// The starting step size. radau.py:393.",
+    "#[allow(dead_code)]",
+    "fn md_first_step(",
+    "    t0: f64,",
+    "    y: &[f64],",
+    "    p: &[f64],",
+    "    w: &mut [f64],",
+    "    f0: &[f64],",
+    "    rtol: f64,",
+    "    atol: f64,",
+    "    span: f64,",
+    ") -> f64 {",
+    "    let n = y.len();",
+    "    let mut scale = vec![0.0f64; n];",
+    "    for q in 0..n { scale[q] = atol + rtol * y[q].abs(); }",
+    "    let mut tmp = vec![0.0f64; n];",
+    "    for q in 0..n { tmp[q] = y[q] / scale[q]; }",
+    "    let d0 = md_norm(&tmp);",
+    "    for q in 0..n { tmp[q] = f0[q] / scale[q]; }",
+    "    let d1 = md_norm(&tmp);",
+    "    let h0 = if d0 < TRIVIAL || d1 < TRIVIAL { 1e-6 } else { 0.01 * d0 / d1 };",
+    "    let mut probe = vec![0.0f64; n];",
+    "    for q in 0..n { probe[q] = y[q] + h0 * f0[q]; }",
+    "    let mut slope = vec![0.0f64; n];",
+    "    rhs(t0 + h0, &probe, p, w, &mut slope);",
+    "    for q in 0..n { tmp[q] = (slope[q] - f0[q]) / scale[q]; }",
+    "    let d2 = md_norm(&tmp) / h0;",
+    "    let biggest = d1.max(d2);",
+    "    let h1 = if biggest <= NEGLIGIBLE {",
+    "        (1e-6f64).max(h0 * 1e-3)",
+    "    } else {",
+    "        (0.01 / biggest).powf(1.0 / (NEWTON_ORDER + 1.0))",
+    "    };",
+    "    (100.0 * h0).min(h1).min(span)",
     "}",
     "",
 )
