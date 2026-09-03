@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from modelica.sim.rust_radau import CONSTANTS, LINALG
+from modelica.sim.rust_radau import CONSTANTS, LINALG, STEP
 
 COMPILER = shutil.which("rustc")
 needs_rustc = pytest.mark.skipif(COMPILER is None, reason="no rustc on this machine")
@@ -30,6 +30,10 @@ def _floats(values: object) -> str:
 
 def _run(program: str) -> list[float]:
     assert COMPILER is not None
+    # These programs paste the whole runtime and a main that exercises one piece, so most of it
+    # is unused per test; allow that at the crate root rather than per item. The real runtime,
+    # compiled with a model that calls it, is where dead code would actually matter.
+    program = "#![allow(dead_code)]\n" + program
     with tempfile.TemporaryDirectory() as tmp:
         unit = Path(tmp) / "csolve.rs"
         unit.write_text(program, encoding="utf-8")
@@ -165,3 +169,113 @@ def test_the_constants_match_radau() -> None:
         *radau.P.ravel().tolist(),
     ]
     numpy.testing.assert_allclose(found, wanted, rtol=1e-12, atol=1e-12)
+
+
+@needs_rustc
+def test_md_norm_matches_radau() -> None:
+    """The scaled RMS norm equals `radau._norm`."""
+    numpy = pytest.importorskip("numpy")
+    radau = pytest.importorskip("modelica.sim.radau")
+    x = numpy.random.default_rng(7).standard_normal(9)
+    program = "\n".join(
+        [
+            *CONSTANTS,
+            *LINALG,
+            *STEP,
+            "fn main() {",
+            f"    let x: [f64; {len(x)}] = [{_floats(x)}];",
+            '    println!("{}", md_norm(&x));',
+            "}",
+            "",
+        ]
+    )
+    found = _run(program)
+    assert found[0] == pytest.approx(float(radau._norm(x)), rel=1e-12, abs=1e-12)  # noqa: SLF001
+
+
+@needs_rustc
+def test_md_predict_matches_radau() -> None:
+    """The step-size predictor equals `radau._predict` across the cases it branches on."""
+    numpy = pytest.importorskip("numpy")
+    radau = pytest.importorskip("modelica.sim.radau")
+    cases = [
+        (0.1, -1.0, 0.5, -1.0),  # first step, error_old unknown
+        (0.1, 0.2, 0.5, 0.8),  # both known
+        (0.1, 0.2, 2.0, 0.3),  # error > 1
+        (0.1, 0.2, 0.0, 0.3),  # error == 0 -> MAX_FACTOR
+    ]
+    calls = "\n".join(
+        f"    v.push(md_predict({h!r}f64, {ho!r}f64, {e!r}f64, {eo!r}f64));"
+        for h, ho, e, eo in cases
+    )
+    program = "\n".join(
+        [
+            *CONSTANTS,
+            *LINALG,
+            *STEP,
+            "fn main() {",
+            "    let mut v: Vec<f64> = Vec::new();",
+            calls,
+            "    let printed: Vec<String> = v.iter().map(|x| x.to_string()).collect();",
+            '    println!("{}", printed.join(" "));',
+            "}",
+            "",
+        ]
+    )
+    found = _run(program)
+    wanted = [radau._predict(*case) for case in cases]  # noqa: SLF001
+    numpy.testing.assert_allclose(found, wanted, rtol=1e-12, atol=1e-12)
+
+
+@needs_rustc
+@pytest.mark.parametrize("n", [1, 2, 3, 4])
+def test_md_factor_pair_matches_radau(n: int) -> None:
+    """Building mu/h*I - J and factoring both eigen-systems, then solving, matches radau.
+
+    The whole linear-algebra path a step takes before Newton: `md_factor_pair` composes the
+    constants and the factored LU, and a solve against each factorisation must reproduce
+    ``numpy.linalg.solve`` on the same two matrices radau builds.
+    """
+    numpy = pytest.importorskip("numpy")
+    radau = pytest.importorskip("modelica.sim.radau")
+    rng = numpy.random.default_rng(100 + n)
+    jac = rng.standard_normal((n, n))
+    h = 0.037
+    br = rng.standard_normal(n)
+    bcr = rng.standard_normal(n)
+    bci = rng.standard_normal(n)
+
+    program = "\n".join(
+        [
+            *CONSTANTS,
+            *LINALG,
+            *STEP,
+            "fn main() {",
+            f"    let jac: [f64; {n * n}] = [{_floats(jac.ravel())}];",
+            f"    let mut ar = [0.0f64; {n * n}];",
+            f"    let mut pr = [0usize; {n}];",
+            f"    let mut acr = [0.0f64; {n * n}];",
+            f"    let mut aci = [0.0f64; {n * n}];",
+            f"    let mut pc = [0usize; {n}];",
+            f"    assert!(md_factor_pair({n}, &jac, {h!r}f64, &mut ar, &mut pr, &mut acr, &mut aci, &mut pc));",
+            f"    let mut br: [f64; {n}] = [{_floats(br)}];",
+            f"    md_lu_solve({n}, &ar, &pr, &mut br);",
+            f"    let mut bcr: [f64; {n}] = [{_floats(bcr)}];",
+            f"    let mut bci: [f64; {n}] = [{_floats(bci)}];",
+            f"    md_clu_solve({n}, &acr, &aci, &pc, &mut bcr, &mut bci);",
+            "    let mut printed: Vec<String> = br.iter().map(|v| v.to_string()).collect();",
+            "    printed.extend(bcr.iter().map(|v| v.to_string()));",
+            "    printed.extend(bci.iter().map(|v| v.to_string()));",
+            '    println!("{}", printed.join(" "));',
+            "}",
+            "",
+        ]
+    )
+    found = _run(program)
+    mu_real = radau.MU_REAL / h
+    mu_complex = radau.MU_COMPLEX / h
+    x_real = numpy.linalg.solve(mu_real * numpy.eye(n) - jac, br)
+    x_complex = numpy.linalg.solve(mu_complex * numpy.eye(n) - jac, bcr + 1j * bci)
+    numpy.testing.assert_allclose(found[:n], x_real, rtol=1e-12, atol=1e-12)
+    got_complex = numpy.array(found[n : 2 * n]) + 1j * numpy.array(found[2 * n :])
+    numpy.testing.assert_allclose(got_complex, x_complex, rtol=1e-12, atol=1e-12)
