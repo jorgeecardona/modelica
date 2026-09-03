@@ -189,3 +189,29 @@ def test_the_rust_indicators_answer_what_the_python_ones_answer(model: Path) -> 
         system, "indicators", len(kernel.code.events), (states, parameters, workspace)
     )
     assert found == pytest.approx(list(wanted), rel=1e-12, abs=1e-12)
+
+
+@needs_rustc
+@pytest.mark.parametrize("model", _supported(), ids=[m.stem for m in _supported()])
+def test_the_rust_jacobian_answers_what_the_python_one_answers(model: Path) -> None:
+    """The whole n-by-n matrix, entry by entry, at the start point.
+
+    Exact to 1e-12: this is symbolic differentiation on both sides, not a difference quotient,
+    so a disagreement is a wrong derivative and never a rounding one. ``equal_nan`` because a
+    model can start where its Jacobian is genuinely singular; both tiers must be undefined in
+    the same entries and equal in all the others. The supported models have one state set and
+    no switch, so the start point is the one place to compare.
+    """
+    numpy = pytest.importorskip("numpy")
+    build = pytest.importorskip("modelica.sim.kernel").build
+    system = _system(model)
+    kernel = build(system)
+    parameters, states, workspace = kernel.start(0.0)
+    width = len(states)
+
+    wanted = numpy.zeros((width, width))
+    kernel.jacobian(0.0, states, parameters, workspace, wanted)
+    found = _call_in_rust(system, "jacobian", width * width, (states, parameters, workspace))
+    numpy.testing.assert_allclose(
+        numpy.array(found).reshape(width, width), wanted, rtol=1e-12, atol=1e-12, equal_nan=True
+    )
