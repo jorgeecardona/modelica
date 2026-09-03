@@ -12,11 +12,11 @@ variable a block solves for, what order the blocks run in, which relations are l
 where a Jacobian's rows come from. Those are the same in every language and they are decided
 once, in `emit`, or the second backend is a second compiler rather than a second printer.
 
-Two dialects live here. :data:`PYTHON` is what the emitter has always produced, written out
-as data so that it is comparable with the other one; :data:`C` is the new one. Anything the
-two disagree about is visible in one place, which is the point -- a difference that is not in
-this file is a difference the emitter had to know about, and that is exactly what a template
-was supposed to avoid.
+Three dialects live here. :data:`PYTHON` is what the emitter has always produced, written out
+as data so that it is comparable with the others; :data:`C` and :data:`RUST` are compiled
+targets. Anything the dialects disagree about is visible in one place, which is the point -- a
+difference that is not in this file is a difference the emitter had to know about, and that is
+exactly what a template was supposed to avoid.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Final
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-__all__ = ["PYTHON", "C", "Dialect"]
+__all__ = ["PYTHON", "RUST", "C", "Dialect"]
 
 CONDITIONAL: Final = 0
 """Binds loosest. A conditional in an operand always takes brackets."""
@@ -180,26 +180,30 @@ PYTHON: Final = Dialect(
 #: keeps the generated arithmetic readable, which `docs/ideas/backends.md:8` makes the whole
 #: argument for owning the compiler.
 #:
-#: ``static inline`` and not ``static``, and that is not style. A generated unit carries every
-#: helper whether or not this particular model uses one, and a plain ``static`` function that
+#: Every helper is ``MD_UNUSED static inline``, and that is not style. A generated unit
+#: carries every helper whether or not this particular model uses one, and a helper that
 #: nothing calls is an error under ``-Werror=unused-function`` -- so a model with no ``mod``
 #: in it would fail to compile because of a helper written for a model that has one. The same
-#: applies to ``md_solve``, which most models never call.
+#: applies to ``md_solve``, which most models never call. GCC exempts unused ``static inline``
+#: from that warning; clang does not, so the ``__attribute__((unused))`` in ``MD_UNUSED`` is
+#: what makes the preamble portable. Both compilers accept the attribute under ``-std=c11``.
 C_PREAMBLE: Final = (
     "#include <math.h>",
     "",
-    "static inline double md_mod(double a, double b) {",
+    "#define MD_UNUSED __attribute__((unused))",
+    "",
+    "MD_UNUSED static inline double md_mod(double a, double b) {",
     "    double r = fmod(a, b);",
     "    return (r != 0.0 && (r < 0.0) != (b < 0.0)) ? r + b : r;",
     "}",
     "",
-    "static inline double md_min(double a, double b) { return a < b ? a : b; }",
-    "static inline double md_max(double a, double b) { return a > b ? a : b; }",
-    "static inline double md_sign(double a) { return (double)((a > 0.0) - (a < 0.0)); }",
+    "MD_UNUSED static inline double md_min(double a, double b) { return a < b ? a : b; }",
+    "MD_UNUSED static inline double md_max(double a, double b) { return a > b ? a : b; }",
+    "MD_UNUSED static inline double md_sign(double a) { return (double)((a > 0.0) - (a < 0.0)); }",
     "",
     "/* Dense LU with partial pivoting: the linear blocks are two- and three-by-two, and a",
     "   BLAS dependency for that would be a build system in exchange for nothing. */",
-    "static inline void md_solve(int n, double *a, double *b, double *x) {",
+    "MD_UNUSED static inline void md_solve(int n, double *a, double *b, double *x) {",
     "    for (int k = 0; k < n; ++k) {",
     "        int pivot = k;",
     "        for (int i = k + 1; i < n; ++i) {",
@@ -290,4 +294,123 @@ C: Final = Dialect(
     ),
     preamble=C_PREAMBLE,
     clarify={"or": frozenset({"and"})},
+)
+
+
+#: Written into every Rust unit before anything this dialect emits. Rust's scalar maths lives
+#: on ``f64`` as methods, so ``sin`` is ``x.sin()`` and not a free function -- the emitter can
+#: only spell a call as ``name(args)``, so the :attr:`Dialect.functions` map points at the
+#: associated-function form ``f64::sin`` for everything Rust has, and at a helper here for the
+#: four Modelica built-ins whose semantics differ from the nearest ``f64`` method: ``min`` and
+#: ``max`` (``f64::min`` swallows a NaN operand where Modelica propagates it), ``sign``
+#: (``f64::signum`` is +/-1 and never 0), and ``mod`` (``%`` truncates where ``mod`` floors).
+#:
+#: ``#[allow(dead_code)]`` on each helper is the same decision the C preamble makes with
+#: ``MD_UNUSED``: a unit carries every helper whether or not this model calls it, and the test
+#: compiles with ``-D warnings``, so an unused helper would otherwise be an error. The attribute
+#: exempts the helper and leaves that denial in force for the generated expression itself.
+RUST_PREAMBLE: Final = (
+    "#[allow(dead_code)] fn md_min(a: f64, b: f64) -> f64 { if a < b { a } else { b } }",
+    "#[allow(dead_code)] fn md_max(a: f64, b: f64) -> f64 { if a > b { a } else { b } }",
+    "#[allow(dead_code)] fn md_sign(a: f64) -> f64 {",
+    "    ((a > 0.0) as i32 - (a < 0.0) as i32) as f64",
+    "}",
+    "#[allow(dead_code)] fn md_rem(a: f64, b: f64) -> f64 { a % b }",
+    "#[allow(dead_code)] fn md_mod(a: f64, b: f64) -> f64 {",
+    "    let r = a % b;",
+    "    if r != 0.0 && (r < 0.0) != (b < 0.0) { r + b } else { r }",
+    "}",
+    "",
+    "// Dense LU with partial pivoting: the same routine the C preamble carries, and for the",
+    "// same reason -- a BLAS dependency for two- and three-by-two blocks would be a build",
+    "// system in exchange for nothing.",
+    "#[allow(dead_code)]",
+    "fn md_solve(n: usize, a: &mut [f64], b: &mut [f64], x: &mut [f64]) {",
+    "    for k in 0..n {",
+    "        let mut pivot = k;",
+    "        for i in (k + 1)..n {",
+    "            if a[i * n + k].abs() > a[pivot * n + k].abs() { pivot = i; }",
+    "        }",
+    "        if pivot != k {",
+    "            for j in 0..n { a.swap(k * n + j, pivot * n + j); }",
+    "            b.swap(k, pivot);",
+    "        }",
+    "        for i in (k + 1)..n {",
+    "            let factor = a[i * n + k] / a[k * n + k];",
+    "            a[i * n + k] = 0.0;",
+    "            for j in (k + 1)..n { a[i * n + j] -= factor * a[k * n + j]; }",
+    "            b[i] -= factor * b[k];",
+    "        }",
+    "    }",
+    "    for i in (0..n).rev() {",
+    "        let mut total = b[i];",
+    "        for j in (i + 1)..n { total -= a[i * n + j] * x[j]; }",
+    "        x[i] = total / a[i * n + i];",
+    "    }",
+    "}",
+    "",
+)
+
+
+RUST: Final = Dialect(
+    name="rust",
+    binary={
+        # Rust's precedence agrees with C's on every operator this table holds: `&&` tighter
+        # than `||`, the orderings tighter than equality, arithmetic tighter than either. So
+        # the levels are C's, and only `^` differs -- it is `f64::powf` below, not an operator.
+        "or": ("||", 1),
+        "and": ("&&", 2),
+        "==": ("==", 3),
+        "<>": ("!=", 3),
+        "<": ("<", 4),
+        "<=": ("<=", 4),
+        ">": (">", 4),
+        ">=": (">=", 4),
+        "+": ("+", 5),
+        "-": ("-", 5),
+        "*": ("*", 6),
+        "/": ("/", 6),
+        "^": ("", 8),  # never reached: `power` below turns it into a call
+    },
+    functions={
+        "abs": "f64::abs",
+        "acos": "f64::acos",
+        "asin": "f64::asin",
+        "atan": "f64::atan",
+        "atan2": "f64::atan2",
+        "ceil": "f64::ceil",
+        "cos": "f64::cos",
+        "cosh": "f64::cosh",
+        "exp": "f64::exp",
+        "floor": "f64::floor",
+        "log": "f64::ln",
+        "log10": "f64::log10",
+        "max": "md_max",
+        "min": "md_min",
+        "mod": "md_mod",
+        "rem": "md_rem",
+        "sign": "md_sign",
+        "sin": "f64::sin",
+        "sinh": "f64::sinh",
+        "sqrt": "f64::sqrt",
+        "tan": "f64::tan",
+        "tanh": "f64::tanh",
+    },
+    true="true",
+    false="false",
+    negation="!",
+    conditional=lambda condition, then, otherwise: (
+        f"if {condition} {{ {then} }} else {{ {otherwise} }}"
+    ),
+    negation_level=SIGN,
+    integer=lambda value: f"{value}.0",
+    power=lambda base, exponent: f"f64::powf({base}, {exponent})",
+    truncate="f64::trunc",
+    square=lambda name, size: f"let mut {name} = [0.0f64; {size * size}]",
+    column=lambda name, size: f"let mut {name} = [0.0f64; {size}]",
+    entry=lambda name, row, col, size: f"{name}[{row * size + col}]",
+    linear_solve=lambda a, b, x, size: (
+        f"let mut {x} = [0.0f64; {size}]; md_solve({size}, &mut {a}, &mut {b}, &mut {x})"
+    ),
+    preamble=RUST_PREAMBLE,
 )
