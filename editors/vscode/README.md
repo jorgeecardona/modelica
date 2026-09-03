@@ -10,26 +10,27 @@ Plain JavaScript, no build step, no dependencies.
 
 ## Install it locally
 
-Pick one:
-
-**Run it from source (fastest):**
-1. Open this folder (`editors/vscode`) in VS Code.
-2. Press `F5`. A second VS Code window ("Extension Development Host") opens with the extension loaded.
-3. In that window: `Cmd/Ctrl+Shift+P` → **pymodelica: Open Simulation Scope**.
-
-**Package and install a `.vsix`:**
+**Package a `.vsix` and install it (simplest, no debugger):**
 ```bash
 cd editors/vscode
-npx --yes @vscode/vsce package        # writes pymodelica-scope-0.0.1.vsix
+pnpm run package                              # pnpm dlx @vscode/vsce package -> the .vsix
 code --install-extension pymodelica-scope-0.0.1.vsix
 ```
-Then `Cmd/Ctrl+Shift+P` → **pymodelica: Open Simulation Scope** in any window.
+Or in one step: `pnpm run install-local`. Then in any window: `Cmd/Ctrl+Shift+P` →
+**pymodelica: Open Simulation Scope**. (`pnpm run package` uses `pnpm dlx`, pnpm's `npx`, so
+nothing is installed globally.)
 
-**Or drop the folder in place:**
+**Or drop the folder in place** (no packaging):
 ```bash
 cp -r editors/vscode ~/.vscode/extensions/pymodelica-scope-0.0.1
 ```
-Reload VS Code.
+Reload VS Code, then run the command from the palette.
+
+**Or run it from source in a dev window:** open this folder (`editors/vscode`) in VS Code and
+start the "Run Simulation Scope" launch config. On macOS plain `F5` is dictation, so use one
+of: `fn+F5`; the **Run and Debug** view (play icon in the sidebar) → green ▶; or the palette →
+**Debug: Start Debugging**. A second window (`[Extension Development Host]`) opens with the
+extension loaded; run the command there.
 
 ## Refreshing the data
 

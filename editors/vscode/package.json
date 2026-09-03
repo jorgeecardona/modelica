@@ -9,6 +9,10 @@
   "categories": ["Visualization", "Data Science"],
   "activationEvents": [],
   "main": "./extension.js",
+  "scripts": {
+    "package": "pnpm dlx @vscode/vsce package",
+    "install-local": "pnpm dlx @vscode/vsce package && code --install-extension pymodelica-scope-0.0.1.vsix"
+  },
   "contributes": {
     "commands": [
       { "command": "pymodelica.openScope", "title": "pymodelica: Open Simulation Scope" }
