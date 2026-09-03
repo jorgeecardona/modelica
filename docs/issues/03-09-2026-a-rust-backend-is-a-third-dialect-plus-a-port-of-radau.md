@@ -78,6 +78,24 @@ with the method named as radau5 rather than left open:
    `solve.py`, not `radau.py`. A model with events is refused until this lands, exactly as
    `radau.py` refuses one today.
 
+## Execution model (decided)
+
+Ahead-of-time and native, no runtime JIT. `rustc` at **build** time is accepted; what is ruled
+out is a compiler on the user's run path.
+
+- The emitted source is compiled once with `rustc --crate-type=cdylib` (and `--target
+  wasm32-unknown-unknown` for the browser), keyed by the `System` content hash so the build
+  reruns only when the model changes, not per run. That hash key is the one
+  `docs/ideas/backends.md` already names for the compiled-kernel cache.
+- The compiled artifact is loaded across an FFI boundary and called, exactly as
+  `tests/test_cgen.py` `dlopen`s the C `.so` today. Machine code runs directly: **no per-run
+  compile, no runtime JIT (no Cranelift, no LLVM), no runtime dependency.**
+- The interpreter stays the compile-free reference tier. It is the only zero-compilation path,
+  and it is slow on purpose; the fast path pays one build-time compile to escape it.
+- A native `cdylib` per target is the default deliverable (the FMU model, mirroring the C
+  path); WASM is the one-file portable form for the editor and browser, where the host engine
+  runs it and there is still nothing for this project to ship as a runtime.
+
 ## Deliberately not done
 
 - **No linking of Fortran.** RADAU5/DASSL/ODEPACK exist and are battle-tested, and linking one
@@ -89,6 +107,7 @@ with the method named as radau5 rather than left open:
 - **No method-of-lines sizes yet.** The dense complex LU is written for the single-digit
   states the corpus has. A stencil unrolled to hundreds of states is a separate decision, the
   same boundary the TypeScript idea drew.
-- **No FMU/WASM packaging yet.** Step 1 emits source and a `main` that runs it; a build step,
-  a crate, or a `wasm-bindgen` surface is only worth asking about once the integrator and the
-  event loop land.
+- **No FMU/WASM packaging yet.** The execution model is decided (above), but the build step
+  that realises it -- `rustc --crate-type=cdylib`, the content-hash cache around it, and the
+  FFI loader that calls the artifact -- lands once the integrator and the event loop do. Step 1
+  emits source and a `main` that runs it, which is enough to prove the arithmetic first.
