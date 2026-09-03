@@ -1,5 +1,11 @@
 # modelica
 
+[![pipeline status](https://gitlab.com/jorgeecardona/pymodelica/badges/main/pipeline.svg)](https://gitlab.com/jorgeecardona/pymodelica/-/pipelines)
+[![PyPI version](https://img.shields.io/pypi/v/modelica.svg)](https://pypi.org/project/modelica/)
+[![Python versions](https://img.shields.io/pypi/pyversions/modelica.svg)](https://pypi.org/project/modelica/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-gitlab%20pages-blue.svg)](https://jorgeecardona.gitlab.io/pymodelica/)
+
 A Modelica toolchain written only in Python. It reads Modelica source, flattens it to a
 DAE, simulates it, and draws it. It also speaks the two exchange standards of the Modelica
 Association: **FMI 3.0** for one component, and **SSP 2.0** for a system of them.

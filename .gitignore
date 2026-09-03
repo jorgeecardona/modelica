@@ -31,3 +31,10 @@ media/
 # hypothesis keeps the examples that failed, so a rerun starts from them. Local state:
 # regenerating it is what the generators are for.
 .hypothesis/
+
+# local agent instructions, not shared
+AGENTS.md
+
+# generated diagram outputs
+/*.svg
+/*.png
