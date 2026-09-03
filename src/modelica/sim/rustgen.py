@@ -43,6 +43,7 @@ be valid Rust.
 _SIGNATURES: Final = {
     "rhs": "_t: f64, y: &[f64], p: &[f64], w: &mut [f64], dy: &mut [f64]",
     "observe": "_t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]",
+    "indicators": "_t: f64, y: &[f64], p: &[f64], w: &mut [f64], z: &mut [f64]",
 }
 
 
@@ -120,6 +121,27 @@ def _observe(emitter: Emitter, system: System, mode: Mode) -> list[str]:
     return _bind(_live(lines))
 
 
+def _indicators(emitter: Emitter, position: int, mode: Mode) -> list[str]:
+    """The zero-crossing functions, one ``z[k]`` per event.
+
+    A supported model has no events (the guard refuses one that does), so this is empty today
+    and the test checks that both tiers agree it is empty -- an emitter that wrote one indicator
+    too many would pass every other check. The shape is `cgen`'s, so it is right the moment
+    events land: the blocks run only when there is an indicator to read, and an event owned by
+    another state set is held negative so its root finder has nothing to find.
+    """
+    events = emitter.events()
+    lines = [
+        *(emitter.blocks(mode) if events else []),
+        *(
+            f"z[{k}] = "
+            + (emitter.expr(event.indicator) if event.origin in (None, position) else "-1.0")
+            for k, event in enumerate(events)
+        ),
+    ]
+    return _bind(_live(lines))
+
+
 def _guard(system: System) -> tuple[Emitter, Mode]:
     """Refuse what this increment does not yet write, each with the piece it is missing."""
     if len(system.modes) != 1:
@@ -156,7 +178,7 @@ def _function(name: str, body: list[str]) -> list[str]:
 
 
 def unit(system: System) -> str:
-    """``rhs`` and ``observe`` for ``system``, as one Rust source file.
+    """``rhs``, ``observe`` and ``indicators`` for ``system``, as one Rust source file.
 
     The workspace layout is the Python and C one, unchanged: ``y`` the states, ``p`` the
     parameters in `System.parameters` order, ``w`` one slot per observed variable. A backend
@@ -169,5 +191,6 @@ def unit(system: System) -> str:
         "",
         *_function("rhs", _rhs(emitter, mode)),
         *_function("observe", _observe(emitter, system, mode)),
+        *_function("indicators", _indicators(emitter, 0, mode)),
     ]
     return "\n".join(lines) + "\n"

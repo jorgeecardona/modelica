@@ -167,3 +167,25 @@ def test_the_rust_observation_answers_what_the_python_one_answers(model: Path) -
         system, "observe", len(kernel.code.observed), (states, parameters, workspace)
     )
     assert found == pytest.approx(list(wanted), rel=1e-12, abs=1e-12)
+
+
+@needs_rustc
+@pytest.mark.parametrize("model", _supported(), ids=[m.stem for m in _supported()])
+def test_the_rust_indicators_answer_what_the_python_ones_answer(model: Path) -> None:
+    """Every zero-crossing function at the start point.
+
+    A supported model has no events, so both tiers produce an empty array -- worth running,
+    because an emitter that wrote one indicator too many would pass every other test here.
+    """
+    numpy = pytest.importorskip("numpy")
+    build = pytest.importorskip("modelica.sim.kernel").build
+    system = _system(model)
+    kernel = build(system)
+    parameters, states, workspace = kernel.start(0.0)
+
+    wanted = numpy.zeros(len(kernel.code.events))
+    kernel.indicators(0.0, states, parameters, workspace, wanted)
+    found = _call_in_rust(
+        system, "indicators", len(kernel.code.events), (states, parameters, workspace)
+    )
+    assert found == pytest.approx(list(wanted), rel=1e-12, abs=1e-12)
