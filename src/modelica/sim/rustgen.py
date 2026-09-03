@@ -7,15 +7,16 @@ makes no modelling decisions. It asks `modelica.sim.emit` for the same lines wit
 dialect table cannot hold -- around them.
 
 It grows one kernel function at a time. A single state set, blocks that are assignments or a
-linear solve (the dialect's ``md_solve`` carries the dense LU), and the four kernel functions
-``rhs``, ``observe``, ``indicators`` and ``jacobian`` -- for a model with events too, so
-``indicators`` reads real zero-crossing functions. A block that has to be iterated on --
-Newton -- is refused, because its loop is structure the emitter writes rather than spelling the
-dialect holds; several state sets are refused for want of a mode dispatcher. Everything refused
-raises an `EmitError` that names the missing piece, exactly as `cgen` does, so a model moving
-off the refused set fails the test and gets its check turned on rather than staying quietly
-untested. What is left: Newton, the mode dispatcher, and ``transition`` with the integrator's
-event loop, so an event model can actually be integrated and not only have its kernel checked.
+linear solve (the dialect's ``md_solve`` carries the dense LU), and the five kernel functions
+``rhs``, ``observe``, ``indicators``, ``transition`` and ``jacobian`` -- for a model with events
+too, so ``indicators`` reads real zero-crossing functions and ``transition`` writes the reset.
+A block that has to be iterated on -- Newton -- is refused, because its loop is structure the
+emitter writes rather than spelling the dialect holds; several state sets are refused for want
+of a mode dispatcher. Everything refused raises an `EmitError` that names the missing piece,
+exactly as `cgen` does, so a model moving off the refused set fails the test and gets its check
+turned on rather than staying quietly untested. What is left: Newton, the mode dispatcher, and
+the integrator's event loop -- root-finding on ``indicators`` then applying ``transition`` --
+so an event model can actually be integrated and not only have its kernel checked.
 """
 
 from __future__ import annotations
@@ -50,6 +51,7 @@ _SIGNATURES: Final = {
     "rhs": "t: f64, y: &[f64], p: &[f64], w: &mut [f64], dy: &mut [f64]",
     "observe": "t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]",
     "indicators": "t: f64, y: &[f64], p: &[f64], w: &mut [f64], z: &mut [f64]",
+    "transition": "event: usize, t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]",
     "jacobian": "t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]",
 }
 
@@ -129,7 +131,10 @@ def _observe(emitter: Emitter, system: System, mode: Mode) -> list[str]:
     lines = [
         *emitter.unpack(mode),
         *emitter.blocks(mode),
-        *(f"{emitter.symbols[name]} = {emitter.expr(node)}" for name, node in system.aliases.items()),
+        *(
+            f"{emitter.symbols[name]} = {emitter.expr(node)}"
+            for name, node in system.aliases.items()
+        ),
         *(f"out[{slot}] = {emitter.symbols[name]}" for slot, name in enumerate(emitter.observed)),
     ]
     return _bind(_live(lines))
@@ -154,6 +159,33 @@ def _indicators(emitter: Emitter, position: int, mode: Mode) -> list[str]:
             for k, event in enumerate(events)
         ),
     ]
+    return _bind(_live(lines))
+
+
+def _transition(emitter: Emitter, mode: Mode) -> list[str]:
+    """The post-event state: copy ``y`` through, then let each event's branch overwrite its slots.
+
+    ``out[:] = y`` first (Rust has no slice assignment here either, so it is written out), and
+    *before* the branches, so a crossing that reinitialises one state leaves the others exactly
+    where they were. Then one ``if event == k`` per crossing runs that branch's `reinit` and
+    discrete assignments and flips its latch -- the same body `cgen` writes. Single state set
+    only, so there is no destination mode to rebase into: `_guard` refuses several sets, and a
+    single-set model's crossings never carry a switch.
+    """
+    events = emitter.events()
+    slots = {name: slot for slot, name in enumerate(mode.states)}
+    lines = [
+        *emitter.unpack(mode),
+        *(emitter.blocks(mode) if events else []),
+        *(f"out[{slot}] = y[{slot}]" for slot in range(len(mode.states))),
+    ]
+    for k, event in enumerate(events):
+        taken = [emitter.statement(statement, slots) for statement in event.body]
+        if event.latch is not None:
+            taken.append(f"    w[{event.latch}] = 1.0 - w[{event.latch}]")
+        lines.append(f"if event == {k} {{")
+        lines.extend(taken)
+        lines.append("}")
     return _bind(_live(lines))
 
 
@@ -345,7 +377,7 @@ def _function(name: str, body: list[str]) -> list[str]:
 
 
 def unit(system: System) -> str:
-    """``rhs``, ``observe``, ``indicators`` and ``jacobian`` for ``system``, as one Rust file.
+    """``rhs``, ``observe``, ``indicators``, ``transition`` and ``jacobian``, as one Rust file.
 
     The workspace layout is the Python and C one, unchanged: ``y`` the states, ``p`` the
     parameters in `System.parameters` order, ``w`` one slot per observed variable. A backend
@@ -359,6 +391,7 @@ def unit(system: System) -> str:
         *_function("rhs", _rhs(emitter, mode)),
         *_function("observe", _observe(emitter, system, mode)),
         *_function("indicators", _indicators(emitter, 0, mode)),
+        *_function("transition", _transition(emitter, mode)),
         *_function("jacobian", _jacobian(emitter, mode)),
     ]
     return "\n".join(lines) + "\n"

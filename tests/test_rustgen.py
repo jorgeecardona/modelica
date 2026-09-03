@@ -124,6 +124,38 @@ def _call_in_rust(
     return _compile_and_run(program, system.name)
 
 
+def _transition_in_rust(
+    system: System, event: int, start: tuple[object, object, object]
+) -> tuple[list[float], list[float]]:
+    """Run ``transition`` for one event at the start point, returning the post-event ``(out, w)``.
+
+    Both are needed, and this is why it is not `_call_in_rust`: a reinit lands in ``out`` (the new
+    state) but a latch flip or discrete assignment lands in ``w``, so a test that read only ``out``
+    would let every Thermostat-style crossing pass without checking anything it does.
+    """
+    numpy = pytest.importorskip("numpy")
+    states, parameters, workspace = start
+    n = len(numpy.asarray(states))
+    m = len(numpy.asarray(workspace))
+    program = "\n".join(
+        [
+            unit(system),
+            "fn main() {",
+            f"    let y: [f64; {n}] = [{_floats(states)}];",
+            f"    let p: [f64; {len(numpy.asarray(parameters))}] = [{_floats(parameters)}];",
+            f"    let mut w: [f64; {m}] = [{_floats(workspace)}];",
+            f"    let mut out = [0.0f64; {n}];",
+            f"    transition({event}, 0.0, &y, &p, &mut w, &mut out);",
+            "    let printed: Vec<String> = out.iter().chain(w.iter()).map(|v| v.to_string()).collect();",
+            '    println!("{}", printed.join(" "));',
+            "}",
+            "",
+        ]
+    )
+    both = _compile_and_run(program, system.name)
+    return both[:n], both[n:]
+
+
 def _compile_and_run(program: str, name: str) -> list[float]:
     assert COMPILER is not None
     with tempfile.TemporaryDirectory() as tmp:
@@ -218,6 +250,37 @@ def test_the_rust_indicators_answer_what_the_python_ones_answer(model: Path) -> 
         system, "indicators", len(kernel.code.events), (states, parameters, workspace)
     )
     assert found == pytest.approx(list(wanted), rel=1e-12, abs=1e-12)
+
+
+@needs_rustc
+@pytest.mark.parametrize("model", _supported(), ids=[m.stem for m in _supported()])
+def test_the_rust_transition_answers_what_the_python_one_answers(model: Path) -> None:
+    """The post-event state for every crossing, at the start point.
+
+    A no-event model has an empty event list and both tiers only copy the state through -- still
+    run, because a transition that reinitialised a slot it should not have would pass every other
+    test here. An event model fires each crossing in turn: BouncingBall's ``reinit(v, -e*pre(v))``
+    and Thermostat's latch flip both have to land on the same numbers the interpreter tier does.
+    The workspace matters here, not just the last argument: a crossing writes latches into ``w``.
+    """
+    numpy = pytest.importorskip("numpy")
+    build = pytest.importorskip("modelica.sim.kernel").build
+    system = _system(model)
+    kernel = build(system)
+    parameters, states, workspace = kernel.start(0.0)
+    n = len(states)
+
+    for event in range(max(kernel.events, 1)):
+        wanted = numpy.zeros(n)
+        after = workspace.copy()  # transition writes latches into the workspace in place
+        kernel.transition(event, 0.0, states, parameters, after, wanted)
+        found_out, found_w = _transition_in_rust(system, event, (states, parameters, workspace))
+        assert found_out == pytest.approx(list(wanted), rel=1e-12, abs=1e-12), (
+            f"{system.name} event {event} state"
+        )
+        assert found_w == pytest.approx(list(after), rel=1e-12, abs=1e-12), (
+            f"{system.name} event {event} workspace"
+        )
 
 
 @needs_rustc
