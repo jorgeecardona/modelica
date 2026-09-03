@@ -61,6 +61,30 @@ def _supported() -> list[Path]:
     return out
 
 
+def _reference_models() -> list[Path]:
+    """Supported models whose .toml records reference points for at least one state.
+
+    The integrator is checked against these: the model's own recorded trajectory, not a number
+    the Rust or the Python radau invented. A model whose references name only observed variables
+    (not states) is left out, since the integrator returns states.
+    """
+    out: list[Path] = []
+    for model in _supported():
+        spec = tomllib.loads(model.with_suffix(".toml").read_text(encoding="utf-8"))
+        points = [
+            point
+            for point in spec.get("simulate", {}).get("point", [])
+            if point.get("source") == "reference" and "values" in point
+        ]
+        names = set(_system(model).modes[0].states)
+        if any(any(name in names for name in point["values"]) for point in points):
+            out.append(model)
+    return out
+
+
+_REFERENCE_MODELS = _reference_models()
+
+
 def _floats(values: object) -> str:
     return ", ".join(f"{float(v)!r}f64" for v in values)  # type: ignore[union-attr]
 
@@ -219,21 +243,26 @@ def test_the_rust_jacobian_answers_what_the_python_one_answers(model: Path) -> N
 
 
 @needs_rustc
-def test_the_rust_integrator_reproduces_the_toml_reference() -> None:
-    """The milestone: emit RLCCircuit, bundle the radau runtime, integrate, match the .toml.
+@pytest.mark.parametrize("model", _REFERENCE_MODELS, ids=[m.stem for m in _REFERENCE_MODELS])
+def test_the_rust_integrator_reproduces_the_toml_reference(model: Path) -> None:
+    """The milestone: emit the model, bundle the radau runtime, integrate, match the .toml.
 
     The AOT "integrator and model compile together" unit. rustgen emits rhs and jacobian, the
     radau runtime calls them by name, and rustc compiles the whole into one binary that
     integrates from the model's start to its stop. The reference is the model's own recorded
-    trajectory in RLCCircuit.toml, at the tolerance (1e-8) that reproduces it to well within the
-    file's 1e-6 comparison bar -- so this checks the Rust integrator against a number neither it
-    nor the Python radau invented.
+    trajectory in its .toml, at the tolerance (1e-8) that reproduces it to well within the file's
+    1e-6 comparison bar -- so this checks the Rust integrator against a number neither it nor the
+    Python radau invented. Run over every supported model with state references, so the stiff
+    ones (Robertson, VanDerPol) and the implicit tangent (AtwoodPendulum) are exercised too, not
+    only the linear RLCCircuit.
     """
     pytest.importorskip("numpy")
     build = pytest.importorskip("modelica.sim.kernel").build
-    model = EXAMPLES / "models" / "RLCCircuit.mo"
     spec = tomllib.loads(model.with_suffix(".toml").read_text(encoding="utf-8"))
-    refs = [pt for pt in spec["simulate"]["point"] if pt.get("source") == "reference"]
+    refs = sorted(
+        (p for p in spec["simulate"]["point"] if p.get("source") == "reference" and "values" in p),
+        key=lambda p: p["t"],
+    )
     times = [float(pt["t"]) for pt in refs]
 
     system = _system(model)
@@ -254,10 +283,10 @@ def test_the_rust_integrator_reproduces_the_toml_reference() -> None:
             *FIRST_STEP,
             *INTEGRATE,
             "fn main() {",
-            f"    let y0 = [{_floats(states)}];",
-            f"    let p = [{_floats(parameters)}];",
+            f"    let y0: [f64; {n}] = [{_floats(states)}];",
+            f"    let p: [f64; {len(parameters)}] = [{_floats(parameters)}];",
             f"    let mut w: [f64; {len(workspace)}] = [{_floats(workspace)}];",
-            f"    let grid = [{_floats(times)}];",
+            f"    let grid: [f64; {len(times)}] = [{_floats(times)}];",
             f"    let mut out = [0.0f64; {len(times) * n}];",
             f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &grid, &mut out);",
             "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
@@ -269,6 +298,8 @@ def test_the_rust_integrator_reproduces_the_toml_reference() -> None:
     out = _compile_and_run(program, system.name)
     for i, point in enumerate(refs):
         for q, name in enumerate(names):
+            if name not in point["values"]:
+                continue
             assert out[i * n + q] == pytest.approx(point["values"][name], rel=1e-6, abs=1e-9), (
-                f"t={point['t']} {name}"
+                f"{system.name} t={point['t']} {name}"
             )
