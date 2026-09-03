@@ -110,6 +110,7 @@ def _trajectory(stem: str) -> dict | None:
         for point in spec.get("simulate", {}).get("point", [])
         if point.get("source") == "reference" and "values" in point
     ]
+    units = {v.name: v.unit for v in system.variables}
     return {
         "model": stem,
         "summary": spec.get("summary", ""),
@@ -118,9 +119,11 @@ def _trajectory(stem: str) -> dict | None:
         "stop": stop,
         "t": [_r7(v) for v in time[keep]],
         "series": series,
+        "units": {nm: units.get(nm, "") for nm in series},
         "refs": refs,
         "events": events,
         "nstates": len(names),
+        "states": list(names),
     }
 
 

@@ -2,7 +2,7 @@
   "name": "pymodelica-scope",
   "displayName": "pymodelica Simulation Scope",
   "description": "Simulate the Modelica .mo file you are editing and see its trajectory, in an interactive chart inside VS Code.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "jorgeecardona",
   "license": "MIT",
   "repository": {
@@ -10,9 +10,16 @@
     "url": "https://gitlab.com/jorgeecardona/pymodelica.git",
     "directory": "editors/vscode"
   },
-  "engines": { "vscode": "^1.75.0" },
-  "categories": ["Visualization", "Data Science"],
-  "activationEvents": ["workspaceContains:**/*.mo"],
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Visualization",
+    "Data Science"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/*.mo"
+  ],
   "main": "./extension.js",
   "scripts": {
     "package": "pnpm dlx @vscode/vsce package",
@@ -20,18 +27,37 @@
   },
   "contributes": {
     "commands": [
-      { "command": "pymodelica.simulateModel", "title": "pymodelica: Simulate This Model", "icon": "$(pulse)" },
-      { "command": "pymodelica.openScope", "title": "pymodelica: Open Simulation Scope (corpus gallery)" }
+      {
+        "command": "pymodelica.simulateModel",
+        "title": "pymodelica: Simulate This Model",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "pymodelica.openScope",
+        "title": "pymodelica: Open Simulation Scope (corpus gallery)"
+      }
     ],
     "menus": {
       "editor/title": [
-        { "command": "pymodelica.simulateModel", "when": "resourceExtname == .mo", "group": "navigation" }
+        {
+          "command": "pymodelica.simulateModel",
+          "when": "resourceExtname == .mo",
+          "group": "navigation"
+        }
       ],
       "editor/context": [
-        { "command": "pymodelica.simulateModel", "when": "resourceExtname == .mo", "group": "z_commands" }
+        {
+          "command": "pymodelica.simulateModel",
+          "when": "resourceExtname == .mo",
+          "group": "z_commands"
+        }
       ],
       "explorer/context": [
-        { "command": "pymodelica.simulateModel", "when": "resourceExtname == .mo", "group": "z_commands" }
+        {
+          "command": "pymodelica.simulateModel",
+          "when": "resourceExtname == .mo",
+          "group": "z_commands"
+        }
       ]
     },
     "configuration": {
@@ -39,14 +65,25 @@
       "properties": {
         "pymodelica.runtime": {
           "type": "string",
-          "enum": ["auto", "python"],
+          "enum": [
+            "auto",
+            "python"
+          ],
           "default": "auto",
           "description": "Which runtime simulates the model. 'auto' picks the fastest available (Python today; a Rust/C interpreter later)."
         },
         "pymodelica.python": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["uv", "run", "--extra", "sim", "python"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "uv",
+            "run",
+            "--extra",
+            "sim",
+            "python"
+          ],
           "description": "Command that runs a Python with `modelica` importable. The simulator script and arguments are appended."
         },
         "pymodelica.stop": {
@@ -56,7 +93,9 @@
         },
         "pymodelica.library": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Extra .mo files or folders to load for dependencies (a sibling 'library/' folder is loaded automatically). E.g. 'examples/library' for the corpus models."
         },

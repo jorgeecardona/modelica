@@ -78,6 +78,7 @@ def _run(path: Path, name: str, stop: float, libraries: list[str]) -> dict[str, 
         {"t": _r7(event.time), "cause": str(getattr(event, "cause", ""))}
         for event in (getattr(result, "events", []) or [])
     ]
+    units = {v.name: v.unit for v in system.variables}
     return {
         "model": name,
         "summary": str(path),
@@ -86,9 +87,11 @@ def _run(path: Path, name: str, stop: float, libraries: list[str]) -> dict[str, 
         "stop": stop,
         "t": [_r7(v) for v in time[keep]],
         "series": series,
+        "units": {nm: units.get(nm, "") for nm in series},
         "refs": [],
         "events": events,
         "nstates": len(states),
+        "states": list(system.modes[0].states),
     }
 
 

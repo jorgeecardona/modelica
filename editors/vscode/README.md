@@ -3,9 +3,10 @@
 Simulate the Modelica `.mo` file you are editing and see its trajectory, in an interactive
 chart inside VS Code. Same chart engine as the notebook widget (`modelica.sim.view`), so the
 two match: drag to zoom, double-click to reset, hover for a cursor readout, click a variable to
-toggle it, and switch the vertical axis between **linear**, **log |y|**, **normalised**, and
-**split** (each variable in its own strip with its own scale, so a signal near zero stays
-legible next to one in the hundreds).
+toggle it in or out, and switch the vertical axis between **linear**, **log |y|**,
+**normalised**, **by unit** (variables that share a physical unit share a strip and a scale --
+the temperatures together, mass on its own), and **split** (each variable its own strip). A
+single open `.mo` opens on its states grouped by unit, so nothing gets crushed.
 
 Plain JavaScript, no build step, no dependencies. Simulation runs through the Python simulator
 (`modelica.sim`, the reference tier) -- nothing is compiled per model.
