@@ -7,11 +7,13 @@ makes no modelling decisions. It asks `modelica.sim.emit` for the same lines wit
 dialect table cannot hold -- around them.
 
 It begins deliberately small. Only what a plain right-hand side needs is written: a single
-state set, blocks that are assignments (no linear solve, no Newton iteration), and no events.
-Anything else is refused with an `EmitError` that names the missing piece, exactly as `cgen`
-refuses what it cannot yet write, so a model moving off the refused set fails the test and
-gets its check turned on rather than staying quietly untested. Newton, the linear solve, the
-mode dispatcher, the row-at-a-time tangent and the event functions are the next increments.
+state set, blocks that are assignments or a linear solve (the dialect's ``md_solve`` carries
+the dense LU), and no events. A block that has to be iterated on -- Newton -- is refused,
+because its loop is structure the emitter writes rather than spelling the dialect holds, and
+that structure is a later increment. Everything refused raises an `EmitError` that names the
+missing piece, exactly as `cgen` does, so a model moving off the refused set fails the test
+and gets its check turned on rather than staying quietly untested. Newton, the mode
+dispatcher, the row-at-a-time tangent and the event functions are what is left.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ import re
 from typing import TYPE_CHECKING, Final
 
 from modelica.sim.dialect import RUST
-from modelica.sim.emit import EmitError, Emitter
+from modelica.sim.emit import EmitError, Emitter, iterated
 
 if TYPE_CHECKING:
     from modelica.ir.system import Mode, System
@@ -109,10 +111,8 @@ def _guard(system: System) -> tuple[Emitter, Mode]:
         raise EmitError("rust: events are not emitted yet (no indicators/transition)")
     mode = system.modes[0]
     for block in mode.blocks:
-        if block.assignment is None:
-            raise EmitError(
-                "rust: only assignment blocks are emitted yet (no linear solve, no Newton)"
-            )
+        if block.assignment is None and iterated(block):
+            raise EmitError("rust: Newton iteration is not emitted yet (no iterated blocks)")
     return emitter, mode
 
 
