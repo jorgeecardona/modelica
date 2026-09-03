@@ -6,14 +6,16 @@ makes no modelling decisions. It asks `modelica.sim.emit` for the same lines wit
 :data:`modelica.sim.dialect.RUST` selected, and writes the Rust *structure* -- the part a
 dialect table cannot hold -- around them.
 
-It begins deliberately small. Only what a plain right-hand side needs is written: a single
-state set, blocks that are assignments or a linear solve (the dialect's ``md_solve`` carries
-the dense LU), and no events. A block that has to be iterated on -- Newton -- is refused,
-because its loop is structure the emitter writes rather than spelling the dialect holds, and
-that structure is a later increment. Everything refused raises an `EmitError` that names the
-missing piece, exactly as `cgen` does, so a model moving off the refused set fails the test
-and gets its check turned on rather than staying quietly untested. Newton, the mode
-dispatcher, the row-at-a-time tangent and the event functions are what is left.
+It grows one kernel function at a time. A single state set, blocks that are assignments or a
+linear solve (the dialect's ``md_solve`` carries the dense LU), and the four kernel functions
+``rhs``, ``observe``, ``indicators`` and ``jacobian`` -- for a model with events too, so
+``indicators`` reads real zero-crossing functions. A block that has to be iterated on --
+Newton -- is refused, because its loop is structure the emitter writes rather than spelling the
+dialect holds; several state sets are refused for want of a mode dispatcher. Everything refused
+raises an `EmitError` that names the missing piece, exactly as `cgen` does, so a model moving
+off the refused set fails the test and gets its check turned on rather than staying quietly
+untested. What is left: Newton, the mode dispatcher, and ``transition`` with the integrator's
+event loop, so an event model can actually be integrated and not only have its kernel checked.
 """
 
 from __future__ import annotations
@@ -45,10 +47,10 @@ be valid Rust.
 #: A C ABI surface for FMU export is a later increment, and a separate decision. The last
 #: parameter is the output the function fills; the others are the shared workspace layout.
 _SIGNATURES: Final = {
-    "rhs": "_t: f64, y: &[f64], p: &[f64], w: &mut [f64], dy: &mut [f64]",
-    "observe": "_t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]",
-    "indicators": "_t: f64, y: &[f64], p: &[f64], w: &mut [f64], z: &mut [f64]",
-    "jacobian": "_t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]",
+    "rhs": "t: f64, y: &[f64], p: &[f64], w: &mut [f64], dy: &mut [f64]",
+    "observe": "t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]",
+    "indicators": "t: f64, y: &[f64], p: &[f64], w: &mut [f64], z: &mut [f64]",
+    "jacobian": "t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]",
 }
 
 
@@ -136,14 +138,15 @@ def _observe(emitter: Emitter, system: System, mode: Mode) -> list[str]:
 def _indicators(emitter: Emitter, position: int, mode: Mode) -> list[str]:
     """The zero-crossing functions, one ``z[k]`` per event.
 
-    A supported model has no events (the guard refuses one that does), so this is empty today
-    and the test checks that both tiers agree it is empty -- an emitter that wrote one indicator
-    too many would pass every other check. The shape is `cgen`'s, so it is right the moment
-    events land: the blocks run only when there is an indicator to read, and an event owned by
-    another state set is held negative so its root finder has nothing to find.
+    Unpack the workspace, run the blocks when there is an indicator to read, then store each
+    event's function into ``z`` -- the same shape `cgen` writes. A model with no events makes an
+    empty body (``_live`` prunes the unpack nothing reads); a model with events needs the unpack,
+    because an indicator like BouncingBall's ``-h`` reads a state. An event owned by another state
+    set is held negative so its root finder has nothing to find.
     """
     events = emitter.events()
     lines = [
+        *emitter.unpack(mode),
         *(emitter.blocks(mode) if events else []),
         *(
             f"z[{k}] = "
@@ -313,8 +316,6 @@ def _guard(system: System) -> tuple[Emitter, Mode]:
     if len(system.modes) != 1:
         raise EmitError("rust: several state sets are not emitted yet (no mode dispatcher)")
     emitter = Emitter(system, dialect=RUST)
-    if emitter.events():
-        raise EmitError("rust: events are not emitted yet (no indicators/transition)")
     mode = system.modes[0]
     for block in mode.blocks:
         if block.assignment is None and iterated(block):

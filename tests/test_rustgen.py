@@ -25,7 +25,8 @@ import pytest
 
 from modelica.ir.causalize import causalize
 from modelica.lang import parse
-from modelica.sim.emit import EmitError
+from modelica.sim.dialect import RUST
+from modelica.sim.emit import EmitError, Emitter
 from modelica.sim.rust_radau import CONSTANTS, FIRST_STEP, INTEGRATE, LINALG, NEWTON, STEP
 from modelica.sim.rustgen import unit
 
@@ -70,13 +71,16 @@ def _reference_models() -> list[Path]:
     """
     out: list[Path] = []
     for model in _supported():
+        system = _system(model)
+        if Emitter(system, dialect=RUST).events():
+            continue  # md_integrate has no event handling yet, so an event model cannot integrate
         spec = tomllib.loads(model.with_suffix(".toml").read_text(encoding="utf-8"))
         points = [
             point
             for point in spec.get("simulate", {}).get("point", [])
             if point.get("source") == "reference" and "values" in point
         ]
-        names = set(_system(model).modes[0].states)
+        names = set(system.modes[0].states)
         if any(any(name in names for name in point["values"]) for point in points):
             out.append(model)
     return out
