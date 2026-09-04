@@ -24,10 +24,11 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Final
 
+from modelica.ir import nodes as ir
 from modelica.ir.derive import ZERO
 from modelica.ir.rewrite import residual
 from modelica.sim.dialect import RUST
-from modelica.sim.emit import EmitError, Emitter, block_jacobian, iterated
+from modelica.sim.emit import ITERATIONS, TOLERANCE, EmitError, Emitter, block_jacobian, iterated
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -119,11 +120,79 @@ def _bind(lines: list[str]) -> list[str]:
     return out
 
 
+def _newton(emitter: Emitter, block: Block) -> list[str]:
+    """The Newton iteration for one torn block, written here rather than shaped by the dialect.
+
+    The same argument `cgen._newton` makes: an iteration is a loop, a mutable step and an early
+    exit, which is structure a `Dialect` table cannot hold. What the lines are *made of* still
+    comes from `emit` -- the same residuals, block Jacobian, iteration count and tolerance -- so
+    only the shape is written twice, once per language. The unknown is read from its workspace
+    slot as the guess, updated in place each pass, and written back so a downstream block (and
+    the next call) sees the converged value.
+
+    Two spellings depart from `cgen`, both to keep `_bind` able to read the lines. The body is
+    not indented, because `_bind` recognises a reassigned local by its name and a leading space
+    would make ``    x`` a different name than ``x``; the ``for``/``if`` braces carry the scope
+    that indentation would only decorate. And the multi-unknown convergence test folds into
+    ``_worst = _worst.max(...)`` rather than an ``if`` that assigns inside its own braces, which
+    `_bind` could not see as a second write.
+    """
+    unknowns = block.unknowns
+    jacobian = block_jacobian(block)
+    negated = [ir.Unary("-", residual(equation)) for equation in block.equations]
+    guess = [f"{emitter.symbols[u]} = w[{emitter.slots[u]}]" for u in unknowns]
+    keep = [f"w[{emitter.slots[u]}] = {emitter.symbols[u]}" for u in unknowns]
+
+    if len(unknowns) == 1:
+        name = emitter.symbols[unknowns[0]]
+        body = [
+            f"_step = {emitter.expr(negated[0])} / ({emitter.expr(jacobian[0][0])})",
+            f"{name} = {name} + _step",
+            f"if _step.abs() < {TOLERANCE} {{ break; }}",
+        ]
+    else:
+        size = len(unknowns)
+        body = [*emitter.system_lines(block, jacobian, negated)]
+        body += [
+            f"{emitter.symbols[u]} = {emitter.symbols[u]} + _x[{position}]"
+            for position, u in enumerate(unknowns)
+        ]
+        body.append("_worst = 0.0")
+        body += [f"_worst = _worst.max(_x[{k}].abs())" for k in range(size)]
+        body.append(f"if _worst < {TOLERANCE} {{ break; }}")
+
+    return [*guess, f"for _ in 0..{ITERATIONS} {{", *body, "}", *keep]
+
+
+def _one(emitter: Emitter, block: Block) -> list[str]:
+    """One block, solved.
+
+    An assignment or a linear solve is `Emitter.solve`; a torn block is the Newton loop above
+    followed by its tear-off assignments, exactly as `cgen._one` composes.
+    """
+    if block.assignment is None and iterated(block):
+        return [
+            *_newton(emitter, block),
+            *(f"{emitter.symbols[name]} = {emitter.expr(value)}" for name, value in block.torn),
+        ]
+    return emitter.solve(block)
+
+
+def _blocks(emitter: Emitter, mode: Mode) -> list[str]:
+    """Every block of a mode, in order. `Emitter.blocks`, except a torn block is a Newton loop.
+
+    The reason rustgen writes this rather than calling `Emitter.blocks`: an iterated block's
+    loop is statement structure, the one thing the dialect does not spell, so it is emitted here
+    the same way `cgen._blocks` does instead of leaving it to the interpreter's own `solve`.
+    """
+    return [line for block in mode.blocks for line in _one(emitter, block)]
+
+
 def _rhs(emitter: Emitter, mode: Mode) -> list[str]:
     """The derivative vector: unpack the workspace, run the blocks, store into ``dy``."""
     lines = [
         *emitter.unpack(mode),
-        *emitter.blocks(mode),
+        *_blocks(emitter, mode),
         *(
             f"dy[{slot}] = {emitter.symbols[mode.derivative[state]]}"
             for slot, state in enumerate(mode.states)
@@ -141,7 +210,7 @@ def _observe(emitter: Emitter, system: System, mode: Mode) -> list[str]:
     """
     lines = [
         *emitter.unpack(mode),
-        *emitter.blocks(mode),
+        *_blocks(emitter, mode),
         *(
             f"{emitter.symbols[name]} = {emitter.expr(node)}"
             for name, node in system.aliases.items()
@@ -163,7 +232,7 @@ def _indicators(emitter: Emitter, position: int, mode: Mode) -> list[str]:
     events = emitter.events()
     lines = [
         *emitter.unpack(mode),
-        *(emitter.blocks(mode) if events else []),
+        *(_blocks(emitter, mode) if events else []),
         *(
             f"z[{k}] = "
             + (emitter.expr(event.indicator) if event.origin in (None, position) else "-1.0")
@@ -187,7 +256,7 @@ def _transition(emitter: Emitter, position: int, system: System, mode: Mode) -> 
     slots = {name: slot for slot, name in enumerate(mode.states)}
     lines = [
         *emitter.unpack(mode),
-        *(emitter.blocks(mode) if events else []),
+        *(_blocks(emitter, mode) if events else []),
         *(f"out[{slot}] = y[{slot}]" for slot in range(len(mode.states))),
     ]
     for k, event in enumerate(events):
@@ -316,7 +385,7 @@ def _tangent(emitter: Emitter, mode: Mode, width: int) -> list[tuple[str | None,
         ]
 
     for block in mode.blocks:
-        groups.append((None, emitter.solve(block)))
+        groups.append((None, _one(emitter, block)))
         if block.assignment is not None:
             unknown = block.unknowns[0]
             groups.append(
@@ -359,13 +428,15 @@ def _jacobian(emitter: Emitter, mode: Mode) -> list[str]:
 
 
 def _guard(system: System) -> Emitter:
-    """Refuse what this increment does not yet write, each with the piece it is missing."""
-    emitter = Emitter(system, dialect=RUST)
-    for mode in system.modes:
-        for block in mode.blocks:
-            if block.assignment is None and iterated(block):
-                raise EmitError("rust: Newton iteration is not emitted yet (no iterated blocks)")
-    return emitter
+    """Build the emitter for ``system``.
+
+    Every kernel function, the mode dispatcher and the Newton loop are written now, so nothing in
+    the corpus is refused for its structure any more. The seam stays because emission can still
+    fail: an expression the `RUST` dialect has no spelling for raises `EmitError` from `emit`,
+    and `test_every_model_is_accounted_for` holds that it is the only other outcome. What that
+    error should say is the dialect's to decide, not a blanket refusal here.
+    """
+    return Emitter(system, dialect=RUST)
 
 
 def _function(name: str, signature: str, body: list[str]) -> list[str]:

@@ -89,12 +89,17 @@ def _reference_models() -> list[Path]:
 _REFERENCE_MODELS = _reference_models()
 
 
-#: Single-mode event models the Rust loop does not yet reproduce, with why. PhaseChange has two
-#: crossings on a shared threshold (``T > Ms`` and ``T < Ms``) and a relation (``T > Ac1``) that
-#: T re-crosses near the phase-change kink; the loop finds two more crossings there than SciPy's
-#: segment-based detection does, so its event count and trajectory diverge. The fix is a
-#: later increment; naming it here keeps the gap greppable rather than silently dropped.
-_EVENT_GAPS = frozenset({"PhaseChange"})
+#: Event models this integration test does not cover, with why -- greppable rather than silently
+#: dropped. PhaseChange is an emitter/loop gap: two crossings on a shared threshold (``T > Ms``
+#: and ``T < Ms``) plus a relation (``T > Ac1``) that T re-crosses near the phase-change kink,
+#: where the loop finds two more crossings than SciPy's segment detection, so the event count and
+#: trajectory diverge. Pendulum is a *test* gap, not an emitter one: it switches state sets at
+#: runtime, and this test keys the trajectory on the first set's state names, which stop meaning
+#: the same thing once the run is in the other set (mode 0 holds ``[y, vy]``, mode 1 ``[x, vx]``).
+#: Its kernel -- rhs, jacobian and the rebasing transition, Newton and all -- is checked against
+#: the interpreter by the per-function tests; a mode-invariant (observed-variable) integration
+#: comparison is the follow-up that would let the switched trajectory itself be checked here.
+_EVENT_GAPS = frozenset({"PhaseChange", "Pendulum"})
 
 
 def _event_models() -> list[Path]:
