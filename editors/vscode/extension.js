@@ -48,6 +48,8 @@ function ensurePanel(context) {
       // (the live one, or a pinned comparison) the answer belongs to, and is echoed back.
       const opts = {
         stop: Number(msg.stop), until: msg.until, from: Number(msg.from), sets: msg.sets || {},
+        // A sensitivity study: the response to read off, and the relative step for each parameter.
+        sensitivity: msg.sensitivity || null, sstep: Number(msg.sstep) || 0.05,
       };
       runHelper(live.context, live.file, opts, (data) => {
         panel.webview.postMessage(
@@ -175,9 +177,13 @@ function runtimeCommand(context, cfg, file, opts) {
   const setArgs = Object.entries(opts.sets || {}).flatMap(([name, value]) => [
     "--set", `${name}=${value}`,
   ]);
+  // A sensitivity study runs every editable parameter a step either way and reads a response.
+  const sensArgs = opts.sensitivity
+    ? ["--sensitivity", String(opts.sensitivity), "--sensitivity-step", String(opts.sstep || 0.05)]
+    : [];
   return {
     cmd: python[0],
-    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...setArgs, ...libs],
+    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...setArgs, ...sensArgs, ...libs],
   };
 }
 

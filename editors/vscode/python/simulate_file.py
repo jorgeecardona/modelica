@@ -159,6 +159,76 @@ def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed stra
     return fallback, _integrate(kernel, fallback, params), note
 
 
+def _response(result: Result, spec: str) -> float | None:
+    """One number read off a run: ``final:<variable>`` or ``event:<cause>`` (its first time).
+
+    ``None`` when there is no such number -- an event that never fired -- which the panel draws
+    as a gap rather than a zero.
+    """
+    kind, _, target = spec.partition(":")
+    if kind == "event":
+        for event in result.events:
+            if event.cause == target:
+                return float(event.time)
+        return None
+    if kind == "final" and target in result.names:
+        column = np.asarray(result[target], dtype=float)
+        finite = column[np.isfinite(column)]
+        return float(finite[-1]) if finite.size else None
+    return None
+
+
+def _sensitivity(  # noqa: PLR0913, PLR0917 - the knobs of one study, passed straight through
+    system: System,
+    kernel: Kernel,
+    stop: float,
+    sets: dict[str, float],
+    spec: str,
+    step: float,
+    base: Result,
+) -> dict[str, object]:
+    """How much each parameter moves the response, one at a time, by ``step`` either way.
+
+    A finite difference, not the model's analytic sensitivities: the response may be the time
+    an event fires, which is not a smooth function the emitted Jacobians know about. Every
+    editable parameter (a literal binding; a derived one follows whatever it depends on) is
+    run at (1 - step) and (1 + step) times its value with everything else as it is, and the
+    response read off each. 2N runs, so this is an explicit action in the panel, not a live one.
+    """
+    values = settings(system, sets)
+    rows: list[dict[str, object]] = []
+    for variable in system.parameters:
+        derived = variable.binding is not None and not type(variable.binding).__name__.endswith(
+            "Literal"
+        )
+        value = values.get(variable.name)
+        if derived or value is None or not isinstance(value, (int, float)) or float(value) == 0.0:
+            continue
+        ends: list[float | None] = []
+        for factor in (1.0 - step, 1.0 + step):
+            trial = dict(sets)
+            trial[variable.name] = float(value) * factor
+            ends.append(_response(_integrate(kernel, stop, vector(system, trial)), spec))
+        rows.append(
+            {
+                "name": variable.name,
+                "unit": variable.unit,
+                "value": _r7(value),
+                "minus": _r7(ends[0]) if ends[0] is not None else None,
+                "plus": _r7(ends[1]) if ends[1] is not None else None,
+            }
+        )
+
+    def span(row: dict[str, object]) -> float:
+        plus, minus = row["plus"], row["minus"]
+        if isinstance(plus, (int, float)) and isinstance(minus, (int, float)):
+            return abs(float(plus) - float(minus))
+        return -1.0
+
+    rows.sort(key=span, reverse=True)
+    return {"response": spec, "step": step, "base": _response(base, spec), "rows": rows}
+
+
 def _parse_sets(items: list[str]) -> dict[str, float]:
     """``--set name=value`` pairs as a mapping; a malformed one is an error the panel shows."""
     out: dict[str, float] = {}
@@ -180,6 +250,8 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     frm: float = 0.0,
     maximum: float = 0.0,
     sets: dict[str, float] | None = None,
+    sensitivity: str | None = None,
+    sstep: float = 0.05,
 ) -> dict[str, object]:
     system, kernel, units = _load(path, name, libraries)
     states = set(system.modes[0].states)
@@ -233,6 +305,12 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     for state, derivative in system.modes[0].derivative.items():
         base = units.get(state, "")
         units[derivative] = f"{base}/s" if base else "1/s"
+    # The sensitivity study, when asked for: 2N more runs, so only on request.
+    sens = (
+        _sensitivity(system, kernel, stop, sets, sensitivity, sstep, result)
+        if sensitivity
+        else None
+    )
     return {
         "model": name,
         "summary": str(path),
@@ -249,6 +327,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         "autoNote": note,
         "parameters": parameters,
         "overrides": sets,
+        "sensitivity": sens,
     }
 
 
@@ -296,6 +375,20 @@ def main() -> None:
         metavar="NAME=VALUE",
         help="override a parameter (repeatable); everything derived from it is recomputed",
     )
+    ap.add_argument(
+        "--sensitivity",
+        default=None,
+        metavar="SPEC",
+        help="also run every editable parameter a step either way and read off this response: "
+        "'final:<variable>' or 'event:<cause>'",
+    )
+    ap.add_argument(
+        "--sensitivity-step",
+        dest="sensitivity_step",
+        type=float,
+        default=0.05,
+        help="the relative step for --sensitivity (0.05 is +-5 percent)",
+    )
     args = ap.parse_args()
 
     path = Path(args.path)
@@ -311,6 +404,8 @@ def main() -> None:
             frm=args.frm,
             maximum=args.maximum,
             sets=_parse_sets(args.sets),
+            sensitivity=args.sensitivity,
+            sstep=args.sensitivity_step,
         )
         print(json.dumps({"models": [record]}, separators=(",", ":"), allow_nan=False))
     except Exception as error:  # noqa: BLE001 - report every failure to the panel, never crash silently

@@ -196,6 +196,15 @@
   .lrow .lcols { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 2px; font-size: 11px; }
   .lcol { font-variant-numeric: tabular-nums; }
   .lcol.miss { color: var(--dim); text-decoration: line-through; }
+  /* The sensitivity tornado: one row per parameter, a bar from the response at -step to the
+     response at +step around the base, widest first -- which knob moves the drop time most. */
+  #ntitle { margin-top: 12px; }
+  .tchart { display: block; width: 100%; margin-top: 4px; }
+  .tchart .tbar { fill: var(--accent); opacity: .55; }
+  .tchart .tbase { stroke: var(--ink); stroke-width: 1; }
+  .tchart .tname { fill: var(--ink); font-size: 11px; }
+  .tchart .tval { fill: var(--dim); font-size: 9.5px; font-variant-numeric: tabular-nums; }
+  .tchart .tmiss { fill: var(--dim); font-size: 9.5px; font-style: italic; }
   .legtitle { padding: 4px 12px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .7px;
     text-transform: uppercase; color: var(--dim); }
   .row { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; cursor: pointer;
@@ -308,6 +317,12 @@
     </div>
     <div class="legtitle" id="ltitle" hidden>measured</div>
     <div id="loglist"></div>
+    <div class="legtitle" id="ntitle" hidden>sensitivity</div>
+    <div id="sensctl" class="sweepctl" hidden>
+      <div class="srow"><span class="l">of</span><select id="nresp" title="the response: a variable's final value, or the time an event first fires"></select></div>
+      <div class="srow"><span class="l">to each parameter, &plusmn;</span><input id="nstep" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" value="5"><span class="l">%</span><button type="button" id="nrun" title="run every editable parameter a step either way (two simulations each) and read the response off each">compute</button></div>
+      <svg id="tchart" class="tchart"></svg>
+    </div>
   </aside>
 </div>
 <div class="note" id="srcnote"></div>
@@ -469,6 +484,7 @@ function select(i) {
   paintRuns();
   paintSweep();
   paintLogs();
+  paintSensitivity();
   draw();
   // An automatic stop says where it landed and why, until the pointer moves on.
   if (D.autoNote) foot.textContent = D.autoNote + "  ·  t → " + fmt(toT(D.stop)) + " " + tUnit();
@@ -962,6 +978,87 @@ function cursor(v) {
   foot.textContent = phase + "t = " + fmt(toT(T[j])) + " " + tUnit() + (near.length ? "   ⟨ " + (near[0].cause || "event") + " ⟩" : "");
   paintLegend(j);
 }
+
+// -- sensitivity ---------------------------------------------------------------------------
+// Which parameter moves the response most. The simulator runs every editable parameter a step
+// either way and reads the response off each (2N runs, so an explicit action); the answer
+// comes back on the live run's record as `sensitivity`, drawn here as a tornado: one row per
+// parameter, a bar from the response at -step to the one at +step around the base, widest
+// first. A response that does not exist at an end -- the drop event never fired at -5% of
+// UA, say -- is written as such rather than drawn as zero.
+let sensPicked = false;
+function paintSensitivity() {
+  const title = document.getElementById("ntitle"), ctl = document.getElementById("sensctl");
+  const show = LIVE && editableParams().length > 0;
+  title.hidden = ctl.hidden = !show;
+  if (!show) return;
+  const sel = document.getElementById("nresp");
+  const choices = responseChoices();
+  const keep = sel.value;
+  sel.replaceChildren(...choices.map((c) => { const o = document.createElement("option"); o.value = c.key; o.textContent = c.label; return o; }));
+  const dropChoice = choices.find((c) => c.kind === "event" && /T_drop/.test(c.cause));
+  const fallback = choices.find((c) => c.kind === "final" && Array.isArray(D.states) && c.name === D.states[0]) || choices[0];
+  if (D.sensitivity && choices.some((c) => c.key === D.sensitivity.response)) sel.value = D.sensitivity.response;
+  else if (dropChoice && !sensPicked) sel.value = dropChoice.key;
+  else if (choices.some((c) => c.key === keep)) sel.value = keep;
+  else sel.value = fallback ? fallback.key : "";
+  drawTornado();
+}
+function runSensitivity() {
+  if (!vscodeApi) { foot.textContent = "a sensitivity study needs the extension to re-simulate"; return; }
+  const key = document.getElementById("nresp").value; if (!key) return;
+  const pct = parseFloat(String(document.getElementById("nstep").value).replace(",", "."));
+  const step = isFinite(pct) && pct > 0 ? pct / 100 : 0.05;
+  foot.textContent = "sensitivity of " + key.replace(/^(final|event):/, "") + " to each parameter, ±" + Math.round(step * 100) + "% …";
+  vscodeApi.postMessage({ type: "simulate", stop: D.stop, sets: overrides, runId: RUNS.length - 1, sensitivity: key, sstep: step });
+}
+function drawTornado() {
+  const svgT = document.getElementById("tchart"); if (!svgT) return;
+  const S = D && D.sensitivity;
+  const key = document.getElementById("nresp").value;
+  const w = svgT.clientWidth || 200;
+  if (!S || S.response !== key || !S.rows || !S.rows.length) {
+    svgT.setAttribute("viewBox", "0 0 " + w + " 24"); svgT.style.height = "24px";
+    const frag = document.createDocumentFragment();
+    frag.appendChild(el("text", {class: "tval", x: 0, y: 14}, S && S.rows && S.rows.length ? "computed for another response -- compute again" : "compute to see which parameter matters"));
+    svgT.replaceChildren(frag); return;
+  }
+  const choice = responseChoices().find((c) => c.key === S.response);
+  const isEvent = choice && choice.kind === "event";
+  const u = choice && choice.kind === "final" ? unitOf(choice.name) : "";
+  const shown = (v) => v === null || v === undefined ? null : (isEvent ? toT(v) : disp(v, u));
+  const unitLabel = isEvent ? tUnit() : dispUnit(u);
+  const rows = S.rows.map((r) => ({name: r.name, minus: shown(r.minus), plus: shown(r.plus)}));
+  const base = shown(S.base);
+  const rh = 18, top = 16, left = 74, right = 8, h = top + rows.length * rh + 6;
+  svgT.setAttribute("viewBox", "0 0 " + w + " " + h); svgT.style.height = h + "px";
+  const vals = rows.flatMap((r) => [r.minus, r.plus]).filter((v) => v !== null && isFinite(v));
+  if (base !== null && isFinite(base)) vals.push(base);
+  if (!vals.length) { svgT.replaceChildren(el("text", {class: "tmiss", x: 0, y: 14}, "the response is undefined at every step")); return; }
+  const dom = spanPad(Math.min(...vals), Math.max(...vals));
+  const TX = (v) => left + ((v - dom[0]) / (dom[1] - dom[0])) * (w - left - right);
+  const frag = document.createDocumentFragment();
+  frag.appendChild(el("text", {class: "tval", x: left, y: 10}, (choice ? choice.label : S.response) + (unitLabel ? "  (" + unitLabel + ")" : "") + "   ±" + Math.round(S.step * 100) + "%"));
+  if (base !== null && isFinite(base)) frag.appendChild(el("line", {class: "tbase", x1: TX(base), x2: TX(base), y1: top, y2: h - 4}));
+  rows.forEach((r, i) => {
+    const y = top + i * rh;
+    frag.appendChild(el("text", {class: "tname", x: left - 6, y: y + 12, "text-anchor": "end"}, r.name));
+    const ok = r.minus !== null && r.plus !== null && isFinite(r.minus) && isFinite(r.plus);
+    if (ok) {
+      const x0 = TX(Math.min(r.minus, r.plus)), x1 = TX(Math.max(r.minus, r.plus));
+      frag.appendChild(el("rect", {class: "tbar", x: x0, y: y + 3, width: Math.max(x1 - x0, 1.5), height: rh - 7, rx: 2}));
+      frag.appendChild(el("text", {class: "tval", x: x1 + 4, y: y + 12}, "Δ " + fmt(r.plus - r.minus)));
+    } else {
+      const one = r.minus !== null && isFinite(r.minus) ? r.minus : (r.plus !== null && isFinite(r.plus) ? r.plus : null);
+      if (one !== null) frag.appendChild(el("circle", {class: "tbar", cx: TX(one), cy: y + rh / 2 - 0.5, r: 3}));
+      frag.appendChild(el("text", {class: "tmiss", x: one !== null ? TX(one) + 6 : left + 4, y: y + 12},
+        one === null ? "undefined either way" : "undefined at " + (r.minus === null ? "−" : "+") + "step"));
+    }
+  });
+  svgT.replaceChildren(frag);
+}
+document.getElementById("nresp").onchange = () => { sensPicked = true; drawTornado(); };
+document.getElementById("nrun").onclick = runSensitivity;
 
 // -- measured logs -------------------------------------------------------------------------
 // A log's column for a model variable: the same name, or the same name ignoring case, so a
