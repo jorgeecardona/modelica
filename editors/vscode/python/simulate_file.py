@@ -59,8 +59,13 @@ def _r7(value: object) -> float | None:
         return None
 
 
-def _load(path: Path, name: str, libraries: list[str]) -> tuple[System, Kernel]:
-    """Parse the .mo and its libraries once, so a probe can re-integrate without reloading."""
+def _load(path: Path, name: str, libraries: list[str]) -> tuple[System, Kernel, dict[str, str]]:
+    """Parse the .mo and its libraries once, so a probe can re-integrate without reloading.
+
+    Also returns every variable's declared unit, read from the flat model *before* causalization:
+    the causalizer folds ``probe = T_probe - 273.15`` into an alias, and an alias is no longer in
+    ``system.variables`` -- so the panel would have shown the roaster's degC probe as unitless.
+    """
     sources: list[object] = []
     search = [Path(lib) for lib in libraries]
     sibling = path.parent / "library"
@@ -72,8 +77,10 @@ def _load(path: Path, name: str, libraries: list[str]) -> tuple[System, Kernel]:
         elif entry.exists():
             sources.append(parse(entry.read_text(encoding="utf-8")))
     sources.append(parse(path.read_text(encoding="utf-8")))
-    system = causalize(flatten(sources, name))  # type: ignore[arg-type]
-    return system, build(system)
+    flat = flatten(sources, name)  # type: ignore[arg-type]
+    system = causalize(flat)
+    units = {variable.name: variable.unit for variable in flat.variables}
+    return system, build(system), units
 
 
 def _integrate(kernel: Kernel, stop: float, params: NDArray[np.float64] | None = None) -> Result:
@@ -174,7 +181,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     maximum: float = 0.0,
     sets: dict[str, float] | None = None,
 ) -> dict[str, object]:
-    system, kernel = _load(path, name, libraries)
+    system, kernel, units = _load(path, name, libraries)
     states = set(system.modes[0].states)
     sets = sets or {}
     # Overrides go through `vector`, which recomputes everything downstream of a changed
@@ -218,7 +225,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         {"t": _r7(event.time), "cause": str(getattr(event, "cause", ""))}
         for event in (getattr(result, "events", []) or [])
     ]
-    units = {v.name: v.unit for v in system.variables}
+    # `units` came from the flat model in `_load`, aliases included.
     # A derivative carries the state's unit over time: der(T_bean) is K/s, not dimensionless,
     # which is also what keeps a °C display from wrongly subtracting 273.15 from a *rate* (only
     # a bare "K" is converted, never "K/s"). The flattener leaves the derivative variable's unit

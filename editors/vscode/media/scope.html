@@ -159,6 +159,23 @@
   .prow.derived { color: var(--dim); }
   .prow .undo { cursor: pointer; color: var(--dim); text-align: center; }
   .prow .undo:hover { color: var(--accent); }
+  /* The drop: the variable and target the batch is finished on, and one card per run saying
+     where that run started, turned and dropped. The marker on the plot is a solid accent line
+     (an event is a dashed grey one), dashed per run like its trace. */
+  #dtitle { margin-top: 12px; }
+  .dropctl { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; padding: 2px 12px;
+    font-size: 12px; color: var(--dim); }
+  .dropctl select { max-width: 120px; }
+  .dropctl input { width: 62px; font: inherit; font-size: 11.5px; color: var(--ink);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+    text-align: right; font-variant-numeric: tabular-nums; }
+  .dcard { padding: 4px 12px 3px; font-size: 12px; line-height: 1.4; }
+  .dcard .tag { font-weight: 650; }
+  .dcard .l { color: var(--dim); }
+  .dcard .v { font-variant-numeric: tabular-nums; }
+  .dcard .miss { color: var(--dim); font-style: italic; }
+  .dropline { stroke: var(--accent); stroke-width: 1.4; }
+  .droplab { fill: var(--accent); font-size: 10px; font-weight: 600; }
   .legtitle { padding: 4px 12px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .7px;
     text-transform: uppercase; color: var(--dim); }
   .row { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; cursor: pointer;
@@ -253,6 +270,9 @@
     <div class="legtitle">variables</div><div id="legend"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="ptitle" hidden>parameters</div><div id="plist"></div>
+    <div class="legtitle" id="dtitle" hidden>drop</div>
+    <div id="dropctl" class="dropctl" hidden>when <select id="dropvar" title="the variable the batch is finished on"></select> reaches <input id="dropthr" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" title="the target; if a run never gets there, its drop is where this variable peaks"><span id="dropunit" class="pu"></span></div>
+    <div id="droplist"></div>
   </aside>
 </div>
 <div class="note" id="srcnote"></div>
@@ -292,6 +312,8 @@ let overrides = {};      // the live run's parameter overrides, name -> SI value
 let dispMode = "si";     // display units: "si", or "c" to print kelvin as celsius
 let lastModel = null;    // to keep the view across a re-run of the same model
 let prevEnd = 0;
+let dropVar = null;      // the variable a batch is finished on (the bean probe, for a roast)
+let dropThr = null;      // its target, in SI; null means "at the peak"
 
 function readBg() {
   cssbg = getComputedStyle(document.body).backgroundColor || "#ffffff";
@@ -394,8 +416,10 @@ function select(i) {
   }
   document.getElementById("pin").hidden = !LIVE;
   paintEvents();
+  initDrop();
   paintParams();
   paintRuns();
+  paintDrop();
   draw();
   // An automatic stop says where it landed and why, until the pointer moves on.
   if (D.autoNote) foot.textContent = D.autoNote + "  ·  t → " + fmt(D.stop);
@@ -421,7 +445,8 @@ const DISPLAY = { c: { K: { unit: "°C", to: (v) => v - 273.15, from: (v) => v +
 function dispOf(unit) { const t = DISPLAY[dispMode]; return (t && t[unit]) || null; }
 function disp(v, unit) { const c = dispOf(unit); return (c && v !== null && v !== undefined && isFinite(v)) ? c.to(v) : v; }
 function undisp(v, unit) { const c = dispOf(unit); return c ? c.from(v) : v; }
-function dispUnit(unit) { const c = dispOf(unit); return c ? c.unit : unit; }
+// The unit as printed: converted when the display mode says so, and Modelica's "degC" spelled °C.
+function dispUnit(unit) { const c = dispOf(unit); return c ? c.unit : (unit === "degC" ? "°C" : unit); }
 function unitOf(nm) { return (D && D.units && D.units[nm] !== undefined) ? D.units[nm] : ""; }
 // The one unit every selected variable shares, else "": an overlay axis can only be labelled
 // in display units when everything on it converts the same way.
@@ -579,6 +604,21 @@ function draw() {
     for (const e of ((RUNS[ri].data || {}).events || [])) {
       if (e.t < win[0] || e.t > win[1]) continue;
       frag.appendChild(el("line", {class: "event pin", x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b}));
+    }
+  }
+  // The drop, per run: a solid accent line where the finishing variable reached its target or,
+  // failing that, its peak -- dashed like that run's trace, labelled with the run's letter.
+  if (dropVar && D.series[dropVar]) {
+    for (let ri = 0; ri < RUNS.length; ri++) {
+      const data = ri === RUNS.length - 1 ? D : RUNS[ri].data;
+      const d = data && dropOf(data.t, data.series[dropVar], dropThr);
+      if (!d || d.tDrop < win[0] || d.tDrop > win[1] * (1 + 1e-9)) continue;
+      const x = X(d.tDrop), st = runStyle(ri);
+      const attrs = {class: "dropline", x1: x, x2: x, y1: M.t, y2: box.h - M.b, opacity: st.op};
+      if (st.dash) attrs["stroke-dasharray"] = st.dash;
+      frag.appendChild(el("line", attrs));
+      frag.appendChild(el("text", {class: "droplab", x: x - 4, y: M.t + 22 + 11 * ri, "text-anchor": "end"},
+        "drop" + (RUNS.length > 1 ? " " + String.fromCharCode(65 + ri) : "")));
     }
   }
   // The stop marker: where the run ends, drawn as a handle. Drag it left to trim the horizon
@@ -902,7 +942,7 @@ document.getElementById("pin").onclick = () => {
   const copy = {overrides: {...live.overrides}, data: live.data, onBase: null};
   RUNS.splice(RUNS.length - 1, 0, copy);
   rebase(copy);
-  paintRuns(); draw();
+  paintRuns(); paintDrop(); draw();
 };
 
 function paramUnit(name) {
@@ -933,7 +973,7 @@ function paintRuns() {
     chip.append(dash, tag, what);
     if (!live) {
       const x = document.createElement("span"); x.className = "x"; x.textContent = "×"; x.title = "drop this run";
-      x.onclick = () => { RUNS.splice(ri, 1); paintRuns(); draw(); };
+      x.onclick = () => { RUNS.splice(ri, 1); paintRuns(); paintDrop(); draw(); };
       chip.appendChild(x);
     }
     frag.appendChild(chip);
@@ -987,6 +1027,90 @@ function paintParams() {
   }
   list.replaceChildren(frag);
 }
+
+// -- the drop --------------------------------------------------------------------------
+// Where a batch is finished. For a roast that is the bean probe coming back up through the drop
+// temperature -- or, for a batch that never gets there, where the probe topped out: the target
+// or the peak, whichever comes first. Computed from the trajectory, per run, so a threshold
+// can be changed live and two batch sizes each get their own drop with no re-simulation.
+//   start        the variable at t = 0 (the charge: the probe reads the hot empty drum)
+//   min / tMin   its lowest point after that (the turning point every roaster watches for)
+//   drop / tDrop the target if reached after the turning point, else the peak
+function dropOf(t, vs, thr) {
+  if (!vs || !t || t.length < 2) return null;
+  const ok = (k) => vs[k] !== null && vs[k] !== undefined && isFinite(vs[k]);
+  let i0 = 0; while (i0 < vs.length && !ok(i0)) i0++;
+  if (i0 >= vs.length) return null;
+  let imin = i0; for (let k = i0; k < vs.length; k++) if (ok(k) && vs[k] < vs[imin]) imin = k;
+  let imax = imin; for (let k = imin; k < vs.length; k++) if (ok(k) && vs[k] > vs[imax]) imax = k;
+  let hit = -1;
+  if (thr !== null && isFinite(thr)) {
+    for (let k = imin + 1; k < vs.length; k++) if (ok(k) && vs[k] >= thr) { hit = k; break; }
+  }
+  if (hit > 0 && hit <= imax) {
+    const a = hit - 1, v0 = vs[a], v1 = vs[hit];
+    const tDrop = v1 > v0 ? t[a] + (t[hit] - t[a]) * (thr - v0) / (v1 - v0) : t[hit];
+    return {start: vs[i0], min: vs[imin], tMin: t[imin], drop: thr, tDrop: tDrop, reached: true};
+  }
+  return {start: vs[i0], min: vs[imin], tMin: t[imin], drop: vs[imax], tDrop: t[imax], reached: false};
+}
+// A model's natural finishing variable and target: the probe at 216 degC for a roast (in K or
+// degC as the model spells it); otherwise the first state, finished at its peak.
+function initDrop() {
+  if (dropVar && names.includes(dropVar)) return;
+  dropVar = names.includes("probe") ? "probe" : names.includes("T_probe") ? "T_probe"
+    : (Array.isArray(D.states) && D.states.find((s) => names.includes(s))) || names[0] || null;
+  const u = dropVar ? unitOf(dropVar) : "";
+  dropThr = u === "degC" ? 216 : u === "K" ? 216 + 273.15 : null;
+}
+function paintDrop() {
+  const title = document.getElementById("dtitle"), ctl = document.getElementById("dropctl"),
+        list = document.getElementById("droplist"), sel = document.getElementById("dropvar"),
+        thr = document.getElementById("dropthr"), unit = document.getElementById("dropunit");
+  const show = !!(dropVar && D && D.series[dropVar]);
+  title.hidden = ctl.hidden = !show;
+  if (!show) { list.replaceChildren(); return; }
+  const u = unitOf(dropVar);
+  sel.replaceChildren(...names.map((nm) => { const o = document.createElement("option"); o.value = nm; o.textContent = nm; return o; }));
+  sel.value = dropVar;
+  const shownThr = dropThr === null ? null : disp(dropThr, u);
+  thr.value = shownThr === null ? "" : String(Number(shownThr.toPrecision(6)));
+  thr.placeholder = "peak";
+  unit.textContent = dispUnit(u);
+  const frag = document.createDocumentFragment();
+  RUNS.forEach((run, ri) => {
+    const data = ri === RUNS.length - 1 ? D : run.data;
+    const d = data && dropOf(data.t, data.series[dropVar], dropThr);
+    if (!d) return;
+    const card = document.createElement("div"); card.className = "dcard";
+    const f = (v) => fmt(disp(v, u)), un = dispUnit(u) ? " " + dispUnit(u) : "";
+    const tag = RUNS.length > 1 ? `<span class="tag">${String.fromCharCode(65 + ri)}</span> ` : "";
+    const end = d.reached
+      ? `<span class="l">drop</span> <span class="v">${f(d.drop)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(d.tDrop)} s</span>`
+      : `<span class="l">peak</span> <span class="v">${f(d.drop)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(d.tDrop)} s</span>`
+        + (dropThr !== null ? ` <span class="miss">(${f(dropThr)}${un} not reached)</span>` : "");
+    card.innerHTML = `${tag}<span class="l">charge</span> <span class="v">${f(d.start)}${un}</span> <span class="l">→ turning point</span> <span class="v">${f(d.min)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(d.tMin)} s</span> <span class="l">→</span> ${end}`;
+    frag.appendChild(card);
+  });
+  list.replaceChildren(frag);
+}
+document.getElementById("dropvar").onchange = (e) => {
+  dropVar = e.target.value;
+  const u = unitOf(dropVar);
+  dropThr = u === "degC" ? 216 : u === "K" ? 216 + 273.15 : null;
+  paintDrop(); draw();
+};
+(() => {
+  const thr = document.getElementById("dropthr");
+  const apply = () => {
+    const raw = String(thr.value).trim().replace(",", ".");
+    const x = parseFloat(raw);
+    dropThr = raw === "" || !isFinite(x) ? null : undisp(x, unitOf(dropVar));
+    paintDrop(); draw();
+  };
+  thr.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } });
+  thr.addEventListener("change", apply);
+})();
 
 // The events, listed under the variables with their cause. Clicking one says "show me until
 // here": a live .mo moves its stop to just past that event and re-runs; the corpus gallery,
@@ -1045,7 +1169,7 @@ window.addEventListener("message", (e) => {
         }
       }
     } else {
-      RUNS[ri].data = rec; rebase(RUNS[ri]); paintRuns(); draw();
+      RUNS[ri].data = rec; rebase(RUNS[ri]); paintRuns(); paintDrop(); draw();
     }
   }
   else if (m.type === "error") { foot.textContent = "error: " + m.error; }
