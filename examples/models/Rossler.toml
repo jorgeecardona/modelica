@@ -1,0 +1,82 @@
+summary = "The Rössler system at a = 0.2, b = 0.2, c = 5.7: a spiral in the x-y plane that a single nonlinear term folds back on itself -- chaotic like Lorenz, but with an error growth an order of magnitude slower, so a solver stays right for hundreds of time units."
+teaches = [
+  "chaos from one nonlinear term",
+  "a slow Lyapunov exponent: where pointwise checks still mean something late in a run",
+  "a phase plot in x-y, and the fold in z",
+  "a mathematical toy as an integrator benchmark",
+]
+requires = []
+
+[parse]
+classes = ["Rossler"]
+
+[flatten]
+model = "Rossler"
+states = ["x", "y", "z"]
+equations = 3
+index = 1
+balanced = true
+
+# Rössler (1976) built the simplest thing he could that was still chaotic: two linear
+# equations that spiral outward in the x-y plane, and one nonlinear term, `z * (x - c)`, that
+# lifts the spiral off the plane once x passes c and drops it back near the origin -- the
+# fold. The leading Lyapunov exponent is about 0.07, thirteen times smaller than Lorenz's
+# 0.9, so two 1e-12 runs a hair apart stay within 3e-10 of each other all the way to t = 30
+# (measured), where Lorenz would have separated by everything. That is what this model is
+# for beside Lorenz: it is the benchmark where a late reference point is still a fair test
+# of the integrator, not of the arithmetic.
+#
+# `stop` covers many turns of the spiral, enough to fill the attractor in a phase plot. The
+# reference points are scipy DOP853 at rtol = atol = 1e-12 from (1, 1, 1); a run at 1e-10
+# agrees with them to about 1e-9 absolute, well inside the bar. z spends most of its time
+# near zero and spikes to 20 at each fold, so its tolerance carries an absolute part.
+[simulate]
+stop = 100.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 5.0
+values = { x = 2.168343299, y = -1.031926442, z = 0.051906045 }
+rtol = 1e-7
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { x = -0.295004794, y = -3.696553118, z = 0.030787025 }
+rtol = 1e-7
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 20.0
+values = { x = -4.369046519, y = 7.304384818, z = 0.024542600 }
+rtol = 1e-7
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 30.0
+values = { x = 2.051257944, y = 3.118558230, z = 0.069230360 }
+rtol = 1e-7
+atol = 1e-8
+source = "reference"
+
+# The attractor is bounded; the bounds are the extremes of a 1e-12 run over the full horizon
+# (x in [-9.10, 11.43], y in [-10.78, 7.83], z in [0.01, 22.78]) with a margin. z can never
+# go negative: at z = 0 its derivative is b > 0, so a solver that takes it below zero has
+# left the model.
+[[simulate.invariant]]
+expr = "x"
+min = -12.0
+max = 14.0
+
+[[simulate.invariant]]
+expr = "y"
+min = -13.0
+max = 10.0
+
+[[simulate.invariant]]
+expr = "z"
+min = 0.0
+max = 26.0

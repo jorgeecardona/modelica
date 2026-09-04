@@ -62,6 +62,7 @@ FLAT = {
     "PhaseChange",
     "RoastingMachine",
     "Robertson",
+    "Rossler",
     "Setback",
     "Thermostat",
     "VanDerPol",
