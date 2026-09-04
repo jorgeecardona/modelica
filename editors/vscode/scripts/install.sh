@@ -27,7 +27,10 @@ candidates() {
       done
     done
   fi
-  for app in "/Applications" "$HOME/Applications"; do
+  # Fixed places too, since Spotlight can be paused or its index in an "unknown state" for a
+  # folder (seen on ~/Downloads): the two Applications folders, and Downloads itself, which is
+  # where an unmoved download runs from.
+  for app in "/Applications" "$HOME/Applications" "$HOME/Downloads"; do
     for name in "Visual Studio Code" "Visual Studio Code - Insiders"; do
       for bin in code code-insiders; do
         echo "$app/$name.app/Contents/Resources/app/bin/$bin"
