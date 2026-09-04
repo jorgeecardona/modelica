@@ -183,6 +183,19 @@
   .schart .rl { stroke: var(--accent); fill: none; stroke-width: 1.4; }
   .schart .rtick { fill: var(--dim); font-size: 9.5px; font-variant-numeric: tabular-nums; }
   .schart .rax { stroke: var(--line); }
+  /* A measured log: its samples as hollow points in the variable's colour, so the simulation's
+     line can be judged against what the machine actually read; a row per log in the legend
+     with the columns it matched, the ones it did not, its time unit, and a way to drop it. */
+  .logpt { fill: var(--bg); stroke-width: 1.3; }
+  #ltitle { margin-top: 12px; }
+  .lrow { padding: 3px 12px; font-size: 12px; }
+  .lrow .lhead { display: flex; align-items: baseline; gap: 6px; }
+  .lrow .lname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+  .lrow .x { cursor: pointer; color: var(--dim); }
+  .lrow .x:hover { color: var(--accent); }
+  .lrow .lcols { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 2px; font-size: 11px; }
+  .lcol { font-variant-numeric: tabular-nums; }
+  .lcol.miss { color: var(--dim); text-decoration: line-through; }
   .legtitle { padding: 4px 12px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .7px;
     text-transform: uppercase; color: var(--dim); }
   .row { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; cursor: pointer;
@@ -267,6 +280,7 @@
             <option value="c">K as &deg;C</option>
           </select>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
+          <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
           <button id="all">all</button>
           <button id="none">none</button>
           <button id="reset" title="or double-click the chart">reset</button>
@@ -292,6 +306,8 @@
       <div class="srow"><span class="l">response</span><select id="sresp" title="the number read off each run and plotted against the parameter"></select></div>
       <svg id="schart" class="schart"></svg>
     </div>
+    <div class="legtitle" id="ltitle" hidden>measured</div>
+    <div id="loglist"></div>
   </aside>
 </div>
 <div class="note" id="srcnote"></div>
@@ -340,6 +356,9 @@ let XD = [0, 1];
 // interval between them and every selected variable's change across it -- the drying phase's
 // length, turning point to first crack -- the way an oscilloscope's cursors do.
 let marks = [];
+// Measured logs overlaid on the plot: {name, t (seconds), series {column: values}, tscale}.
+// `tscale` is what the file's clock is multiplied by to get seconds (60 for a log in minutes).
+let LOGS = [];
 let lastModel = null;    // to keep the view across a re-run of the same model
 let prevEnd = 0;
 
@@ -443,11 +462,13 @@ function select(i) {
     document.getElementById("mchips").replaceChildren(cf);
   }
   document.getElementById("pin").hidden = !LIVE;
+  document.getElementById("logbtn").hidden = !vscodeApi;
   paintEvents();
   paintXAxis();
   paintParams();
   paintRuns();
   paintSweep();
+  paintLogs();
   draw();
   // An automatic stop says where it landed and why, until the pointer moves on.
   if (D.autoNote) foot.textContent = D.autoNote + "  ·  t → " + fmt(toT(D.stop)) + " " + tUnit();
@@ -738,6 +759,7 @@ function drawOverlay(frag) {
   for (const nm of selected()) {
     const to = project(nm, dom);
     eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, (v) => Y(to(v)), nm, ri));
+    drawLogPoints(frag, nm, (v) => Y(to(v)));
   }
   if (scale === "linear" && !xVar) for (const rf of D.refs) {
     if (rf.t < win[0] || rf.t > win[1]) continue;
@@ -798,7 +820,7 @@ function drawSplit(frag) {
     const pad = hi > lo ? (hi - lo) * 0.08 : (Math.abs(lo) * 0.08 || 1);
     lo -= pad; hi += pad;
     const yFor = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
-    eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, yFor, nm, ri));
+    eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, yFor, nm, ri)); drawLogPoints(frag, nm, yFor);
     if (!xVar) for (const rf of D.refs) { const rv = rf.values[nm];
       if (rv === undefined || rf.t < win[0] || rf.t > win[1]) continue;
       const cx = X(rf.t), cy = yFor(rv);
@@ -851,7 +873,7 @@ function drawUnits(frag) {
     lo -= pad; hi += pad;
     const yFor = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
     for (const nm of members) {
-      eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, yFor, nm, ri));
+      eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, yFor, nm, ri)); drawLogPoints(frag, nm, yFor);
       if (!xVar) for (const rf of D.refs) { const rv = rf.values[nm];
         if (rv === undefined || rf.t < win[0] || rf.t > win[1]) continue;
         const cx = X(rf.t), cy = yFor(rv);
@@ -940,6 +962,64 @@ function cursor(v) {
   foot.textContent = phase + "t = " + fmt(toT(T[j])) + " " + tUnit() + (near.length ? "   ⟨ " + (near[0].cause || "event") + " ⟩" : "");
   paintLegend(j);
 }
+
+// -- measured logs -------------------------------------------------------------------------
+// A log's column for a model variable: the same name, or the same name ignoring case, so a
+// roaster's "Probe" lines up with the model's `probe`. Nothing cleverer -- a wrong match would
+// draw a measurement against the wrong quantity and look like a model error.
+function logColumn(log, nm) {
+  if (log.series[nm]) return log.series[nm];
+  const key = Object.keys(log.series).find((k) => k.toLowerCase() === nm.toLowerCase());
+  return key ? log.series[key] : null;
+}
+// The log's samples for one variable as hollow points, placed with the same y mapping as the
+// variable's own curve (whichever mode is drawing), and along x by the log's clock -- or, in a
+// phase plot, by the log's column for the phase variable, if it has one.
+function drawLogPoints(frag, nm, yOf) {
+  if (!LOGS.length) return;
+  for (const log of LOGS) {
+    const col = logColumn(log, nm); if (!col) continue;
+    const xcol = xVar ? logColumn(log, xVar) : null;
+    if (xVar && !xcol) continue;
+    for (let k = 0; k < col.length; k++) {
+      const v = col[k]; if (v === null || v === undefined || !isFinite(v)) continue;
+      const xv = xVar ? xcol[k] : log.t[k] * log.tscale;
+      if (xv === null || xv === undefined || !isFinite(xv) || xv < XD[0] || xv > XD[1]) continue;
+      const y = yOf(v); if (!isFinite(y) || y < M.t - 1 || y > box.h - M.b + 1) continue;
+      frag.appendChild(el("circle", {class: "logpt", cx: X(xv), cy: y, r: 2.4, stroke: colour(nm)}));
+    }
+  }
+}
+// The legend's account of each log: which columns found a variable, which did not, the clock's
+// unit, and a way to drop it.
+function paintLogs() {
+  const title = document.getElementById("ltitle"), list = document.getElementById("loglist");
+  title.hidden = !LOGS.length;
+  const frag = document.createDocumentFragment();
+  LOGS.forEach((log, li) => {
+    const row = document.createElement("div"); row.className = "lrow";
+    const head = document.createElement("div"); head.className = "lhead";
+    const name = document.createElement("span"); name.className = "lname"; name.textContent = log.name; name.title = log.name;
+    const unit = document.createElement("select"); unit.title = "the unit of the log's time column";
+    for (const [v, t] of [["1", "s"], ["60", "min"]]) { const o = document.createElement("option"); o.value = v; o.textContent = t; unit.appendChild(o); }
+    unit.value = String(log.tscale);
+    unit.onchange = () => { log.tscale = Number(unit.value); draw(); };
+    const x = document.createElement("span"); x.className = "x"; x.textContent = "×"; x.title = "remove this log";
+    x.onclick = () => { LOGS.splice(li, 1); paintLogs(); draw(); };
+    head.append(name, unit, x);
+    const cols = document.createElement("div"); cols.className = "lcols";
+    for (const c of Object.keys(log.series)) {
+      const hit = names.find((nm) => nm === c || nm.toLowerCase() === c.toLowerCase());
+      const s = document.createElement("span"); s.className = "lcol" + (hit ? "" : " miss");
+      s.textContent = c + (hit && hit !== c ? " → " + hit : ""); s.title = hit ? "drawn as " + hit : "no variable by this name";
+      if (hit) s.style.color = colour(hit);
+      cols.appendChild(s);
+    }
+    row.append(head, cols); frag.appendChild(row);
+  });
+  list.replaceChildren(frag);
+}
+document.getElementById("logbtn").onclick = () => { if (vscodeApi) vscodeApi.postMessage({ type: "importLog" }); };
 
 // -- the sweep -----------------------------------------------------------------------------
 // One parameter over a range, one run per value, and a response read off each run plotted
@@ -1401,6 +1481,11 @@ window.addEventListener("message", (e) => {
     } else {
       RUNS[ri].data = rec; rebase(RUNS[ri]); paintRuns(); paintSweep(); draw();
     }
+  }
+  else if (m.type === "log" && m.t && m.series) {
+    LOGS.push({name: m.name || "log", t: m.t, series: m.series, tscale: 1});
+    paintLogs(); draw();
+    foot.textContent = "overlaid " + (m.name || "log") + ": " + Object.keys(m.series).length + " columns";
   }
   else if (m.type === "error") { foot.textContent = "error: " + m.error; }
 });

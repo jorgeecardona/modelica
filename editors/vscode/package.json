@@ -2,7 +2,7 @@
   "name": "pymodelica-scope",
   "displayName": "pymodelica Simulation Scope",
   "description": "Simulate the Modelica .mo file you are editing and see its trajectory, in an interactive chart inside VS Code.",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "publisher": "jorgeecardona",
   "license": "MIT",
   "repository": {
@@ -35,6 +35,10 @@
       {
         "command": "pymodelica.openScope",
         "title": "pymodelica: Open Simulation Scope (corpus gallery)"
+      },
+      {
+        "command": "pymodelica.importLog",
+        "title": "pymodelica: Overlay a Measured Log (CSV)…"
       }
     ],
     "menus": {

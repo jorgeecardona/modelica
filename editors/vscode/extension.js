@@ -56,9 +56,69 @@ function ensurePanel(context) {
             : { type: "data", models: data.models, runId: msg.runId, sets: opts.sets }
         );
       });
+    } else if (msg && msg.type === "importLog") {
+      importLog();
     }
   });
   return panel;
+}
+
+// A measured log, overlaid. The panel asks; the extension owns the file dialog and the file
+// system, parses the CSV, and posts the columns back. The first column named like time (t,
+// time, seconds) is the clock -- the first column otherwise -- and every other numeric column
+// is a series named by its header, which the panel matches to the model's variables.
+function importLog() {
+  if (!panel) return;
+  vscode.window
+    .showOpenDialog({
+      canSelectMany: false,
+      openLabel: "Overlay log",
+      filters: { "Data files": ["csv", "tsv", "txt"] },
+    })
+    .then((picked) => {
+      if (!picked || !picked.length) return;
+      const file = picked[0].fsPath;
+      let text;
+      try {
+        text = fs.readFileSync(file, "utf8");
+      } catch (error) {
+        panel.webview.postMessage({ type: "error", error: `Could not read ${file}: ${error.message}` });
+        return;
+      }
+      const parsed = parseCsv(text);
+      if (!parsed) {
+        panel.webview.postMessage({ type: "error", error: `${path.basename(file)}: no numeric columns found` });
+        return;
+      }
+      panel.webview.postMessage({ type: "log", name: path.basename(file), ...parsed });
+    });
+}
+
+// Comma, semicolon or tab separated, one header row. A semicolon file usually carries comma
+// decimals, so those are accepted when the delimiter is not a comma.
+function parseCsv(text) {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim().length);
+  if (lines.length < 2) return null;
+  const delim = [",", ";", "\t"].sort((a, b) => lines[0].split(b).length - lines[0].split(a).length)[0];
+  const header = lines[0].split(delim).map((h) => h.trim().replace(/^"|"$/g, ""));
+  const num = (s) => {
+    const cleaned = String(s).trim().replace(/^"|"$/g, "");
+    return Number(delim === "," ? cleaned : cleaned.replace(",", "."));
+  };
+  const rows = lines.slice(1).map((line) => line.split(delim).map(num)).filter((r) => r.length === header.length);
+  if (!rows.length) return null;
+  let tcol = header.findIndex((h) => /^(t|time|seconds?|sec|s|min|minutes?)$/i.test(h));
+  if (tcol < 0) tcol = 0;
+  const minutes = /^min/i.test(header[tcol]);
+  const t = rows.map((r) => (minutes ? r[tcol] * 60 : r[tcol]));
+  const series = {};
+  header.forEach((h, i) => {
+    if (i === tcol) return;
+    const col = rows.map((r) => (Number.isFinite(r[i]) ? r[i] : null));
+    if (col.some((v) => v !== null)) series[h] = col;
+  });
+  if (!Object.keys(series).length || t.some((v) => !Number.isFinite(v))) return null;
+  return { t, series };
 }
 
 // Read the webview template, inject a nonce, the data, and whether this is a live .mo (which
@@ -174,6 +234,10 @@ function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand("pymodelica.openScope", () => openScope(context)),
     vscode.commands.registerCommand("pymodelica.simulateModel", () => simulateActive(context)),
+    vscode.commands.registerCommand("pymodelica.importLog", () => {
+      if (!panel) { vscode.window.showWarningMessage("Open the Simulation Scope first, then overlay a log."); return; }
+      importLog();
+    }),
     vscode.workspace.onDidSaveTextDocument((doc) => {
       const cfg = vscode.workspace.getConfiguration("pymodelica");
       if (cfg.get("simulateOnSave", false) && doc.fileName.endsWith(".mo") && panel) {
