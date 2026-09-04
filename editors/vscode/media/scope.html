@@ -217,7 +217,8 @@
     .stopwrap label { flex: 1 1 120px; }
     .stopwrap input { flex: 1 1 auto; width: auto; min-width: 78px; }
     .stopwrap button { flex: 1 1 auto; }
-    #scale, #disp { flex: 1 1 46%; }
+    #scale { flex: 1 1 100%; }
+    #timeunit, #disp { flex: 1 1 46%; }
     #pin, #all, #none, #reset { flex: 1 1 auto; }
     .foot, .note, .srcnote { padding-left: 12px; padding-right: 12px; }
   }
@@ -249,6 +250,10 @@
             <option value="norm">normalised</option>
             <option value="units">by unit</option>
             <option value="split">split (per-variable)</option>
+          </select>
+          <select id="timeunit" title="time axis unit: the data stays in seconds, only what is shown converts">
+            <option value="s">seconds</option>
+            <option value="min">minutes</option>
           </select>
           <select id="disp" title="display units: the data stays SI, only what is printed converts">
             <option value="si">SI units</option>
@@ -312,6 +317,7 @@ let cssbg = "#ffffff";
 let RUNS = [];           // [{overrides, data, onBase}]
 let overrides = {};      // the live run's parameter overrides, name -> SI value
 let dispMode = "si";     // display units: "si", or "c" to print kelvin as celsius
+let timeMode = "s";      // time axis: "s" seconds, or "min" minutes -- the data stays in seconds
 let lastModel = null;    // to keep the view across a re-run of the same model
 let prevEnd = 0;
 let dropVar = null;      // the variable a batch is finished on (the bean probe, for a roast)
@@ -401,8 +407,8 @@ function select(i) {
   const stopwrap = document.getElementById("stopwrap");
   if (LIVE) {
     stopwrap.hidden = false;
-    document.getElementById("stop").value = cleanStop(D.stop);
-    document.getElementById("stopunit").textContent = D.tunit ? " " + D.tunit : "";
+    document.getElementById("stop").value = cleanStop(toT(D.stop));
+    document.getElementById("stopunit").textContent = " " + tUnit();
     document.getElementById("mchips").replaceChildren();
   } else {
     stopwrap.hidden = true;
@@ -424,7 +430,7 @@ function select(i) {
   paintDrop();
   draw();
   // An automatic stop says where it landed and why, until the pointer moves on.
-  if (D.autoNote) foot.textContent = D.autoNote + "  ·  t → " + fmt(D.stop);
+  if (D.autoNote) foot.textContent = D.autoNote + "  ·  t → " + fmt(toT(D.stop)) + " " + tUnit();
 }
 
 // -- helpers ---------------------------------------------------------------------------
@@ -434,6 +440,13 @@ function fmt(v) {
   if (a !== 0 && (a < 1e-4 || a >= 1e6)) return v.toExponential(3);
   return String(Number(v.toPrecision(6)));
 }
+// Time in the unit the axis is set to. The whole trajectory is in seconds -- win, X(), events,
+// the stop the simulator gets -- and only what is shown to a person converts: a 863 s roast
+// reads as 14.4 min. `toT` seconds->shown, `fromT` shown->seconds, `tUnit` the label.
+const TSCALE = { s: 1, min: 60 };
+function tUnit() { return timeMode; }
+function toT(seconds) { return seconds / TSCALE[timeMode]; }
+function fromT(shown) { return shown * TSCALE[timeMode]; }
 // A stop time a person can read in the field. A drag or an automatic stop lands on a value like
 // 831.023458281 s; four significant figures keeps the sub-second detail that matters on a short
 // run (2.584) and drops the meaningless tail on a long one (831).
@@ -445,10 +458,25 @@ function cleanStop(v) { return v > 0 ? Number(v.toPrecision(4)) : 0; }
 // value back. A table rather than a special case, so more conversions can follow.
 const DISPLAY = { c: { K: { unit: "°C", to: (v) => v - 273.15, from: (v) => v + 273.15 } } };
 function dispOf(unit) { const t = DISPLAY[dispMode]; return (t && t[unit]) || null; }
-function disp(v, unit) { const c = dispOf(unit); return (c && v !== null && v !== undefined && isFinite(v)) ? c.to(v) : v; }
-function undisp(v, unit) { const c = dispOf(unit); return c ? c.from(v) : v; }
-// The unit as printed: converted when the display mode says so, and Modelica's "degC" spelled °C.
-function dispUnit(unit) { const c = dispOf(unit); return c ? c.unit : (unit === "degC" ? "°C" : unit); }
+// A rate per second follows the time axis: with the axis in minutes, K/s is shown as K/min
+// (x60). That is the roaster's rate of rise, and in °C mode it reads °C/min -- the same number,
+// since an offset cancels in a rate, only the label changes.
+function rateScale(unit) { return timeMode === "min" && /\/s$/.test(unit) ? 60 : 1; }
+function disp(v, unit) {
+  if (v === null || v === undefined || !isFinite(v)) return v;
+  const c = dispOf(unit);
+  return (c ? c.to(v) : v) * rateScale(unit);
+}
+function undisp(v, unit) { const x = v / rateScale(unit); const c = dispOf(unit); return c ? c.from(x) : x; }
+// The unit as printed: converted when the display mode says so, rates in the axis's time unit,
+// and Modelica's "degC" spelled °C.
+function dispUnit(unit) {
+  const c = dispOf(unit); if (c) return c.unit;
+  let u = unit === "degC" ? "°C" : unit;
+  if (timeMode === "min" && /\/s$/.test(u)) u = u.replace(/\/s$/, "/min");
+  if (dispMode === "c" && /^K\//.test(u)) u = u.replace(/^K\//, "°C/");
+  return u;
+}
 function unitOf(nm) { return (D && D.units && D.units[nm] !== undefined) ? D.units[nm] : ""; }
 // The one unit every selected variable shares, else "": an overlay axis can only be labelled
 // in display units when everything on it converts the same way.
@@ -588,12 +616,14 @@ function draw() {
   svg.setAttribute("viewBox", "0 0 " + box.w + " " + box.h);
   const frag = document.createDocumentFragment();
 
-  // Shared frame: time grid, the two axes, and one vertical line per event, full height.
-  for (const t of ticks(win[0], win[1], Math.max(2, Math.round(box.w / 90)))) {
-    const x = X(t);
+  // Shared frame: time grid, the two axes, and one vertical line per event, full height. Ticks
+  // are laid at round values of the *shown* time unit (whole minutes, say) and mapped back to
+  // seconds for their x, so the axis reads 0, 2, 4 min rather than 0, 120, 240.
+  for (const dt of ticks(toT(win[0]), toT(win[1]), Math.max(2, Math.round(box.w / 90)))) {
+    const x = X(fromT(dt));
     if (x < M.l - 0.5 || x > box.w - M.r + 0.5) continue;
     frag.appendChild(el("line", {class: "grid", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
-    frag.appendChild(el("text", {class: "tick", x: x, y: box.h - 9, "text-anchor": "middle"}, fmt(t)));
+    frag.appendChild(el("text", {class: "tick", x: x, y: box.h - 9, "text-anchor": "middle"}, fmt(dt)));
   }
   frag.appendChild(el("line", {class: "axis", x1: M.l, x2: M.l, y1: M.t, y2: box.h - M.b}));
   frag.appendChild(el("line", {class: "axis", x1: M.l, x2: box.w - M.r, y1: box.h - M.b, y2: box.h - M.b}));
@@ -837,7 +867,7 @@ function cursor(t) {
   }
   hud.replaceChildren(frag);
   const near = D.events.filter((e) => Math.abs(X(e.t) - x) < 4);
-  foot.textContent = "t = " + fmt(T[j]) + (near.length ? "   ⟨ " + (near[0].cause || "event") + " ⟩" : "");
+  foot.textContent = "t = " + fmt(toT(T[j])) + " " + tUnit() + (near.length ? "   ⟨ " + (near[0].cause || "event") + " ⟩" : "");
   paintLegend(j);
 }
 
@@ -869,7 +899,7 @@ svg.addEventListener("pointermove", (e) => {
     // Follow the pointer; the handle stays on the plot, the value may run past its right edge.
     const t = Math.max(timeAtFree(e), (win[1] - win[0]) * 0.01);
     hud.replaceChildren(stopMarker(X(Math.min(t, win[1]))));
-    foot.textContent = "stop → " + fmt(t) + (t > win[1] * (1 + 1e-9) ? "   (extending)" : "");
+    foot.textContent = "stop → " + fmt(toT(t)) + " " + tUnit() + (t > win[1] * (1 + 1e-9) ? "   (extending)" : "");
     return;
   }
   if (drag !== null) {
@@ -895,7 +925,7 @@ svg.addEventListener("pointerup", (e) => {
     stopDrag = false;
     const t = Math.max(timeAtFree(e), (win[1] - win[0]) * 0.01);
     hud.replaceChildren();
-    document.getElementById("stop").value = cleanStop(t);
+    document.getElementById("stop").value = cleanStop(toT(t));
     reRun();
     return;
   }
@@ -912,6 +942,13 @@ document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : 
 document.getElementById("all").onclick = () => { on = new Set(names); draw(); };
 document.getElementById("none").onclick = () => { on = new Set(); draw(); };
 document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
+document.getElementById("timeunit").onchange = (e) => {
+  timeMode = e.target.value;
+  const s = document.getElementById("stop");
+  if (LIVE && s && D) s.value = cleanStop(toT(D.stop));
+  document.getElementById("stopunit").textContent = " " + tUnit();
+  paintEvents(); paintDrop(); draw();
+};
 window.addEventListener("resize", draw);
 
 // Live stop-time control: ask the extension to re-simulate at a new stop, then swap in the data.
@@ -919,11 +956,12 @@ window.addEventListener("resize", draw);
 // past the current one; without it the number in the field is the stop.
 function reRun(until) {
   if (!vscodeApi) return;
-  const stop = parseFloat(document.getElementById("stop").value);
+  // The field is in the shown time unit; the simulator works in seconds.
+  const stop = fromT(parseFloat(document.getElementById("stop").value));
   if (!until && !(stop > 0)) return;
   foot.textContent = until === "event" ? "looking for the next event …"
     : until === "settle" ? "running until the signals settle …"
-    : "re-simulating to t = " + stop + " …";
+    : "re-simulating to t = " + fmt(toT(stop)) + " " + tUnit() + " …";
   vscodeApi.postMessage({ type: "simulate", stop: stop, until: until, from: stop,
     sets: overrides, runId: RUNS.length - 1 });
 }
@@ -1088,10 +1126,10 @@ function paintDrop() {
     const f = (v) => fmt(disp(v, u)), un = dispUnit(u) ? " " + dispUnit(u) : "";
     const tag = RUNS.length > 1 ? `<span class="tag">${String.fromCharCode(65 + ri)}</span> ` : "";
     const end = d.reached
-      ? `<span class="l">drop</span> <span class="v">${f(d.drop)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(d.tDrop)} s</span>`
-      : `<span class="l">peak</span> <span class="v">${f(d.drop)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(d.tDrop)} s</span>`
+      ? `<span class="l">drop</span> <span class="v">${f(d.drop)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(toT(d.tDrop))} ${tUnit()}</span>`
+      : `<span class="l">peak</span> <span class="v">${f(d.drop)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(toT(d.tDrop))} ${tUnit()}</span>`
         + (dropThr !== null ? ` <span class="miss">(${f(dropThr)}${un} not reached)</span>` : "");
-    card.innerHTML = `${tag}<span class="l">charge</span> <span class="v">${f(d.start)}${un}</span> <span class="l">→ turning point</span> <span class="v">${f(d.min)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(d.tMin)} s</span> <span class="l">→</span> ${end}`;
+    card.innerHTML = `${tag}<span class="l">charge</span> <span class="v">${f(d.start)}${un}</span> <span class="l">→ turning point</span> <span class="v">${f(d.min)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(toT(d.tMin))} ${tUnit()}</span> <span class="l">→</span> ${end}`;
     frag.appendChild(card);
   });
   list.replaceChildren(frag);
@@ -1124,12 +1162,12 @@ function paintEvents() {
   for (const ev of evs) {
     const row = document.createElement("div");
     row.className = "evrow"; row.title = ev.cause || "event";
-    const t = document.createElement("span"); t.className = "evt"; t.textContent = fmt(ev.t);
+    const t = document.createElement("span"); t.className = "evt"; t.textContent = fmt(toT(ev.t));
     const c = document.createElement("span"); c.className = "evc"; c.textContent = ev.cause || "event";
     row.append(t, c);
     row.onclick = () => {
       const until = ev.t > 0 ? ev.t * 1.05 : (T[N - 1] || 1) * 0.02;
-      if (LIVE && vscodeApi) { document.getElementById("stop").value = cleanStop(until); reRun(); }
+      if (LIVE && vscodeApi) { document.getElementById("stop").value = cleanStop(toT(until)); reRun(); }
       else { win = [T[0], Math.min(T[N - 1], until)]; draw(); }
     };
     frag.appendChild(row);
