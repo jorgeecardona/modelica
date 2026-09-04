@@ -171,8 +171,8 @@
         <span class="tools">
           <span id="stopwrap" class="stopwrap" hidden>
             <label title="simulation stop time -- Enter to re-run, or drag the marker on the plot">t&nbsp;&#8594;&nbsp;<input id="stop" type="number" step="any" min="0"><span class="unitlab" id="stopunit"></span></label>
-            <button type="button" id="nextev" title="continue until the next event">&#8594; event</button>
-            <button type="button" id="settle" title="stop where the signals settle">&#8677; settle</button>
+            <button type="button" id="nextev" title="continue until the next event (bounded by the pymodelica.autoStopMax setting)">&#8594; event</button>
+            <button type="button" id="settle" title="stop where the signals settle: every state within 1% of its final value (bounded by pymodelica.autoStopMax)">&#8677; settle</button>
           </span>
           <select id="scale" title="vertical axis">
             <option value="linear">linear</option>

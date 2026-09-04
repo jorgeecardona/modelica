@@ -2,7 +2,7 @@
   "name": "pymodelica-scope",
   "displayName": "pymodelica Simulation Scope",
   "description": "Simulate the Modelica .mo file you are editing and see its trajectory, in an interactive chart inside VS Code.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "jorgeecardona",
   "license": "MIT",
   "repository": {
@@ -90,6 +90,11 @@
           "type": "number",
           "default": 0,
           "description": "Stop time for the simulation. 0 means use the model's own (its sibling .toml's [simulate].stop, else 10). You can also change it live in the panel."
+        },
+        "pymodelica.autoStopMax": {
+          "type": "number",
+          "default": 0,
+          "description": "How far the automatic stops ('→ event', '⇥ settle') may probe past the current stop before giving up. 0 means ten times the current stop. A cap, so a model that never settles comes back in seconds."
         },
         "pymodelica.library": {
           "type": "array",

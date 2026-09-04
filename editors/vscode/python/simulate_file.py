@@ -100,19 +100,23 @@ def _settle_time(result: Result, states: set[str], eps: float = 0.01) -> float:
     return settle
 
 
-def _auto_stop(
-    kernel: Kernel, states: set[str], until: str, frm: float, default: float
+def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed straight through
+    kernel: Kernel, states: set[str], until: str, frm: float, default: float, maximum: float
 ) -> tuple[float, Result, str]:
     """Choose a stop from the signals: the next event past ``frm``, or where they settle.
 
-    Probes a growing horizon -- doubled at most four times, so a model that never settles or
-    has no further event does not run away -- and returns the chosen stop, the result integrated
-    to it, and a note for the panel. Falls back to ``frm``, unchanged, when there is nothing to
-    find. A small tail is added past the instant found, so the event line and what follows it
-    (or the flat settled stretch) is visible rather than cut off at the right edge.
+    Probes a doubling horizon up to ``maximum`` -- the cap that keeps a model that never settles,
+    or has no further event, from running away -- and returns the chosen stop, the result
+    integrated to it, and a note for the panel. Falls back to ``frm``, unchanged, when there is
+    nothing to find before the cap, and the note says so with the cap it reached. A small tail is
+    added past the instant found, so the event line and what follows it (or the flat settled
+    stretch) is visible rather than cut off at the right edge.
     """
+    maximum = max(maximum, frm)  # never below what is already on screen; a cap under the
+    # model's own default is still honoured -- the user asked for it
     horizon = max(frm * 1.5, frm + default, default) if until == "event" else max(frm, default, 1.0)
-    for _ in range(4):
+    horizon = min(horizon, maximum)
+    while True:
         probe = _integrate(kernel, horizon)
         if until == "event":
             future = [e for e in probe.events if float(e.time) > frm + 1e-9]
@@ -125,20 +129,36 @@ def _auto_stop(
             if settle < 0.85 * horizon:  # settled with room to spare, not merely cut off
                 target = min(horizon, settle * 1.08)
                 return target, _integrate(kernel, target), "signals settled"
-        horizon *= 2.0
+        if horizon >= maximum:
+            break
+        horizon = min(horizon * 2.0, maximum)
     fallback = frm if frm > 0 else default
-    note = "no further event found" if until == "event" else "signals had not settled"
+    note = (
+        f"no further event before t = {maximum:g}"
+        if until == "event"
+        else f"signals had not settled by t = {maximum:g}"
+    )
     return fallback, _integrate(kernel, fallback), note
 
 
 def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
-    path: Path, name: str, stop: float, libraries: list[str], until: str = "none", frm: float = 0.0
+    path: Path,
+    name: str,
+    stop: float,
+    libraries: list[str],
+    until: str = "none",
+    frm: float = 0.0,
+    maximum: float = 0.0,
 ) -> dict[str, object]:
     system, kernel = _load(path, name, libraries)
     states = set(system.modes[0].states)
     note = ""
     if until in ("event", "settle"):
-        stop, result, note = _auto_stop(kernel, states, until, frm, _default_stop(path))
+        default = _default_stop(path)
+        # No cap given: ten times what is on screen, far enough to find something and bounded
+        # enough that a model that never settles comes back in seconds, not minutes.
+        cap = maximum if maximum > 0 else 10.0 * max(frm, default)
+        stop, result, note = _auto_stop(kernel, states, until, frm, default, cap)
     else:
         result = _integrate(kernel, stop)
     time = np.asarray(result.time, dtype=float)
@@ -202,13 +222,22 @@ def main() -> None:
     ap.add_argument(
         "--from", dest="frm", type=float, default=0.0, help="the current stop, for --until event"
     )
+    ap.add_argument(
+        "--max",
+        dest="maximum",
+        type=float,
+        default=0.0,
+        help="the farthest --until may probe (0: ten times the current stop)",
+    )
     args = ap.parse_args()
 
     path = Path(args.path)
     name = args.model or path.stem
     stop = args.stop if args.stop is not None else _default_stop(path)
     try:
-        record = _run(path, name, stop, args.library, until=args.until, frm=args.frm)
+        record = _run(
+            path, name, stop, args.library, until=args.until, frm=args.frm, maximum=args.maximum
+        )
         print(json.dumps({"models": [record]}, separators=(",", ":"), allow_nan=False))
     except Exception as error:  # noqa: BLE001 - report every failure to the panel, never crash silently
         print(

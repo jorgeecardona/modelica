@@ -92,8 +92,12 @@ function runtimeCommand(context, cfg, file, opts) {
   const helper = path.join(context.extensionPath, "python", "simulate_file.py");
   const libs = cfg.get("library", []).flatMap((dir) => ["--library", dir]);
   const stopArg = opts.stop > 0 ? ["--stop", String(opts.stop)] : [];
+  // The farthest an automatic stop may probe; 0 lets the simulator pick ten times the current
+  // stop. A cap, so a model that never settles comes back in seconds rather than running away.
+  const max = Number(cfg.get("autoStopMax", 0)) || 0;
   const untilArg = opts.until
-    ? ["--until", String(opts.until), "--from", String(opts.from > 0 ? opts.from : 0)]
+    ? ["--until", String(opts.until), "--from", String(opts.from > 0 ? opts.from : 0),
+       "--max", String(max > 0 ? max : 0)]
     : [];
   return {
     cmd: python[0],
