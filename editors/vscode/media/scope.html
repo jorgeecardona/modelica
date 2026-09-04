@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-__NONCE__';">
+<title>Simulation Scope</title>
+<style>
+  :root {
+    /* Match the editor: VS Code injects its active theme as --vscode-* variables and updates
+       them live when the theme changes, so the scope follows dark/light/high-contrast exactly.
+       The fallbacks are a light palette for outside VS Code (the browser preview). */
+    color-scheme: light dark;
+    --ink: var(--vscode-editor-foreground, #1a1a1a);
+    --dim: var(--vscode-descriptionForeground, #6b6b6b);
+    --line: var(--vscode-panel-border, var(--vscode-widget-border, #d9d9d9));
+    --bg: var(--vscode-editor-background, #ffffff);
+    --panel: var(--vscode-editorWidget-background, #f4f5f7);
+    --panel-2: var(--vscode-editorWidget-background, #eceef1);
+    --accent: var(--vscode-textLink-foreground, #3a6ea5);
+    --accent-ink: var(--vscode-button-foreground, #ffffff);
+    --rail: var(--vscode-sideBar-background, var(--vscode-editorWidget-background, #f7f8fa));
+  }
+  * { box-sizing: border-box; }
+  /* A `hidden` element stays hidden even when a class gives it a `display` (the live-only stop
+     control is `.stopwrap`, whose `inline-flex` would otherwise defeat the attribute). */
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 13px/1.45 var(--vscode-font-family, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif);
+    display: flex; flex-direction: column;
+  }
+  .top {
+    display: flex; align-items: baseline; gap: 4px 12px; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); flex: none; flex-wrap: wrap;
+  }
+  .top h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: .2px; white-space: nowrap; }
+  .top .sub { color: var(--dim); font-size: 12px; min-width: 0; flex: 1 1 140px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .top .count { margin-left: auto; color: var(--dim); font-size: 12px;
+    font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .app { flex: 1; display: grid; grid-template-columns: 232px 1fr 208px; min-height: 0; }
+  /* one open .mo: no rail, chart takes its place */
+  body.single .app { grid-template-columns: 1fr 208px; }
+  body.single .rail { display: none; }
+  /* -- model rail -- */
+  .rail { border-right: 1px solid var(--line); background: var(--rail);
+    overflow-y: auto; padding: 6px 0; }
+  .grp { padding: 12px 14px 4px; font-size: 10.5px; font-weight: 650; letter-spacing: .7px;
+    text-transform: uppercase; color: var(--dim); }
+  .item { display: flex; align-items: baseline; gap: 8px; padding: 5px 14px; cursor: pointer;
+    border-left: 2px solid transparent; }
+  .item:hover { background: var(--panel); }
+  .item.on { background: var(--panel); border-left-color: var(--accent); }
+  .item .nm { font-weight: 550; }
+  .item .mt { margin-left: auto; color: var(--dim); font-size: 11px;
+    font-variant-numeric: tabular-nums; }
+  .item.on .nm { color: var(--accent); }
+  /* -- scope -- */
+  .scope { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .mhead { padding: 12px 16px 8px; border-bottom: 1px solid var(--line); }
+  .mrow { display: flex; align-items: baseline; gap: 8px 12px; flex-wrap: wrap; }
+  .mrow .name { min-width: 0; }
+  .mhead .name { font-size: 17px; font-weight: 650; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  /* Two lines then ellipsis: a corpus summary is a sentence, a live .mo's is its path -- both
+     stay compact instead of pushing the chart down. The full text is on the title attribute. */
+  .mhead .desc { color: var(--dim); margin-top: 3px; max-width: 72ch;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .chip { font-size: 11px; color: var(--dim); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 999px; padding: 1px 9px; font-variant-numeric: tabular-nums; }
+  .chip.tag { background: transparent; }
+  .tools { margin-left: auto; display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+  .stopwrap { color: var(--dim); display: inline-flex; align-items: baseline; gap: 3px; font-size: 12px; }
+  .stopwrap input { width: 68px; font: inherit; font-size: 12px; color: var(--ink);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; }
+  .stopwrap .unitlab { color: var(--dim); }
+  .plotwrap { flex: 1; min-height: 0; display: flex; }
+  svg { flex: 1; min-width: 0; display: block; touch-action: none; }
+  select, button {
+    font: inherit; font-size: 12px; color: inherit; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 5px; padding: 2px 7px; cursor: pointer;
+  }
+  button:hover, select:hover { border-color: var(--dim); }
+  button:focus-visible, select:focus-visible, .item:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px; }
+  .foot { flex: none; height: 26px; padding: 5px 16px; border-top: 1px solid var(--line);
+    color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden;
+    font-variant-numeric: tabular-nums; }
+  /* -- legend -- */
+  .legend { border-left: 1px solid var(--line); overflow-y: auto; padding: 8px 0; }
+  .legtitle { padding: 4px 12px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .7px;
+    text-transform: uppercase; color: var(--dim); }
+  .row { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; cursor: pointer;
+    white-space: nowrap; }
+  .row:hover { background: var(--panel); }
+  .row.off { opacity: .38; }
+  .swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; align-self: center; }
+  .row .name { overflow: hidden; text-overflow: ellipsis; }
+  .row .value { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--dim);
+    font-size: 12px; }
+  .axis { stroke: var(--line); }
+  .tick { fill: var(--dim); font-size: 10px; }
+  .grid { stroke: var(--line); stroke-dasharray: 2 3; opacity: .65; }
+  .event { stroke: var(--dim); stroke-dasharray: 4 3; opacity: .8; }
+  .cursor { stroke: var(--dim); }
+  .band { fill: var(--accent); opacity: .16; }
+  .refring { fill: none; stroke-width: 1.5; }
+  .note { padding: 5px 16px; color: var(--dim); font-size: 11px; border-top: 1px solid var(--line);
+    flex: none; }
+  @media (max-width: 780px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    /* single model has no rail, so the chart owns the whole height */
+    body.single .app { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); }
+    .rail { display: flex; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line);
+      max-height: 132px; }
+    .legend { display: none; }
+  }
+  /* Narrow pane (the .mo open beside its editor): the toolbar goes full width and its controls
+     share rows instead of overflowing, and the frame tightens so the plot keeps its room. */
+  @media (max-width: 480px) {
+    .top { padding: 8px 12px; }
+    .mhead { padding: 10px 12px 8px; }
+    .mhead .name { font-size: 15px; }
+    .tools { width: 100%; margin-left: 0; margin-top: 2px; }
+    .tools #scale { flex: 1 1 100%; }
+    .tools button { flex: 1 1 0; }
+    .stopwrap { flex: 1 1 100%; }
+    .stopwrap input { flex: 1; width: auto; }
+    .foot, .note, .srcnote { padding-left: 12px; padding-right: 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Simulation Scope</h1>
+  <span class="sub">the pymodelica corpus, integrated to its reference points</span>
+  <span class="count" id="count"></span>
+</div>
+
+<div class="app">
+  <nav class="rail" id="rail" aria-label="models"></nav>
+  <section class="scope">
+    <div class="mhead">
+      <div class="mrow">
+        <span class="name" id="mname"></span>
+        <span class="tools">
+          <label id="stopwrap" class="stopwrap" title="simulation stop time -- Enter to re-run" hidden>t&nbsp;&#8594;&nbsp;<input id="stop" type="number" step="any" min="0"><span class="unitlab" id="stopunit"></span></label>
+          <select id="scale" title="vertical axis">
+            <option value="linear">linear</option>
+            <option value="log">log |y|</option>
+            <option value="norm">normalised</option>
+            <option value="units">by unit</option>
+            <option value="split">split (per-variable)</option>
+          </select>
+          <button id="all">all</button>
+          <button id="none">none</button>
+          <button id="reset" title="or double-click the chart">reset</button>
+        </span>
+      </div>
+      <div class="desc" id="mdesc"></div>
+      <div class="chips" id="mchips"></div>
+    </div>
+    <div class="plotwrap"><svg id="chart"><g id="plot"></g><g id="hud"></g></svg></div>
+    <div class="foot" id="foot">drag to zoom · double-click to reset</div>
+  </section>
+  <aside class="legend"><div class="legtitle">variables</div><div id="legend"></div></aside>
+</div>
+<div class="note" id="srcnote"></div>
+
+<script id="data" type="application/json" nonce="__NONCE__">__DATA__</script>
+<script nonce="__NONCE__">
+"use strict";
+const DB = JSON.parse(document.getElementById("data").textContent);
+const LIVE = __LIVE__;
+const vscodeApi = (typeof acquireVsCodeApi === "function") ? acquireVsCodeApi() : null;
+let MODELS = DB.models;
+const PALETTE = ["#4c78a8","#f58518","#54a24b","#e45756","#72b7b2","#eeca3b",
+                 "#b279a2","#ff9da6","#9d755d","#bab0ac"];
+const M = {l: 60, r: 12, t: 10, b: 24};
+
+const svg = document.getElementById("chart");
+const plot = document.getElementById("plot");
+const hud = document.getElementById("hud");
+const legend = document.getElementById("legend");
+const foot = document.getElementById("foot");
+
+let D = null;            // active model
+let names = [];          // series names
+let T = [];              // time
+let N = 0;
+let on = new Set();
+let scale = "linear";
+let win = [0, 1];
+let drag = null;
+let box = {w: 0, h: 0};
+let cssbg = "#ffffff";
+
+function readBg() {
+  cssbg = getComputedStyle(document.body).backgroundColor || "#ffffff";
+}
+
+// -- rail ------------------------------------------------------------------------------
+function buildRail() {
+  const rail = document.getElementById("rail");
+  // One model means one open .mo, not the corpus: drop the rail (via a class the responsive
+  // rules respect) and give the chart its room.
+  if (MODELS.length <= 1) {
+    document.body.classList.add("single");
+    document.querySelector(".top .sub").textContent =
+      MODELS.length ? MODELS[0].summary : "";
+    document.getElementById("count").textContent =
+      MODELS.length ? MODELS[0].events.length + " events" : "";
+    return;
+  }
+  const order = ["Circuits", "Mechanical", "Thermal", "Stiff benchmarks", "Hybrid / events", "Other"];
+  const groups = {};
+  MODELS.forEach((m, i) => { (groups[m.group] = groups[m.group] || []).push(i); });
+  const frag = document.createDocumentFragment();
+  for (const g of order) {
+    if (!groups[g]) continue;
+    const h = document.createElement("div"); h.className = "grp"; h.textContent = g;
+    frag.appendChild(h);
+    for (const i of groups[g]) {
+      const m = MODELS[i];
+      const item = document.createElement("div");
+      item.className = "item"; item.tabIndex = 0; item.dataset.i = i;
+      const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = m.model;
+      const mt = document.createElement("span"); mt.className = "mt";
+      mt.textContent = m.nstates + "s" + (m.events.length ? " · " + m.events.length + "e" : "");
+      item.append(nm, mt);
+      item.onclick = () => select(i);
+      item.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(i); } };
+      frag.appendChild(item);
+    }
+  }
+  rail.replaceChildren(frag);
+  document.getElementById("count").textContent =
+    MODELS.length + " models · " + MODELS.reduce((a, m) => a + m.events.length, 0) + " events";
+}
+
+function select(i) {
+  D = MODELS[i];
+  names = Object.keys(D.series);
+  T = D.t; N = T.length;
+  win = N ? [T[0], T[N - 1]] : [0, 1];
+  // open on the moving variables
+  on = new Set(names.filter((nm) => {
+    const v = D.series[nm]; let a = v[0];
+    for (const x of v) if (x !== a) return true;
+    return false;
+  }));
+  if (!on.size) on = new Set(names);
+  // A single open .mo opens on its states in split mode: each state gets its own strip, so a
+  // model whose variables span decades (a temperature beside a mass) is legible at a glance.
+  if (MODELS.length === 1 && Array.isArray(D.states) && D.states.length) {
+    on = new Set(D.states.filter((s) => names.includes(s)));
+    scale = "units";
+    document.getElementById("scale").value = "units";
+  }
+  document.querySelectorAll(".item").forEach((el) => el.classList.toggle("on", +el.dataset.i === i));
+  document.getElementById("mname").textContent = D.model;
+  const mdesc = document.getElementById("mdesc");
+  mdesc.textContent = D.summary || "";
+  mdesc.title = D.summary || "";  // the desc is clamped to two lines; hover shows the whole path
+  // A live .mo gets an editable stop control instead of the pills; the corpus keeps its pills.
+  const stopwrap = document.getElementById("stopwrap");
+  if (LIVE) {
+    stopwrap.hidden = false;
+    document.getElementById("stop").value = D.stop;
+    document.getElementById("stopunit").textContent = D.tunit ? " " + D.tunit : "";
+    document.getElementById("mchips").replaceChildren();
+  } else {
+    stopwrap.hidden = true;
+    const cf = document.createDocumentFragment();
+    const chip = (t, tag) => { const s = document.createElement("span");
+      s.className = "chip" + (tag ? " tag" : ""); s.textContent = t; cf.appendChild(s); };
+    chip(D.nstates + " state" + (D.nstates > 1 ? "s" : ""));
+    chip("t → " + fmt(D.stop));
+    if (D.events.length) chip(D.events.length + " event" + (D.events.length > 1 ? "s" : ""));
+    if (D.refs.length) chip(D.refs.length + " reference point" + (D.refs.length > 1 ? "s" : ""));
+    (D.tags || []).slice(0, 3).forEach((t) => chip(t, true));
+    document.getElementById("mchips").replaceChildren(cf);
+  }
+  draw();
+}
+
+// -- helpers ---------------------------------------------------------------------------
+function fmt(v) {
+  if (v === null || v === undefined || !isFinite(v)) return "--";
+  const a = Math.abs(v);
+  if (a !== 0 && (a < 1e-4 || a >= 1e6)) return v.toExponential(3);
+  return String(Number(v.toPrecision(6)));
+}
+function ticks(lo, hi, want) {
+  if (!(hi > lo)) return [lo];
+  const raw = (hi - lo) / want;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / mag;
+  const step = (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(v);
+  return out;
+}
+function spanPad(lo, hi) {
+  if (!(isFinite(lo) && isFinite(hi))) return [0, 1];
+  if (hi > lo) { const pad = (hi - lo) * 0.06; return [lo - pad, hi + pad]; }
+  const pad = Math.abs(lo) * 0.06 || 1;
+  return [lo - pad, lo + pad];
+}
+function index(t) {
+  let lo = 0, hi = N - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (T[mid] < t) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+function visible() { return [Math.max(0, index(win[0]) - 1), Math.min(N - 1, index(win[1]) + 1)]; }
+function selected() { return names.filter((nm) => on.has(nm)); }
+function colour(nm) { return PALETTE[names.indexOf(nm) % PALETTE.length]; }
+function el(tag, attrs, text) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) node.setAttribute(k, attrs[k]);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+// -- scales ----------------------------------------------------------------------------
+function bounds() {
+  const [a, b] = visible();
+  if (scale === "norm") return [0, 1];
+  let lo = Infinity, hi = -Infinity;
+  for (const nm of selected()) {
+    const vs = D.series[nm];
+    for (let i = a; i <= b; i++) {
+      let v = vs[i]; if (v === null || !isFinite(v)) continue;
+      if (scale === "log") { v = Math.abs(v); if (!(v > 0)) continue; v = Math.log10(v); }
+      if (v < lo) lo = v; if (v > hi) hi = v;
+    }
+    // include reference points in range
+    if (scale === "linear") for (const rf of D.refs) {
+      const rv = rf.values[nm]; if (rv === undefined) continue;
+      if (rv < lo) lo = rv; if (rv > hi) hi = rv;
+    }
+  }
+  if (!isFinite(lo)) return [0, 1];
+  return spanPad(lo, hi);
+}
+function extent(nm) {
+  const [a, b] = visible(); const vs = D.series[nm];
+  let lo = Infinity, hi = -Infinity;
+  for (let i = a; i <= b; i++) { const v = vs[i]; if (v === null) continue;
+    if (v < lo) lo = v; if (v > hi) hi = v; }
+  return hi > lo ? [lo, hi] : [lo, lo + 1];
+}
+function project(nm, dom) {
+  if (scale === "norm") { const [lo, hi] = extent(nm); return (v) => (v - lo) / (hi - lo); }
+  if (scale === "log") return (v) => (Math.log10(Math.abs(v)) - dom[0]) / (dom[1] - dom[0]);
+  return (v) => (v - dom[0]) / (dom[1] - dom[0]);
+}
+const X = (t) => M.l + ((t - win[0]) / (win[1] - win[0])) * (box.w - M.l - M.r);
+const Y = (u) => box.h - M.b - u * (box.h - M.t - M.b);
+
+// -- drawing ---------------------------------------------------------------------------
+function draw() {
+  if (!D) return;
+  readBg();
+  box = {w: svg.clientWidth, h: svg.clientHeight};
+  // A narrow pane cannot spare 60px of gutter; tighten it so the plot keeps its width.
+  M.l = box.w < 360 ? 40 : box.w < 520 ? 50 : 60;
+  svg.setAttribute("viewBox", "0 0 " + box.w + " " + box.h);
+  const frag = document.createDocumentFragment();
+
+  // Shared frame: time grid, the two axes, and one vertical line per event, full height.
+  for (const t of ticks(win[0], win[1], Math.max(2, Math.round(box.w / 90)))) {
+    const x = X(t);
+    if (x < M.l - 0.5 || x > box.w - M.r + 0.5) continue;
+    frag.appendChild(el("line", {class: "grid", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
+    frag.appendChild(el("text", {class: "tick", x: x, y: box.h - 9, "text-anchor": "middle"}, fmt(t)));
+  }
+  frag.appendChild(el("line", {class: "axis", x1: M.l, x2: M.l, y1: M.t, y2: box.h - M.b}));
+  frag.appendChild(el("line", {class: "axis", x1: M.l, x2: box.w - M.r, y1: box.h - M.b, y2: box.h - M.b}));
+  for (const e of D.events) {
+    if (e.t < win[0] || e.t > win[1]) continue;
+    frag.appendChild(el("line", {class: "event", x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b}));
+  }
+
+  if (scale === "split") drawSplit(frag);
+  else if (scale === "units") drawUnits(frag);
+  else drawOverlay(frag);
+
+  plot.replaceChildren(frag);
+  hud.replaceChildren();
+  paintLegend();
+}
+
+// One shared y-scale, every selected variable on it. `linear`, `log |y|`, `normalised`.
+function drawOverlay(frag) {
+  const dom = bounds();
+  if (scale !== "norm") {
+    for (const v of ticks(dom[0], dom[1], Math.max(2, Math.round(box.h / 44)))) {
+      const y = Y((v - dom[0]) / (dom[1] - dom[0]));
+      if (y < M.t - 0.5 || y > box.h - M.b + 0.5) continue;
+      frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r, y1: y, y2: y}));
+      frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y + 3, "text-anchor": "end"},
+        scale === "log" ? "1e" + fmt(v) : fmt(v)));
+    }
+  }
+  const [a, b] = visible();
+  for (const nm of selected()) {
+    const vs = D.series[nm]; const to = project(nm, dom);
+    let d = "", pen = false;
+    for (let i = a; i <= b; i++) {
+      const v = vs[i]; const u = v === null ? null : to(v);
+      if (u === null || !isFinite(u)) { pen = false; continue; }
+      d += (pen ? "L" : "M") + X(T[i]).toFixed(2) + " " + Y(u).toFixed(2);
+      pen = true;
+    }
+    frag.appendChild(el("path", {d: d, fill: "none", "stroke-width": 1.6,
+      stroke: colour(nm), "stroke-linejoin": "round"}));
+  }
+  if (scale === "linear") for (const rf of D.refs) {
+    if (rf.t < win[0] || rf.t > win[1]) continue;
+    for (const nm of selected()) {
+      const rv = rf.values[nm]; if (rv === undefined) continue;
+      const u = (rv - dom[0]) / (dom[1] - dom[0]);
+      const cx = X(rf.t), cy = Y(u);
+      frag.appendChild(el("circle", {cx: cx, cy: cy, r: 4.5, fill: cssbg,
+        stroke: colour(nm), class: "refring"}));
+      frag.appendChild(el("circle", {cx: cx, cy: cy, r: 1.7, fill: colour(nm)}));
+    }
+  }
+}
+
+// A strip's min and max, its max at the top edge and its min at the bottom. A constant series
+// has min == max, which would stack the same number on itself, so it prints once at the middle
+// -- what fixed the duplicated "1.794" a flat mass drew in the by-unit view.
+function stripLabels(frag, lo, hi, y0, y1) {
+  if (hi - lo > (Math.abs(hi) || 1) * 1e-9) {
+    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y0 + 8, "text-anchor": "end"}, fmt(hi)));
+    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y1, "text-anchor": "end"}, fmt(lo)));
+  } else {
+    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: (y0 + y1) / 2 + 3,
+      "text-anchor": "end"}, fmt(lo)));
+  }
+}
+
+// Each selected variable in its own horizontal strip with its own y-scale, so a signal near
+// zero stays legible beside one in the hundreds. This is the "split" answer to a model like
+// RoastingMachine, where m_w would be a flat line at the foot of the temperatures.
+function drawSplit(frag) {
+  const rows = selected();
+  if (!rows.length) return;
+  const top = M.t, bottom = box.h - M.b, gap = 12;
+  const stripH = (bottom - top) / rows.length;
+  const [a, b] = visible();
+  rows.forEach((nm, i) => {
+    const y0 = top + i * stripH + (i ? gap / 2 : 2);
+    const y1 = top + (i + 1) * stripH - gap / 2;
+    if (i) frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r,
+      y1: top + i * stripH, y2: top + i * stripH}));
+    const vs = D.series[nm];
+    let lo = Infinity, hi = -Infinity;
+    for (let k = a; k <= b; k++) { const v = vs[k]; if (v === null || !isFinite(v)) continue;
+      if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (!isFinite(lo)) { lo = 0; hi = 1; }
+    const dataLo = lo, dataHi = hi;
+    const pad = hi > lo ? (hi - lo) * 0.08 : (Math.abs(lo) * 0.08 || 1);
+    lo -= pad; hi += pad;
+    const yFor = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
+    let d = "", pen = false;
+    for (let k = a; k <= b; k++) { const v = vs[k];
+      if (v === null || !isFinite(v)) { pen = false; continue; }
+      d += (pen ? "L" : "M") + X(T[k]).toFixed(2) + " " + yFor(v).toFixed(2); pen = true; }
+    frag.appendChild(el("path", {d: d, fill: "none", "stroke-width": 1.6,
+      stroke: colour(nm), "stroke-linejoin": "round"}));
+    for (const rf of D.refs) { const rv = rf.values[nm];
+      if (rv === undefined || rf.t < win[0] || rf.t > win[1]) continue;
+      const cx = X(rf.t), cy = yFor(rv);
+      frag.appendChild(el("circle", {cx: cx, cy: cy, r: 4.5, fill: cssbg, stroke: colour(nm), class: "refring"}));
+      frag.appendChild(el("circle", {cx: cx, cy: cy, r: 1.7, fill: colour(nm)}));
+    }
+    frag.appendChild(el("text", {x: M.l + 5, y: y0 + 10, fill: colour(nm),
+      "font-size": 10, "font-weight": 600}, nm));
+    stripLabels(frag, dataLo, dataHi, y0, y1);
+  });
+}
+
+// Strips grouped by physical unit: variables that share a unit (the temperatures, in K) share
+// one strip and one scale, so they are directly comparable; a different unit (kg) is its own
+// strip. The unit labels the strip and each variable keeps its colour. This is the default a
+// single .mo opens on, so RoastingMachine's three temperatures sit together, m_w on its own.
+function drawUnits(frag) {
+  const rows = selected();
+  if (!rows.length) return;
+  const groups = new Map();
+  for (const nm of rows) {
+    const u = (D.units && D.units[nm] !== undefined) ? D.units[nm] : "";
+    if (!groups.has(u)) groups.set(u, []);
+    groups.get(u).push(nm);
+  }
+  const units = [...groups.keys()];
+  const top = M.t, bottom = box.h - M.b, gap = 12;
+  // Height by how many variables a unit holds, so three temperatures get a tall strip and a
+  // lone mass gets a short one, instead of a flat line owning half the pane. Boundaries are
+  // the running sum of the weights, scaled to fill the plot.
+  const weight = units.map((u) => Math.max(1, groups.get(u).length));
+  const total = weight.reduce((s, x) => s + x, 0);
+  const edge = [top];
+  for (let k = 0; k < units.length; k++) edge.push(edge[k] + (bottom - top) * weight[k] / total);
+  const [a, b] = visible();
+  units.forEach((u, i) => {
+    const members = groups.get(u);
+    const y0 = edge[i] + (i ? gap / 2 : 2);
+    const y1 = edge[i + 1] - gap / 2;
+    if (i) frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r,
+      y1: edge[i], y2: edge[i]}));
+    let lo = Infinity, hi = -Infinity;
+    for (const nm of members) { const vs = D.series[nm];
+      for (let k = a; k <= b; k++) { const v = vs[k]; if (v === null || !isFinite(v)) continue;
+        if (v < lo) lo = v; if (v > hi) hi = v; } }
+    if (!isFinite(lo)) { lo = 0; hi = 1; }
+    const dataLo = lo, dataHi = hi;
+    const pad = hi > lo ? (hi - lo) * 0.08 : (Math.abs(lo) * 0.08 || 1);
+    lo -= pad; hi += pad;
+    const yFor = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
+    for (const nm of members) {
+      const vs = D.series[nm]; let d = "", pen = false;
+      for (let k = a; k <= b; k++) { const v = vs[k];
+        if (v === null || !isFinite(v)) { pen = false; continue; }
+        d += (pen ? "L" : "M") + X(T[k]).toFixed(2) + " " + yFor(v).toFixed(2); pen = true; }
+      frag.appendChild(el("path", {d: d, fill: "none", "stroke-width": 1.6,
+        stroke: colour(nm), "stroke-linejoin": "round"}));
+      for (const rf of D.refs) { const rv = rf.values[nm];
+        if (rv === undefined || rf.t < win[0] || rf.t > win[1]) continue;
+        const cx = X(rf.t), cy = yFor(rv);
+        frag.appendChild(el("circle", {cx: cx, cy: cy, r: 4.5, fill: cssbg, stroke: colour(nm), class: "refring"}));
+        frag.appendChild(el("circle", {cx: cx, cy: cy, r: 1.7, fill: colour(nm)}));
+      }
+    }
+    stripLabels(frag, dataLo, dataHi, y0, y1);
+    const unitLabel = u || "(dimensionless)";
+    let lx = M.l + 5;
+    frag.appendChild(el("text", {class: "tick", x: lx, y: y0 + 10, "font-weight": 600}, unitLabel));
+    lx += unitLabel.length * 6.5 + 12;
+    for (const nm of members) {
+      frag.appendChild(el("text", {x: lx, y: y0 + 10, fill: colour(nm), "font-size": 9}, nm));
+      lx += nm.length * 6.2 + 9;
+    }
+  });
+}
+
+// -- legend, cursor --------------------------------------------------------------------
+function paintLegend(at) {
+  const frag = document.createDocumentFragment();
+  for (const nm of names) {
+    const row = document.createElement("div");
+    row.className = "row" + (on.has(nm) ? "" : " off"); row.title = nm;
+    const dot = document.createElement("span"); dot.className = "swatch";
+    dot.style.background = colour(nm);
+    const name = document.createElement("span"); name.className = "name"; name.textContent = nm;
+    const value = document.createElement("span"); value.className = "value";
+    if (at !== undefined && on.has(nm)) value.textContent = fmt(D.series[nm][at]);
+    row.append(dot, name, value);
+    row.onclick = () => { on.has(nm) ? on.delete(nm) : on.add(nm); draw(); };
+    frag.appendChild(row);
+  }
+  legend.replaceChildren(frag);
+}
+function cursor(t) {
+  const i = index(t);
+  const j = i > 0 && Math.abs(T[i - 1] - t) < Math.abs(T[i] - t) ? i - 1 : i;
+  const x = X(T[j]);
+  const frag = document.createDocumentFragment();
+  frag.appendChild(el("line", {class: "cursor", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
+  // Dots on the shared scale; the strip modes have a scale per strip, so their readout is the legend.
+  if (scale !== "split" && scale !== "units") {
+    const dom = bounds();
+    for (const nm of selected()) {
+      const v = D.series[nm][j]; if (v === null) continue;
+      const u = project(nm, dom)(v); if (!isFinite(u)) continue;
+      frag.appendChild(el("circle", {cx: x, cy: Y(u), r: 2.6, fill: colour(nm)}));
+    }
+  }
+  hud.replaceChildren(frag);
+  const near = D.events.filter((e) => Math.abs(X(e.t) - x) < 4);
+  foot.textContent = "t = " + fmt(T[j]) + (near.length ? "   ⟨ " + (near[0].cause || "event") + " ⟩" : "");
+  paintLegend(j);
+}
+
+// -- interaction -----------------------------------------------------------------------
+function timeAt(event) {
+  const r = svg.getBoundingClientRect();
+  const x = Math.min(Math.max(event.clientX - r.left, M.l), r.width - M.r);
+  return win[0] + ((x - M.l) / (r.width - M.l - M.r)) * (win[1] - win[0]);
+}
+svg.addEventListener("pointermove", (e) => {
+  if (!D) return;
+  if (drag !== null) {
+    const t = timeAt(e);
+    const x0 = X(Math.min(drag, t)), x1 = X(Math.max(drag, t));
+    hud.replaceChildren(el("rect", {class: "band", x: x0, y: M.t,
+      width: Math.max(x1 - x0, 0), height: box.h - M.t - M.b}));
+    foot.textContent = "zoom → [" + fmt(Math.min(drag, t)) + ", " + fmt(Math.max(drag, t)) + "]";
+    return;
+  }
+  if (N) cursor(timeAt(e));
+});
+svg.addEventListener("pointerdown", (e) => { if (!D) return; drag = timeAt(e); svg.setPointerCapture(e.pointerId); });
+svg.addEventListener("pointerup", (e) => {
+  if (drag === null) return;
+  const t = timeAt(e); const lo = Math.min(drag, t), hi = Math.max(drag, t); drag = null;
+  if (hi - lo > (win[1] - win[0]) * 1e-4) win = [lo, hi];
+  draw();
+});
+svg.addEventListener("pointerleave", () => {
+  if (drag === null) { hud.replaceChildren(); foot.textContent = "drag to zoom · double-click to reset"; paintLegend(); }
+});
+svg.addEventListener("dblclick", () => { win = N ? [T[0], T[N - 1]] : [0, 1]; draw(); });
+document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; draw(); };
+document.getElementById("all").onclick = () => { on = new Set(names); draw(); };
+document.getElementById("none").onclick = () => { on = new Set(); draw(); };
+document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
+window.addEventListener("resize", draw);
+
+// Live stop-time control: ask the extension to re-simulate at a new stop, then swap in the data.
+function reRun() {
+  if (!vscodeApi) return;
+  const stop = parseFloat(document.getElementById("stop").value);
+  if (!(stop > 0)) return;
+  foot.textContent = "re-simulating to t = " + stop + " …";
+  vscodeApi.postMessage({ type: "simulate", stop: stop });
+}
+const stopInput = document.getElementById("stop");
+if (stopInput) {
+  stopInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); reRun(); } });
+  stopInput.addEventListener("change", reRun);
+}
+window.addEventListener("message", (e) => {
+  const m = e.data || {};
+  if (m.type === "data" && m.models) { MODELS = m.models; load(); }
+  else if (m.type === "error") { foot.textContent = "error: " + m.error; }
+});
+
+document.getElementById("srcnote").textContent =
+  "Trajectories from modelica.sim (the reference tier). The rings mark the model's recorded reference points; the line is the simulation passing through them. Same chart engine as the notebook widget (modelica.sim.view).";
+
+function load() {
+  document.body.classList.remove("single");
+  buildRail();
+  select(0);
+}
+load();
+</script>
+
+</body>
+</html>
