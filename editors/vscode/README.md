@@ -70,7 +70,8 @@ so an old version number here means reload the window (**Developer: Reload Windo
   `when T_probe + -273.15 >= T_drop`).
 - **Legend.** Click a variable to toggle it; `all`, `none` and `reset` act on the set. The
   legend pane resizes by dragging its splitter and collapses on a double-click. Below 780 px
-  of panel width it is hidden, so widen the panel to reach the sections below.
+  of panel width it is hidden by default and a `legend` button appears in the toolbar: it
+  opens the legend as a strip under the chart, with every section below reachable.
 
 ### Parameters and comparison
 

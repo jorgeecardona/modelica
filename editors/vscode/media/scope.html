@@ -104,6 +104,9 @@
   .legend { border-left: 1px solid var(--line); overflow-y: auto; padding: 8px 0; }
   /* The splitter between chart and legend: a 6px grip column, its line shown on hover. */
   .split { cursor: col-resize; position: relative; }
+  /* The legend toggle exists for the narrow pane only; wide, the legend is always there. */
+  #legendbtn { display: none; }
+  #legendbtn[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .split::after { content: ""; position: absolute; inset: 0 2px; background: var(--accent);
     opacity: 0; transition: opacity .12s; }
   .split:hover::after, .split.on::after { opacity: .6; }
@@ -231,6 +234,16 @@
     .rail { display: flex; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line);
       max-height: 132px; }
     .legend, .split { display: none; }
+    /* Narrow, the legend is off by default -- the chart needs the width -- but everything in it
+       (parameters, the sweep, sensitivity) must stay reachable: the `legend` button in the
+       toolbar opens it as a strip under the chart, capped so the chart keeps most of the height. */
+    #legendbtn { display: inline-block; }
+    body.legend-open .legend { display: block; border-left: 0; border-top: 1px solid var(--line); }
+    /* The legend's row is capped by the grid, not by the legend: an `auto` row sized to the
+       legend's content squeezed the chart to a sliver (15px at 720px tall, measured), while a
+       `minmax(0, 30vh)` row keeps the chart at two thirds of the height and scrolls the legend. */
+    body.legend-open .app { grid-template-rows: auto minmax(0, 1fr) minmax(0, 30vh); }
+    body.single.legend-open .app { grid-template-rows: minmax(0, 1fr) minmax(0, 30vh); }
   }
   /* Narrow pane (the .mo open beside its editor -- often ~300px). The toolbar takes the full
      width and lays out in tidy rows: the time controls together, the two selects together, then
@@ -247,7 +260,7 @@
     .stopwrap button { flex: 1 1 auto; }
     #scale { flex: 1 1 100%; }
     #timeunit, #disp { flex: 1 1 46%; }
-    #pin, #all, #none, #reset { flex: 1 1 auto; }
+    #pin, #all, #none, #reset, #legendbtn { flex: 1 1 auto; }
     .foot, .note, .srcnote { padding-left: 12px; padding-right: 12px; }
   }
 </style>
@@ -294,6 +307,7 @@
           <button id="all">all</button>
           <button id="none">none</button>
           <button id="reset" title="or double-click the chart">reset</button>
+          <button type="button" id="legendbtn" aria-pressed="false" title="show or hide the legend -- variables, events, parameters, sweep, sensitivity -- which a narrow pane hides by default">legend</button>
         </span>
       </div>
       <div class="desc" id="mdesc"></div>
@@ -1614,6 +1628,14 @@ split.addEventListener("pointerdown", (e) => { splitDrag = true; split.classList
 split.addEventListener("pointermove", (e) => { if (splitDrag) setLegend(window.innerWidth - e.clientX - 3); });
 split.addEventListener("pointerup", () => { splitDrag = false; split.classList.remove("on"); });
 split.addEventListener("dblclick", () => setLegend(legendWidth < 40 ? 208 : 0));
+// Narrow pane: the legend is hidden by the layout, and this button brings it back as a strip
+// under the chart (see the 780px media query). Wide, the button itself is hidden.
+const legendBtn = document.getElementById("legendbtn");
+legendBtn.addEventListener("click", () => {
+  const open = document.body.classList.toggle("legend-open");
+  legendBtn.setAttribute("aria-pressed", open ? "true" : "false");
+  draw();
+});
 window.addEventListener("message", (e) => {
   const m = e.data || {};
   if (m.type === "data" && m.models) {
