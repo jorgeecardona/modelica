@@ -42,7 +42,10 @@ function ensurePanel(context) {
   });
   panel.webview.onDidReceiveMessage((msg) => {
     if (msg && msg.type === "simulate" && live) {
-      runHelper(live.context, live.file, Number(msg.stop), (data) => {
+      // `until` asks the simulator to pick the stop itself (next event past `from`, or where
+      // the signals settle) instead of taking the number the panel holds.
+      const opts = { stop: Number(msg.stop), until: msg.until, from: Number(msg.from) };
+      runHelper(live.context, live.file, opts, (data) => {
         panel.webview.postMessage(
           data.error ? { type: "error", error: data.error } : { type: "data", models: data.models }
         );
@@ -77,8 +80,10 @@ function openScope(context) {
 
 // The command and arguments for the chosen runtime. Python is the only one today; `auto`
 // resolves to it. A Rust/C interpreter over the flat IR slots in here later without touching
-// the rest of the extension. `stop <= 0` means "let the model decide" (no --stop).
-function runtimeCommand(context, cfg, file, stop) {
+// the rest of the extension. `opts.stop <= 0` means "let the model decide" (no --stop);
+// `opts.until` ("event" | "settle") has the simulator choose the stop from the signals, with
+// `opts.from` the current stop it should look past.
+function runtimeCommand(context, cfg, file, opts) {
   const runtime = cfg.get("runtime", "auto");
   if (runtime !== "auto" && runtime !== "python") {
     throw new Error(`runtime '${runtime}' is not available yet; use 'python'`);
@@ -86,17 +91,23 @@ function runtimeCommand(context, cfg, file, stop) {
   const python = cfg.get("python", ["uv", "run", "--extra", "sim", "python"]);
   const helper = path.join(context.extensionPath, "python", "simulate_file.py");
   const libs = cfg.get("library", []).flatMap((dir) => ["--library", dir]);
-  const stopArg = stop > 0 ? ["--stop", String(stop)] : [];
-  return { cmd: python[0], args: [...python.slice(1), helper, file, ...stopArg, ...libs] };
+  const stopArg = opts.stop > 0 ? ["--stop", String(opts.stop)] : [];
+  const untilArg = opts.until
+    ? ["--until", String(opts.until), "--from", String(opts.from > 0 ? opts.from : 0)]
+    : [];
+  return {
+    cmd: python[0],
+    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...libs],
+  };
 }
 
-function runHelper(context, file, stop, done) {
+function runHelper(context, file, opts, done) {
   const cfg = vscode.workspace.getConfiguration("pymodelica");
   const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file));
   const cwd = cfg.get("cwd") || (folder && folder.uri.fsPath) || path.dirname(file);
   let plan;
   try {
-    plan = runtimeCommand(context, cfg, file, stop);
+    plan = runtimeCommand(context, cfg, file, opts);
   } catch (error) {
     done({ error: String(error.message || error) });
     return;
@@ -129,7 +140,7 @@ function simulateActive(context, document) {
   }
   const file = doc.fileName;
   const stop = vscode.workspace.getConfiguration("pymodelica").get("stop", 0);
-  runHelper(context, file, Number(stop), (data) => {
+  runHelper(context, file, { stop: Number(stop) }, (data) => {
     if (data.error) {
       vscode.window.showErrorMessage(`${path.basename(file)}: ${data.error}`);
       return;

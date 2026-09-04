@@ -20,6 +20,7 @@
     --accent: var(--vscode-textLink-foreground, #3a6ea5);
     --accent-ink: var(--vscode-button-foreground, #ffffff);
     --rail: var(--vscode-sideBar-background, var(--vscode-editorWidget-background, #f7f8fa));
+    --legend-w: 208px; /* the legend column; the splitter changes it, double-click collapses */
   }
   * { box-sizing: border-box; }
   /* A `hidden` element stays hidden even when a class gives it a `display` (the live-only stop
@@ -40,9 +41,9 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .top .count { margin-left: auto; color: var(--dim); font-size: 12px;
     font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .app { flex: 1; display: grid; grid-template-columns: 232px 1fr 208px; min-height: 0; }
+  .app { flex: 1; display: grid; grid-template-columns: 232px 1fr 6px var(--legend-w); min-height: 0; }
   /* one open .mo: no rail, chart takes its place */
-  body.single .app { grid-template-columns: 1fr 208px; }
+  body.single .app { grid-template-columns: 1fr 6px var(--legend-w); }
   body.single .rail { display: none; }
   /* -- model rail -- */
   .rail { border-right: 1px solid var(--line); background: var(--rail);
@@ -73,7 +74,9 @@
     border-radius: 999px; padding: 1px 9px; font-variant-numeric: tabular-nums; }
   .chip.tag { background: transparent; }
   .tools { margin-left: auto; display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
-  .stopwrap { color: var(--dim); display: inline-flex; align-items: baseline; gap: 3px; font-size: 12px; }
+  /* The time controls, together: the stop field, then the two automatic stops. */
+  .stopwrap { color: var(--dim); display: inline-flex; align-items: baseline; gap: 5px; font-size: 12px; }
+  .stopwrap label { display: inline-flex; align-items: baseline; gap: 3px; }
   .stopwrap input { width: 68px; font: inherit; font-size: 12px; color: var(--ink);
     background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; }
   .stopwrap .unitlab { color: var(--dim); }
@@ -91,6 +94,23 @@
     font-variant-numeric: tabular-nums; }
   /* -- legend -- */
   .legend { border-left: 1px solid var(--line); overflow-y: auto; padding: 8px 0; }
+  /* The splitter between chart and legend: a 6px grip column, its line shown on hover. */
+  .split { cursor: col-resize; position: relative; }
+  .split::after { content: ""; position: absolute; inset: 0 2px; background: var(--accent);
+    opacity: 0; transition: opacity .12s; }
+  .split:hover::after, .split.on::after { opacity: .6; }
+  body.legend-collapsed .legend { display: none; }
+  /* The events, below the variables: time, then the relation that fired. */
+  #evtitle { margin-top: 12px; }
+  .evrow { display: flex; align-items: baseline; gap: 8px; padding: 2px 12px; cursor: pointer;
+    white-space: nowrap; font-size: 12px; }
+  .evrow:hover { background: var(--panel); }
+  .evrow .evt { font-variant-numeric: tabular-nums; min-width: 5.5ch; text-align: right; }
+  .evrow .evc { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+  /* The stop marker: where the run ends, as a handle you drag to move the horizon. */
+  .stopline { stroke: var(--accent); stroke-dasharray: 3 3; opacity: .9; }
+  .stopgrip { fill: var(--accent); cursor: ew-resize; }
+  .stoplab { fill: var(--accent); font-size: 10px; font-weight: 600; }
   .legtitle { padding: 4px 12px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .7px;
     text-transform: uppercase; color: var(--dim); }
   .row { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; cursor: pointer;
@@ -116,7 +136,7 @@
     body.single .app { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); }
     .rail { display: flex; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line);
       max-height: 132px; }
-    .legend { display: none; }
+    .legend, .split { display: none; }
   }
   /* Narrow pane (the .mo open beside its editor): the toolbar goes full width and its controls
      share rows instead of overflowing, and the frame tightens so the plot keeps its room. */
@@ -128,7 +148,9 @@
     .tools #scale { flex: 1 1 100%; }
     .tools button { flex: 1 1 0; }
     .stopwrap { flex: 1 1 100%; }
+    .stopwrap label { flex: 1; }
     .stopwrap input { flex: 1; width: auto; }
+    .stopwrap button { flex: 0 0 auto; }
     .foot, .note, .srcnote { padding-left: 12px; padding-right: 12px; }
   }
 </style>
@@ -147,7 +169,11 @@
       <div class="mrow">
         <span class="name" id="mname"></span>
         <span class="tools">
-          <label id="stopwrap" class="stopwrap" title="simulation stop time -- Enter to re-run" hidden>t&nbsp;&#8594;&nbsp;<input id="stop" type="number" step="any" min="0"><span class="unitlab" id="stopunit"></span></label>
+          <span id="stopwrap" class="stopwrap" hidden>
+            <label title="simulation stop time -- Enter to re-run, or drag the marker on the plot">t&nbsp;&#8594;&nbsp;<input id="stop" type="number" step="any" min="0"><span class="unitlab" id="stopunit"></span></label>
+            <button type="button" id="nextev" title="continue until the next event">&#8594; event</button>
+            <button type="button" id="settle" title="stop where the signals settle">&#8677; settle</button>
+          </span>
           <select id="scale" title="vertical axis">
             <option value="linear">linear</option>
             <option value="log">log |y|</option>
@@ -166,7 +192,11 @@
     <div class="plotwrap"><svg id="chart"><g id="plot"></g><g id="hud"></g></svg></div>
     <div class="foot" id="foot">drag to zoom · double-click to reset</div>
   </section>
-  <aside class="legend"><div class="legtitle">variables</div><div id="legend"></div></aside>
+  <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
+  <aside class="legend">
+    <div class="legtitle">variables</div><div id="legend"></div>
+    <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
+  </aside>
 </div>
 <div class="note" id="srcnote"></div>
 
@@ -195,6 +225,7 @@ let on = new Set();
 let scale = "linear";
 let win = [0, 1];
 let drag = null;
+let stopDrag = false;    // dragging the stop marker, as opposed to a zoom band
 let box = {w: 0, h: 0};
 let cssbg = "#ffffff";
 
@@ -284,7 +315,10 @@ function select(i) {
     (D.tags || []).slice(0, 3).forEach((t) => chip(t, true));
     document.getElementById("mchips").replaceChildren(cf);
   }
+  paintEvents();
   draw();
+  // An automatic stop says where it landed and why, until the pointer moves on.
+  if (D.autoNote) foot.textContent = D.autoNote + "  ·  t → " + fmt(D.stop);
 }
 
 // -- helpers ---------------------------------------------------------------------------
@@ -383,6 +417,12 @@ function draw() {
   for (const e of D.events) {
     if (e.t < win[0] || e.t > win[1]) continue;
     frag.appendChild(el("line", {class: "event", x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b}));
+  }
+  // The stop marker: where the run ends, drawn as a handle. Drag it left to trim the horizon
+  // or past the right edge to extend it; letting go re-simulates to there. A live .mo only,
+  // since the corpus gallery cannot re-simulate.
+  if (LIVE && N && D.stop >= win[0] && D.stop <= win[1] * (1 + 1e-9)) {
+    frag.appendChild(stopMarker(X(Math.min(D.stop, win[1]))));
   }
 
   if (scale === "split") drawSplit(frag);
@@ -594,8 +634,31 @@ function timeAt(event) {
   const x = Math.min(Math.max(event.clientX - r.left, M.l), r.width - M.r);
   return win[0] + ((x - M.l) / (r.width - M.l - M.r)) * (win[1] - win[0]);
 }
+// Like timeAt but not clamped at the plot's right edge: past it the time keeps growing at the
+// plot's own scale, which is how dragging the stop marker outward extends the horizon.
+function timeAtFree(event) {
+  const r = svg.getBoundingClientRect();
+  const x = Math.max(event.clientX - r.left, M.l);
+  return win[0] + ((x - M.l) / (r.width - M.l - M.r)) * (win[1] - win[0]);
+}
+// The stop marker as one SVG group: a dashed line the full plot height, a grip at the axis to
+// grab, and a label. Drawn in `plot` at rest and in `hud` while being dragged.
+function stopMarker(x) {
+  const g = el("g", {});
+  g.appendChild(el("line", {class: "stopline", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
+  g.appendChild(el("rect", {class: "stopgrip", x: x - 5, y: box.h - M.b - 16, width: 10, height: 16, rx: 2}));
+  g.appendChild(el("text", {class: "stoplab", x: x - 7, y: M.t + 10, "text-anchor": "end"}, "stop"));
+  return g;
+}
 svg.addEventListener("pointermove", (e) => {
   if (!D) return;
+  if (stopDrag) {
+    // Follow the pointer; the handle stays on the plot, the value may run past its right edge.
+    const t = Math.max(timeAtFree(e), (win[1] - win[0]) * 0.01);
+    hud.replaceChildren(stopMarker(X(Math.min(t, win[1]))));
+    foot.textContent = "stop → " + fmt(t) + (t > win[1] * (1 + 1e-9) ? "   (extending)" : "");
+    return;
+  }
   if (drag !== null) {
     const t = timeAt(e);
     const x0 = X(Math.min(drag, t)), x1 = X(Math.max(drag, t));
@@ -606,15 +669,30 @@ svg.addEventListener("pointermove", (e) => {
   }
   if (N) cursor(timeAt(e));
 });
-svg.addEventListener("pointerdown", (e) => { if (!D) return; drag = timeAt(e); svg.setPointerCapture(e.pointerId); });
+svg.addEventListener("pointerdown", (e) => {
+  if (!D) return;
+  svg.setPointerCapture(e.pointerId);
+  // Grabbing the stop handle moves the horizon; grabbing anywhere else starts a zoom band.
+  if (e.target && e.target.classList && e.target.classList.contains("stopgrip")) { stopDrag = true; return; }
+  drag = timeAt(e);
+});
 svg.addEventListener("pointerup", (e) => {
+  if (stopDrag) {
+    // "Show me until here": the marker's time becomes the stop, and the model re-runs to it.
+    stopDrag = false;
+    const t = Math.max(timeAtFree(e), (win[1] - win[0]) * 0.01);
+    hud.replaceChildren();
+    document.getElementById("stop").value = Number(t.toPrecision(6));
+    reRun();
+    return;
+  }
   if (drag === null) return;
   const t = timeAt(e); const lo = Math.min(drag, t), hi = Math.max(drag, t); drag = null;
   if (hi - lo > (win[1] - win[0]) * 1e-4) win = [lo, hi];
   draw();
 });
 svg.addEventListener("pointerleave", () => {
-  if (drag === null) { hud.replaceChildren(); foot.textContent = "drag to zoom · double-click to reset"; paintLegend(); }
+  if (drag === null && !stopDrag) { hud.replaceChildren(); foot.textContent = "drag to zoom · double-click to reset"; paintLegend(); }
 });
 svg.addEventListener("dblclick", () => { win = N ? [T[0], T[N - 1]] : [0, 1]; draw(); });
 document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; draw(); };
@@ -624,18 +702,64 @@ document.getElementById("scale").onchange = (e) => { scale = e.target.value; dra
 window.addEventListener("resize", draw);
 
 // Live stop-time control: ask the extension to re-simulate at a new stop, then swap in the data.
-function reRun() {
+// `until` ("event" | "settle") asks the simulator to pick the stop from the signals, looking
+// past the current one; without it the number in the field is the stop.
+function reRun(until) {
   if (!vscodeApi) return;
   const stop = parseFloat(document.getElementById("stop").value);
-  if (!(stop > 0)) return;
-  foot.textContent = "re-simulating to t = " + stop + " …";
-  vscodeApi.postMessage({ type: "simulate", stop: stop });
+  if (!until && !(stop > 0)) return;
+  foot.textContent = until === "event" ? "looking for the next event …"
+    : until === "settle" ? "running until the signals settle …"
+    : "re-simulating to t = " + stop + " …";
+  vscodeApi.postMessage({ type: "simulate", stop: stop, until: until, from: stop });
 }
 const stopInput = document.getElementById("stop");
 if (stopInput) {
   stopInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); reRun(); } });
-  stopInput.addEventListener("change", reRun);
+  stopInput.addEventListener("change", () => reRun());
 }
+document.getElementById("nextev").onclick = () => reRun("event");
+document.getElementById("settle").onclick = () => reRun("settle");
+
+// The events, listed under the variables with their cause. Clicking one says "show me until
+// here": a live .mo moves its stop to just past that event and re-runs; the corpus gallery,
+// which cannot re-simulate, zooms the view to end there instead.
+function paintEvents() {
+  const evs = (D && D.events) || [];
+  document.getElementById("evtitle").hidden = !evs.length;
+  const frag = document.createDocumentFragment();
+  for (const ev of evs) {
+    const row = document.createElement("div");
+    row.className = "evrow"; row.title = ev.cause || "event";
+    const t = document.createElement("span"); t.className = "evt"; t.textContent = fmt(ev.t);
+    const c = document.createElement("span"); c.className = "evc"; c.textContent = ev.cause || "event";
+    row.append(t, c);
+    row.onclick = () => {
+      const until = ev.t > 0 ? ev.t * 1.05 : (T[N - 1] || 1) * 0.02;
+      if (LIVE && vscodeApi) { document.getElementById("stop").value = Number(until.toPrecision(6)); reRun(); }
+      else { win = [T[0], Math.min(T[N - 1], until)]; draw(); }
+    };
+    frag.appendChild(row);
+  }
+  document.getElementById("evlist").replaceChildren(frag);
+}
+
+// A resizable legend: drag the splitter to set its width, double-click to collapse and again
+// to bring it back. The width is a CSS variable the grid reads, so the chart re-lays out and
+// redraws to whatever room is left.
+const split = document.getElementById("split");
+let splitDrag = false;
+let legendWidth = 208;
+function setLegend(px) {
+  legendWidth = Math.max(0, Math.min(480, px));
+  document.documentElement.style.setProperty("--legend-w", legendWidth + "px");
+  document.body.classList.toggle("legend-collapsed", legendWidth < 40);
+  draw();
+}
+split.addEventListener("pointerdown", (e) => { splitDrag = true; split.classList.add("on"); split.setPointerCapture(e.pointerId); });
+split.addEventListener("pointermove", (e) => { if (splitDrag) setLegend(window.innerWidth - e.clientX - 3); });
+split.addEventListener("pointerup", () => { splitDrag = false; split.classList.remove("on"); });
+split.addEventListener("dblclick", () => setLegend(legendWidth < 40 ? 208 : 0));
 window.addEventListener("message", (e) => {
   const m = e.data || {};
   if (m.type === "data" && m.models) { MODELS = m.models; load(); }
