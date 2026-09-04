@@ -67,11 +67,17 @@ function render(context, dataString, isLive) {
   const media = path.join(context.extensionPath, "media");
   const template = fs.readFileSync(path.join(media, "scope.html"), "utf8");
   const n = nonce();
+  // The running extension's own version, so the panel can show which build drew it. After a
+  // `.vsix` upgrade the old extension host keeps running until the window reloads; seeing an
+  // old version here is how you tell the panel is on stale code.
+  const version = require("./package.json").version;
   ensurePanel(context).webview.html = template
     .split("__NONCE__")
     .join(n)
     .split("__LIVE__")
     .join(isLive ? "true" : "false")
+    .split("__VERSION__")
+    .join(version)
     .replace("__DATA__", () => dataString);
 }
 

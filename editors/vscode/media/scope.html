@@ -41,6 +41,7 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .top .count { margin-left: auto; color: var(--dim); font-size: 12px;
     font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .top .ver { color: var(--dim); font-size: 11px; opacity: .7; font-variant-numeric: tabular-nums; }
   .app { flex: 1; display: grid; grid-template-columns: 232px 1fr 6px var(--legend-w); min-height: 0; }
   /* one open .mo: no rail, chart takes its place */
   body.single .app { grid-template-columns: 1fr 6px var(--legend-w); }
@@ -227,6 +228,7 @@
   <h1>Simulation Scope</h1>
   <span class="sub">the pymodelica corpus, integrated to its reference points</span>
   <span class="count" id="count"></span>
+  <span class="ver" title="the extension build that drew this panel; after upgrading, reload the window if this is old">v__VERSION__</span>
 </div>
 
 <div class="app">
