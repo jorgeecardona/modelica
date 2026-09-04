@@ -167,6 +167,22 @@
   .prow.derived { color: var(--dim); }
   .prow .undo { cursor: pointer; color: var(--dim); text-align: center; }
   .prow .undo:hover { color: var(--accent); }
+  /* The sweep: one parameter over a range, one pinned run per value, and a small chart of a
+     response read off each run against the parameter -- drop time against charge. */
+  #stitle { margin-top: 12px; }
+  .sweepctl { padding: 0 12px 4px; font-size: 12px; }
+  .srow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; margin: 3px 0; }
+  .srow .l { color: var(--dim); }
+  .srow input { width: 58px; font: inherit; font-size: 11.5px; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; text-align: right;
+    font-variant-numeric: tabular-nums; }
+  .srow input#ssteps { width: 34px; }
+  .srow select { max-width: 100%; }
+  .schart { display: block; width: 100%; height: 130px; margin-top: 4px; }
+  .schart .rp { fill: var(--accent); }
+  .schart .rl { stroke: var(--accent); fill: none; stroke-width: 1.4; }
+  .schart .rtick { fill: var(--dim); font-size: 9.5px; font-variant-numeric: tabular-nums; }
+  .schart .rax { stroke: var(--line); }
   .legtitle { padding: 4px 12px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .7px;
     text-transform: uppercase; color: var(--dim); }
   .row { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; cursor: pointer;
@@ -268,6 +284,14 @@
     <div class="legtitle">variables</div><div id="legend"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="ptitle" hidden>parameters</div><div id="plist"></div>
+    <div class="legtitle" id="stitle" hidden>sweep</div>
+    <div id="sweepctl" class="sweepctl" hidden>
+      <div class="srow"><select id="sparam" title="the parameter to sweep"></select></div>
+      <div class="srow"><span class="l">from</span><input id="sfrom" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"><span class="l">to</span><input id="sto" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"><span class="l">in</span><input id="ssteps" type="text" inputmode="numeric" spellcheck="false" autocomplete="off" value="5"><span class="l">runs</span></div>
+      <div class="srow"><button type="button" id="srun" title="simulate the model once per value, each as a pinned run">run sweep</button><button type="button" id="sclear" title="drop the sweep's runs">clear</button></div>
+      <div class="srow"><span class="l">response</span><select id="sresp" title="the number read off each run and plotted against the parameter"></select></div>
+      <svg id="schart" class="schart"></svg>
+    </div>
   </aside>
 </div>
 <div class="note" id="srcnote"></div>
@@ -423,6 +447,7 @@ function select(i) {
   paintXAxis();
   paintParams();
   paintRuns();
+  paintSweep();
   draw();
   // An automatic stop says where it landed and why, until the pointer moves on.
   if (D.autoNote) foot.textContent = D.autoNote + "  ·  t → " + fmt(toT(D.stop)) + " " + tUnit();
@@ -916,6 +941,136 @@ function cursor(v) {
   paintLegend(j);
 }
 
+// -- the sweep -----------------------------------------------------------------------------
+// One parameter over a range, one run per value, and a response read off each run plotted
+// against the parameter: drop time against charge, final temperature against burner power.
+// Each value becomes a pinned run (its chip names the value) so the trajectories overlay as
+// any comparison does; the runs are slots filled by the extension's answers, keyed by runId.
+function editableParams() { return ((D && D.parameters) || []).filter((p) => !p.derived); }
+// The response choices: a variable's final value, or the time an event first fires.
+function responseChoices() {
+  const out = names.map((nm) => ({key: "final:" + nm, label: "final " + nm, kind: "final", name: nm}));
+  const causes = new Set();
+  for (const run of RUNS) for (const e of ((run.data || {}).events || [])) if (e.cause) causes.add(e.cause);
+  for (const c of causes) out.push({key: "event:" + c, label: "time of: " + c, kind: "event", cause: c});
+  return out;
+}
+function responseOf(run, choice) {
+  const data = run.data; if (!data || !choice) return null;
+  if (choice.kind === "event") {
+    const hit = (data.events || []).find((e) => e.cause === choice.cause);
+    return hit ? {v: toT(hit.t), unit: tUnit()} : null;
+  }
+  const vs = data.series[choice.name]; if (!vs) return null;
+  for (let k = vs.length - 1; k >= 0; k--) { const v = vs[k]; if (v !== null && v !== undefined && isFinite(v)) {
+    const u = (data.units || {})[choice.name] || ""; return {v: disp(v, u), unit: dispUnit(u)}; } }
+  return null;
+}
+let sweepChoice = null;
+let sweepPicked = false;  // true once the user chose the response themselves
+function paintSweep() {
+  const title = document.getElementById("stitle"), ctl = document.getElementById("sweepctl");
+  const params = editableParams();
+  const show = LIVE && params.length > 0;
+  title.hidden = ctl.hidden = !show;
+  if (!show) return;
+  const psel = document.getElementById("sparam");
+  const keep = psel.value;
+  psel.replaceChildren(...params.map((p) => { const o = document.createElement("option"); o.value = p.name;
+    o.textContent = p.name + (dispUnit(p.unit) ? "  (" + dispUnit(p.unit) + ")" : ""); return o; }));
+  psel.value = params.some((p) => p.name === keep) ? keep : (params.find((p) => p.name === "m_green") || params[0]).name;
+  if (!document.getElementById("sfrom").value) sweepDefaults();
+  const rsel = document.getElementById("sresp");
+  const choices = responseChoices();
+  const rkeep = rsel.value;
+  rsel.replaceChildren(...choices.map((c) => { const o = document.createElement("option"); o.value = c.key; o.textContent = c.label; return o; }));
+  // The response the roaster asks for is when the batch dropped; until a run has fired that
+  // event it cannot be offered, so the moment a sweep makes it appear it becomes the choice --
+  // unless the user has picked one themselves, which is then kept.
+  const dropChoice = choices.find((c) => c.kind === "event" && /T_drop/.test(c.cause));
+  const fallback = choices.find((c) => c.kind === "final" && Array.isArray(D.states) && c.name === D.states[0]) || choices[0];
+  if (dropChoice && !sweepPicked) rsel.value = dropChoice.key;
+  else if (choices.some((c) => c.key === rkeep)) rsel.value = rkeep;
+  else rsel.value = fallback ? fallback.key : "";
+  sweepChoice = choices.find((c) => c.key === rsel.value) || null;
+  drawResponse();
+}
+// A range around the parameter's current value, in display units: half to one and a half.
+function sweepDefaults() {
+  const p = editableParams().find((q) => q.name === document.getElementById("sparam").value); if (!p) return;
+  const v = disp(p.value, p.unit);
+  document.getElementById("sfrom").value = String(Number((v * 0.5).toPrecision(4)));
+  document.getElementById("sto").value = String(Number((v * 1.5).toPrecision(4)));
+}
+function runSweep() {
+  if (!vscodeApi) { foot.textContent = "a sweep needs the extension to re-simulate"; return; }
+  const p = editableParams().find((q) => q.name === document.getElementById("sparam").value); if (!p) return;
+  const num = (id) => parseFloat(String(document.getElementById(id).value).trim().replace(",", "."));
+  const from = num("sfrom"), to = num("sto"), steps = Math.max(2, Math.min(25, Math.round(num("ssteps")) || 5));
+  if (!isFinite(from) || !isFinite(to)) return;
+  clearSweep(false);
+  const live = RUNS[RUNS.length - 1];
+  const slots = [];
+  for (let i = 0; i < steps; i++) {
+    const shown = from + (to - from) * i / (steps - 1);
+    const value = undisp(shown, p.unit);
+    const slot = {overrides: {...overrides, [p.name]: value}, data: null, onBase: null, sweep: {param: p.name, value}};
+    RUNS.splice(RUNS.length - 1, 0, slot); slots.push(slot);
+  }
+  for (const slot of slots) {
+    vscodeApi.postMessage({ type: "simulate", stop: live.data ? live.data.stop : D.stop, sets: slot.overrides, runId: RUNS.indexOf(slot) });
+  }
+  foot.textContent = "sweeping " + p.name + " over " + steps + " runs …";
+  paintRuns(); paintSweep(); draw();
+}
+function clearSweep(repaint = true) {
+  RUNS = RUNS.filter((r) => !r.sweep);
+  if (repaint) { paintRuns(); paintSweep(); draw(); }
+}
+// The response chart: the parameter along x, the response along y, one point per sweep run
+// that has answered, joined in parameter order. A run whose response is undefined -- an event
+// that never fired -- leaves a gap, which is the honest picture.
+function drawResponse() {
+  const svgR = document.getElementById("schart"); if (!svgR) return;
+  const w = svgR.clientWidth || 200, h = 130, m = {l: 44, r: 8, t: 10, b: 22};
+  svgR.setAttribute("viewBox", "0 0 " + w + " " + h);
+  const frag = document.createDocumentFragment();
+  const runs = RUNS.filter((r) => r.sweep && r.data).sort((a, b) => a.sweep.value - b.sweep.value);
+  const pname = document.getElementById("sparam").value;
+  const p = editableParams().find((q) => q.name === pname);
+  const pts = runs.filter((r) => r.sweep.param === pname).map((r) => {
+    const res = responseOf(r, sweepChoice);
+    return {x: disp(r.sweep.value, p ? p.unit : ""), y: res ? res.v : null, unit: res ? res.unit : ""};
+  });
+  const xs = pts.map((q) => q.x), ys = pts.filter((q) => q.y !== null).map((q) => q.y);
+  if (!xs.length) {
+    frag.appendChild(el("text", {class: "rtick", x: m.l, y: h / 2}, sweepChoice ? "run a sweep to plot " + sweepChoice.label : ""));
+    svgR.replaceChildren(frag); return;
+  }
+  const xd = spanPad(Math.min(...xs), Math.max(...xs)), yd = ys.length ? spanPad(Math.min(...ys), Math.max(...ys)) : [0, 1];
+  const RX = (v) => m.l + ((v - xd[0]) / (xd[1] - xd[0])) * (w - m.l - m.r);
+  const RY = (v) => h - m.b - ((v - yd[0]) / (yd[1] - yd[0])) * (h - m.t - m.b);
+  for (const v of ticks(xd[0], xd[1], 4)) frag.appendChild(el("text", {class: "rtick", x: RX(v), y: h - 8, "text-anchor": "middle"}, fmt(v)));
+  for (const v of ticks(yd[0], yd[1], 3)) frag.appendChild(el("text", {class: "rtick", x: m.l - 4, y: RY(v) + 3, "text-anchor": "end"}, fmt(v)));
+  frag.appendChild(el("line", {class: "rax", x1: m.l, x2: m.l, y1: m.t, y2: h - m.b}));
+  frag.appendChild(el("line", {class: "rax", x1: m.l, x2: w - m.r, y1: h - m.b, y2: h - m.b}));
+  frag.appendChild(el("text", {class: "rtick", x: w - m.r, y: h - m.b - 4, "text-anchor": "end"}, pname + (p && dispUnit(p.unit) ? " " + dispUnit(p.unit) : "")));
+  const yl = sweepChoice ? (sweepChoice.kind === "event" ? "t of event, " + tUnit() : sweepChoice.name + (pts.find((q) => q.unit) ? " " + pts.find((q) => q.unit).unit : "")) : "";
+  frag.appendChild(el("text", {class: "rtick", x: m.l + 4, y: m.t + 2}, yl));
+  let d = "", pen = false;
+  for (const q of pts) {
+    if (q.y === null) { pen = false; continue; }
+    d += (pen ? "L" : "M") + RX(q.x).toFixed(1) + " " + RY(q.y).toFixed(1); pen = true;
+    frag.appendChild(el("circle", {class: "rp", cx: RX(q.x), cy: RY(q.y), r: 3}));
+  }
+  if (d) frag.appendChild(el("path", {class: "rl", d}));
+  svgR.replaceChildren(frag);
+}
+document.getElementById("sparam").onchange = () => { sweepDefaults(); drawResponse(); };
+document.getElementById("sresp").onchange = (e) => { sweepPicked = true; sweepChoice = responseChoices().find((c) => c.key === e.target.value) || null; drawResponse(); };
+document.getElementById("srun").onclick = runSweep;
+document.getElementById("sclear").onclick = () => clearSweep(true);
+
 // -- measurement marks -------------------------------------------------------------------
 // A click places a mark at the nearest sample; a second gives the interval; a third starts
 // over. Marks are sample indices, so they mean the same thing against time and in a phase
@@ -1091,7 +1246,7 @@ if (stopInput) {
 }
 document.getElementById("nextev").onclick = () => reRun("event");
 document.getElementById("settle").onclick = () => reRun("settle");
-document.getElementById("disp").onchange = (e) => { dispMode = e.target.value; paintParams(); paintRuns(); draw(); };
+document.getElementById("disp").onchange = (e) => { dispMode = e.target.value; paintParams(); paintRuns(); paintSweep(); draw(); };
 // Pin: freeze the live run as a comparison. A copy with its overrides and data is inserted
 // before the live one, so the live run stays last (solid, editable) and the pinned copy draws
 // dashed behind it -- change a parameter and the two diverge on the same axes.
@@ -1101,7 +1256,7 @@ document.getElementById("pin").onclick = () => {
   const copy = {overrides: {...live.overrides}, data: live.data, onBase: null};
   RUNS.splice(RUNS.length - 1, 0, copy);
   rebase(copy);
-  paintRuns(); draw();
+  paintRuns(); paintSweep(); draw();
 };
 
 function paramUnit(name) {
@@ -1132,7 +1287,7 @@ function paintRuns() {
     chip.append(dash, tag, what);
     if (!live) {
       const x = document.createElement("span"); x.className = "x"; x.textContent = "×"; x.title = "drop this run";
-      x.onclick = () => { RUNS.splice(ri, 1); paintRuns(); draw(); };
+      x.onclick = () => { RUNS.splice(ri, 1); paintRuns(); paintSweep(); draw(); };
       chip.appendChild(x);
     }
     frag.appendChild(chip);
@@ -1244,7 +1399,7 @@ window.addEventListener("message", (e) => {
         }
       }
     } else {
-      RUNS[ri].data = rec; rebase(RUNS[ri]); paintRuns(); draw();
+      RUNS[ri].data = rec; rebase(RUNS[ri]); paintRuns(); paintSweep(); draw();
     }
   }
   else if (m.type === "error") { foot.textContent = "error: " + m.error; }
