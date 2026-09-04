@@ -56,6 +56,7 @@ FLAT = {
     "E5",
     "HIRES",
     "HeatBar",
+    "Lorenz",
     "NewtonCooling",
     "Pendulum",
     "PhaseChange",
