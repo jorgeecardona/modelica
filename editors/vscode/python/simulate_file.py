@@ -39,17 +39,77 @@ if TYPE_CHECKING:
     from modelica.sim.result import Result
 
 
-def _thin(time: list[float], limit: int = 700) -> list[int]:
-    t = np.asarray(time, dtype=float)
-    n = len(t)
+def _douglas_peucker(
+    x: NDArray[np.float64], y: NDArray[np.float64], eps: float
+) -> NDArray[np.bool_]:
+    """The points a polyline must keep to stay within ``eps`` of the original (Ramer-Douglas-Peucker).
+
+    Iterative rather than recursive: a stiff run has tens of thousands of steps and the
+    recursion would be as deep as the spike is sharp.
+    """
+    n = len(x)
+    keep = np.zeros(n, dtype=bool)
+    keep[0] = keep[-1] = True
+    stack = [(0, n - 1)]
+    while stack:
+        a, b = stack.pop()
+        if b <= a + 1:
+            continue
+        dx, dy = x[b] - x[a], y[b] - y[a]
+        length = float(np.hypot(dx, dy)) or 1.0
+        d = np.abs(dy * (x[a + 1 : b] - x[a]) - dx * (y[a + 1 : b] - y[a])) / length
+        m = int(np.argmax(d))
+        if d[m] > eps:
+            idx = a + 1 + m
+            keep[idx] = True
+            stack.append((a, idx))
+            stack.append((idx, b))
+    return keep
+
+
+def _sample(
+    time: NDArray[np.float64], columns: list[NDArray[np.float64]], limit: int = 700
+) -> list[int]:
+    """Which instants to send the panel: shape-preserving, so a spike keeps its apex every cycle.
+
+    The solver's own steps cluster at a jump -- that is where it had to work -- and a uniform
+    stride over them kept the sample at the peak on some cycles and dropped it on others, so a
+    periodic impulse (van der Pol's der(x), a 0.01 s jump to 1350) rendered at a wandering
+    height. Douglas-Peucker per series keeps exactly the points a straight line cannot stand
+    in for -- the apex and the two shoulders of every spike, the knee of every corner -- and
+    the union over the series is what is kept, usually fewer points than the stride was. Event
+    instants (a repeated time) always stay, so a discontinuity draws as a vertical step.
+    """
+    n = len(time)
     if n <= limit:
         return list(range(n))
-    stride = int(np.ceil(n / limit))
-    breaks = np.flatnonzero(np.diff(t) <= 0.0)
-    keep = np.union1d(
-        np.arange(0, n, stride), np.union1d(np.union1d(breaks, breaks + 1), [0, n - 1])
-    )
-    return [int(i) for i in keep]
+    keep = np.zeros(n, dtype=bool)
+    keep[0] = keep[-1] = True
+    breaks = np.flatnonzero(np.diff(time) <= 0.0)
+    keep[breaks] = True
+    keep[np.minimum(breaks + 1, n - 1)] = True
+    tx = (time - time[0]) / (float(time[-1] - time[0]) or 1.0)
+    normalised: list[NDArray[np.float64]] = []
+    for column in columns:
+        finite = column[np.isfinite(column)]
+        if finite.size == 0:
+            continue
+        span = float(finite.max() - finite.min())
+        if span == 0.0:  # one value, or a flat line: nothing a straight line cannot stand in for
+            continue
+        normalised.append(np.nan_to_num((column - float(finite.min())) / span))
+    # A tolerance of 0.4% of each series' own range keeps every feature a reader could see;
+    # it is loosened only if the union still overruns the cap.
+    eps = 0.004
+    picked = keep
+    for _ in range(8):
+        picked = keep.copy()
+        for column in normalised:
+            picked |= _douglas_peucker(tx, column, eps)
+        if int(picked.sum()) <= limit:
+            break
+        eps *= 1.6
+    return [int(i) for i in np.flatnonzero(picked)]
 
 
 def _r7(value: object) -> float | None:
@@ -284,15 +344,19 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     else:
         result = _integrate(kernel, stop, params)
     time = np.asarray(result.time, dtype=float)
-    keep = _thin(list(time))
-    series: dict[str, list[float | None]] = {}
+    # A parameter is one flat value; keep the ones that move, plus the states so a constant
+    # state (a body at rest) still shows. Decided on the full column, then every kept series
+    # has a say in which instants are sent, so each is drawn to its true shape.
+    full: dict[str, NDArray[np.float64]] = {}
     for variable in result.names:
-        column = np.asarray(result[variable])
-        # A parameter is one flat value; keep the ones that move, plus the states so a
-        # constant state (a body at rest) still shows. This is what the widget opens on.
-        values = [_r7(v) for v in column[keep]]
-        if variable in states or len({v for v in values if v is not None}) > 1:
-            series[variable] = values
+        column = np.asarray(result[variable], dtype=float)
+        finite = column[np.isfinite(column)]
+        if variable in states or (finite.size and float(finite.max() - finite.min()) > 0.0):
+            full[variable] = column
+    keep = _sample(time, list(full.values()))
+    series: dict[str, list[float | None]] = {
+        variable: [_r7(v) for v in column[keep]] for variable, column in full.items()
+    }
     events = [
         {"t": _r7(event.time), "cause": str(getattr(event, "cause", ""))}
         for event in (getattr(result, "events", []) or [])
