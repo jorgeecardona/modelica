@@ -97,9 +97,9 @@ _REFERENCE_MODELS = _reference_models()
 #: Pendulum is a *test* gap, not an emitter one: it switches state sets at
 #: runtime, and this test keys the trajectory on the first set's state names, which stop meaning
 #: the same thing once the run is in the other set (mode 0 holds ``[y, vy]``, mode 1 ``[x, vx]``).
-#: Its kernel -- rhs, jacobian and the rebasing transition, Newton and all -- is checked against
-#: the interpreter by the per-function tests; a mode-invariant (observed-variable) integration
-#: comparison is the follow-up that would let the switched trajectory itself be checked here.
+#: Its switched trajectory is checked instead by
+#: `test_the_rust_integrator_matches_the_interpreter_across_a_mode_switch`, which reads the
+#: coordinates from the runtime's observed-variable output, where they mean the same in every set.
 _EVENT_GAPS = frozenset({"Pendulum"})
 
 
@@ -108,10 +108,10 @@ def _event_models() -> list[Path]:
 
     At least one crossing, minus the known gaps in `_EVENT_GAPS`. Both a ``when`` branch and a
     latched relation are handled: the loop applies the transition, iterates over any latch it
-    makes stale, and rearms on the side the crossing settled. Multi-mode models are in too --
-    their dispatcher and mode-0 dynamics are checked -- though the only one rustgen emits so far
-    (TwoInertias) does not actually switch within its horizon, so the trajectory comparison keyed
-    on the first set's states stays valid; a model that switches at runtime needs Newton first.
+    makes stale, and rearms on the side the crossing settled. Multi-mode models are in too when
+    they stay in one state set over the horizon (TwoInertias), since this comparison is keyed on
+    the first set's states; one that switches at runtime (Pendulum) is compared on its observed
+    variables instead, by the mode-switch test below.
     """
     out: list[Path] = []
     for model in _supported():
@@ -402,7 +402,8 @@ def test_the_rust_integrator_reproduces_the_toml_reference(model: Path) -> None:
             f"    let mut out = [0.0f64; {len(times) * n}];",
             "    let dirs: [f64; 0] = [];",
             "    let lat: [i64; 0] = [];",
-            f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &grid, &mut out);",
+            "    let mut obs: [f64; 0] = [];",
+            f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &grid, &mut out, &mut obs);",
             "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
             '    println!("{}", printed.join(" "));',
             "}",
@@ -426,14 +427,16 @@ def _integrate_events_in_rust(  # noqa: PLR0913, PLR0917 - the runtime's call su
     directions: list[float],
     latches: list[int],
     start: tuple[object, object, object],
-) -> tuple[int, list[float]]:
+    observed: int = 0,
+) -> tuple[int, list[float], list[float]]:
     """Integrate a model with events through the whole radau runtime, on a grid.
 
-    Returns ``(events, trajectory)``: the number of crossings the run applied and the state at
-    every grid point, row-major. The count comes back on its own line so the test can check it
-    tolerance-free -- a wrong event tally is a structural bug the trajectory tolerance might
-    absorb, and the strongest single signal that the loop found the same crossings the
-    interpreter did.
+    Returns ``(events, trajectory, observed)``: the number of crossings the run applied, the
+    state at every grid point, row-major, and -- when ``observed`` is not zero -- that many
+    observed variables at every grid point, in `Emitter.observed` order. The count comes back on
+    its own line so the test can check it tolerance-free -- a wrong event tally is a structural
+    bug the trajectory tolerance might absorb, and the strongest single signal that the loop
+    found the same crossings the interpreter did.
     """
     numpy = pytest.importorskip("numpy")
     states, parameters, workspace = start
@@ -456,16 +459,23 @@ def _integrate_events_in_rust(  # noqa: PLR0913, PLR0917 - the runtime's call su
             f"    let lat: [i64; {len(latches)}] = [{', '.join(f'{int(v)}i64' for v in latches)}];",
             f"    let grid: [f64; {len(grid)}] = [{_floats(grid)}];",
             f"    let mut out = [0.0f64; {len(grid) * n}];",
-            f"    let r = md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &grid, &mut out);",
+            f"    let mut obs = [0.0f64; {len(grid) * observed}];",
+            f"    let r = md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &grid, &mut out, &mut obs);",
             '    println!("{}", r.6);',
             "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
             '    println!("{}", printed.join(" "));',
+            "    let seen: Vec<String> = obs.iter().map(|v| v.to_string()).collect();",
+            '    println!("{}", seen.join(" "));',
             "}",
             "",
         ]
     )
     lines = _compile_and_run_lines(program, system.name)
-    return int(lines[0]), [float(token) for token in lines[1].split()]
+    return (
+        int(lines[0]),
+        [float(token) for token in lines[1].split()],
+        [float(token) for token in lines[2].split()] if len(lines) > 2 else [],
+    )
 
 
 @needs_rustc
@@ -502,11 +512,73 @@ def test_the_rust_integrator_matches_the_interpreter_on_events(model: Path) -> N
     wanted = numpy.array([[reference[name][column] for name in names] for column in columns])
 
     parameters, states, workspace = kernel.start(0.0)
-    events, flat = _integrate_events_in_rust(
+    events, flat, _ = _integrate_events_in_rust(
         system, stop, list(grid), directions, latches, (states, parameters, workspace)
     )
     found = numpy.array(flat).reshape(len(grid), len(names))
     assert events == len(reference.events), (
         f"{system.name}: rust applied {events} events, interpreter {len(reference.events)}"
+    )
+    numpy.testing.assert_allclose(found, wanted, rtol=1e-4, atol=1e-3)
+
+
+def _switching_models() -> list[Path]:
+    """Supported models with more than one state set: the ones a state-keyed comparison cannot read."""
+    return [model for model in _supported() if len(_system(model).modes) > 1]
+
+
+_SWITCHING_MODELS = _switching_models()
+
+
+@needs_rustc
+@pytest.mark.parametrize("model", _SWITCHING_MODELS, ids=[m.stem for m in _SWITCHING_MODELS])
+def test_the_rust_integrator_matches_the_interpreter_across_a_mode_switch(model: Path) -> None:
+    """A model that changes state set at runtime, compared on what means the same in every set.
+
+    Pendulum integrates ``[y, vy]`` while the rod is nearer horizontal and ``[x, vx]`` nearer
+    vertical, switching four times in two seconds, so a row of `md_integrate`'s state output
+    means one pair before a switch and the other after. The observed variables do not move: the
+    runtime evaluates ``observe`` at every grid point, in whichever set it is in, and this test
+    reads the union of every mode's state names -- ``x``, ``y``, ``vx``, ``vy`` -- from there
+    and compares them with the interpreter's, along with the count of switches. TwoInertias is
+    in too; it never switches within its horizon, which makes it the control.
+
+    The interpreter is run at the runtime's tolerance here, 1e-8, so the slack is between two
+    integrators on one problem and not between two tolerances: the velocities reach 4 m/s and
+    the switch instants themselves are located independently by each side.
+    """
+    numpy = pytest.importorskip("numpy")
+    simulate = pytest.importorskip("modelica.sim").simulate
+    build = pytest.importorskip("modelica.sim.kernel").build
+    spec = tomllib.loads(model.with_suffix(".toml").read_text(encoding="utf-8"))
+    stop = float(spec["simulate"]["stop"])
+    system = _system(model)
+    kernel = build(system)
+    names = sorted({name for mode in system.modes for name in mode.states})
+    observed = list(kernel.code.observed)
+    columns_of = [observed.index(name) for name in names]
+    directions = [float(event.direction) for event in kernel.code.events]
+    latches = [event.latch if event.latch is not None else -1 for event in kernel.code.events]
+
+    grid = numpy.linspace(0.0, stop, 41)
+    reference = simulate(system, stop=stop, times=grid, tolerance=1e-8)
+    rows = numpy.clip(
+        numpy.searchsorted(reference.time, grid, side="left"), 0, len(reference.time) - 1
+    )
+    wanted = numpy.array([[reference[name][row] for name in names] for row in rows])
+
+    parameters, states, workspace = kernel.start(0.0)
+    events, _, seen = _integrate_events_in_rust(
+        system,
+        stop,
+        list(grid),
+        directions,
+        latches,
+        (states, parameters, workspace),
+        observed=len(observed),
+    )
+    found = numpy.array(seen).reshape(len(grid), len(observed))[:, columns_of]
+    assert events == len(reference.events), (
+        f"{system.name}: rust switched {events} times, interpreter {len(reference.events)}"
     )
     numpy.testing.assert_allclose(found, wanted, rtol=1e-4, atol=1e-3)

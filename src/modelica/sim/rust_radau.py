@@ -465,11 +465,14 @@ FIRST_STEP: Final = (
 #: watches the indicators for a crossing, locates the earliest with `md_locate`, applies the
 #: model's transition (iterating over any latch it makes stale, `solve.py`'s `_settle`) and
 #: restarts. One long function on purpose, as `radau.py:489` argues: splitting the controller
-#: from the step would put a call on the hot path for every quantity they pass. It handles a
-#: single state set -- the subset `rustgen` emits a transition for -- with ``when`` branches and
-#: latched relations both, so there is no mode switch to rebase into; the rearm nudge is
-#: +``MD_REARM`` for a `when` and the side the latch settled on for a relation. It fills ``out``
-#: (grid.len() by n, row-major) and returns the run's counters, events included.
+#: from the step would put a call on the hot path for every quantity they pass. It handles
+#: ``when`` branches, latched relations and mode switches alike -- a switch is a transition that
+#: rebases the state into the destination set and moves the dispatcher's slot, so the same
+#: ``rhs`` name serves every mode; the rearm nudge is +``MD_REARM`` for a `when` and the side
+#: the latch settled on for a relation. It fills ``out`` (grid.len() by n, row-major) with the
+#: states and, when asked, ``obs`` (grid.len() by nobs) with ``observe`` at every grid point --
+#: what a run that switches state sets is compared on -- and returns the run's counters, events
+#: included.
 _INTEGRATE_SRC = """\
 // Locate, along one accepted step's dense polynomial, where indicator `k` crosses zero.
 // The step is y(x) = y + x*(q0 + x*(q1 + x*q2)) for x in [0, 1], and g(x) = z_k(y(x)) + nudge
@@ -533,8 +536,15 @@ fn md_integrate(
     latches: &[i64],
     grid: &[f64],
     out: &mut [f64],
+    obs: &mut [f64],
 ) -> (i32, usize, usize, usize, usize, usize, usize, f64) {
     let n = y0.len();
+    // Observed variables at every grid point, grid.len() by nobs, alongside the states in
+    // `out`. Empty `obs` asks for none. A model that switches state sets mid-run makes `out`
+    // hard to read -- `y` means one thing before the switch and another after -- while an
+    // observed variable means the same in every mode, so this is what a run is compared on.
+    let points = grid.len();
+    let nobs = if points > 0 { obs.len() / points } else { 0 };
     let mut y = y0.to_vec();
     let mut t = t0;
     let mut f = vec![0.0f64; n];
@@ -579,10 +589,10 @@ fn md_integrate(
     let mut fired_flags = vec![false; nevents];
     let mut events_total = 0usize;
 
-    let points = grid.len();
     let mut cursor = 0usize;
     while cursor < points && grid[cursor] <= t0 {
         for q in 0..n { out[cursor * n + q] = y[q]; }
+        if nobs > 0 { observe(grid[cursor], &y, p, w, &mut obs[cursor * nobs..(cursor + 1) * nobs]); }
         cursor += 1;
     }
 
@@ -754,6 +764,13 @@ fn md_integrate(
                     out[cursor * n + q] =
                         y[q] + x * (quad[q * 3] + x * (quad[q * 3 + 1] + x * quad[q * 3 + 2]));
                 }
+                if nobs > 0 {
+                    // Before the transition, with the workspace as it still is: these points
+                    // belong to the segment that is ending, in the state set it ran in.
+                    let (states, rest) = out.split_at_mut((cursor + 1) * n);
+                    let _ = rest;
+                    observe(grid[cursor], &states[cursor * n..], p, w, &mut obs[cursor * nobs..(cursor + 1) * nobs]);
+                }
                 cursor += 1;
             }
             for q in 0..n {
@@ -825,6 +842,11 @@ fn md_integrate(
                 out[cursor * n + q] =
                     y[q] + x * (quad[q * 3] + x * (quad[q * 3 + 1] + x * quad[q * 3 + 2]));
             }
+            if nobs > 0 {
+                let (states, rest) = out.split_at_mut((cursor + 1) * n);
+                let _ = rest;
+                observe(grid[cursor], &states[cursor * n..], p, w, &mut obs[cursor * nobs..(cursor + 1) * nobs]);
+            }
             cursor += 1;
         }
 
@@ -863,6 +885,7 @@ fn md_integrate(
 
     while cursor < points {
         for q in 0..n { out[cursor * n + q] = y[q]; }
+        if nobs > 0 { observe(grid[cursor], &y, p, w, &mut obs[cursor * nobs..(cursor + 1) * nobs]); }
         cursor += 1;
     }
     (status, steps, rejected_total, evaluations, jacobians, factorisations, events_total, t)
