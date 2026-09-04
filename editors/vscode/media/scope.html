@@ -258,6 +258,7 @@
   <span class="sub">the pymodelica corpus, integrated to its reference points</span>
   <span class="count" id="count"></span>
   <span class="ver" title="the extension build that drew this panel; after upgrading, reload the window if this is old">v__VERSION__</span>
+  <span class="ver" id="solver" title="the integrator this run used: the model's own [simulate] method and tolerance from its .toml, else Radau at 1e-6"></span>
 </div>
 
 <div class="app">
@@ -420,8 +421,21 @@ function buildRail() {
     MODELS.length + " models · " + MODELS.reduce((a, m) => a + m.events.length, 0) + " events";
 }
 
+// The integrator this run used, beside the version badge: the model's own .toml method and
+// tolerance (VanDerPol asks for LSODA at 1e-9, the roaster for 1e-11), so what the panel
+// shows is what the corpus tests check, and a reader can tell at a glance.
+function paintSolver() {
+  const el = document.getElementById("solver");
+  if (!el) return;
+  const s = D && D.solver;
+  if (!s || !s.method) { el.textContent = ""; return; }
+  const tol = Number(s.tolerance);
+  el.textContent = s.method + " · " + (Number.isFinite(tol) ? tol.toExponential(0).replace("e-", "e-").replace("e+", "e") : "");
+}
+
 function select(i) {
   D = MODELS[i];
+  paintSolver();
   names = Object.keys(D.series);
   T = D.t; N = T.length;
   // The runs. In the corpus the one run simply follows the model shown; live, the last run is

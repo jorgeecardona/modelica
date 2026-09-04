@@ -18,8 +18,9 @@ import argparse
 import json
 import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -146,21 +147,48 @@ def _load(path: Path, name: str, libraries: list[str]) -> tuple[System, Kernel, 
     return system, build(system), units
 
 
-def _integrate(kernel: Kernel, stop: float, params: NDArray[np.float64] | None = None) -> Result:
+@dataclass(frozen=True)
+class _Solver:
+    """How a model asks to be integrated: its sibling ``.toml``'s ``[simulate]`` settings.
+
+    The corpus tests run each model at the tolerance and method its ``.toml`` names (VanDerPol
+    at 1e-9 with LSODA, the roaster at 1e-11), and the panel used to run everything at
+    `simulate`'s 1e-6 Radau default -- a different integrator from the one the model's reference
+    points were checked against. Now the panel runs what the tests run, and says so.
+    """
+
+    method: str = "Radau"
+    tolerance: float = 1e-6
+    absolute: float | None = None
+
+    @property
+    def atol(self) -> float:
+        """`simulate`'s rule: the absolute tolerance defaults to the relative one."""
+        return self.tolerance if self.absolute is None else self.absolute
+
+
+def _integrate(
+    kernel: Kernel, stop: float, params: NDArray[np.float64] | None, solver: _Solver
+) -> Result:
     """One run to ``stop`` on a 300-point grid, at the model's parameters or ``params``."""
-    return simulate(kernel, stop=stop, times=np.linspace(0.0, stop, 300), parameters=params)
+    return simulate(
+        kernel,
+        stop=stop,
+        times=np.linspace(0.0, stop, 300),
+        parameters=params,
+        tolerance=solver.tolerance,
+        absolute=solver.absolute,
+        method=solver.method,
+    )
 
 
-_TOLERANCE = 1e-6
-"""What `simulate` uses when not told: relative and absolute both."""
-
-
-def _integrate_from(
+def _integrate_from(  # noqa: PLR0913, PLR0917 - the run's knobs, passed straight through
     kernel: Kernel,
     stop: float,
     params: NDArray[np.float64] | None,
     resume: dict[str, object] | None,
     states: list[str],
+    solver: _Solver,
 ) -> tuple[Result, dict[str, object]]:
     """The panel's main run, with a checkpoint out and, optionally, a checkpoint in.
 
@@ -182,7 +210,7 @@ def _integrate_from(
     else:
         start = 0.0
         grid = np.linspace(0.0, stop, 300)
-    plan = _Run(kernel, p, w, _TOLERANCE, _TOLERANCE, "Radau")
+    plan = _Run(kernel, p, w, solver.tolerance, solver.atol, solver.method)
     result = plan.run(start, stop, y, grid)
     final = [float(np.asarray(result[state], dtype=float)[-1]) for state in states]
     checkpoint: dict[str, object] = {"t": stop, "y": final, "w": [float(v) for v in plan.w]}
@@ -221,6 +249,7 @@ def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed stra
     default: float,
     maximum: float,
     params: NDArray[np.float64] | None,
+    solver: _Solver,
 ) -> tuple[float, Result, str]:
     """Choose a stop from the signals: the next event past ``frm``, or where they settle.
 
@@ -236,18 +265,22 @@ def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed stra
     horizon = max(frm * 1.5, frm + default, default) if until == "event" else max(frm, default, 1.0)
     horizon = min(horizon, maximum)
     while True:
-        probe = _integrate(kernel, horizon, params)
+        probe = _integrate(kernel, horizon, params, solver)
         if until == "event":
             future = [e for e in probe.events if float(e.time) > frm + 1e-9]
             if future:
                 nxt = min(future, key=lambda e: float(e.time))
                 target = min(horizon, float(nxt.time) + 0.05 * max(float(nxt.time) - frm, 1.0))
-                return target, _integrate(kernel, target, params), f"next event: {nxt.cause}"
+                return (
+                    target,
+                    _integrate(kernel, target, params, solver),
+                    f"next event: {nxt.cause}",
+                )
         else:
             settle = _settle_time(probe, states)
             if settle < 0.85 * horizon:  # settled with room to spare, not merely cut off
                 target = min(horizon, settle * 1.08)
-                return target, _integrate(kernel, target, params), "signals settled"
+                return target, _integrate(kernel, target, params, solver), "signals settled"
         if horizon >= maximum:
             break
         horizon = min(horizon * 2.0, maximum)
@@ -257,7 +290,7 @@ def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed stra
         if until == "event"
         else f"signals had not settled by t = {maximum:g}"
     )
-    return fallback, _integrate(kernel, fallback, params), note
+    return fallback, _integrate(kernel, fallback, params, solver), note
 
 
 def _response(result: Result, spec: str) -> float | None:
@@ -287,6 +320,7 @@ def _sensitivity(  # noqa: PLR0913, PLR0917 - the knobs of one study, passed str
     spec: str,
     step: float,
     base: Result,
+    solver: _Solver,
 ) -> dict[str, object]:
     """How much each parameter moves the response, one at a time, by ``step`` either way.
 
@@ -309,7 +343,7 @@ def _sensitivity(  # noqa: PLR0913, PLR0917 - the knobs of one study, passed str
         for factor in (1.0 - step, 1.0 + step):
             trial = dict(sets)
             trial[variable.name] = float(value) * factor
-            ends.append(_response(_integrate(kernel, stop, vector(system, trial)), spec))
+            ends.append(_response(_integrate(kernel, stop, vector(system, trial), solver), spec))
         rows.append(
             {
                 "name": variable.name,
@@ -356,6 +390,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     resume: dict[str, object] | None = None,
 ) -> dict[str, object]:
     system, kernel, units = _load(path, name, libraries)
+    solver = _solver(path)
     states = set(system.modes[0].states)
     sets = sets or {}
     # Overrides go through `vector`, which recomputes everything downstream of a changed
@@ -383,10 +418,10 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         # No cap given: ten times what is on screen, far enough to find something and bounded
         # enough that a model that never settles comes back in seconds, not minutes.
         cap = maximum if maximum > 0 else 10.0 * max(frm, default)
-        stop, result, note = _auto_stop(kernel, states, until, frm, default, cap, params)
+        stop, result, note = _auto_stop(kernel, states, until, frm, default, cap, params, solver)
     else:
         result, checkpoint = _integrate_from(
-            kernel, stop, params, resume, list(system.modes[0].states)
+            kernel, stop, params, resume, list(system.modes[0].states), solver
         )
     time = np.asarray(result.time, dtype=float)
     # A parameter is one flat value; keep the ones that move, plus the states so a constant
@@ -416,7 +451,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         units[derivative] = f"{base}/s" if base else "1/s"
     # The sensitivity study, when asked for: 2N more runs, so only on request.
     sens = (
-        _sensitivity(system, kernel, stop, sets, sensitivity, sstep, result)
+        _sensitivity(system, kernel, stop, sets, sensitivity, sstep, result, solver)
         if sensitivity
         else None
     )
@@ -437,6 +472,12 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         "parameters": parameters,
         "overrides": sets,
         "sensitivity": sens,
+        # The integrator this run used -- the model's own, from its .toml -- so the panel can say.
+        "solver": {
+            "method": solver.method,
+            "tolerance": solver.tolerance,
+            "absolute": solver.absolute,
+        },
         # Where this run ended, for the next call to continue from; and, when this call did
         # continue, where it took over -- so the panel appends the tail to what it has.
         "checkpoint": checkpoint,
@@ -444,18 +485,49 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     }
 
 
-def _default_stop(path: Path) -> float:
-    """The model's own stop time: a sibling ``<name>.toml``'s ``[simulate].stop``, else 10."""
+def _section(path: Path) -> dict[str, object]:
+    """The model's ``[simulate]`` table from its sibling ``<name>.toml``, or nothing.
+
+    A missing or malformed file is not an error here: the model still simulates, at defaults.
+    """
     toml = path.with_suffix(".toml")
-    if toml.exists():
-        try:
-            spec = tomllib.loads(toml.read_text(encoding="utf-8"))
-            stop = spec.get("simulate", {}).get("stop")
-            if stop is not None:
-                return float(stop)
-        except (tomllib.TOMLDecodeError, ValueError, TypeError):
-            pass
-    return 10.0
+    if not toml.exists():
+        return {}
+    try:
+        spec = tomllib.loads(toml.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return {}
+    section: object = spec.get("simulate", {})
+    return cast("dict[str, object]", section) if isinstance(section, dict) else {}
+
+
+def _default_stop(path: Path) -> float:
+    """The model's own stop time: ``[simulate].stop``, else 10."""
+    try:
+        return float(_section(path).get("stop", 10.0))  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return 10.0
+
+
+def _solver(path: Path) -> _Solver:
+    """The model's own integrator: ``[simulate].method``, ``tolerance``, ``absolute``.
+
+    The same keys `tests/test_examples.py` reads when it checks the model against its reference
+    points, so the panel reproduces the corpus run rather than a looser default.
+    """
+    section = _section(path)
+    try:
+        return _Solver(
+            method=str(section.get("method", "Radau")),
+            tolerance=float(section.get("tolerance", 1e-6)),  # type: ignore[arg-type]
+            absolute=(
+                float(section["absolute"])  # type: ignore[arg-type]
+                if section.get("absolute") is not None
+                else None
+            ),
+        )
+    except (ValueError, TypeError):
+        return _Solver()
 
 
 def main() -> None:
