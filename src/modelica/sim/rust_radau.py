@@ -475,7 +475,8 @@ _INTEGRATE_SRC = """\
 // The step is y(x) = y + x*(q0 + x*(q1 + x*q2)) for x in [0, 1], and g(x) = z_k(y(x)) + nudge
 // is the crossing function the loop watches. Called only when the segment ends bracket a
 // directional crossing, so g(0) and g(1) straddle zero and plain bisection converges to the
-// root -- the same instant `solve.py` gets from SciPy's brentq, to f64 precision in 60 halvings.
+// root -- the same instant `solve.py` gets from SciPy's brentq, to f64 precision in 60 halvings
+// -- and returns the end of the final bracket that lies past the crossing.
 #[allow(dead_code)]
 fn md_locate(
     k: usize,
@@ -509,7 +510,14 @@ fn md_locate(
             hi = mid;
         }
     }
-    0.5 * (lo + hi)
+    // The far end of the bracket, not its midpoint: `hi` is the first instant at which the
+    // indicator has the sign it crossed to, so the state handed to the transition has actually
+    // crossed. The event iteration judges every *other* latched relation at that state, and a
+    // relation sharing the threshold -- PhaseChange's `T > Ms` and `T < Ms` -- is only seen to
+    // disagree with its latch if the crossing has happened there. Landing a hair before it left
+    // the pair agreeing, and each then re-crossed its own rearm nudge on the next segments: four
+    // events at one instant where the interpreter, whose root lands past the crossing, fires two.
+    hi
 }
 
 #[allow(dead_code)]

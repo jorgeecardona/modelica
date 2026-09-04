@@ -90,16 +90,17 @@ _REFERENCE_MODELS = _reference_models()
 
 
 #: Event models this integration test does not cover, with why -- greppable rather than silently
-#: dropped. PhaseChange is an emitter/loop gap: two crossings on a shared threshold (``T > Ms``
-#: and ``T < Ms``) plus a relation (``T > Ac1``) that T re-crosses near the phase-change kink,
-#: where the loop finds two more crossings than SciPy's segment detection, so the event count and
-#: trajectory diverge. Pendulum is a *test* gap, not an emitter one: it switches state sets at
+#: dropped. (PhaseChange used to be here: its two relations on one threshold, ``T > Ms`` and
+#: ``T < Ms``, fired four events at one instant instead of two because the located root landed a
+#: hair *before* the crossing, so the paired relation was not judged stale until it re-crossed its
+#: own nudge. `md_locate` now returns the far end of its bracket, and the counts agree, 12 and 12.)
+#: Pendulum is a *test* gap, not an emitter one: it switches state sets at
 #: runtime, and this test keys the trajectory on the first set's state names, which stop meaning
 #: the same thing once the run is in the other set (mode 0 holds ``[y, vy]``, mode 1 ``[x, vx]``).
 #: Its kernel -- rhs, jacobian and the rebasing transition, Newton and all -- is checked against
 #: the interpreter by the per-function tests; a mode-invariant (observed-variable) integration
 #: comparison is the follow-up that would let the switched trajectory itself be checked here.
-_EVENT_GAPS = frozenset({"PhaseChange", "Pendulum"})
+_EVENT_GAPS = frozenset({"Pendulum"})
 
 
 def _event_models() -> list[Path]:
