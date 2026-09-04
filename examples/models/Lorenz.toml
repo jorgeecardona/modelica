@@ -1,0 +1,76 @@
+summary = "The Lorenz system at sigma = 10, rho = 28, beta = 8/3: three smooth equations whose solution never repeats -- the butterfly, and a benchmark for how fast an integrator's error grows."
+teaches = [
+  "deterministic chaos from three smooth equations",
+  "a phase plot, where the x axis is a state and not time",
+  "error growth as the real limit on a long integration",
+  "a mathematical toy as an integrator benchmark",
+]
+requires = []
+
+[parse]
+classes = ["Lorenz"]
+
+[flatten]
+model = "Lorenz"
+states = ["x", "y", "z"]
+equations = 3
+index = 1
+balanced = true
+
+# Nothing here is a physical machine; the system is Lorenz's 1963 reduction of convection,
+# kept because it is the simplest thing that is genuinely chaotic. Two trajectories that
+# start a hair apart separate as e^(0.9 t) -- the leading Lyapunov exponent -- so a solver's
+# local error, however small, is amplified sixfold by t = 2 and ninety-fold by t = 5. That
+# is what makes it a benchmark: the question is not whether the integrator is right but how
+# long it stays right, and no tolerance buys more than a few dozen time units. The x-z view
+# is the reason the phase plot exists: against time the states look like noise, and against
+# each other they trace the two lobes of the attractor.
+#
+# `stop` is long enough to fill both lobes; the reference points sit early, where a run at
+# rtol 1e-8 still agrees with scipy at 1e-12 to a few parts in 1e9, well inside the 1e-6 bar.
+# Past ~t = 15 no two solvers agree pointwise and only the invariants below mean anything.
+[simulate]
+stop = 40.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 1.0
+values = { x = -9.378570011, y = -8.357033788, z = 29.362325337 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 2.0
+values = { x = -8.173499932, y = -9.562023687, z = 24.620702050 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 3.0
+values = { x = -7.456658261, y = -6.190996128, z = 27.441806506 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 5.0
+values = { x = -6.512113699, y = -6.974042788, z = 23.924129572 }
+rtol = 1e-6
+source = "reference"
+
+# The attractor is bounded: whatever the solver does, it must stay on it. The bounds are the
+# extremes of a 1e-12 run over the full horizon, with a margin, so a solver that runs away
+# or damps out is caught even where pointwise agreement is no longer possible.
+[[simulate.invariant]]
+expr = "x"
+min = -22.0
+max = 22.0
+
+[[simulate.invariant]]
+expr = "y"
+min = -30.0
+max = 30.0
+
+[[simulate.invariant]]
+expr = "z"
+min = 0.0
+max = 55.0
