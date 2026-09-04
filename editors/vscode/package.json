@@ -23,8 +23,16 @@
   "main": "./extension.js",
   "scripts": {
     "package": "pnpm dlx @vscode/vsce package",
-    "install-local": "pnpm dlx @vscode/vsce package && sh scripts/install.sh"
+    "install-local": "pnpm dlx @vscode/vsce package && sh scripts/install.sh",
+    "publish": "pnpm dlx @vscode/vsce publish"
   },
+  "keywords": [
+    "modelica",
+    "simulation",
+    "plot",
+    "scientific",
+    "engineering"
+  ],
   "contributes": {
     "commands": [
       {
