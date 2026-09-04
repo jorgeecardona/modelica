@@ -120,6 +120,13 @@
   .stopgrip { fill: var(--accent); cursor: ew-resize; }
   .stoplab { fill: var(--accent); font-size: 10px; font-weight: 600; }
   .event.pin { opacity: .3; }
+  /* Measurement marks and their readout: a thin line per mark, and a small panel with the
+     interval and each variable's change when there are two. */
+  .mark { stroke: var(--ink); stroke-width: 1; opacity: .7; }
+  .marklab { fill: var(--ink); font-size: 10px; font-weight: 650; }
+  .measurebg { fill: var(--panel); stroke: var(--line); opacity: .94; }
+  .measure { fill: var(--ink); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .measure.dim { fill: var(--dim); }
   /* Runs: the live one and any pinned for comparison, as chips (A, B, ...). Pinned draw dashed. */
   .runs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; align-items: center; }
   .run { display: inline-flex; align-items: baseline; gap: 6px; font-size: 11px; padding: 1px 8px;
@@ -254,7 +261,7 @@
       <div class="runs" id="runs" hidden></div>
     </div>
     <div class="plotwrap"><svg id="chart"><g id="plot"></g><g id="hud"></g></svg></div>
-    <div class="foot" id="foot">drag to zoom · double-click to reset</div>
+    <div class="foot" id="foot">drag to zoom · click to mark, twice for Δ · double-click to reset</div>
   </section>
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
@@ -305,6 +312,10 @@ let timeMode = "s";      // time axis: "s" seconds, or "min" minutes -- the data
 let xVar = null;
 let xwin = null;
 let XD = [0, 1];
+// Measurement marks: up to two sample indices set by clicking. One is a readout; two give the
+// interval between them and every selected variable's change across it -- the drying phase's
+// length, turning point to first crack -- the way an oscilloscope's cursors do.
+let marks = [];
 let lastModel = null;    // to keep the view across a re-run of the same model
 let prevEnd = 0;
 
@@ -674,6 +685,7 @@ function draw() {
   else if (scale === "units") drawUnits(frag);
   else drawOverlay(frag);
 
+  drawMarks(frag);
   plot.replaceChildren(frag);
   hud.replaceChildren();
   paintLegend();
@@ -904,6 +916,59 @@ function cursor(v) {
   paintLegend(j);
 }
 
+// -- measurement marks -------------------------------------------------------------------
+// A click places a mark at the nearest sample; a second gives the interval; a third starts
+// over. Marks are sample indices, so they mean the same thing against time and in a phase
+// plot, and every selected variable is read at both.
+function placeMark(j) {
+  if (j === null || j === undefined) return;
+  if (marks.length >= 2 || marks.includes(j)) marks = [j]; else marks.push(j);
+  draw();
+  foot.textContent = restFooter();
+}
+// What the footer says when the pointer is not on the plot: the measurement, if there is one.
+function restFooter() {
+  if (marks.length === 1) return "mark at t = " + fmt(toT(T[marks[0]])) + " " + tUnit() + " · click again for the interval";
+  if (marks.length === 2) {
+    const [a, b] = [Math.min(...marks), Math.max(...marks)];
+    let s = "Δt = " + fmt(toT(T[b] - T[a])) + " " + tUnit();
+    if (xVar) { const u = unitOf(xVar), xs = seriesOf(RUNS.length - 1, xVar);
+      if (xs) s += "   ·   Δ" + xVar + " = " + fmt(disp(xs[b], u) - disp(xs[a], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""); }
+    return s + "   ·   double-click to clear";
+  }
+  return "drag to zoom · click to mark, twice for Δ · double-click to reset";
+}
+function drawMarks(frag) {
+  if (!marks.length || !N) return;
+  const live = RUNS.length - 1;
+  marks.forEach((j, n) => {
+    const xv = xOfRun(live, j); if (xv === null || xv === undefined || !isFinite(xv)) return;
+    const x = X(xv); if (x < M.l - 0.5 || x > box.w - M.r + 0.5) return;
+    frag.appendChild(el("line", {class: "mark", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
+    frag.appendChild(el("text", {class: "marklab", x: x + 3, y: box.h - M.b - 4}, String(n + 1)));
+  });
+  if (marks.length < 2) return;
+  // The readout: the interval, then each selected variable's change across it (live run).
+  const [a, b] = [Math.min(...marks), Math.max(...marks)];
+  const lines = [{t: "Δt = " + fmt(toT(T[b] - T[a])) + " " + tUnit() + "   (" + fmt(toT(T[a])) + " → " + fmt(toT(T[b])) + ")", dim: false}];
+  if (xVar) { const u = unitOf(xVar), xs = seriesOf(live, xVar);
+    if (xs) lines.push({t: "Δ" + xVar + " = " + fmt(disp(xs[b], u) - disp(xs[a], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: false}); }
+  for (const nm of selected().slice(0, 6)) {
+    const vs = D.series[nm]; if (!vs) continue;
+    const u = unitOf(nm), v1 = disp(vs[a], u), v2 = disp(vs[b], u);
+    if (v1 === null || v2 === null || !isFinite(v1) || !isFinite(v2)) continue;
+    lines.push({t: nm + ": " + fmt(v1) + " → " + fmt(v2) + "   Δ " + fmt(v2 - v1) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: true, nm});
+  }
+  const lh = 14, pad = 7, w = Math.max(...lines.map((l) => l.t.length)) * 6.3 + 2 * pad;
+  const x0 = M.l + 8, y0 = M.t + 8;
+  frag.appendChild(el("rect", {class: "measurebg", x: x0, y: y0, width: w, height: lines.length * lh + 2 * pad - 3, rx: 4}));
+  lines.forEach((l, i) => {
+    const attrs = {class: "measure" + (l.dim ? " dim" : ""), x: x0 + pad, y: y0 + pad + 10 + i * lh};
+    if (l.nm) attrs.fill = colour(l.nm);
+    frag.appendChild(el("text", attrs, l.t));
+  });
+}
+
 // -- interaction -----------------------------------------------------------------------
 // The x-domain value under the pointer, clamped to the plot: a time against time, a value of
 // the phase variable in a phase plot -- the inverse of X().
@@ -968,13 +1033,15 @@ svg.addEventListener("pointerup", (e) => {
   const t = timeAt(e); const lo = Math.min(drag, t), hi = Math.max(drag, t); drag = null;
   // A band zooms the x domain: the time window, or -- in a phase plot -- the phase variable.
   if (hi - lo > (XD[1] - XD[0]) * 1e-4) { if (xVar) xwin = [lo, hi]; else win = [lo, hi]; }
+  // No band: a click. It places a measurement mark at the nearest sample.
+  else placeMark(nearestIndex(t));
   draw();
 });
 svg.addEventListener("pointerleave", () => {
-  if (drag === null && !stopDrag) { hud.replaceChildren(); foot.textContent = "drag to zoom · double-click to reset"; paintLegend(); }
+  if (drag === null && !stopDrag) { hud.replaceChildren(); foot.textContent = restFooter(); paintLegend(); }
 });
-svg.addEventListener("dblclick", () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; draw(); });
-document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; draw(); };
+svg.addEventListener("dblclick", () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; draw(); foot.textContent = restFooter(); });
+document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; draw(); foot.textContent = restFooter(); };
 document.getElementById("all").onclick = () => { on = new Set(names); draw(); };
 document.getElementById("none").onclick = () => { on = new Set(); draw(); };
 document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
