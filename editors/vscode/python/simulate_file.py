@@ -26,10 +26,14 @@ import numpy as np
 from modelica.ir.causalize import causalize
 from modelica.lang import parse
 from modelica.sim import flatten
+from modelica.sim.emit import settings
 from modelica.sim.kernel import build
 from modelica.sim.solve import simulate
+from modelica.sim.sweep import vector
 
 if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
     from modelica.ir.system import System
     from modelica.sim.kernel import Kernel
     from modelica.sim.result import Result
@@ -72,8 +76,9 @@ def _load(path: Path, name: str, libraries: list[str]) -> tuple[System, Kernel]:
     return system, build(system)
 
 
-def _integrate(kernel: Kernel, stop: float) -> Result:
-    return simulate(kernel, stop=stop, times=np.linspace(0.0, stop, 300))
+def _integrate(kernel: Kernel, stop: float, params: NDArray[np.float64] | None = None) -> Result:
+    """One run to ``stop`` on a 300-point grid, at the model's parameters or ``params``."""
+    return simulate(kernel, stop=stop, times=np.linspace(0.0, stop, 300), parameters=params)
 
 
 def _settle_time(result: Result, states: set[str], eps: float = 0.01) -> float:
@@ -101,7 +106,13 @@ def _settle_time(result: Result, states: set[str], eps: float = 0.01) -> float:
 
 
 def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed straight through
-    kernel: Kernel, states: set[str], until: str, frm: float, default: float, maximum: float
+    kernel: Kernel,
+    states: set[str],
+    until: str,
+    frm: float,
+    default: float,
+    maximum: float,
+    params: NDArray[np.float64] | None,
 ) -> tuple[float, Result, str]:
     """Choose a stop from the signals: the next event past ``frm``, or where they settle.
 
@@ -117,18 +128,18 @@ def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed stra
     horizon = max(frm * 1.5, frm + default, default) if until == "event" else max(frm, default, 1.0)
     horizon = min(horizon, maximum)
     while True:
-        probe = _integrate(kernel, horizon)
+        probe = _integrate(kernel, horizon, params)
         if until == "event":
             future = [e for e in probe.events if float(e.time) > frm + 1e-9]
             if future:
                 nxt = min(future, key=lambda e: float(e.time))
                 target = min(horizon, float(nxt.time) + 0.05 * max(float(nxt.time) - frm, 1.0))
-                return target, _integrate(kernel, target), f"next event: {nxt.cause}"
+                return target, _integrate(kernel, target, params), f"next event: {nxt.cause}"
         else:
             settle = _settle_time(probe, states)
             if settle < 0.85 * horizon:  # settled with room to spare, not merely cut off
                 target = min(horizon, settle * 1.08)
-                return target, _integrate(kernel, target), "signals settled"
+                return target, _integrate(kernel, target, params), "signals settled"
         if horizon >= maximum:
             break
         horizon = min(horizon * 2.0, maximum)
@@ -138,7 +149,19 @@ def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed stra
         if until == "event"
         else f"signals had not settled by t = {maximum:g}"
     )
-    return fallback, _integrate(kernel, fallback), note
+    return fallback, _integrate(kernel, fallback, params), note
+
+
+def _parse_sets(items: list[str]) -> dict[str, float]:
+    """``--set name=value`` pairs as a mapping; a malformed one is an error the panel shows."""
+    out: dict[str, float] = {}
+    for item in items:
+        name, sep, value = item.partition("=")
+        if not sep or not name.strip():
+            message = f"--set expects name=value, got {item!r}"
+            raise ValueError(message)
+        out[name.strip()] = float(value)
+    return out
 
 
 def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
@@ -149,18 +172,38 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     until: str = "none",
     frm: float = 0.0,
     maximum: float = 0.0,
+    sets: dict[str, float] | None = None,
 ) -> dict[str, object]:
     system, kernel = _load(path, name, libraries)
     states = set(system.modes[0].states)
+    sets = sets or {}
+    # Overrides go through `vector`, which recomputes everything downstream of a changed
+    # parameter (m_dry from m_green), so the run is the model the caller asked for.
+    params = vector(system, sets) if sets else None
+    # Every parameter with the value this run uses, for the panel to show and edit. One whose
+    # binding is an expression (not a literal) is derived from others and marked so: it is
+    # shown read-only, since overriding it would silently detach it from what it depends on.
+    values = settings(system, sets)
+    parameters = [
+        {
+            "name": variable.name,
+            "value": _r7(values.get(variable.name)),
+            "unit": variable.unit,
+            "doc": variable.comment,
+            "derived": variable.binding is not None
+            and not type(variable.binding).__name__.endswith("Literal"),
+        }
+        for variable in system.parameters
+    ]
     note = ""
     if until in ("event", "settle"):
         default = _default_stop(path)
         # No cap given: ten times what is on screen, far enough to find something and bounded
         # enough that a model that never settles comes back in seconds, not minutes.
         cap = maximum if maximum > 0 else 10.0 * max(frm, default)
-        stop, result, note = _auto_stop(kernel, states, until, frm, default, cap)
+        stop, result, note = _auto_stop(kernel, states, until, frm, default, cap, params)
     else:
-        result = _integrate(kernel, stop)
+        result = _integrate(kernel, stop, params)
     time = np.asarray(result.time, dtype=float)
     keep = _thin(list(time))
     series: dict[str, list[float | None]] = {}
@@ -190,6 +233,8 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         "nstates": len(states),
         "states": list(system.modes[0].states),
         "autoNote": note,
+        "parameters": parameters,
+        "overrides": sets,
     }
 
 
@@ -229,6 +274,14 @@ def main() -> None:
         default=0.0,
         help="the farthest --until may probe (0: ten times the current stop)",
     )
+    ap.add_argument(
+        "--set",
+        dest="sets",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="override a parameter (repeatable); everything derived from it is recomputed",
+    )
     args = ap.parse_args()
 
     path = Path(args.path)
@@ -236,7 +289,14 @@ def main() -> None:
     stop = args.stop if args.stop is not None else _default_stop(path)
     try:
         record = _run(
-            path, name, stop, args.library, until=args.until, frm=args.frm, maximum=args.maximum
+            path,
+            name,
+            stop,
+            args.library,
+            until=args.until,
+            frm=args.frm,
+            maximum=args.maximum,
+            sets=_parse_sets(args.sets),
         )
         print(json.dumps({"models": [record]}, separators=(",", ":"), allow_nan=False))
     except Exception as error:  # noqa: BLE001 - report every failure to the panel, never crash silently

@@ -44,10 +44,16 @@ function ensurePanel(context) {
     if (msg && msg.type === "simulate" && live) {
       // `until` asks the simulator to pick the stop itself (next event past `from`, or where
       // the signals settle) instead of taking the number the panel holds.
-      const opts = { stop: Number(msg.stop), until: msg.until, from: Number(msg.from) };
+      // `sets` are parameter overrides for this run; `runId` says which of the panel's runs
+      // (the live one, or a pinned comparison) the answer belongs to, and is echoed back.
+      const opts = {
+        stop: Number(msg.stop), until: msg.until, from: Number(msg.from), sets: msg.sets || {},
+      };
       runHelper(live.context, live.file, opts, (data) => {
         panel.webview.postMessage(
-          data.error ? { type: "error", error: data.error } : { type: "data", models: data.models }
+          data.error
+            ? { type: "error", error: data.error, runId: msg.runId }
+            : { type: "data", models: data.models, runId: msg.runId, sets: opts.sets }
         );
       });
     }
@@ -99,9 +105,13 @@ function runtimeCommand(context, cfg, file, opts) {
     ? ["--until", String(opts.until), "--from", String(opts.from > 0 ? opts.from : 0),
        "--max", String(max > 0 ? max : 0)]
     : [];
+  // Parameter overrides, one --set name=value each; the simulator recomputes what depends on them.
+  const setArgs = Object.entries(opts.sets || {}).flatMap(([name, value]) => [
+    "--set", `${name}=${value}`,
+  ]);
   return {
     cmd: python[0],
-    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...libs],
+    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...setArgs, ...libs],
   };
 }
 

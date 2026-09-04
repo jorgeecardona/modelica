@@ -111,6 +111,32 @@
   .stopline { stroke: var(--accent); stroke-dasharray: 3 3; opacity: .9; }
   .stopgrip { fill: var(--accent); cursor: ew-resize; }
   .stoplab { fill: var(--accent); font-size: 10px; font-weight: 600; }
+  .event.pin { opacity: .3; }
+  /* Runs: the live one and any pinned for comparison, as chips (A, B, ...). Pinned draw dashed. */
+  .runs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; align-items: center; }
+  .run { display: inline-flex; align-items: baseline; gap: 6px; font-size: 11px; padding: 1px 8px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--dim);
+    font-variant-numeric: tabular-nums; }
+  .run.live { color: var(--ink); border-color: var(--accent); }
+  .run .tag { font-weight: 650; }
+  .run .dash { width: 18px; height: 0; border-top: 2px solid var(--ink); align-self: center; }
+  .run .x { cursor: pointer; padding-left: 2px; }
+  .run .x:hover { color: var(--accent); }
+  /* Parameters, editable in the legend: an overridden one is outlined and gets an undo; a
+     derived one (m_dry from m_green) is dimmed and read-only, recomputed by the simulator. */
+  #ptitle { margin-top: 12px; }
+  .prow { display: flex; align-items: baseline; gap: 6px; padding: 2px 12px; font-size: 12px;
+    white-space: nowrap; }
+  .prow .pn { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+  .prow input, .prow .pv { width: 74px; font: inherit; font-size: 11.5px; text-align: right;
+    font-variant-numeric: tabular-nums; }
+  .prow input { color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 4px; padding: 1px 4px; }
+  .prow input.set { border-color: var(--accent); }
+  .prow .pu { color: var(--dim); font-size: 11px; min-width: 2.5ch; }
+  .prow.derived { color: var(--dim); }
+  .prow .undo { cursor: pointer; color: var(--dim); }
+  .prow .undo:hover { color: var(--accent); }
   .legtitle { padding: 4px 12px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .7px;
     text-transform: uppercase; color: var(--dim); }
   .row { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; cursor: pointer;
@@ -181,6 +207,11 @@
             <option value="units">by unit</option>
             <option value="split">split (per-variable)</option>
           </select>
+          <select id="disp" title="display units: the data stays SI, only what is printed converts">
+            <option value="si">SI units</option>
+            <option value="c">K as &deg;C</option>
+          </select>
+          <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button id="all">all</button>
           <button id="none">none</button>
           <button id="reset" title="or double-click the chart">reset</button>
@@ -188,6 +219,7 @@
       </div>
       <div class="desc" id="mdesc"></div>
       <div class="chips" id="mchips"></div>
+      <div class="runs" id="runs" hidden></div>
     </div>
     <div class="plotwrap"><svg id="chart"><g id="plot"></g><g id="hud"></g></svg></div>
     <div class="foot" id="foot">drag to zoom · double-click to reset</div>
@@ -196,6 +228,7 @@
   <aside class="legend">
     <div class="legtitle">variables</div><div id="legend"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
+    <div class="legtitle" id="ptitle" hidden>parameters</div><div id="plist"></div>
   </aside>
 </div>
 <div class="note" id="srcnote"></div>
@@ -228,6 +261,13 @@ let drag = null;
 let stopDrag = false;    // dragging the stop marker, as opposed to a zoom band
 let box = {w: 0, h: 0};
 let cssbg = "#ffffff";
+// Runs: the last is the live one (solid, editable); earlier ones are pinned comparisons, each
+// interpolated onto the live run's time grid so every drawing loop shares one x.
+let RUNS = [];           // [{overrides, data, onBase}]
+let overrides = {};      // the live run's parameter overrides, name -> SI value
+let dispMode = "si";     // display units: "si", or "c" to print kelvin as celsius
+let lastModel = null;    // to keep the view across a re-run of the same model
+let prevEnd = 0;
 
 function readBg() {
   cssbg = getComputedStyle(document.body).backgroundColor || "#ffffff";
@@ -276,20 +316,33 @@ function select(i) {
   D = MODELS[i];
   names = Object.keys(D.series);
   T = D.t; N = T.length;
-  win = N ? [T[0], T[N - 1]] : [0, 1];
-  // open on the moving variables
-  on = new Set(names.filter((nm) => {
-    const v = D.series[nm]; let a = v[0];
-    for (const x of v) if (x !== a) return true;
-    return false;
-  }));
-  if (!on.size) on = new Set(names);
-  // A single open .mo opens on its states in split mode: each state gets its own strip, so a
-  // model whose variables span decades (a temperature beside a mass) is legible at a glance.
-  if (MODELS.length === 1 && Array.isArray(D.states) && D.states.length) {
-    on = new Set(D.states.filter((s) => names.includes(s)));
-    scale = "units";
-    document.getElementById("scale").value = "units";
+  // The runs. In the corpus the one run simply follows the model shown; live, the last run is
+  // this data (its overrides are the panel's) and earlier ones are pinned comparisons, brought
+  // onto the new time grid.
+  if (!LIVE || !RUNS.length) RUNS = [{overrides: overrides, data: D, onBase: null}];
+  else { RUNS[RUNS.length - 1].data = D; RUNS[RUNS.length - 1].overrides = overrides; }
+  for (let k = 0; k < RUNS.length - 1; k++) rebase(RUNS[k]);
+  // A re-run of the same model keeps the selection, the scale and -- if the stop did not move
+  // -- the zoom, so editing a parameter does not throw away the view being compared.
+  const same = lastModel === D.model && on.size > 0;
+  const stopMoved = !N || Math.abs(T[N - 1] - prevEnd) > 1e-9;
+  if (!same || stopMoved) win = N ? [T[0], T[N - 1]] : [0, 1];
+  lastModel = D.model; prevEnd = N ? T[N - 1] : 0;
+  if (!same) {
+    // open on the moving variables
+    on = new Set(names.filter((nm) => {
+      const v = D.series[nm]; let a = v[0];
+      for (const x of v) if (x !== a) return true;
+      return false;
+    }));
+    if (!on.size) on = new Set(names);
+    // A single open .mo opens on its states in split mode: each state gets its own strip, so a
+    // model whose variables span decades (a temperature beside a mass) is legible at a glance.
+    if (MODELS.length === 1 && Array.isArray(D.states) && D.states.length) {
+      on = new Set(D.states.filter((s) => names.includes(s)));
+      scale = "units";
+      document.getElementById("scale").value = "units";
+    }
   }
   document.querySelectorAll(".item").forEach((el) => el.classList.toggle("on", +el.dataset.i === i));
   document.getElementById("mname").textContent = D.model;
@@ -315,7 +368,10 @@ function select(i) {
     (D.tags || []).slice(0, 3).forEach((t) => chip(t, true));
     document.getElementById("mchips").replaceChildren(cf);
   }
+  document.getElementById("pin").hidden = !LIVE;
   paintEvents();
+  paintParams();
+  paintRuns();
   draw();
   // An automatic stop says where it landed and why, until the pointer moves on.
   if (D.autoNote) foot.textContent = D.autoNote + "  ·  t → " + fmt(D.stop);
@@ -327,6 +383,74 @@ function fmt(v) {
   const a = Math.abs(v);
   if (a !== 0 && (a < 1e-4 || a >= 1e6)) return v.toExponential(3);
   return String(Number(v.toPrecision(6)));
+}
+
+// -- display units ---------------------------------------------------------------------
+// The data stays SI; only what is printed converts, through this table, so a kelvin reads as
+// the celsius you have intuition for. Affine per unit, with the inverse for reading a typed
+// value back. A table rather than a special case, so more conversions can follow.
+const DISPLAY = { c: { K: { unit: "°C", to: (v) => v - 273.15, from: (v) => v + 273.15 } } };
+function dispOf(unit) { const t = DISPLAY[dispMode]; return (t && t[unit]) || null; }
+function disp(v, unit) { const c = dispOf(unit); return (c && v !== null && v !== undefined && isFinite(v)) ? c.to(v) : v; }
+function undisp(v, unit) { const c = dispOf(unit); return c ? c.from(v) : v; }
+function dispUnit(unit) { const c = dispOf(unit); return c ? c.unit : unit; }
+function unitOf(nm) { return (D && D.units && D.units[nm] !== undefined) ? D.units[nm] : ""; }
+// The one unit every selected variable shares, else "": an overlay axis can only be labelled
+// in display units when everything on it converts the same way.
+function sharedUnit() {
+  const us = new Set(selected().map(unitOf));
+  return us.size === 1 ? [...us][0] : "";
+}
+
+// -- runs --------------------------------------------------------------------------------
+// A pinned run's series, linearly interpolated onto the live run's time grid: outside the
+// pinned run's span the value is null, so its line simply ends there.
+function interp(t, v, grid) {
+  const out = new Array(grid.length).fill(null);
+  const n = t.length; if (!n) return out;
+  let j = 0;
+  for (let i = 0; i < grid.length; i++) {
+    const g = grid[i];
+    if (g < t[0] || g > t[n - 1]) continue;
+    while (j < n - 2 && t[j + 1] < g) j++;
+    const t0 = t[j], t1 = t[j + 1], v0 = v[j], v1 = v[j + 1];
+    if (v0 === null || v1 === null || v1 === undefined) { out[i] = v0 === null ? null : v0; continue; }
+    out[i] = t1 > t0 ? v0 + (v1 - v0) * (g - t0) / (t1 - t0) : v0;
+  }
+  return out;
+}
+function rebase(run) {
+  run.onBase = {};
+  if (!run.data || !run.data.series) return;
+  for (const nm of Object.keys(run.data.series)) run.onBase[nm] = interp(run.data.t, run.data.series[nm], T);
+}
+// The live run draws solid and full; a pinned one dashed, by how far back it was pinned.
+const DASHES = ["6 4", "2 3", "9 3 2 3", "1 3"];
+function runStyle(ri) {
+  const back = RUNS.length - 1 - ri;
+  return back === 0 ? {dash: null, w: 1.8, op: 1}
+    : {dash: DASHES[Math.min(back - 1, DASHES.length - 1)], w: 1.4, op: .85};
+}
+function seriesOf(ri, nm) {
+  return ri === RUNS.length - 1 ? (D.series[nm] || null) : ((RUNS[ri].onBase || {})[nm] || null);
+}
+function eachRun(nm, fn) {
+  for (let ri = 0; ri < RUNS.length; ri++) { const vs = seriesOf(ri, nm); if (vs) fn(vs, ri); }
+}
+// One polyline for one run of one variable, in that variable's colour and that run's style.
+function drawPath(frag, vs, a, b, yOf, nm, ri) {
+  const st = runStyle(ri);
+  let d = "", pen = false;
+  for (let k = a; k <= b; k++) {
+    const v = vs[k]; const y = (v === null || v === undefined || !isFinite(v)) ? null : yOf(v);
+    if (y === null || !isFinite(y)) { pen = false; continue; }
+    d += (pen ? "L" : "M") + X(T[k]).toFixed(2) + " " + y.toFixed(2); pen = true;
+  }
+  if (!d) return;
+  const attrs = {d: d, fill: "none", "stroke-width": st.w, stroke: colour(nm),
+    "stroke-linejoin": "round", opacity: st.op};
+  if (st.dash) attrs["stroke-dasharray"] = st.dash;
+  frag.appendChild(el("path", attrs));
 }
 function ticks(lo, hi, want) {
   if (!(hi > lo)) return [lo];
@@ -365,12 +489,13 @@ function bounds() {
   if (scale === "norm") return [0, 1];
   let lo = Infinity, hi = -Infinity;
   for (const nm of selected()) {
-    const vs = D.series[nm];
-    for (let i = a; i <= b; i++) {
-      let v = vs[i]; if (v === null || !isFinite(v)) continue;
-      if (scale === "log") { v = Math.abs(v); if (!(v > 0)) continue; v = Math.log10(v); }
-      if (v < lo) lo = v; if (v > hi) hi = v;
-    }
+    eachRun(nm, (vs) => {
+      for (let i = a; i <= b; i++) {
+        let v = vs[i]; if (v === null || !isFinite(v)) continue;
+        if (scale === "log") { v = Math.abs(v); if (!(v > 0)) continue; v = Math.log10(v); }
+        if (v < lo) lo = v; if (v > hi) hi = v;
+      }
+    });
     // include reference points in range
     if (scale === "linear") for (const rf of D.refs) {
       const rv = rf.values[nm]; if (rv === undefined) continue;
@@ -381,10 +506,13 @@ function bounds() {
   return spanPad(lo, hi);
 }
 function extent(nm) {
-  const [a, b] = visible(); const vs = D.series[nm];
+  const [a, b] = visible();
   let lo = Infinity, hi = -Infinity;
-  for (let i = a; i <= b; i++) { const v = vs[i]; if (v === null) continue;
-    if (v < lo) lo = v; if (v > hi) hi = v; }
+  eachRun(nm, (vs) => {
+    for (let i = a; i <= b; i++) { const v = vs[i]; if (v === null || !isFinite(v)) continue;
+      if (v < lo) lo = v; if (v > hi) hi = v; }
+  });
+  if (!isFinite(lo)) return [0, 1];
   return hi > lo ? [lo, hi] : [lo, lo + 1];
 }
 function project(nm, dom) {
@@ -418,6 +546,13 @@ function draw() {
     if (e.t < win[0] || e.t > win[1]) continue;
     frag.appendChild(el("line", {class: "event", x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b}));
   }
+  // A pinned run's events, fainter: where its schedule fired may differ from the live run's.
+  for (let ri = 0; ri < RUNS.length - 1; ri++) {
+    for (const e of ((RUNS[ri].data || {}).events || [])) {
+      if (e.t < win[0] || e.t > win[1]) continue;
+      frag.appendChild(el("line", {class: "event pin", x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b}));
+    }
+  }
   // The stop marker: where the run ends, drawn as a handle. Drag it left to trim the horizon
   // or past the right edge to extend it; letting go re-simulates to there. A live .mo only,
   // since the corpus gallery cannot re-simulate.
@@ -437,27 +572,25 @@ function draw() {
 // One shared y-scale, every selected variable on it. `linear`, `log |y|`, `normalised`.
 function drawOverlay(frag) {
   const dom = bounds();
+  // Ticks in display units when everything selected shares one unit (all temperatures, say):
+  // laid at round display values and mapped back to data space. Otherwise plain SI.
+  const su = scale === "linear" ? sharedUnit() : "";
   if (scale !== "norm") {
-    for (const v of ticks(dom[0], dom[1], Math.max(2, Math.round(box.h / 44)))) {
+    const lo = scale === "linear" ? disp(dom[0], su) : dom[0];
+    const hi = scale === "linear" ? disp(dom[1], su) : dom[1];
+    for (const dv of ticks(lo, hi, Math.max(2, Math.round(box.h / 44)))) {
+      const v = scale === "linear" ? undisp(dv, su) : dv;
       const y = Y((v - dom[0]) / (dom[1] - dom[0]));
       if (y < M.t - 0.5 || y > box.h - M.b + 0.5) continue;
       frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r, y1: y, y2: y}));
       frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y + 3, "text-anchor": "end"},
-        scale === "log" ? "1e" + fmt(v) : fmt(v)));
+        scale === "log" ? "1e" + fmt(dv) : fmt(dv)));
     }
   }
   const [a, b] = visible();
   for (const nm of selected()) {
-    const vs = D.series[nm]; const to = project(nm, dom);
-    let d = "", pen = false;
-    for (let i = a; i <= b; i++) {
-      const v = vs[i]; const u = v === null ? null : to(v);
-      if (u === null || !isFinite(u)) { pen = false; continue; }
-      d += (pen ? "L" : "M") + X(T[i]).toFixed(2) + " " + Y(u).toFixed(2);
-      pen = true;
-    }
-    frag.appendChild(el("path", {d: d, fill: "none", "stroke-width": 1.6,
-      stroke: colour(nm), "stroke-linejoin": "round"}));
+    const to = project(nm, dom);
+    eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, (v) => Y(to(v)), nm, ri));
   }
   if (scale === "linear") for (const rf of D.refs) {
     if (rf.t < win[0] || rf.t > win[1]) continue;
@@ -499,21 +632,18 @@ function drawSplit(frag) {
     const y1 = top + (i + 1) * stripH - gap / 2;
     if (i) frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r,
       y1: top + i * stripH, y2: top + i * stripH}));
-    const vs = D.series[nm];
+    const u = unitOf(nm);
     let lo = Infinity, hi = -Infinity;
-    for (let k = a; k <= b; k++) { const v = vs[k]; if (v === null || !isFinite(v)) continue;
-      if (v < lo) lo = v; if (v > hi) hi = v; }
+    eachRun(nm, (vs) => {
+      for (let k = a; k <= b; k++) { const v = vs[k]; if (v === null || !isFinite(v)) continue;
+        if (v < lo) lo = v; if (v > hi) hi = v; }
+    });
     if (!isFinite(lo)) { lo = 0; hi = 1; }
     const dataLo = lo, dataHi = hi;
     const pad = hi > lo ? (hi - lo) * 0.08 : (Math.abs(lo) * 0.08 || 1);
     lo -= pad; hi += pad;
     const yFor = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
-    let d = "", pen = false;
-    for (let k = a; k <= b; k++) { const v = vs[k];
-      if (v === null || !isFinite(v)) { pen = false; continue; }
-      d += (pen ? "L" : "M") + X(T[k]).toFixed(2) + " " + yFor(v).toFixed(2); pen = true; }
-    frag.appendChild(el("path", {d: d, fill: "none", "stroke-width": 1.6,
-      stroke: colour(nm), "stroke-linejoin": "round"}));
+    eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, yFor, nm, ri));
     for (const rf of D.refs) { const rv = rf.values[nm];
       if (rv === undefined || rf.t < win[0] || rf.t > win[1]) continue;
       const cx = X(rf.t), cy = yFor(rv);
@@ -521,8 +651,8 @@ function drawSplit(frag) {
       frag.appendChild(el("circle", {cx: cx, cy: cy, r: 1.7, fill: colour(nm)}));
     }
     frag.appendChild(el("text", {x: M.l + 5, y: y0 + 10, fill: colour(nm),
-      "font-size": 10, "font-weight": 600}, nm));
-    stripLabels(frag, dataLo, dataHi, y0, y1);
+      "font-size": 10, "font-weight": 600}, nm + (u ? "  " + dispUnit(u) : "")));
+    stripLabels(frag, disp(dataLo, u), disp(dataHi, u), y0, y1);
   });
 }
 
@@ -556,21 +686,17 @@ function drawUnits(frag) {
     if (i) frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r,
       y1: edge[i], y2: edge[i]}));
     let lo = Infinity, hi = -Infinity;
-    for (const nm of members) { const vs = D.series[nm];
+    for (const nm of members) eachRun(nm, (vs) => {
       for (let k = a; k <= b; k++) { const v = vs[k]; if (v === null || !isFinite(v)) continue;
-        if (v < lo) lo = v; if (v > hi) hi = v; } }
+        if (v < lo) lo = v; if (v > hi) hi = v; }
+    });
     if (!isFinite(lo)) { lo = 0; hi = 1; }
     const dataLo = lo, dataHi = hi;
     const pad = hi > lo ? (hi - lo) * 0.08 : (Math.abs(lo) * 0.08 || 1);
     lo -= pad; hi += pad;
     const yFor = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
     for (const nm of members) {
-      const vs = D.series[nm]; let d = "", pen = false;
-      for (let k = a; k <= b; k++) { const v = vs[k];
-        if (v === null || !isFinite(v)) { pen = false; continue; }
-        d += (pen ? "L" : "M") + X(T[k]).toFixed(2) + " " + yFor(v).toFixed(2); pen = true; }
-      frag.appendChild(el("path", {d: d, fill: "none", "stroke-width": 1.6,
-        stroke: colour(nm), "stroke-linejoin": "round"}));
+      eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, yFor, nm, ri));
       for (const rf of D.refs) { const rv = rf.values[nm];
         if (rv === undefined || rf.t < win[0] || rf.t > win[1]) continue;
         const cx = X(rf.t), cy = yFor(rv);
@@ -578,8 +704,8 @@ function drawUnits(frag) {
         frag.appendChild(el("circle", {cx: cx, cy: cy, r: 1.7, fill: colour(nm)}));
       }
     }
-    stripLabels(frag, dataLo, dataHi, y0, y1);
-    const unitLabel = u || "(dimensionless)";
+    stripLabels(frag, disp(dataLo, u), disp(dataHi, u), y0, y1);
+    const unitLabel = dispUnit(u) || "(dimensionless)";
     let lx = M.l + 5;
     frag.appendChild(el("text", {class: "tick", x: lx, y: y0 + 10, "font-weight": 600}, unitLabel));
     lx += unitLabel.length * 6.5 + 12;
@@ -600,7 +726,13 @@ function paintLegend(at) {
     dot.style.background = colour(nm);
     const name = document.createElement("span"); name.className = "name"; name.textContent = nm;
     const value = document.createElement("span"); value.className = "value";
-    if (at !== undefined && on.has(nm)) value.textContent = fmt(D.series[nm][at]);
+    if (at !== undefined && on.has(nm)) {
+      // One value per run in run order (A │ B ...), in display units.
+      const u = unitOf(nm);
+      value.textContent = RUNS.map((_, ri) => {
+        const vs = seriesOf(ri, nm); return fmt(disp(vs ? vs[at] : null, u));
+      }).join(" │ ");
+    }
     row.append(dot, name, value);
     row.onclick = () => { on.has(nm) ? on.delete(nm) : on.add(nm); draw(); };
     frag.appendChild(row);
@@ -617,9 +749,12 @@ function cursor(t) {
   if (scale !== "split" && scale !== "units") {
     const dom = bounds();
     for (const nm of selected()) {
-      const v = D.series[nm][j]; if (v === null) continue;
-      const u = project(nm, dom)(v); if (!isFinite(u)) continue;
-      frag.appendChild(el("circle", {cx: x, cy: Y(u), r: 2.6, fill: colour(nm)}));
+      const to = project(nm, dom);
+      eachRun(nm, (vs, ri) => {
+        const v = vs[j]; if (v === null || v === undefined || !isFinite(v)) return;
+        const u = to(v); if (!isFinite(u)) return;
+        frag.appendChild(el("circle", {cx: x, cy: Y(u), r: 2.6, fill: colour(nm), opacity: runStyle(ri).op}));
+      });
     }
   }
   hud.replaceChildren(frag);
@@ -711,7 +846,8 @@ function reRun(until) {
   foot.textContent = until === "event" ? "looking for the next event …"
     : until === "settle" ? "running until the signals settle …"
     : "re-simulating to t = " + stop + " …";
-  vscodeApi.postMessage({ type: "simulate", stop: stop, until: until, from: stop });
+  vscodeApi.postMessage({ type: "simulate", stop: stop, until: until, from: stop,
+    sets: overrides, runId: RUNS.length - 1 });
 }
 const stopInput = document.getElementById("stop");
 if (stopInput) {
@@ -720,6 +856,97 @@ if (stopInput) {
 }
 document.getElementById("nextev").onclick = () => reRun("event");
 document.getElementById("settle").onclick = () => reRun("settle");
+document.getElementById("disp").onchange = (e) => { dispMode = e.target.value; paintParams(); paintRuns(); draw(); };
+// Pin: freeze the live run as a comparison. A copy with its overrides and data is inserted
+// before the live one, so the live run stays last (solid, editable) and the pinned copy draws
+// dashed behind it -- change a parameter and the two diverge on the same axes.
+document.getElementById("pin").onclick = () => {
+  if (!RUNS.length) return;
+  const live = RUNS[RUNS.length - 1];
+  const copy = {overrides: {...live.overrides}, data: live.data, onBase: null};
+  RUNS.splice(RUNS.length - 1, 0, copy);
+  rebase(copy);
+  paintRuns(); draw();
+};
+
+function paramUnit(name) {
+  const p = ((D && D.parameters) || []).find((q) => q.name === name);
+  return p ? p.unit : "";
+}
+
+// The runs as chips: A, B, ... in order, the live one last and outlined, each with its line
+// style and what it overrides ("as written" for the model's own values); × drops a pinned run.
+function paintRuns() {
+  const holder = document.getElementById("runs");
+  const show = LIVE && (RUNS.length > 1 || Object.keys(overrides).length > 0);
+  holder.hidden = !show;
+  if (!show) { holder.replaceChildren(); return; }
+  const frag = document.createDocumentFragment();
+  RUNS.forEach((run, ri) => {
+    const live = ri === RUNS.length - 1;
+    const chip = document.createElement("span"); chip.className = "run" + (live ? " live" : "");
+    const st = runStyle(ri);
+    const dash = document.createElement("span"); dash.className = "dash";
+    dash.style.borderTopStyle = st.dash ? (st.dash.startsWith("2") || st.dash.startsWith("1") ? "dotted" : "dashed") : "solid";
+    const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = String.fromCharCode(65 + ri);
+    const what = document.createElement("span");
+    const ov = Object.entries(run.overrides || {});
+    what.textContent = ov.length
+      ? ov.map(([k, v]) => k + " = " + fmt(disp(v, paramUnit(k))) + (dispUnit(paramUnit(k)) ? " " + dispUnit(paramUnit(k)) : "")).join(", ")
+      : "as written";
+    chip.append(dash, tag, what);
+    if (!live) {
+      const x = document.createElement("span"); x.className = "x"; x.textContent = "×"; x.title = "drop this run";
+      x.onclick = () => { RUNS.splice(ri, 1); paintRuns(); draw(); };
+      chip.appendChild(x);
+    }
+    frag.appendChild(chip);
+  });
+  holder.replaceChildren(frag);
+}
+
+// The model's parameters, editable. A value typed here overrides the model's (the field is
+// outlined and gets an undo), the live run re-simulates, and anything derived from it -- m_dry
+// from m_green -- is recomputed by the simulator and shown read-only. Values print in display
+// units and are read back in them: type 20 for T_amb with °C on and the model gets 293.15 K.
+function paintParams() {
+  const list = document.getElementById("plist"), title = document.getElementById("ptitle");
+  const ps = (LIVE && D && D.parameters) || [];
+  title.hidden = !ps.length;
+  if (!ps.length) { list.replaceChildren(); return; }
+  const frag = document.createDocumentFragment();
+  for (const p of ps) {
+    const row = document.createElement("div");
+    row.className = "prow" + (p.derived ? " derived" : "");
+    row.title = (p.doc || p.name) + (p.derived ? "  (derived: edit what it depends on)" : "");
+    const nm = document.createElement("span"); nm.className = "pn"; nm.textContent = p.name;
+    const unit = document.createElement("span"); unit.className = "pu"; unit.textContent = dispUnit(p.unit);
+    const shown = disp(p.value, p.unit);
+    if (p.derived) {
+      const v = document.createElement("span"); v.className = "pv"; v.textContent = fmt(shown);
+      row.append(nm, v, unit);
+    } else {
+      const inp = document.createElement("input"); inp.type = "number"; inp.step = "any";
+      inp.value = (shown !== null && isFinite(shown)) ? Number(shown.toPrecision(7)) : "";
+      if (p.name in overrides) inp.classList.add("set");
+      const apply = () => {
+        const x = parseFloat(inp.value); if (!isFinite(x)) return;
+        overrides[p.name] = undisp(x, p.unit); reRun();
+      };
+      inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } });
+      inp.addEventListener("change", apply);
+      row.append(nm, inp, unit);
+      if (p.name in overrides) {
+        const undo = document.createElement("span"); undo.className = "undo"; undo.textContent = "↺";
+        undo.title = "back to the model's value";
+        undo.onclick = () => { delete overrides[p.name]; reRun(); };
+        row.appendChild(undo);
+      }
+    }
+    frag.appendChild(row);
+  }
+  list.replaceChildren(frag);
+}
 
 // The events, listed under the variables with their cause. Clicking one says "show me until
 // here": a live .mo moves its stop to just past that event and re-runs; the corpus gallery,
@@ -762,7 +989,25 @@ split.addEventListener("pointerup", () => { splitDrag = false; split.classList.r
 split.addEventListener("dblclick", () => setLegend(legendWidth < 40 ? 208 : 0));
 window.addEventListener("message", (e) => {
   const m = e.data || {};
-  if (m.type === "data" && m.models) { MODELS = m.models; load(); }
+  if (m.type === "data" && m.models) {
+    const rec = m.models[0];
+    const liveIdx = RUNS.length - 1;
+    const ri = (typeof m.runId === "number" && m.runId >= 0 && m.runId < RUNS.length) ? m.runId : liveIdx;
+    if (ri === liveIdx) {
+      // The live run defines the time grid: swap it in (select() rebases the pinned runs onto
+      // it), then bring any pinned run whose stop differs -- an automatic stop may have moved
+      // it -- to the same horizon, so the comparison covers the same span.
+      MODELS = m.models; load();
+      for (let k = 0; k < RUNS.length - 1; k++) {
+        const have = (RUNS[k].data && RUNS[k].data.stop) || 0;
+        if (vscodeApi && Math.abs(have - D.stop) > 1e-9) {
+          vscodeApi.postMessage({ type: "simulate", stop: D.stop, sets: RUNS[k].overrides, runId: k });
+        }
+      }
+    } else {
+      RUNS[ri].data = rec; rebase(RUNS[ri]); paintRuns(); draw();
+    }
+  }
   else if (m.type === "error") { foot.textContent = "error: " + m.error; }
 });
 

@@ -11,25 +11,48 @@ if [ -z "$VSIX" ]; then
   exit 1
 fi
 
+# Every CLI worth trying, one per line (paths can hold spaces). PATH names first; then, on
+# macOS, whatever app bundles Spotlight knows about -- wherever they were dragged to, including
+# ~/Downloads, which is where an unmoved download runs from -- checking both binary names, since
+# the Insiders bundle ships its CLI as `bin/code`; then the fixed Linux locations.
+candidates() {
+  echo "code"
+  echo "code-insiders"
+  if command -v mdfind >/dev/null 2>&1; then
+    for id in com.microsoft.VSCode com.microsoft.VSCodeInsiders; do
+      mdfind "kMDItemCFBundleIdentifier == '$id'" 2>/dev/null | while IFS= read -r app; do
+        for bin in code code-insiders; do
+          [ -x "$app/Contents/Resources/app/bin/$bin" ] && echo "$app/Contents/Resources/app/bin/$bin"
+        done
+      done
+    done
+  fi
+  for app in "/Applications" "$HOME/Applications"; do
+    for name in "Visual Studio Code" "Visual Studio Code - Insiders"; do
+      for bin in code code-insiders; do
+        echo "$app/$name.app/Contents/Resources/app/bin/$bin"
+      done
+    done
+  done
+  echo "/usr/share/code/bin/code"
+  echo "/snap/bin/code"
+}
+
+# Read the list from a file rather than a pipe, so `found` set in the loop survives it.
+list="$(mktemp)"
+candidates | awk '!seen[$0]++' > "$list"
 found=""
-for cli in \
-  "code" \
-  "code-insiders" \
-  "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
-  "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders" \
-  "$HOME/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
-  "$HOME/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders" \
-  "/usr/share/code/bin/code" \
-  "/snap/bin/code"; do
-  # `code`/`code-insiders` (bare names) resolve via PATH; absolute paths must be executable.
+while IFS= read -r cli; do
+  # A bare name resolves via PATH; an absolute path must be executable.
   case "$cli" in
     /*) [ -x "$cli" ] || continue ;;
     *) command -v "$cli" >/dev/null 2>&1 || continue ;;
   esac
   echo "installing into: $cli"
-  "$cli" --install-extension "$VSIX" || true
+  "$cli" --install-extension "$VSIX" --force || true
   found="yes"
-done
+done < "$list"
+rm -f "$list"
 
 if [ -z "$found" ]; then
   echo ""
