@@ -28,7 +28,10 @@ from modelica.lang import parse
 from modelica.sim import flatten
 from modelica.sim.emit import settings
 from modelica.sim.kernel import build
-from modelica.sim.solve import simulate
+from modelica.sim.solve import (
+    _Run,  # pyright: ignore[reportPrivateUsage]
+    simulate,
+)
 from modelica.sim.sweep import vector
 
 if TYPE_CHECKING:
@@ -146,6 +149,44 @@ def _load(path: Path, name: str, libraries: list[str]) -> tuple[System, Kernel, 
 def _integrate(kernel: Kernel, stop: float, params: NDArray[np.float64] | None = None) -> Result:
     """One run to ``stop`` on a 300-point grid, at the model's parameters or ``params``."""
     return simulate(kernel, stop=stop, times=np.linspace(0.0, stop, 300), parameters=params)
+
+
+_TOLERANCE = 1e-6
+"""What `simulate` uses when not told: relative and absolute both."""
+
+
+def _integrate_from(
+    kernel: Kernel,
+    stop: float,
+    params: NDArray[np.float64] | None,
+    resume: dict[str, object] | None,
+    states: list[str],
+) -> tuple[Result, dict[str, object]]:
+    """The panel's main run, with a checkpoint out and, optionally, a checkpoint in.
+
+    Extending the horizon used to re-integrate from t = 0 every time -- O(t) per keystroke, so
+    a held arrow key grew slower with every press. Instead the run's end is handed back as a
+    checkpoint -- the instant, the state vector and the whole workspace, latches included --
+    and the next call can pick up from it, integrating only the new stretch. That is the same
+    loop `simulate` runs (`_Run`), started at the checkpoint's instant with its state and its
+    workspace rather than at zero with `kernel.start`'s; the run loop never re-latches on
+    entry, so a hysteresis latch or a discrete variable set by an earlier event carries over.
+    Only valid when the parameters did not change and the stop grew, which the panel checks.
+    """
+    p, y, w = kernel.start(0.0, params)
+    if resume is not None:
+        start = float(resume["t"])  # type: ignore[arg-type]
+        y = np.asarray(resume["y"], dtype=float)
+        w = np.asarray(resume["w"], dtype=float)
+        grid = np.linspace(start, stop, max(30, int(300 * (stop - start) / max(stop, 1e-12))))
+    else:
+        start = 0.0
+        grid = np.linspace(0.0, stop, 300)
+    plan = _Run(kernel, p, w, _TOLERANCE, _TOLERANCE, "Radau")
+    result = plan.run(start, stop, y, grid)
+    final = [float(np.asarray(result[state], dtype=float)[-1]) for state in states]
+    checkpoint: dict[str, object] = {"t": stop, "y": final, "w": [float(v) for v in plan.w]}
+    return result, checkpoint
 
 
 def _settle_time(result: Result, states: set[str], eps: float = 0.01) -> float:
@@ -312,6 +353,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     sets: dict[str, float] | None = None,
     sensitivity: str | None = None,
     sstep: float = 0.05,
+    resume: dict[str, object] | None = None,
 ) -> dict[str, object]:
     system, kernel, units = _load(path, name, libraries)
     states = set(system.modes[0].states)
@@ -335,6 +377,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         for variable in system.parameters
     ]
     note = ""
+    checkpoint: dict[str, object] | None = None
     if until in ("event", "settle"):
         default = _default_stop(path)
         # No cap given: ten times what is on screen, far enough to find something and bounded
@@ -342,7 +385,9 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         cap = maximum if maximum > 0 else 10.0 * max(frm, default)
         stop, result, note = _auto_stop(kernel, states, until, frm, default, cap, params)
     else:
-        result = _integrate(kernel, stop, params)
+        result, checkpoint = _integrate_from(
+            kernel, stop, params, resume, list(system.modes[0].states)
+        )
     time = np.asarray(result.time, dtype=float)
     # A parameter is one flat value; keep the ones that move, plus the states so a constant
     # state (a body at rest) still shows. Decided on the full column, then every kept series
@@ -392,6 +437,10 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         "parameters": parameters,
         "overrides": sets,
         "sensitivity": sens,
+        # Where this run ended, for the next call to continue from; and, when this call did
+        # continue, where it took over -- so the panel appends the tail to what it has.
+        "checkpoint": checkpoint,
+        "resumedFrom": float(resume["t"]) if resume else None,  # type: ignore[arg-type]
     }
 
 
@@ -453,6 +502,13 @@ def main() -> None:
         default=0.05,
         help="the relative step for --sensitivity (0.05 is +-5 percent)",
     )
+    ap.add_argument(
+        "--resume",
+        default=None,
+        metavar="FILE",
+        help="a checkpoint JSON {t, y, w} from an earlier run's output: continue from it to "
+        "--stop instead of starting at t = 0 (same parameters, larger stop)",
+    )
     args = ap.parse_args()
 
     path = Path(args.path)
@@ -470,6 +526,9 @@ def main() -> None:
             sets=_parse_sets(args.sets),
             sensitivity=args.sensitivity,
             sstep=args.sensitivity_step,
+            resume=json.loads(Path(args.resume).read_text(encoding="utf-8"))
+            if args.resume
+            else None,
         )
         print(json.dumps({"models": [record]}, separators=(",", ":"), allow_nan=False))
     except Exception as error:  # noqa: BLE001 - report every failure to the panel, never crash silently

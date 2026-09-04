@@ -1248,6 +1248,36 @@ document.getElementById("sresp").onchange = (e) => { sweepPicked = true; sweepCh
 document.getElementById("srun").onclick = runSweep;
 document.getElementById("sclear").onclick = () => clearSweep(true);
 
+// -- continuation --------------------------------------------------------------------------
+// Join a run's tail onto the run it continued: keep the base's samples up to where the tail
+// took over, then the tail's after it (the tail's first instant repeats the checkpoint's, so
+// it is dropped); series present on only one side are null-filled; events concatenate; the
+// stop and the checkpoint are the tail's. What comes back is a whole run, as if simulated in
+// one go, and `resumedFrom` is cleared so it is not stitched twice.
+function stitch(base, tail) {
+  const from = Number(tail.resumedFrom);
+  const bt = base.t || [], tt = tail.t || [];
+  let cut = bt.length; while (cut > 0 && bt[cut - 1] > from * (1 + 1e-12)) cut--;
+  let skip = 0; while (skip < tt.length && tt[skip] <= from * (1 + 1e-12)) skip++;
+  const names = new Set([...Object.keys(base.series || {}), ...Object.keys(tail.series || {})]);
+  const series = {};
+  for (const nm of names) {
+    const a = (base.series[nm] || []).slice(0, cut), b = (tail.series[nm] || []).slice(skip);
+    const padA = a.length < cut ? new Array(cut - a.length).fill(null) : [];
+    const padB = b.length < tt.length - skip ? new Array(tt.length - skip - b.length).fill(null) : [];
+    series[nm] = [...a, ...padA, ...b, ...padB];
+  }
+  return {
+    ...tail,
+    t: [...bt.slice(0, cut), ...tt.slice(skip)],
+    series,
+    units: {...(base.units || {}), ...(tail.units || {})},
+    events: [...(base.events || []).filter((e) => e.t <= from * (1 + 1e-12)), ...(tail.events || [])],
+    states: base.states || tail.states,
+    resumedFrom: null,
+  };
+}
+
 // -- measurement marks -------------------------------------------------------------------
 // A click places a mark at the nearest sample; a second gives the interval; a third starts
 // over. Marks are sample indices, so they mean the same thing against time and in a phase
@@ -1413,13 +1443,25 @@ function reRun(until) {
   foot.textContent = until === "event" ? "looking for the next event …"
     : until === "settle" ? "running until the signals settle …"
     : "re-simulating to t = " + fmt(toT(stop)) + " " + tUnit() + " …";
+  // Extending the horizon with nothing else changed continues from the last run's end instead
+  // of starting over at t = 0: the simulator hands back a checkpoint (instant, state, workspace)
+  // and takes it back, integrating only the new stretch. Any other change -- a parameter, an
+  // automatic stop, a shorter horizon -- is a fresh run.
+  const ck = D && D.checkpoint;
+  const same = D && JSON.stringify(D.overrides || {}) === JSON.stringify(overrides || {});
+  const resume = (!until && ck && same && stop > (D.stop || 0) * (1 + 1e-9)) ? ck : null;
   vscodeApi.postMessage({ type: "simulate", stop: stop, until: until, from: stop,
-    sets: overrides, runId: RUNS.length - 1 });
+    sets: overrides, runId: RUNS.length - 1, resume: resume });
 }
 const stopInput = document.getElementById("stop");
 if (stopInput) {
-  stopInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); reRun(); } });
-  stopInput.addEventListener("change", () => reRun());
+  // A held arrow key fires a change per step; each used to be a run. Coalesce them: one run,
+  // 300 ms after the last edit. Enter runs at once.
+  let stopTimer = null;
+  const scheduleReRun = () => { clearTimeout(stopTimer); stopTimer = setTimeout(() => { stopTimer = null; reRun(); }, 300); };
+  stopInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); clearTimeout(stopTimer); stopTimer = null; reRun(); } });
+  stopInput.addEventListener("input", scheduleReRun);
+  stopInput.addEventListener("change", scheduleReRun);
 }
 document.getElementById("nextev").onclick = () => reRun("event");
 document.getElementById("settle").onclick = () => reRun("settle");
@@ -1568,15 +1610,24 @@ window.addEventListener("message", (e) => {
       // The live run defines the time grid: swap it in (select() rebases the pinned runs onto
       // it), then bring any pinned run whose stop differs -- an automatic stop may have moved
       // it -- to the same horizon, so the comparison covers the same span.
+      // A continued run comes back as a tail from where it took over: append it to what is
+      // already here, so the panel shows the whole trajectory without having re-run any of it.
+      if (rec && rec.resumedFrom !== null && rec.resumedFrom !== undefined && D) m.models[0] = stitch(D, rec);
       MODELS = m.models; load();
       for (let k = 0; k < RUNS.length - 1; k++) {
         const have = (RUNS[k].data && RUNS[k].data.stop) || 0;
         if (vscodeApi && Math.abs(have - D.stop) > 1e-9) {
-          vscodeApi.postMessage({ type: "simulate", stop: D.stop, sets: RUNS[k].overrides, runId: k });
+          // A pinned run extends the same way the live one does: from its own checkpoint when
+          // the stop only grew, from scratch otherwise.
+          const pk = RUNS[k].data && RUNS[k].data.checkpoint;
+          const grew = D.stop > have * (1 + 1e-9);
+          vscodeApi.postMessage({ type: "simulate", stop: D.stop, sets: RUNS[k].overrides, runId: k, resume: (pk && grew) ? pk : null });
         }
       }
     } else {
-      RUNS[ri].data = rec; rebase(RUNS[ri]); paintRuns(); paintSweep(); draw();
+      const had = RUNS[ri].data;
+      RUNS[ri].data = (rec.resumedFrom !== null && rec.resumedFrom !== undefined && had) ? stitch(had, rec) : rec;
+      rebase(RUNS[ri]); paintRuns(); paintSweep(); draw();
     }
   }
   else if (m.type === "log" && m.t && m.series) {

@@ -14,9 +14,11 @@ const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
+const os = require("os");
 
 let panel = null;
 let live = null; // { context, file } -- the .mo the panel is currently showing, for re-runs
+let resumeCounter = 0; // names the temp file a resume checkpoint travels by, one per call
 
 function nonce() {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -50,6 +52,8 @@ function ensurePanel(context) {
         stop: Number(msg.stop), until: msg.until, from: Number(msg.from), sets: msg.sets || {},
         // A sensitivity study: the response to read off, and the relative step for each parameter.
         sensitivity: msg.sensitivity || null, sstep: Number(msg.sstep) || 0.05,
+        // A checkpoint {t, y, w} from the run this one extends: integrate only the new tail.
+        resume: msg.resume || null,
       };
       runHelper(live.context, live.file, opts, (data) => {
         panel.webview.postMessage(
@@ -181,9 +185,17 @@ function runtimeCommand(context, cfg, file, opts) {
   const sensArgs = opts.sensitivity
     ? ["--sensitivity", String(opts.sensitivity), "--sensitivity-step", String(opts.sstep || 0.05)]
     : [];
+  // A resume checkpoint travels by file: the state and workspace vectors are too long for an
+  // argument and the simulator reads JSON anyway. One file per call, in the OS temp dir.
+  let resumeArgs = [];
+  if (opts.resume && typeof opts.resume.t === "number") {
+    const ckpt = path.join(os.tmpdir(), `pymodelica-resume-${process.pid}-${++resumeCounter}.json`);
+    fs.writeFileSync(ckpt, JSON.stringify(opts.resume));
+    resumeArgs = ["--resume", ckpt];
+  }
   return {
     cmd: python[0],
-    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...setArgs, ...sensArgs, ...libs],
+    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...setArgs, ...sensArgs, ...resumeArgs, ...libs],
   };
 }
 
