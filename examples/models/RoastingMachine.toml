@@ -5,6 +5,7 @@ teaches = [
   "a parameter computed from other parameters",
   "modelling the sensor, not just the thing measured",
   "checking a model against a real machine",
+  "an event the model owns -- the drop -- named by the flag it sets",
 ]
 requires = []
 
@@ -131,6 +132,14 @@ source = "reference"
 # the run starts -- the condition is on `time` -- and the ninth is not: it is where the
 # beans reach 40 degC and the water starts leaving, which depends on the trajectory. Having
 # both kinds in one model is the reason this example is in the corpus.
+#
+# There is a tenth crossing the model owns and this batch never reaches: the drop, `when
+# probe >= T_drop` at 216 degC, which sets `dropped` and records `t_drop`. It is the event a
+# roaster actually calls the roast on, and it is written in the model rather than read off the
+# curve by a viewer, because it is a fact about the roaster and not about the plot. On this
+# profile the 13.8 kg charge peaks at 214.6 degC, so the list below has nine entries and
+# `dropped` stays 0 -- which is itself the finding: this schedule was pulled 1.4 K short of the
+# target. Charge 6 kg instead and the probe comes back through 216 at t = 424 s.
 [simulate.events]
 times = [20.241885, 66.7, 93.0, 526.9, 618.0, 688.5, 714.6, 754.4, 780.8]
 atol = 1e-6

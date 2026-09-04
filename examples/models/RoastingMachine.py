@@ -4,12 +4,15 @@ from modelica.build import (
     Expression,
     Model,
     Real,
+    assign,
     der,
+    discrete,
     if_,
     parameter,
     ref,
     time,
     to_modelica,
+    when,
 )
 
 GAS = (
@@ -61,6 +64,9 @@ class RoastingMachine(Model):
     G_loss = parameter(Real, 384, unit="W/K", doc="Loop to ambient: the bleed and the shell")
     Q_max = parameter(Real, 1.32e5, unit="W", doc="Burner at 100 percent")
     tau_probe = parameter(Real, 18.1, unit="s", doc="Bean probe time constant")
+    T_drop = parameter(
+        Real, 216, unit="degC", doc="The drop: the probe reading at which the roaster pulls the batch"
+    )
 
     T_mach = Real("Machine temperature", unit="K", start=510.53, fixed=True)
     T_bean = Real("Bean temperature -- the coffee itself", unit="K", start=293.15, fixed=True)
@@ -80,6 +86,14 @@ class RoastingMachine(Model):
     probe = Real("What the roaster reads, in degC", unit="degC")
     lag = Real("How far the coffee runs ahead of its own probe", unit="K")
     loss = Real("Weight lost as steam, per cent of the charge")
+    dropped = discrete(
+        Real(
+            "1 once the probe has come back up through T_drop -- the batch is out",
+            start=0,
+            fixed=True,
+        )
+    )
+    t_drop = discrete(Real("When it was dropped", start=0, fixed=True, unit="s"))
 
     def equations(self):
         yield self.burner == staged(GAS, IDLE)
@@ -101,6 +115,13 @@ class RoastingMachine(Model):
         yield self.probe == self.T_probe - 273.15
         yield self.lag == self.T_bean - self.T_probe
         yield self.loss == 100 * (self.m_green * self.moisture - self.m_w) / self.m_green
+        # The drop is an event of the model, not a reading the viewer takes: the probe coming
+        # back up through T_drop. Named by the flag it sets, which is how Modelica names one.
+        yield when(
+            self.probe >= self.T_drop,
+            assign(self.dropped, 1),
+            assign(self.t_drop, time),
+        )
 
 
 if __name__ == "__main__":

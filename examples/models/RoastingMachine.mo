@@ -13,6 +13,7 @@ model RoastingMachine "A Loring S15 coffee roaster over one batch -- gas on a cl
   parameter Real G_loss(unit = "W/K") = 384 "Loop to ambient: the bleed and the shell";
   parameter Real Q_max(unit = "W") = 132000.0 "Burner at 100 percent";
   parameter Real tau_probe(unit = "s") = 18.1 "Bean probe time constant";
+  parameter Real T_drop(unit = "degC") = 216 "The drop: the probe reading at which the roaster pulls the batch";
   Real T_mach(unit = "K", start = 510.53, fixed = true) "Machine temperature";
   Real T_bean(unit = "K", start = 293.15, fixed = true) "Bean temperature -- the coffee itself";
   Real T_probe(unit = "K", start = 489.98, fixed = true) "Bean probe temperature";
@@ -25,6 +26,8 @@ model RoastingMachine "A Loring S15 coffee roaster over one batch -- gas on a cl
   Real probe(unit = "degC") "What the roaster reads, in degC";
   Real lag(unit = "K") "How far the coffee runs ahead of its own probe";
   Real loss "Weight lost as steam, per cent of the charge";
+  discrete Real dropped(start = 0, fixed = true) "1 once the probe has come back up through T_drop -- the batch is out";
+  discrete Real t_drop(start = 0, fixed = true, unit = "s") "When it was dropped";
 equation
   burner = if time < 66.7 then 20 elseif time < 93.0 then 27 elseif time < 526.9 then 85 elseif time < 618.0 then 79 elseif time < 688.5 then 70 elseif time < 714.6 then 61 elseif time < 754.4 then 50 elseif time < 780.8 then 37 else 20;
   Q_burner = burner / 100 * Q_max;
@@ -38,4 +41,8 @@ equation
   probe = T_probe - 273.15;
   lag = T_bean - T_probe;
   loss = 100 * (m_green * moisture - m_w) / m_green;
+  when probe >= T_drop then
+    dropped = 1;
+    t_drop = time;
+  end when;
 end RoastingMachine;
