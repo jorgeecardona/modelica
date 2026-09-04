@@ -160,23 +160,6 @@
   .prow.derived { color: var(--dim); }
   .prow .undo { cursor: pointer; color: var(--dim); text-align: center; }
   .prow .undo:hover { color: var(--accent); }
-  /* The drop: the variable and target the batch is finished on, and one card per run saying
-     where that run started, turned and dropped. The marker on the plot is a solid accent line
-     (an event is a dashed grey one), dashed per run like its trace. */
-  #dtitle { margin-top: 12px; }
-  .dropctl { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; padding: 2px 12px;
-    font-size: 12px; color: var(--dim); }
-  .dropctl select { max-width: 120px; }
-  .dropctl input { width: 62px; font: inherit; font-size: 11.5px; color: var(--ink);
-    background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
-    text-align: right; font-variant-numeric: tabular-nums; }
-  .dcard { padding: 4px 12px 3px; font-size: 12px; line-height: 1.4; }
-  .dcard .tag { font-weight: 650; }
-  .dcard .l { color: var(--dim); }
-  .dcard .v { font-variant-numeric: tabular-nums; }
-  .dcard .miss { color: var(--dim); font-style: italic; }
-  .dropline { stroke: var(--accent); stroke-width: 1.4; }
-  .droplab { fill: var(--accent); font-size: 10px; font-weight: 600; }
   .legtitle { padding: 4px 12px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .7px;
     text-transform: uppercase; color: var(--dim); }
   .row { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; cursor: pointer;
@@ -251,6 +234,7 @@
             <option value="units">by unit</option>
             <option value="split">split (per-variable)</option>
           </select>
+          <select id="xaxis" title="what the x axis is: time, or a variable -- a phase plot, RoR against bean temperature or Lorenz's x against z"><option value="">x: time</option></select>
           <select id="timeunit" title="time axis unit: the data stays in seconds, only what is shown converts">
             <option value="s">seconds</option>
             <option value="min">minutes</option>
@@ -277,9 +261,6 @@
     <div class="legtitle">variables</div><div id="legend"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="ptitle" hidden>parameters</div><div id="plist"></div>
-    <div class="legtitle" id="dtitle" hidden>drop</div>
-    <div id="dropctl" class="dropctl" hidden>when <select id="dropvar" title="the variable the batch is finished on"></select> reaches <input id="dropthr" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" title="the target; if a run never gets there, its drop is where this variable peaks"><span id="dropunit" class="pu"></span></div>
-    <div id="droplist"></div>
   </aside>
 </div>
 <div class="note" id="srcnote"></div>
@@ -318,10 +299,14 @@ let RUNS = [];           // [{overrides, data, onBase}]
 let overrides = {};      // the live run's parameter overrides, name -> SI value
 let dispMode = "si";     // display units: "si", or "c" to print kelvin as celsius
 let timeMode = "s";      // time axis: "s" seconds, or "min" minutes -- the data stays in seconds
+// The x axis. null is time; a variable name makes a phase plot, every selected variable drawn
+// against that one at the same instants (RoR against bean temperature, Lorenz x against z).
+// `xwin` is a zoom in that variable's units, `XD` the domain X() maps from, set once per draw.
+let xVar = null;
+let xwin = null;
+let XD = [0, 1];
 let lastModel = null;    // to keep the view across a re-run of the same model
 let prevEnd = 0;
-let dropVar = null;      // the variable a batch is finished on (the bean probe, for a roast)
-let dropThr = null;      // its target, in SI; null means "at the peak"
 
 function readBg() {
   cssbg = getComputedStyle(document.body).backgroundColor || "#ffffff";
@@ -424,10 +409,9 @@ function select(i) {
   }
   document.getElementById("pin").hidden = !LIVE;
   paintEvents();
-  initDrop();
+  paintXAxis();
   paintParams();
   paintRuns();
-  paintDrop();
   draw();
   // An automatic stop says where it landed and why, until the pointer moves on.
   if (D.autoNote) foot.textContent = D.autoNote + "  ·  t → " + fmt(toT(D.stop)) + " " + tUnit();
@@ -527,7 +511,11 @@ function drawPath(frag, vs, a, b, yOf, nm, ri) {
   for (let k = a; k <= b; k++) {
     const v = vs[k]; const y = (v === null || v === undefined || !isFinite(v)) ? null : yOf(v);
     if (y === null || !isFinite(y)) { pen = false; continue; }
-    d += (pen ? "L" : "M") + X(T[k]).toFixed(2) + " " + y.toFixed(2); pen = true;
+    // In a phase plot the x is this run's phase variable at the same instant; a point outside
+    // the x zoom lifts the pen so the curve is clipped rather than drawn across the frame.
+    const xv = xOfRun(ri, k);
+    if (xv === null || xv === undefined || !isFinite(xv) || (xwin && (xv < xwin[0] || xv > xwin[1]))) { pen = false; continue; }
+    d += (pen ? "L" : "M") + X(xv).toFixed(2) + " " + y.toFixed(2); pen = true;
   }
   if (!d) return;
   const attrs = {d: d, fill: "none", "stroke-width": st.w, stroke: colour(nm),
@@ -580,7 +568,7 @@ function bounds() {
       }
     });
     // include reference points in range
-    if (scale === "linear") for (const rf of D.refs) {
+    if (scale === "linear" && !xVar) for (const rf of D.refs) {
       const rv = rf.values[nm]; if (rv === undefined) continue;
       if (rv < lo) lo = rv; if (rv > hi) hi = rv;
     }
@@ -603,7 +591,28 @@ function project(nm, dom) {
   if (scale === "log") return (v) => (Math.log10(Math.abs(v)) - dom[0]) / (dom[1] - dom[0]);
   return (v) => (v - dom[0]) / (dom[1] - dom[0]);
 }
-const X = (t) => M.l + ((t - win[0]) / (win[1] - win[0])) * (box.w - M.l - M.r);
+// X maps a value of the x-axis domain -- time, or the phase variable -- onto the plot; `XD` is
+// that domain, set once per draw() by xdom(). The inverse, for the pointer, is domAt().
+const X = (v) => M.l + ((v - XD[0]) / (XD[1] - XD[0])) * (box.w - M.l - M.r);
+// The x value of run `ri` at time index `k`: the time itself, or that run's phase variable.
+function xOfRun(ri, k) {
+  if (!xVar) return T[k];
+  const vs = seriesOf(ri, xVar); return vs ? vs[k] : null;
+}
+// The x domain: the time window, or the phase variable's range over the visible instants
+// across every run (unless zoomed into `xwin`), padded so the curve does not touch the frame.
+function xdom() {
+  if (!xVar) return win;
+  if (xwin) return xwin;
+  const [a, b] = visible();
+  let lo = Infinity, hi = -Infinity;
+  for (let ri = 0; ri < RUNS.length; ri++) {
+    const vs = seriesOf(ri, xVar); if (!vs) continue;
+    for (let k = a; k <= b; k++) { const v = vs[k]; if (v === null || v === undefined || !isFinite(v)) continue;
+      if (v < lo) lo = v; if (v > hi) hi = v; }
+  }
+  return isFinite(lo) ? spanPad(lo, hi) : [0, 1];
+}
 const Y = (u) => box.h - M.b - u * (box.h - M.t - M.b);
 
 // -- drawing ---------------------------------------------------------------------------
@@ -616,48 +625,49 @@ function draw() {
   svg.setAttribute("viewBox", "0 0 " + box.w + " " + box.h);
   const frag = document.createDocumentFragment();
 
-  // Shared frame: time grid, the two axes, and one vertical line per event, full height. Ticks
-  // are laid at round values of the *shown* time unit (whole minutes, say) and mapped back to
-  // seconds for their x, so the axis reads 0, 2, 4 min rather than 0, 120, 240.
-  for (const dt of ticks(toT(win[0]), toT(win[1]), Math.max(2, Math.round(box.w / 90)))) {
-    const x = X(fromT(dt));
+  // The x domain for this draw: the time window, or the phase variable's range.
+  XD = xdom();
+
+  // Shared frame: the x grid and the two axes, full height. Against time, ticks are laid at
+  // round values of the *shown* time unit (whole minutes, say) and mapped back to seconds for
+  // their x, so the axis reads 0, 2, 4 min rather than 0, 120, 240. Against a variable, the
+  // same in that variable's display unit, with the variable named at the axis's right end.
+  const xu = xVar ? unitOf(xVar) : "";
+  const shown = xVar ? (v) => disp(v, xu) : toT;
+  const back = xVar ? (v) => undisp(v, xu) : fromT;
+  for (const dv of ticks(shown(XD[0]), shown(XD[1]), Math.max(2, Math.round(box.w / 90)))) {
+    const x = X(back(dv));
     if (x < M.l - 0.5 || x > box.w - M.r + 0.5) continue;
     frag.appendChild(el("line", {class: "grid", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
-    frag.appendChild(el("text", {class: "tick", x: x, y: box.h - 9, "text-anchor": "middle"}, fmt(dt)));
+    frag.appendChild(el("text", {class: "tick", x: x, y: box.h - 9, "text-anchor": "middle"}, fmt(dv)));
+  }
+  if (xVar) {
+    frag.appendChild(el("text", {class: "tick", x: box.w - M.r, y: box.h - M.b - 5, "text-anchor": "end",
+      "font-weight": 600}, xVar + (dispUnit(xu) ? "  " + dispUnit(xu) : "")));
   }
   frag.appendChild(el("line", {class: "axis", x1: M.l, x2: M.l, y1: M.t, y2: box.h - M.b}));
   frag.appendChild(el("line", {class: "axis", x1: M.l, x2: box.w - M.r, y1: box.h - M.b, y2: box.h - M.b}));
-  for (const e of D.events) {
-    if (e.t < win[0] || e.t > win[1]) continue;
-    frag.appendChild(el("line", {class: "event", x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b}));
-  }
-  // A pinned run's events, fainter: where its schedule fired may differ from the live run's.
-  for (let ri = 0; ri < RUNS.length - 1; ri++) {
-    for (const e of ((RUNS[ri].data || {}).events || [])) {
+
+  // Instants -- events and the stop -- are vertical lines against time only; in a phase plot
+  // an instant is a point on a curve, not a column of the plane.
+  if (!xVar) {
+    for (const e of D.events) {
       if (e.t < win[0] || e.t > win[1]) continue;
-      frag.appendChild(el("line", {class: "event pin", x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b}));
+      frag.appendChild(el("line", {class: "event", x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b}));
     }
-  }
-  // The drop, per run: a solid accent line where the finishing variable reached its target or,
-  // failing that, its peak -- dashed like that run's trace, labelled with the run's letter.
-  if (dropVar && D.series[dropVar]) {
-    for (let ri = 0; ri < RUNS.length; ri++) {
-      const data = ri === RUNS.length - 1 ? D : RUNS[ri].data;
-      const d = data && dropOf(data.t, data.series[dropVar], dropThr);
-      if (!d || d.tDrop < win[0] || d.tDrop > win[1] * (1 + 1e-9)) continue;
-      const x = X(d.tDrop), st = runStyle(ri);
-      const attrs = {class: "dropline", x1: x, x2: x, y1: M.t, y2: box.h - M.b, opacity: st.op};
-      if (st.dash) attrs["stroke-dasharray"] = st.dash;
-      frag.appendChild(el("line", attrs));
-      frag.appendChild(el("text", {class: "droplab", x: x - 4, y: M.t + 22 + 11 * ri, "text-anchor": "end"},
-        "drop" + (RUNS.length > 1 ? " " + String.fromCharCode(65 + ri) : "")));
+    // A pinned run's events, fainter: where its schedule fired may differ from the live run's.
+    for (let ri = 0; ri < RUNS.length - 1; ri++) {
+      for (const e of ((RUNS[ri].data || {}).events || [])) {
+        if (e.t < win[0] || e.t > win[1]) continue;
+        frag.appendChild(el("line", {class: "event pin", x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b}));
+      }
     }
-  }
-  // The stop marker: where the run ends, drawn as a handle. Drag it left to trim the horizon
-  // or past the right edge to extend it; letting go re-simulates to there. A live .mo only,
-  // since the corpus gallery cannot re-simulate.
-  if (LIVE && N && D.stop >= win[0] && D.stop <= win[1] * (1 + 1e-9)) {
-    frag.appendChild(stopMarker(X(Math.min(D.stop, win[1]))));
+    // The stop marker: where the run ends, drawn as a handle. Drag it left to trim the horizon
+    // or past the right edge to extend it; letting go re-simulates to there. A live .mo only,
+    // since the corpus gallery cannot re-simulate.
+    if (LIVE && N && D.stop >= win[0] && D.stop <= win[1] * (1 + 1e-9)) {
+      frag.appendChild(stopMarker(X(Math.min(D.stop, win[1]))));
+    }
   }
 
   if (scale === "split") drawSplit(frag);
@@ -692,7 +702,7 @@ function drawOverlay(frag) {
     const to = project(nm, dom);
     eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, (v) => Y(to(v)), nm, ri));
   }
-  if (scale === "linear") for (const rf of D.refs) {
+  if (scale === "linear" && !xVar) for (const rf of D.refs) {
     if (rf.t < win[0] || rf.t > win[1]) continue;
     for (const nm of selected()) {
       const rv = rf.values[nm]; if (rv === undefined) continue;
@@ -752,7 +762,7 @@ function drawSplit(frag) {
     lo -= pad; hi += pad;
     const yFor = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
     eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, yFor, nm, ri));
-    for (const rf of D.refs) { const rv = rf.values[nm];
+    if (!xVar) for (const rf of D.refs) { const rv = rf.values[nm];
       if (rv === undefined || rf.t < win[0] || rf.t > win[1]) continue;
       const cx = X(rf.t), cy = yFor(rv);
       frag.appendChild(el("circle", {cx: cx, cy: cy, r: 4.5, fill: cssbg, stroke: colour(nm), class: "refring"}));
@@ -805,7 +815,7 @@ function drawUnits(frag) {
     const yFor = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
     for (const nm of members) {
       eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, yFor, nm, ri));
-      for (const rf of D.refs) { const rv = rf.values[nm];
+      if (!xVar) for (const rf of D.refs) { const rv = rf.values[nm];
         if (rv === undefined || rf.t < win[0] || rf.t > win[1]) continue;
         const cx = X(rf.t), cy = yFor(rv);
         frag.appendChild(el("circle", {cx: cx, cy: cy, r: 4.5, fill: cssbg, stroke: colour(nm), class: "refring"}));
@@ -847,10 +857,28 @@ function paintLegend(at) {
   }
   legend.replaceChildren(frag);
 }
-function cursor(t) {
-  const i = index(t);
-  const j = i > 0 && Math.abs(T[i - 1] - t) < Math.abs(T[i] - t) ? i - 1 : i;
-  const x = X(T[j]);
+// The instant under the pointer. Against time it is the nearest sample in time; in a phase plot
+// it is the sample whose phase-variable value, over every selected variable and run, sits
+// nearest the pointer's x -- the curve may fold back on itself, so this picks the closest.
+function nearestIndex(v) {
+  if (!xVar) {
+    const i = index(v);
+    return i > 0 && Math.abs(T[i - 1] - v) < Math.abs(T[i] - v) ? i - 1 : i;
+  }
+  const [a, b] = visible();
+  let best = a, dist = Infinity;
+  for (let ri = 0; ri < RUNS.length; ri++) {
+    const vs = seriesOf(ri, xVar); if (!vs) continue;
+    for (let k = a; k <= b; k++) {
+      const xv = vs[k]; if (xv === null || xv === undefined || !isFinite(xv)) continue;
+      const d = Math.abs(xv - v); if (d < dist) { dist = d; best = k; }
+    }
+  }
+  return best;
+}
+function cursor(v) {
+  const j = nearestIndex(v);
+  const x = X(xOfRun(RUNS.length - 1, j) ?? v);
   const frag = document.createDocumentFragment();
   frag.appendChild(el("line", {class: "cursor", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
   // Dots on the shared scale; the strip modes have a scale per strip, so their readout is the legend.
@@ -861,21 +889,28 @@ function cursor(t) {
       eachRun(nm, (vs, ri) => {
         const v = vs[j]; if (v === null || v === undefined || !isFinite(v)) return;
         const u = to(v); if (!isFinite(u)) return;
-        frag.appendChild(el("circle", {cx: x, cy: Y(u), r: 2.6, fill: colour(nm), opacity: runStyle(ri).op}));
+        const cx = X(xOfRun(ri, j) ?? v); if (!isFinite(cx)) return;
+        frag.appendChild(el("circle", {cx: cx, cy: Y(u), r: 2.6, fill: colour(nm), opacity: runStyle(ri).op}));
       });
     }
   }
   hud.replaceChildren(frag);
-  const near = D.events.filter((e) => Math.abs(X(e.t) - x) < 4);
-  foot.textContent = "t = " + fmt(toT(T[j])) + " " + tUnit() + (near.length ? "   ⟨ " + (near[0].cause || "event") + " ⟩" : "");
+  // Against time the footer names any event under the cursor; in a phase plot it reads the
+  // phase variable first, then the instant that point belongs to.
+  const near = xVar ? [] : D.events.filter((e) => Math.abs(X(e.t) - x) < 4);
+  const xu = xVar ? unitOf(xVar) : "";
+  const phase = xVar ? xVar + " = " + fmt(disp(xOfRun(RUNS.length - 1, j), xu)) + (dispUnit(xu) ? " " + dispUnit(xu) : "") + "   ·   " : "";
+  foot.textContent = phase + "t = " + fmt(toT(T[j])) + " " + tUnit() + (near.length ? "   ⟨ " + (near[0].cause || "event") + " ⟩" : "");
   paintLegend(j);
 }
 
 // -- interaction -----------------------------------------------------------------------
+// The x-domain value under the pointer, clamped to the plot: a time against time, a value of
+// the phase variable in a phase plot -- the inverse of X().
 function timeAt(event) {
   const r = svg.getBoundingClientRect();
   const x = Math.min(Math.max(event.clientX - r.left, M.l), r.width - M.r);
-  return win[0] + ((x - M.l) / (r.width - M.l - M.r)) * (win[1] - win[0]);
+  return XD[0] + ((x - M.l) / (r.width - M.l - M.r)) * (XD[1] - XD[0]);
 }
 // Like timeAt but not clamped at the plot's right edge: past it the time keeps growing at the
 // plot's own scale, which is how dragging the stop marker outward extends the horizon.
@@ -931,14 +966,15 @@ svg.addEventListener("pointerup", (e) => {
   }
   if (drag === null) return;
   const t = timeAt(e); const lo = Math.min(drag, t), hi = Math.max(drag, t); drag = null;
-  if (hi - lo > (win[1] - win[0]) * 1e-4) win = [lo, hi];
+  // A band zooms the x domain: the time window, or -- in a phase plot -- the phase variable.
+  if (hi - lo > (XD[1] - XD[0]) * 1e-4) { if (xVar) xwin = [lo, hi]; else win = [lo, hi]; }
   draw();
 });
 svg.addEventListener("pointerleave", () => {
   if (drag === null && !stopDrag) { hud.replaceChildren(); foot.textContent = "drag to zoom · double-click to reset"; paintLegend(); }
 });
-svg.addEventListener("dblclick", () => { win = N ? [T[0], T[N - 1]] : [0, 1]; draw(); });
-document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; draw(); };
+svg.addEventListener("dblclick", () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; draw(); });
+document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; draw(); };
 document.getElementById("all").onclick = () => { on = new Set(names); draw(); };
 document.getElementById("none").onclick = () => { on = new Set(); draw(); };
 document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
@@ -947,8 +983,24 @@ document.getElementById("timeunit").onchange = (e) => {
   const s = document.getElementById("stop");
   if (LIVE && s && D) s.value = cleanStop(toT(D.stop));
   document.getElementById("stopunit").textContent = " " + tUnit();
-  paintEvents(); paintDrop(); draw();
+  paintEvents(); draw();
 };
+// The x axis: time, or one of the model's variables for a phase plot. Changing it drops any x
+// zoom, since a zoom in one variable's units means nothing in another's.
+document.getElementById("xaxis").onchange = (e) => {
+  xVar = e.target.value || null;
+  xwin = null;
+  draw();
+};
+// The x-axis choices for the model shown: time first, then every variable. A choice that the
+// new model does not have falls back to time.
+function paintXAxis() {
+  const sel = document.getElementById("xaxis");
+  const opts = [{v: "", t: "x: time"}, ...names.map((nm) => ({v: nm, t: "x: " + nm}))];
+  sel.replaceChildren(...opts.map((o) => { const el = document.createElement("option"); el.value = o.v; el.textContent = o.t; return el; }));
+  if (xVar && !names.includes(xVar)) { xVar = null; xwin = null; }
+  sel.value = xVar || "";
+}
 window.addEventListener("resize", draw);
 
 // Live stop-time control: ask the extension to re-simulate at a new stop, then swap in the data.
@@ -982,7 +1034,7 @@ document.getElementById("pin").onclick = () => {
   const copy = {overrides: {...live.overrides}, data: live.data, onBase: null};
   RUNS.splice(RUNS.length - 1, 0, copy);
   rebase(copy);
-  paintRuns(); paintDrop(); draw();
+  paintRuns(); draw();
 };
 
 function paramUnit(name) {
@@ -1013,7 +1065,7 @@ function paintRuns() {
     chip.append(dash, tag, what);
     if (!live) {
       const x = document.createElement("span"); x.className = "x"; x.textContent = "×"; x.title = "drop this run";
-      x.onclick = () => { RUNS.splice(ri, 1); paintRuns(); paintDrop(); draw(); };
+      x.onclick = () => { RUNS.splice(ri, 1); paintRuns(); draw(); };
       chip.appendChild(x);
     }
     frag.appendChild(chip);
@@ -1067,90 +1119,6 @@ function paintParams() {
   }
   list.replaceChildren(frag);
 }
-
-// -- the drop --------------------------------------------------------------------------
-// Where a batch is finished. For a roast that is the bean probe coming back up through the drop
-// temperature -- or, for a batch that never gets there, where the probe topped out: the target
-// or the peak, whichever comes first. Computed from the trajectory, per run, so a threshold
-// can be changed live and two batch sizes each get their own drop with no re-simulation.
-//   start        the variable at t = 0 (the charge: the probe reads the hot empty drum)
-//   min / tMin   its lowest point after that (the turning point every roaster watches for)
-//   drop / tDrop the target if reached after the turning point, else the peak
-function dropOf(t, vs, thr) {
-  if (!vs || !t || t.length < 2) return null;
-  const ok = (k) => vs[k] !== null && vs[k] !== undefined && isFinite(vs[k]);
-  let i0 = 0; while (i0 < vs.length && !ok(i0)) i0++;
-  if (i0 >= vs.length) return null;
-  let imin = i0; for (let k = i0; k < vs.length; k++) if (ok(k) && vs[k] < vs[imin]) imin = k;
-  let imax = imin; for (let k = imin; k < vs.length; k++) if (ok(k) && vs[k] > vs[imax]) imax = k;
-  let hit = -1;
-  if (thr !== null && isFinite(thr)) {
-    for (let k = imin + 1; k < vs.length; k++) if (ok(k) && vs[k] >= thr) { hit = k; break; }
-  }
-  if (hit > 0 && hit <= imax) {
-    const a = hit - 1, v0 = vs[a], v1 = vs[hit];
-    const tDrop = v1 > v0 ? t[a] + (t[hit] - t[a]) * (thr - v0) / (v1 - v0) : t[hit];
-    return {start: vs[i0], min: vs[imin], tMin: t[imin], drop: thr, tDrop: tDrop, reached: true};
-  }
-  return {start: vs[i0], min: vs[imin], tMin: t[imin], drop: vs[imax], tDrop: t[imax], reached: false};
-}
-// A model's natural finishing variable and target: the probe at 216 degC for a roast (in K or
-// degC as the model spells it); otherwise the first state, finished at its peak.
-function initDrop() {
-  if (dropVar && names.includes(dropVar)) return;
-  dropVar = names.includes("probe") ? "probe" : names.includes("T_probe") ? "T_probe"
-    : (Array.isArray(D.states) && D.states.find((s) => names.includes(s))) || names[0] || null;
-  const u = dropVar ? unitOf(dropVar) : "";
-  dropThr = u === "degC" ? 216 : u === "K" ? 216 + 273.15 : null;
-}
-function paintDrop() {
-  const title = document.getElementById("dtitle"), ctl = document.getElementById("dropctl"),
-        list = document.getElementById("droplist"), sel = document.getElementById("dropvar"),
-        thr = document.getElementById("dropthr"), unit = document.getElementById("dropunit");
-  const show = !!(dropVar && D && D.series[dropVar]);
-  title.hidden = ctl.hidden = !show;
-  if (!show) { list.replaceChildren(); return; }
-  const u = unitOf(dropVar);
-  sel.replaceChildren(...names.map((nm) => { const o = document.createElement("option"); o.value = nm; o.textContent = nm; return o; }));
-  sel.value = dropVar;
-  const shownThr = dropThr === null ? null : disp(dropThr, u);
-  thr.value = shownThr === null ? "" : String(Number(shownThr.toPrecision(6)));
-  thr.placeholder = "peak";
-  unit.textContent = dispUnit(u);
-  const frag = document.createDocumentFragment();
-  RUNS.forEach((run, ri) => {
-    const data = ri === RUNS.length - 1 ? D : run.data;
-    const d = data && dropOf(data.t, data.series[dropVar], dropThr);
-    if (!d) return;
-    const card = document.createElement("div"); card.className = "dcard";
-    const f = (v) => fmt(disp(v, u)), un = dispUnit(u) ? " " + dispUnit(u) : "";
-    const tag = RUNS.length > 1 ? `<span class="tag">${String.fromCharCode(65 + ri)}</span> ` : "";
-    const end = d.reached
-      ? `<span class="l">drop</span> <span class="v">${f(d.drop)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(toT(d.tDrop))} ${tUnit()}</span>`
-      : `<span class="l">peak</span> <span class="v">${f(d.drop)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(toT(d.tDrop))} ${tUnit()}</span>`
-        + (dropThr !== null ? ` <span class="miss">(${f(dropThr)}${un} not reached)</span>` : "");
-    card.innerHTML = `${tag}<span class="l">charge</span> <span class="v">${f(d.start)}${un}</span> <span class="l">→ turning point</span> <span class="v">${f(d.min)}${un}</span> <span class="l">@</span> <span class="v">${fmtEdge(toT(d.tMin))} ${tUnit()}</span> <span class="l">→</span> ${end}`;
-    frag.appendChild(card);
-  });
-  list.replaceChildren(frag);
-}
-document.getElementById("dropvar").onchange = (e) => {
-  dropVar = e.target.value;
-  const u = unitOf(dropVar);
-  dropThr = u === "degC" ? 216 : u === "K" ? 216 + 273.15 : null;
-  paintDrop(); draw();
-};
-(() => {
-  const thr = document.getElementById("dropthr");
-  const apply = () => {
-    const raw = String(thr.value).trim().replace(",", ".");
-    const x = parseFloat(raw);
-    dropThr = raw === "" || !isFinite(x) ? null : undisp(x, unitOf(dropVar));
-    paintDrop(); draw();
-  };
-  thr.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } });
-  thr.addEventListener("change", apply);
-})();
 
 // The events, listed under the variables with their cause. Clicking one says "show me until
 // here": a live .mo moves its stop to just past that event and re-runs; the corpus gallery,
@@ -1209,7 +1177,7 @@ window.addEventListener("message", (e) => {
         }
       }
     } else {
-      RUNS[ri].data = rec; rebase(RUNS[ri]); paintRuns(); paintDrop(); draw();
+      RUNS[ri].data = rec; rebase(RUNS[ri]); paintRuns(); draw();
     }
   }
   else if (m.type === "error") { foot.textContent = "error: " + m.error; }
