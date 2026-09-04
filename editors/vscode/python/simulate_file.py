@@ -219,6 +219,13 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         for event in (getattr(result, "events", []) or [])
     ]
     units = {v.name: v.unit for v in system.variables}
+    # A derivative carries the state's unit over time: der(T_bean) is K/s, not dimensionless,
+    # which is also what keeps a °C display from wrongly subtracting 273.15 from a *rate* (only
+    # a bare "K" is converted, never "K/s"). The flattener leaves the derivative variable's unit
+    # blank, so fill it from the state it differentiates, named by the mode's derivative map.
+    for state, derivative in system.modes[0].derivative.items():
+        base = units.get(state, "")
+        units[derivative] = f"{base}/s" if base else "1/s"
     return {
         "model": name,
         "summary": str(path),

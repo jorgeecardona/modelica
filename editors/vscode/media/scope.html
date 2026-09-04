@@ -77,14 +77,21 @@
   /* The time controls, together: the stop field, then the two automatic stops. */
   .stopwrap { color: var(--dim); display: inline-flex; align-items: baseline; gap: 5px; font-size: 12px; }
   .stopwrap label { display: inline-flex; align-items: baseline; gap: 3px; }
-  .stopwrap input { width: 68px; font: inherit; font-size: 12px; color: var(--ink);
-    background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; }
+  .stopwrap input { width: 88px; font: inherit; font-size: 12px; color: var(--ink);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px;
+    -moz-appearance: textfield; }
+  /* Drop the number spinner: its arrows overlapped the value in a narrow field, so a stop time
+     of a few hundred seconds could not be read. The value is set by typing, the marker, or a
+     preset, none of which need the arrows. */
+  .stopwrap input::-webkit-inner-spin-button,
+  .stopwrap input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   .stopwrap .unitlab { color: var(--dim); }
   .plotwrap { flex: 1; min-height: 0; display: flex; }
   svg { flex: 1; min-width: 0; display: block; touch-action: none; }
   select, button {
     font: inherit; font-size: 12px; color: inherit; background: var(--panel);
     border: 1px solid var(--line); border-radius: 5px; padding: 2px 7px; cursor: pointer;
+    white-space: nowrap;  /* a label like "+ compare" keeps its width; the row wraps, not the text */
   }
   button:hover, select:hover { border-color: var(--dim); }
   button:focus-visible, select:focus-visible, .item:focus-visible {
@@ -125,17 +132,32 @@
   /* Parameters, editable in the legend: an overridden one is outlined and gets an undo; a
      derived one (m_dry from m_green) is dimmed and read-only, recomputed by the simulator. */
   #ptitle { margin-top: 12px; }
-  .prow { display: flex; align-items: baseline; gap: 6px; padding: 2px 12px; font-size: 12px;
-    white-space: nowrap; }
-  .prow .pn { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
-  .prow input, .prow .pv { width: 74px; font: inherit; font-size: 11.5px; text-align: right;
-    font-variant-numeric: tabular-nums; }
+  /* One grid for every row -- name | value | unit | undo -- so the values line up in a column
+     whatever the name's length, the units line up beside them, and an undo appearing on one
+     row does not shift the others. The value column is wide enough for 2260000 and 0.0000202. */
+  .prow { display: grid; grid-template-columns: minmax(56px, 1fr) minmax(72px, 96px) 5ch 1.2em;
+    align-items: baseline; column-gap: 7px; padding: 2px 12px; font-size: 12px; white-space: nowrap; }
+  .prow .pn { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  /* In a narrow legend (the 208px default) four columns would squeeze the name to a letter, so
+     the row goes to two lines: the name on its own, the value, unit and undo right-aligned
+     beneath it. Drag the legend wider than 250px and the one-line aligned grid comes back. */
+  .legend { container-type: inline-size; }
+  @container (max-width: 250px) {
+    .prow { grid-template-columns: 1fr 96px 7.5ch 1.2em; row-gap: 1px; padding-top: 4px; }
+    .prow .pn { grid-column: 1 / -1; }
+    .prow input, .prow .pv { grid-column: 2; }
+    .prow .pu { grid-column: 3; }
+    .prow .undo { grid-column: 4; }
+  }
+  .prow input, .prow .pv { width: 100%; box-sizing: border-box; font: inherit; font-size: 11.5px;
+    text-align: right; font-variant-numeric: tabular-nums; }
   .prow input { color: var(--ink); background: var(--panel); border: 1px solid var(--line);
-    border-radius: 4px; padding: 1px 4px; }
+    border-radius: 4px; padding: 1px 5px; }
   .prow input.set { border-color: var(--accent); }
-  .prow .pu { color: var(--dim); font-size: 11px; min-width: 2.5ch; }
+  .prow .pv { padding: 1px 5px; }
+  .prow .pu { color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
   .prow.derived { color: var(--dim); }
-  .prow .undo { cursor: pointer; color: var(--dim); }
+  .prow .undo { cursor: pointer; color: var(--dim); text-align: center; }
   .prow .undo:hover { color: var(--accent); }
   .legtitle { padding: 4px 12px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .7px;
     text-transform: uppercase; color: var(--dim); }
@@ -164,19 +186,21 @@
       max-height: 132px; }
     .legend, .split { display: none; }
   }
-  /* Narrow pane (the .mo open beside its editor): the toolbar goes full width and its controls
-     share rows instead of overflowing, and the frame tightens so the plot keeps its room. */
-  @media (max-width: 480px) {
+  /* Narrow pane (the .mo open beside its editor -- often ~300px). The toolbar takes the full
+     width and lays out in tidy rows: the time controls together, the two selects together, then
+     the action buttons. Each control keeps its natural width (labels never wrap, `nowrap`
+     above) and the row wraps when it runs out of room, so nothing is crushed or clipped. */
+  @media (max-width: 560px) {
     .top { padding: 8px 12px; }
     .mhead { padding: 10px 12px 8px; }
     .mhead .name { font-size: 15px; }
-    .tools { width: 100%; margin-left: 0; margin-top: 2px; }
-    .tools #scale { flex: 1 1 100%; }
-    .tools button { flex: 1 1 0; }
-    .stopwrap { flex: 1 1 100%; }
-    .stopwrap label { flex: 1; }
-    .stopwrap input { flex: 1; width: auto; }
-    .stopwrap button { flex: 0 0 auto; }
+    .tools { width: 100%; margin-left: 0; margin-top: 4px; gap: 6px; }
+    .stopwrap { flex: 1 1 100%; flex-wrap: wrap; }
+    .stopwrap label { flex: 1 1 120px; }
+    .stopwrap input { flex: 1 1 auto; width: auto; min-width: 78px; }
+    .stopwrap button { flex: 1 1 auto; }
+    #scale, #disp { flex: 1 1 46%; }
+    #pin, #all, #none, #reset { flex: 1 1 auto; }
     .foot, .note, .srcnote { padding-left: 12px; padding-right: 12px; }
   }
 </style>
@@ -353,7 +377,7 @@ function select(i) {
   const stopwrap = document.getElementById("stopwrap");
   if (LIVE) {
     stopwrap.hidden = false;
-    document.getElementById("stop").value = D.stop;
+    document.getElementById("stop").value = cleanStop(D.stop);
     document.getElementById("stopunit").textContent = D.tunit ? " " + D.tunit : "";
     document.getElementById("mchips").replaceChildren();
   } else {
@@ -384,6 +408,10 @@ function fmt(v) {
   if (a !== 0 && (a < 1e-4 || a >= 1e6)) return v.toExponential(3);
   return String(Number(v.toPrecision(6)));
 }
+// A stop time a person can read in the field. A drag or an automatic stop lands on a value like
+// 831.023458281 s; four significant figures keeps the sub-second detail that matters on a short
+// run (2.584) and drops the meaningless tail on a long one (831).
+function cleanStop(v) { return v > 0 ? Number(v.toPrecision(4)) : 0; }
 
 // -- display units ---------------------------------------------------------------------
 // The data stays SI; only what is printed converts, through this table, so a kelvin reads as
@@ -608,13 +636,21 @@ function drawOverlay(frag) {
 // A strip's min and max, its max at the top edge and its min at the bottom. A constant series
 // has min == max, which would stack the same number on itself, so it prints once at the middle
 // -- what fixed the duplicated "1.794" a flat mass drew in the by-unit view.
+// Four significant figures for an edge label: the gutter is 40px on a narrow pane, where
+// fmt's six ("515.563") clipped to a misleading "15.563". Precision belongs to the legend readout.
+function fmtEdge(v) {
+  if (v === null || v === undefined || !isFinite(v)) return "--";
+  const a = Math.abs(v);
+  if (a !== 0 && (a < 1e-3 || a >= 1e5)) return v.toExponential(2);
+  return String(Number(v.toPrecision(4)));
+}
 function stripLabels(frag, lo, hi, y0, y1) {
   if (hi - lo > (Math.abs(hi) || 1) * 1e-9) {
-    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y0 + 8, "text-anchor": "end"}, fmt(hi)));
-    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y1, "text-anchor": "end"}, fmt(lo)));
+    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y0 + 8, "text-anchor": "end"}, fmtEdge(hi)));
+    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y1, "text-anchor": "end"}, fmtEdge(lo)));
   } else {
     frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: (y0 + y1) / 2 + 3,
-      "text-anchor": "end"}, fmt(lo)));
+      "text-anchor": "end"}, fmtEdge(lo)));
   }
 }
 
@@ -817,7 +853,7 @@ svg.addEventListener("pointerup", (e) => {
     stopDrag = false;
     const t = Math.max(timeAtFree(e), (win[1] - win[0]) * 0.01);
     hud.replaceChildren();
-    document.getElementById("stop").value = Number(t.toPrecision(6));
+    document.getElementById("stop").value = cleanStop(t);
     reRun();
     return;
   }
@@ -926,11 +962,15 @@ function paintParams() {
       const v = document.createElement("span"); v.className = "pv"; v.textContent = fmt(shown);
       row.append(nm, v, unit);
     } else {
-      const inp = document.createElement("input"); inp.type = "number"; inp.step = "any";
-      inp.value = (shown !== null && isFinite(shown)) ? Number(shown.toPrecision(7)) : "";
+      // A text field, not type=number: a number input prints in the browser's locale (293,15)
+      // while the chart prints 293.15, and its spinner is useless for a physical constant. The
+      // value is formatted here with a point, and a typed comma is accepted on the way back.
+      const inp = document.createElement("input"); inp.type = "text"; inp.inputMode = "decimal";
+      inp.spellcheck = false; inp.autocomplete = "off";
+      inp.value = (shown !== null && isFinite(shown)) ? String(Number(shown.toPrecision(7))) : "";
       if (p.name in overrides) inp.classList.add("set");
       const apply = () => {
-        const x = parseFloat(inp.value); if (!isFinite(x)) return;
+        const x = parseFloat(String(inp.value).trim().replace(",", ".")); if (!isFinite(x)) return;
         overrides[p.name] = undisp(x, p.unit); reRun();
       };
       inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } });
@@ -963,7 +1003,7 @@ function paintEvents() {
     row.append(t, c);
     row.onclick = () => {
       const until = ev.t > 0 ? ev.t * 1.05 : (T[N - 1] || 1) * 0.02;
-      if (LIVE && vscodeApi) { document.getElementById("stop").value = Number(until.toPrecision(6)); reRun(); }
+      if (LIVE && vscodeApi) { document.getElementById("stop").value = cleanStop(until); reRun(); }
       else { win = [T[0], Math.min(T[N - 1], until)]; draw(); }
     };
     frag.appendChild(row);
