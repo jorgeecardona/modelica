@@ -1,0 +1,85 @@
+summary = "Lotka-Volterra prey and predators at alpha = 1.1, beta = 0.4, delta = 0.1, gamma = 0.4: two populations on a closed orbit with a period of 14.3, and a conserved quantity that says exactly how far an integrator has drifted."
+teaches = [
+  "a conserved quantity as the sharpest test of a long integration",
+  "a closed orbit in the phase plane, x against y",
+  "populations that fall to a few hundredths and recover: a range of three decades",
+  "a mathematical toy as an integrator benchmark",
+]
+requires = []
+
+[parse]
+classes = ["LotkaVolterra"]
+
+[flatten]
+model = "LotkaVolterra"
+states = ["x", "y"]
+equations = 2
+index = 1
+balanced = true
+
+# Lotka (1920) and Volterra (1926) wrote the same two equations for different reasons:
+# prey x breed at rate alpha and are eaten in proportion to how often they meet a predator,
+# predators y die at rate gamma and are fed by what they eat. The orbit is closed -- neither
+# population settles, and neither dies out -- because the flow conserves
+#     V = delta * x - gamma * log(x) + beta * y - alpha * log(y),
+# which is the invariant below and the whole reason this model is here. Where Lorenz and
+# Rossler can only be checked pointwise while their error is still small, V is exact at every
+# instant of every orbit, so a drift in it is the integrator's drift and nothing else: at
+# rtol 1e-12 scipy holds it to 5e-11 over four periods; a solver that loses energy spirals
+# inward and fails this within one.
+#
+# The reference points are scipy DOP853 at rtol = atol = 1e-12 from (10, 10). Prey fall to
+# 0.02 at the bottom of every cycle, so the tolerances carry an absolute part. `stop` covers
+# four periods.
+[simulate]
+stop = 60.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 5.0
+values = { x = 0.024175274, y = 1.895689740 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { x = 1.122646155, y = 0.289272671 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 20.0
+values = { x = 0.032114280, y = 1.460540030 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 40.0
+values = { x = 4.170179102, y = 0.231915171 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+# The conserved quantity, at its value for the start point (10, 10). This is the test that
+# matters: it holds at every sample of the whole horizon, not only at the reference instants.
+# A run at the tolerance above drifts by 7e-10 (measured), so 1e-7 leaves two decades of room
+# and still fails a solver that loses a part in ten million of it.
+[[simulate.invariant]]
+expr = "delta * x - gamma * log(x) + beta * y - alpha * log(y)"
+value = 1.546122361
+atol = 1e-7
+
+# Populations stay positive and bounded; the bounds are the orbit's extremes (x in
+# [0.020, 29.07], y in [0.232, 10.79]) with a margin.
+[[simulate.invariant]]
+expr = "x"
+min = 0.01
+max = 32.0
+
+[[simulate.invariant]]
+expr = "y"
+min = 0.2
+max = 12.0

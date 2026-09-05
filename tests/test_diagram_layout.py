@@ -57,6 +57,7 @@ FLAT = {
     "HIRES",
     "HeatBar",
     "Lorenz",
+    "LotkaVolterra",
     "NewtonCooling",
     "Pendulum",
     "PhaseChange",
