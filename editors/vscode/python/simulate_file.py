@@ -241,6 +241,17 @@ def _settle_time(result: Result, states: set[str], eps: float = 0.01) -> float:
     return settle
 
 
+_PROBE_TOLERANCE = 1e-6
+"""The relative tolerance the automatic stops probe at.
+
+The question a probe answers is qualitative -- did anything fire past here, have the signals
+stopped moving -- and the model's own tolerance is for the run that is shown, not for that
+question. Measured before this: Lotka-Volterra's `⇥ settle` took 88 s and Rössler's 183 s to
+say "not settled", each probe integrating to ten times the horizon at 1e-10. The absolute
+tolerance is left as the model's, since a model like E5 lives below any coarse floor.
+"""
+
+
 def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed straight through
     kernel: Kernel,
     states: set[str],
@@ -254,7 +265,8 @@ def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed stra
     """Choose a stop from the signals: the next event past ``frm``, or where they settle.
 
     Probes a doubling horizon up to ``maximum`` -- the cap that keeps a model that never settles,
-    or has no further event, from running away -- and returns the chosen stop, the result
+    or has no further event, from running away -- at `_PROBE_TOLERANCE`, then integrates the
+    chosen stop at the model's own, and returns the chosen stop, the result
     integrated to it, and a note for the panel. Falls back to ``frm``, unchanged, when there is
     nothing to find before the cap, and the note says so with the cap it reached. A small tail is
     added past the instant found, so the event line and what follows it (or the flat settled
@@ -262,10 +274,15 @@ def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed stra
     """
     maximum = max(maximum, frm)  # never below what is already on screen; a cap under the
     # model's own default is still honoured -- the user asked for it
+    coarse = _Solver(
+        method=solver.method,
+        tolerance=max(solver.tolerance, _PROBE_TOLERANCE),
+        absolute=solver.absolute,
+    )
     horizon = max(frm * 1.5, frm + default, default) if until == "event" else max(frm, default, 1.0)
     horizon = min(horizon, maximum)
     while True:
-        probe = _integrate(kernel, horizon, params, solver)
+        probe = _integrate(kernel, horizon, params, coarse)
         if until == "event":
             future = [e for e in probe.events if float(e.time) > frm + 1e-9]
             if future:

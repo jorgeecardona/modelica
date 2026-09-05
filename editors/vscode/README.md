@@ -40,7 +40,8 @@ so an old version number here means reload the window (**Developer: Reload Windo
   event line is visible. **`⇥ settle`** runs until every state stays within 1 % of its final
   value. Both probe a doubling horizon bounded by **pymodelica.autoStopMax** (0 means ten
   times the current stop) and say in the footer what they found, or that nothing was found
-  before the cap.
+  before the cap. The probes run at a coarse tolerance, since the question is only whether
+  something happened; the run that is then shown uses the model's own.
 
 ### Axes and units
 
