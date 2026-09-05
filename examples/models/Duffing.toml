@@ -1,0 +1,74 @@
+summary = "The Duffing oscillator at delta = 0.3, alpha = -1, beta = 1, gamma = 0.5, omega = 1.2: a beam between two magnets, shaken at a steady rhythm, that never settles into one -- one degree of freedom, an explicit function of time on the right-hand side, and chaos."
+teaches = [
+  "chaos in a single driven degree of freedom",
+  "an explicit function of time in an equation: the drive",
+  "a phase plot, v against x, of an orbit that visits two wells",
+  "a mathematical toy as an integrator benchmark",
+]
+requires = []
+
+[parse]
+classes = ["Duffing"]
+
+[flatten]
+model = "Duffing"
+states = ["x", "v"]
+equations = 2
+index = 1
+balanced = true
+
+# Duffing (1918) wrote the oscillator with a cubic spring; Holmes (1979) shook it. The linear
+# stiffness is negative, so the rest position at the centre is a hilltop and the two wells at
+# x = +-1 are where the beam wants to sit; the drive, gamma * cos(omega * time), is strong
+# enough to throw it from one well to the other and weak enough not to do so regularly. The
+# result is chaotic: two runs a hair apart separate as e^(0.29 t) (measured: 1e-10 becomes
+# 3e-8 by t = 20 and 8e-6 by t = 60), between Rossler's slow drift and Lorenz's explosion.
+#
+# What it adds to the corpus beside them is the drive: an explicit function of time on the
+# right-hand side, which the other benchmarks do not have and a real machine's schedule does.
+# The reference points are scipy DOP853 at rtol = atol = 1e-12 from (1, 0), kept early, where
+# a run at 1e-10 still agrees to about 1e-8. `stop` is nineteen periods of the drive.
+[simulate]
+stop = 100.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 2.0
+values = { x = 1.095899414, v = -0.356562942 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 5.0
+values = { x = 0.068188486, v = 0.113563596 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { x = 0.143962529, v = -0.048163431 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 20.0
+values = { x = 0.966575362, v = 0.052029755 }
+rtol = 1e-6
+atol = 1e-7
+source = "reference"
+
+# The motion is bounded whatever the solver does: the drive is finite and the cubic spring
+# pulls back harder than anything pushes. The bounds are the extremes of a 1e-12 run over the
+# full horizon (x in [-1.43, 1.53], v in [-1.02, 0.93]) with a margin.
+[[simulate.invariant]]
+expr = "x"
+min = -2.0
+max = 2.0
+
+[[simulate.invariant]]
+expr = "v"
+min = -1.5
+max = 1.5
