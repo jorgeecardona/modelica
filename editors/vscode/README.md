@@ -61,7 +61,8 @@ so an old version number here means reload the window (**Developer: Reload Windo
 
 - **Drag** to zoom in time (or in x, in a phase plot). **Double-click** the chart to reset the
   zoom and clear the marks. **Hover** for a cursor readout of every drawn variable, in the
-  display units, at the nearest sample.
+  display units, at the nearest sample: the values appear beside each variable in the legend,
+  and, while the legend is hidden in a narrow pane, in the footer instead.
 - **Measurement marks.** Click the chart to place a mark at the nearest sample; click again
   for a second and the footer shows Δt and the change in every drawn variable between them.
   Marks are sample indices, so they work in phase plots too.

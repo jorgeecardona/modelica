@@ -1003,7 +1003,16 @@ function cursor(v) {
   const near = xVar ? [] : D.events.filter((e) => Math.abs(X(e.t) - x) < 4);
   const xu = xVar ? unitOf(xVar) : "";
   const phase = xVar ? xVar + " = " + fmt(disp(xOfRun(RUNS.length - 1, j), xu)) + (dispUnit(xu) ? " " + dispUnit(xu) : "") + "   ·   " : "";
-  foot.textContent = phase + "t = " + fmt(toT(T[j])) + " " + tUnit() + (near.length ? "   ⟨ " + (near[0].cause || "event") + " ⟩" : "");
+  // The values under the cursor live in the legend. With the legend out of sight -- a narrow
+  // pane that has not opened it -- they have nowhere to show but here: the first few selected
+  // variables of the live run, in display units.
+  const legendShown = getComputedStyle(document.querySelector(".legend")).display !== "none";
+  const vals = legendShown ? "" : selected().slice(0, 4).map((nm) => {
+    const u = unitOf(nm), vs = seriesOf(RUNS.length - 1, nm);
+    const v = vs ? disp(vs[j], u) : null;
+    return v === null || v === undefined || !isFinite(v) ? null : nm + " " + fmt(v) + (dispUnit(u) ? " " + dispUnit(u) : "");
+  }).filter(Boolean).join("   ·   ");
+  foot.textContent = phase + "t = " + fmt(toT(T[j])) + " " + tUnit() + (near.length ? "   ⟨ " + (near[0].cause || "event") + " ⟩" : "") + (vals ? "   ·   " + vals : "");
   paintLegend(j);
 }
 
