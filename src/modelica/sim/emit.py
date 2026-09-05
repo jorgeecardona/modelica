@@ -475,6 +475,36 @@ def iterated(block: Block) -> bool:
     )
 
 
+def _named_back(node: ir.Expr, aliases: Mapping[str, ir.Expr]) -> ir.Expr:
+    """The expression with every eliminated alias written back by its name, for reporting.
+
+    Alias elimination folds ``probe = T_probe - 273.15`` into every place ``probe`` is read, so
+    a ``when probe >= T_drop`` reaches the emitter as ``T_probe + -273.15 >= T_drop`` -- correct,
+    and not what the modeller wrote or wants to read in an event list. This walks the condition
+    top-down and puts the name back wherever a subtree is exactly an alias's value. Only a
+    compound value counts: an alias that is a bare name or a literal (``a = b``) would otherwise
+    rename every ``b`` to ``a``, which is a choice the model did not make.
+    """
+    for name, value in aliases.items():
+        if node == value and isinstance(value, (ir.Binary, ir.Unary, ir.Call, ir.IfExpr)):
+            return ir.Ref((name,))
+    match node:
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, _named_back(lhs, aliases), _named_back(rhs, aliases))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _named_back(operand, aliases))
+        case ir.Call(name=name, args=args):
+            return ir.Call(name, tuple(_named_back(a, aliases) for a in args))
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(
+                _named_back(condition, aliases),
+                _named_back(then, aliases),
+                _named_back(otherwise, aliases),
+            )
+        case _:
+            return node
+
+
 def _indicator(condition: ir.Expr) -> ir.Expr:
     """Turn a relation into an expression that is positive exactly while it holds."""
     match condition:
@@ -1549,7 +1579,7 @@ class Emitter:
             _Event(
                 indicator=_indicator(branch.condition),
                 trigger=Trigger(
-                    unparse_expr(branch.condition),
+                    unparse_expr(_named_back(branch.condition, self.system.aliases)),
                     1.0,
                     reinitialises=any(
                         isinstance(statement, ir.Reinit) for statement in branch.body
@@ -1563,7 +1593,11 @@ class Emitter:
         crossings = [
             _Event(
                 indicator=_indicator(relation),
-                trigger=Trigger(unparse_expr(relation), 0.0, self.holding(position)),
+                trigger=Trigger(
+                    unparse_expr(_named_back(relation, self.system.aliases)),
+                    0.0,
+                    self.holding(position),
+                ),
             )
             for position, relation in enumerate(self.watched)
         ]

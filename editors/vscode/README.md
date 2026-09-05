@@ -66,8 +66,7 @@ so an old version number here means reload the window (**Developer: Reload Windo
   for a second and the footer shows Δt and the change in every drawn variable between them.
   Marks are sample indices, so they work in phase plots too.
 - **Events** are vertical lines, listed in the legend with their instant and the condition in
-  Modelica that fired, as the model states it (an alias is inlined:
-  `when T_probe + -273.15 >= T_drop`).
+  Modelica that fired, as the model states it (`when probe >= T_drop`).
 - **Legend.** Click a variable to toggle it; `all`, `none` and `reset` act on the set. The
   legend pane resizes by dragging its splitter and collapses on a double-click. Below 780 px
   of panel width it is hidden by default and a `legend` button appears in the toolbar: it
