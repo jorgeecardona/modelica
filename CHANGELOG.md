@@ -6,6 +6,35 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `docs/rust-backend.md`: **the Rust backend, today**: a standing account of what exists (the
+  dialect, `rustgen`, the `radau` port with its event loop, dispatcher and Newton), how it is
+  checked (215 differential tests against the interpreter), how to use it now (emit, append the
+  runtime, compile with `rustc`), and what is missing (the chattering guard, the packaging, the
+  interpreter pivot). The issue page that planned it records where it stands.
+- `modelica.sim.emit`: **an event's reported condition names the alias the model wrote.**
+  Alias elimination folds `probe = T_probe - 273.15` into every read of `probe`, so the
+  roaster's `when probe >= T_drop` reached the event list, the chattering report and the
+  sweep's response menu as `when T_probe + -273.15 >= T_drop`. The reported text now writes an
+  eliminated alias back by name wherever a subtree is exactly its value; a bare-name alias is
+  left alone, since renaming every read of the other variable is a choice the model did not
+  make. The indicators the integrator watches are untouched.
+- `modelica.sim.rust_radau`: **observed variables at every grid point.** `md_integrate` takes
+  a further output and fills it with `observe` in whichever state set the run is in, which is
+  what a run that switches sets is compared on: Pendulum's coordinates across its four switches
+  now agree with the interpreter at 1e-8, the last corpus trajectory the Rust backend could not
+  check.
+- `modelica.sim.rust_radau`: **a located root lands past the crossing.** The bisection returned
+  the midpoint of its final bracket, a hair before the crossing, so a relation sharing the
+  threshold with the one that fired (PhaseChange's `T > Ms` and `T < Ms`) was not judged stale
+  and each re-crossed its rearm nudge: four events at one instant where the interpreter fires
+  two. The far end of the bracket is returned now, and the counts agree, 12 and 12.
+- `examples/LotkaVolterra`: **prey and predators on a closed orbit**, with the conserved
+  quantity `delta x - gamma ln x + beta y - alpha ln y` held to 1e-7 over four periods as an
+  invariant: exact at every instant, so its drift is the integrator's drift and nothing else.
+- `examples/Rossler`: **chaos from one nonlinear term**, with a Lyapunov exponent thirteen
+  times smaller than Lorenz's, so a reference point late in the run is still a fair test of the
+  integrator rather than of the arithmetic. Both new models' `.mo` files are generated from
+  their Python twins, so the two front ends build one tree by construction.
 - `examples/TwoInertias`: **two bodies bolted to one shaft** — index 3 again, and for a
   different reason than the pendulum. The constraint `big.phi = small.phi` is between two
   *states*, so Pantelides differentiates it twice and the dummy-derivative method throws away

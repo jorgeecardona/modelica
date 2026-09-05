@@ -78,6 +78,28 @@ with the method named as radau5 rather than left open:
    `solve.py`, not `radau.py`. A model with events is refused until this lands, exactly as
    `radau.py` refuses one today.
 
+## Where it stands (2026-09-05)
+
+The three steps above are done, and measured in `tests/test_rustgen.py`; the standing
+account is `docs/rust-backend.md`.
+
+- **The kernel.** `modelica.sim.rustgen.unit(system)` emits `rhs`, `observe`, `indicators`,
+  `transition` and `jacobian` for **every model in the corpus**, Newton blocks and the mode
+  dispatcher included; `_guard` refuses nothing. Each function is compared with the
+  interpreter at the model's start point.
+- **The integrator.** `modelica.sim.rust_radau` is the port -- constants, a real and a complex
+  dense LU, the step, the simplified-Newton stage iteration, the starting step, the driver --
+  and reproduces every `.toml` state reference point of the event-free models.
+- **The event loop.** `when` branches, latched relations, the event iteration over stale
+  latches, the rearm nudge, and mode switches that rebase the state; the root is the far end
+  of the bisection bracket so a shared threshold settles in one instant (PhaseChange, 12
+  events as the interpreter). The driver also writes the observed variables at every grid
+  point, which is how a run that switches state sets (Pendulum, four switches) is compared.
+
+Still open: the chattering guard (`solve.py`'s standstill counter) is not ported; and the
+packaging below -- `cdylib`, the content-hash cache, the FFI loader, WASM -- is decided but
+not built. Every test compiles a `main` with `rustc` and reads its stdout.
+
 ## Execution model (decided)
 
 Ahead-of-time and native, no runtime JIT. `rustc` at **build** time is accepted; what is ruled
