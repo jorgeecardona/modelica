@@ -53,6 +53,7 @@ FLAT = {
     "AtwoodPendulum",
     "BouncingBall",
     "Brusselator",
+    "Chua",
     "DrainingTank",
     "Duffing",
     "E5",

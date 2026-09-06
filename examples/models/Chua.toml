@@ -1,0 +1,77 @@
+summary = "Chua's circuit at alpha = 15.6, beta = 28, m0 = -8/7, m1 = -5/7: two capacitors, an inductor and a resistor with a kinked, negative-slope characteristic -- the double scroll, chaos in a circuit you can build on a bench."
+teaches = [
+  "chaos from a piecewise-linear element: three linear regions, glued",
+  "the double scroll, two lobes the trajectory switches between at random",
+  "a kink the step-size control has to take without an event",
+  "a mathematical toy as an integrator benchmark",
+]
+requires = []
+
+[parse]
+classes = ["Chua"]
+
+[flatten]
+model = "Chua"
+states = ["x", "y", "z"]
+equations = 4
+index = 1
+balanced = true
+
+# Chua (1983) built the simplest autonomous circuit that could be proven chaotic: two
+# capacitors, an inductor, and a nonlinear resistor whose current-voltage curve is three
+# straight lines, slope m0 in the middle and m1 outside, joined at +-1. In dimensionless
+# form the states are the two capacitor voltages and the inductor current. The attractor is
+# the double scroll: the trajectory spirals in one lobe, crosses the middle region, and
+# spirals in the other, the choice of when to cross being what is chaotic. Two 1e-12 runs a
+# hair apart separate as e^(0.35 t) (measured: 1e-10 becomes 1.6e-9 by t = 8 and 7e-6 by
+# t = 30), so the reference points sit within the first four time units.
+#
+# What it adds beside Lorenz, Rossler and Duffing is the kink: abs(x + 1) - abs(x - 1) is
+# continuous but not smooth, and the integrator crosses it dozens of times per unit of time
+# with no event to stop at, so the step-size control has to find the corner on its own. That
+# is also why the points stop at t = 4: a Radau run at 1e-8 carries 1e-7 of kink error by
+# t = 8, where x passes through zero and a relative bar has nothing to hold on to. The
+# reference points are scipy DOP853 at rtol = atol = 1e-12 from (0.7, 0, 0); a run at 1e-10
+# agrees to about 5e-10. `stop` covers many scrolls.
+[simulate]
+stop = 100.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 1.0
+values = { x = 1.259313361, y = -0.250909161, z = -2.121117161 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 2.0
+values = { x = 2.131277183, y = 0.301011603, z = -2.297338285 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 4.0
+values = { x = -1.551708983, y = -0.120243015, z = 0.971747539 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+# The double scroll is bounded: the outer regions have negative slope m1 that pulls the
+# trajectory back. The bounds are the extremes of a 1e-12 run over the full horizon (x in
+# [-2.27, 2.27], y in [-0.39, 0.39], z in [-3.64, 3.64]) with a margin.
+[[simulate.invariant]]
+expr = "x"
+min = -3.0
+max = 3.0
+
+[[simulate.invariant]]
+expr = "y"
+min = -0.6
+max = 0.6
+
+[[simulate.invariant]]
+expr = "z"
+min = -5.0
+max = 5.0
