@@ -65,6 +65,7 @@ GROUP = {
     "Rossler": "Chaos and orbits",
     "Duffing": "Chaos and orbits",
     "LotkaVolterra": "Chaos and orbits",
+    "Brusselator": "Chaos and orbits",
 }
 
 #: Rail order. Listed models come first in this order; the rest follow alphabetically.
@@ -98,6 +99,7 @@ ORDER = [
     "Rossler",
     "Duffing",
     "LotkaVolterra",
+    "Brusselator",
 ]
 
 LIMIT = 700

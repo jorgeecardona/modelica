@@ -52,6 +52,7 @@ def _layout(model: Path) -> tuple[Graph, Layout]:
 FLAT = {
     "AtwoodPendulum",
     "BouncingBall",
+    "Brusselator",
     "DrainingTank",
     "Duffing",
     "E5",

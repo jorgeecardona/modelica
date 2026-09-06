@@ -1,0 +1,75 @@
+summary = "The Brusselator at A = 1, B = 3: two chemical concentrations that feed each other into a steady oscillation with a period of 7.16 -- a stable limit cycle, which every start point is drawn onto and no integrator error can push off."
+teaches = [
+  "a limit cycle: an orbit that attracts, where Lotka-Volterra's only persists",
+  "a stiffness that comes and goes within one period",
+  "the phase plane, y against x, closing on the same loop from any start",
+  "a mathematical toy as an integrator benchmark",
+]
+requires = []
+
+[parse]
+classes = ["Brusselator"]
+
+[flatten]
+model = "Brusselator"
+states = ["x", "y"]
+equations = 2
+index = 1
+balanced = true
+
+# Prigogine and Lefever's 1968 scheme, reduced to the two species whose concentrations move:
+# one species is fed at rate A and makes more of itself out of the other, x^2 y, and the
+# other is made from the first at rate B. Below B = 1 + A^2 the mixture settles; above it the
+# rest point is unstable and every start point winds onto one closed orbit, the limit cycle.
+# That is the difference from Lotka-Volterra, whose orbits are neutral: here an integrator's
+# error is pulled back onto the cycle instead of accumulating, so two 1e-12 runs a hair apart
+# stay 5e-11 apart to t = 60 (measured), and a reference point late in the run is as fair a
+# test as an early one. The cycle has a slow arc and a fast one -- x jumps from 0.3 to 3.8 in
+# a fraction of the period -- so the step size has to change by two orders of magnitude within
+# every cycle, which is what the model is for as a benchmark.
+#
+# The reference points are scipy DOP853 at rtol = atol = 1e-12 from (1, 1). `stop` is eight
+# periods.
+[simulate]
+stop = 60.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 5.0
+values = { x = 0.476012383, y = 4.556000894 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { x = 0.373264721, y = 3.361339852 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 20.0
+values = { x = 0.618429907, y = 4.720891470 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 40.0
+values = { x = 0.409113626, y = 4.173509059 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+# Concentrations stay positive and on the cycle; the bounds are the extremes of a 1e-12 run
+# over the full horizon (x in [0.31, 3.77], y in [0.85, 4.74]) with a margin.
+[[simulate.invariant]]
+expr = "x"
+min = 0.1
+max = 5.0
+
+[[simulate.invariant]]
+expr = "y"
+min = 0.5
+max = 6.0
