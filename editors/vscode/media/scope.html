@@ -1682,8 +1682,18 @@ window.addEventListener("message", (e) => {
   }
   else if (m.type === "log" && m.t && m.series) {
     LOGS.push({name: m.name || "log", t: m.t, series: m.series, tscale: 1});
+    // A column is drawn only for a variable that is switched on, and a log is usually about a
+    // variable the panel does not open on -- the roaster opens on its states, and a roast log
+    // holds `probe`, the alias it is measured through. Switch each matched variable on, so the
+    // points show the moment the log arrives instead of listing a column with nothing drawn.
+    let matched = 0;
+    for (const col of Object.keys(m.series)) {
+      const nm = names.find((n) => n.toLowerCase() === String(col).toLowerCase());
+      if (nm) { on.add(nm); matched++; }
+    }
     paintLogs(); draw();
-    foot.textContent = "overlaid " + (m.name || "log") + ": " + Object.keys(m.series).length + " columns";
+    foot.textContent = "overlaid " + (m.name || "log") + ": " + Object.keys(m.series).length + " columns, "
+      + matched + " matched to the model";
   }
   else if (m.type === "error") { foot.textContent = "error: " + m.error; }
 });

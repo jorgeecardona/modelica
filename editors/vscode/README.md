@@ -109,7 +109,8 @@ format:
   `minutes` (case-insensitive), else the first column. A header starting with `min` is read
   as minutes and converted to seconds.
 - Every other numeric column is a series named by its header, matched to the model's
-  variables case-insensitively (`probe` overlays `probe`). Non-numeric cells are gaps.
+  variables case-insensitively (`probe` overlays `probe`). A matched variable is switched on
+  in the legend when the log arrives, so its points show at once. Non-numeric cells are gaps.
 
 Loaded logs are listed in the legend under **measured**, with their clock in the current time
 unit.
