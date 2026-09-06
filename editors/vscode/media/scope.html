@@ -409,9 +409,14 @@ function buildRail() {
       MODELS.length ? MODELS[0].events.length + " events" : "";
     return;
   }
-  const order = ["Circuits", "Mechanical", "Thermal", "Stiff benchmarks", "Hybrid / events", "Other"];
   const groups = {};
   MODELS.forEach((m, i) => { (groups[m.group] = groups[m.group] || []).push(i); });
+  // The shelves the rail knows, in reading order, then any shelf the data brings that it does
+  // not: a group named only in the snapshot used to vanish from the rail with every model on
+  // it (the four chaotic benchmarks sat in the data and nowhere on screen). "Other" stays last.
+  const known = ["Circuits", "Mechanical", "Thermal", "Stiff benchmarks", "Hybrid / events"];
+  const extra = Object.keys(groups).filter((g) => !known.includes(g) && g !== "Other").sort();
+  const order = [...known, ...extra, "Other"];
   const frag = document.createDocumentFragment();
   for (const g of order) {
     if (!groups[g]) continue;
