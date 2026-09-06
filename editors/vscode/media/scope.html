@@ -520,7 +520,10 @@ function select(i) {
   paintSensitivity();
   draw();
   // An automatic stop says where it landed and why, until the pointer moves on.
-  if (D.autoNote) foot.textContent = D.autoNote + "  ·  t → " + fmt(toT(D.stop)) + " " + tUnit();
+  // The footer was showing "re-simulating …" while the run ran: now it has landed, say what
+  // an automatic stop found, or give the rest text, rather than leaving the notice until the
+  // next hover.
+  foot.textContent = settledFooter();
 }
 
 // -- helpers ---------------------------------------------------------------------------
@@ -1331,6 +1334,13 @@ function placeMark(j) {
   foot.textContent = restFooter();
 }
 // What the footer says when the pointer is not on the plot: the measurement, if there is one.
+// What the footer says once every run has landed: the automatic stop's note, when the live
+// run has one, else the rest text. Both the live and the pinned branch of the message handler
+// end here, so a pinned run landing after an automatic stop does not wipe the note.
+function settledFooter() {
+  if (D && D.autoNote) return D.autoNote + "  ·  t → " + fmt(toT(D.stop)) + " " + tUnit();
+  return restFooter();
+}
 function restFooter() {
   if (marks.length === 1) return "mark at t = " + fmt(toT(T[marks[0]])) + " " + tUnit() + " · click again for the interval";
   if (marks.length === 2) {
@@ -1678,6 +1688,8 @@ window.addEventListener("message", (e) => {
       const had = RUNS[ri].data;
       RUNS[ri].data = (rec.resumedFrom !== null && rec.resumedFrom !== undefined && had) ? stitch(had, rec) : rec;
       rebase(RUNS[ri]); paintRuns(); paintSweep(); draw();
+      // The last run of a sweep has landed: the "sweeping …" notice has done its job.
+      if (RUNS.every((r) => r.data)) foot.textContent = settledFooter();
     }
   }
   else if (m.type === "log" && m.t && m.series) {

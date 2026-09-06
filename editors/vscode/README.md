@@ -155,6 +155,22 @@ The token is a Visual Studio Marketplace Personal Access Token (Azure DevOps, sc
 Marketplace → Manage) for the publisher named in `package.json`. It is read from the
 environment and never stored in the repository.
 
+## Previewing the panel outside VS Code
+
+`scripts/preview.py` fills the webview template the way the extension does and writes a
+standalone page, for a browser or for Playwright:
+
+```bash
+uv run --extra sim python python/simulate_file.py ../../examples/models/RoastingMachine.mo > run.json
+uv run python scripts/preview.py --data run.json --out preview.html --host
+python3 -m http.server 8731          # the page's content-security policy blocks file://
+```
+
+`--gallery` builds the corpus gallery from `media/scope.data.json`. `--host` adds a stand-in
+extension host that answers the panel's messages from the embedded record, so pinning,
+parameter overrides, the sweep, the sensitivity study and the automatic stops run end to end
+without VS Code; the messages the panel posted are in `window.__posted`.
+
 ## Refreshing the corpus gallery data
 
 `media/scope.data.json` is a snapshot the Python simulator produces via `scripts/build-data.py`.
