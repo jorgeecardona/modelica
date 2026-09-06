@@ -34,9 +34,11 @@ indicator over the step's dense polynomial, locates the earliest crossing by bis
 root is the far end of the final bracket, so the state handed to the transition has crossed),
 applies the transition, iterates over every latched relation the transition left disagreeing
 with its latch, rearms each fired crossing on the side it settled, and restarts the stepper.
-`when` branches, latched relations and mode switches are all handled. The driver fills the
-states at every grid point and, when asked, the observed variables too, which is what a run
-that changes state set mid-way is compared on.
+`when` branches, latched relations and mode switches are all handled. A standstill counter,
+the interpreter's two numbers, stops a run whose events stop carrying it forward, so a relay
+with no hysteresis ends where the interpreter's does instead of running forever. The driver
+fills the states at every grid point and, when asked, the observed variables too, which is
+what a run that changes state set mid-way is compared on.
 
 ## How it is checked
 
@@ -72,9 +74,9 @@ event directions and latch slots from `kernel.code.events`, a grid, and calls
 
 ## What is missing
 
-- **The chattering guard.** The interpreter counts events that do not advance time and stops
-  with a message naming what kept firing. The Rust driver has no such counter; a chattering
-  model runs until the horizon or forever.
+- **The chattering message.** The driver stops a chattering model where the interpreter does,
+  with the status `CHATTERING`, but it returns a code where the interpreter names the relation
+  that kept firing; the caller has to work that out from the model.
 - **Packaging.** The execution model is decided (compile once to a `cdylib`, keyed by the
   system's content hash, loaded across an FFI boundary; WASM for the browser) and none of it is
   built. The VS Code Scope and the notebooks still run the Python tier.

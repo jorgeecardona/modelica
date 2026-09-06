@@ -228,6 +228,12 @@ CONSTANTS: Final = (
     # A latch slot in `w` reads true above this and false below, the `HELD` threshold `emit`
     # writes: a latch is a float that carries a boolean, so it is compared against a half.
     "const MD_HELD: f64 = 0.5;",
+    # `solve.py`'s chattering guard, the same two numbers (`_STANDSTILL`, `_CHATTER`): a run
+    # whose events fail to carry it forward by MD_STANDSTILL, relative to where it is, for more
+    # than MD_CHATTER events in a row is stopped with `CHATTERING`. A relay with no hysteresis
+    # would otherwise run forever, one MD_REARM nudge at a time.
+    "const MD_STANDSTILL: f64 = 1e-4;",
+    "const MD_CHATTER: usize = 100;",
     "",
 )
 
@@ -249,6 +255,9 @@ STEP: Final = (
     "const WORTH_CHANGING: f64 = 1.2;",
     "const TOO_SMALL: i32 = 1;",
     "const NO_CONVERGENCE: i32 = 2;",
+    # More than MD_CHATTER events without the run moving on by MD_STANDSTILL: the model is
+    # chattering, and the run stops where it stood rather than running forever.
+    "const CHATTERING: i32 = 3;",
     "",
     "// Scaled root-mean-square norm: sqrt(mean(x*x)). radau.py:273.",
     "#[allow(dead_code)]",
@@ -588,6 +597,10 @@ fn md_integrate(
     let mut rearm = vec![0.0f64; nevents];
     let mut fired_flags = vec![false; nevents];
     let mut events_total = 0usize;
+    // The standstill counter: how many events in a row have failed to move the run forward,
+    // and where it last did move (`solve.py`'s `chatter` and `stalled_at`).
+    let mut chatter = 0usize;
+    let mut stalled_at = t0;
 
     let mut cursor = 0usize;
     while cursor < points && grid[cursor] <= t0 {
@@ -819,8 +832,21 @@ fn md_integrate(
                     -MD_REARM
                 };
             }
+            // Measured from where the run last moved on, not from the previous event: a
+            // chattering run advances by MD_REARM over the indicator's slope every time, so a
+            // per-event test would reset at every crossing and never count to one.
+            if te - stalled_at >= MD_STANDSTILL * te.abs().max(1.0) {
+                chatter = 0;
+                stalled_at = te;
+            } else {
+                chatter += 1;
+            }
             t = te;
             for q in 0..n { y[q] = ev_y[q]; }
+            if chatter > MD_CHATTER {
+                status = CHATTERING;
+                break;
+            }
             rhs(t, &y, p, w, &mut f);
             evaluations += 1;
             for e in jac.iter_mut() { *e = 0.0; }

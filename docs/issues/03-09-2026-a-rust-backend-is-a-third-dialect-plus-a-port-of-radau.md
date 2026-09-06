@@ -96,9 +96,11 @@ account is `docs/rust-backend.md`.
   events as the interpreter). The driver also writes the observed variables at every grid
   point, which is how a run that switches state sets (Pendulum, four switches) is compared.
 
-Still open: the chattering guard (`solve.py`'s standstill counter) is not ported; and the
-packaging below -- `cdylib`, the content-hash cache, the FFI loader, WASM -- is decided but
-not built. Every test compiles a `main` with `rustc` and reads its stdout.
+The chattering guard is ported too: the driver's standstill counter, `solve.py`'s two numbers,
+stops the relay with no hysteresis where the interpreter does, with the status `CHATTERING`
+(the interpreter names the relation; the driver returns the code). Still open: the packaging
+below -- `cdylib`, the content-hash cache, the FFI loader, WASM -- is decided but not built.
+Every test compiles a `main` with `rustc` and reads its stdout.
 
 ## Execution model (decided)
 

@@ -6,6 +6,11 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `modelica.sim.rust_radau`: **the chattering guard.** A relay with no hysteresis reaches its
+  threshold and then crosses it at every step, each crossing carrying the run forward by the
+  rearm nudge and nothing more; the Rust driver ran such a model to the horizon, or forever.
+  It now keeps the interpreter's standstill counter, the same two numbers, and stops with the
+  status `CHATTERING` where the interpreter raises, to within 1e-2 on the chattering model.
 - `docs/rust-backend.md`: **the Rust backend, today**: a standing account of what exists (the
   dialect, `rustgen`, the `radau` port with its event loop, dispatcher and Newton), how it is
   checked (215 differential tests against the interpreter), how to use it now (emit, append the

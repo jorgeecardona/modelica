@@ -582,3 +582,85 @@ def test_the_rust_integrator_matches_the_interpreter_across_a_mode_switch(model:
         f"{system.name}: rust switched {events} times, interpreter {len(reference.events)}"
     )
     numpy.testing.assert_allclose(found, wanted, rtol=1e-4, atol=1e-3)
+
+
+CHATTERING = 3
+"""`md_integrate`'s status for a run stopped by the chattering guard (`rust_radau.STEP`)."""
+
+
+def _status_in_rust(
+    system: System,
+    stop: float,
+    directions: list[float],
+    latches: list[int],
+    start: tuple[object, object, object],
+) -> tuple[int, int, float]:
+    """Integrate with no grid and report ``(status, events, t_end)``: how the run ended, and where."""
+    numpy = pytest.importorskip("numpy")
+    states, parameters, workspace = start
+    n = len(numpy.asarray(states))
+    program = "\n".join(
+        [
+            "#![allow(dead_code)]",
+            unit(system),
+            *CONSTANTS,
+            *LINALG,
+            *STEP,
+            *NEWTON,
+            *FIRST_STEP,
+            *INTEGRATE,
+            "fn main() {",
+            f"    let y0: [f64; {n}] = [{_floats(states)}];",
+            f"    let p: [f64; {len(numpy.asarray(parameters))}] = [{_floats(parameters)}];",
+            f"    let mut w: [f64; {len(numpy.asarray(workspace))}] = [{_floats(workspace)}];",
+            f"    let dirs: [f64; {len(directions)}] = [{_floats(directions)}];",
+            f"    let lat: [i64; {len(latches)}] = [{', '.join(f'{int(v)}i64' for v in latches)}];",
+            "    let grid: [f64; 0] = [];",
+            "    let mut out: [f64; 0] = [];",
+            "    let mut obs: [f64; 0] = [];",
+            f"    let r = md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &grid, &mut out, &mut obs);",
+            '    println!("{} {} {}", r.0, r.6, r.7);',
+            "}",
+            "",
+        ]
+    )
+    status, events, t_end = _compile_and_run_lines(program, system.name)[0].split()
+    return int(status), int(events), float(t_end)
+
+
+@needs_rustc
+def test_the_rust_integrator_stops_a_chattering_model() -> None:
+    """A relay with no hysteresis cannot settle on its threshold, and the run says so.
+
+    `tests/test_chattering.py`'s `Chattering` model: ``der(x) = if x > 0 then -1 else 1``,
+    which reaches zero at t = 1 and then crosses it at every step, each crossing moving the run
+    on by the rearm nudge and nothing more. The interpreter counts events that fail to carry the
+    run forward and raises after `_CHATTER` of them; the Rust driver keeps the same counter, the
+    same two numbers, and stops with `CHATTERING` where the interpreter stops -- rather than
+    running to the horizon, or forever.
+    """
+    from test_chattering import SLIDING  # noqa: PLC0415 - the model lives with its own test
+
+    build = pytest.importorskip("modelica.sim.kernel").build
+    flatten = pytest.importorskip("modelica.sim").flatten
+    simulate = pytest.importorskip("modelica.sim").simulate
+    error = pytest.importorskip("modelica.sim").SimulationError
+    system = causalize(flatten([parse(SLIDING)], "Chattering"))
+    kernel = build(system)
+    directions = [float(event.direction) for event in kernel.code.events]
+    latches = [event.latch if event.latch is not None else -1 for event in kernel.code.events]
+    parameters, states, workspace = kernel.start(0.0)
+
+    status, events, t_end = _status_in_rust(
+        system, 5.0, directions, latches, (states, parameters, workspace)
+    )
+    with pytest.raises(error, match="chattering") as caught:
+        simulate(system, stop=5.0)
+    said_at = float(str(caught.value).split("t = ")[1].split()[0])
+
+    assert status == CHATTERING, f"status {status}: the run did not report chattering"
+    assert events > 100, f"stopped after only {events} events"
+    assert t_end < 5.0, "the run reached the horizon instead of stopping"
+    assert t_end == pytest.approx(said_at, abs=1e-2), (
+        f"rust stopped at {t_end}, interpreter at {said_at}"
+    )
