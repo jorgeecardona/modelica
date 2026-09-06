@@ -36,25 +36,68 @@ OUT = Path(__file__).resolve().parents[1] / "media" / "scope.data.json"
 
 #: Which shelf of the rail each model sits on. Anything unlisted falls to "Other".
 GROUP = {
-    "RLCCircuit": "Circuits", "RCCircuit": "Circuits", "ProbeLC": "Circuits",
-    "ProbeRC": "Circuits", "DCMotor": "Circuits", "PIControl": "Circuits",
-    "MassSpringDamper": "Mechanical", "Pendulum": "Mechanical", "AtwoodPendulum": "Mechanical",
-    "TwoInertias": "Mechanical", "TwoFalls": "Mechanical",
-    "HeatBar": "Thermal", "TwoBodyHeat": "Thermal", "NewtonCooling": "Thermal",
-    "Robertson": "Stiff benchmarks", "VanDerPol": "Stiff benchmarks", "HIRES": "Stiff benchmarks",
-    "BouncingBall": "Hybrid / events", "Thermostat": "Hybrid / events",
-    "RoastingMachine": "Hybrid / events", "DrainingTank": "Hybrid / events",
-    "Setback": "Hybrid / events", "BumpStop": "Hybrid / events", "PhaseChange": "Hybrid / events",
+    "RLCCircuit": "Circuits",
+    "RCCircuit": "Circuits",
+    "ProbeLC": "Circuits",
+    "ProbeRC": "Circuits",
+    "DCMotor": "Circuits",
+    "PIControl": "Circuits",
+    "MassSpringDamper": "Mechanical",
+    "Pendulum": "Mechanical",
+    "AtwoodPendulum": "Mechanical",
+    "TwoInertias": "Mechanical",
+    "TwoFalls": "Mechanical",
+    "HeatBar": "Thermal",
+    "TwoBodyHeat": "Thermal",
+    "NewtonCooling": "Thermal",
+    "Robertson": "Stiff benchmarks",
+    "VanDerPol": "Stiff benchmarks",
+    "HIRES": "Stiff benchmarks",
+    "BouncingBall": "Hybrid / events",
+    "Thermostat": "Hybrid / events",
+    "RoastingMachine": "Hybrid / events",
+    "DrainingTank": "Hybrid / events",
+    "Setback": "Hybrid / events",
+    "BumpStop": "Hybrid / events",
+    "PhaseChange": "Hybrid / events",
+    "E5": "Stiff benchmarks",
+    "Lorenz": "Chaos and orbits",
+    "Rossler": "Chaos and orbits",
+    "Duffing": "Chaos and orbits",
+    "LotkaVolterra": "Chaos and orbits",
 }
 
 #: Rail order. Listed models come first in this order; the rest follow alphabetically.
 ORDER = [
-    "RLCCircuit", "RCCircuit", "DCMotor", "PIControl", "ProbeLC", "ProbeRC",
-    "MassSpringDamper", "Pendulum", "AtwoodPendulum", "TwoInertias", "TwoFalls",
-    "HeatBar", "TwoBodyHeat", "NewtonCooling",
-    "Robertson", "VanDerPol", "HIRES",
-    "BouncingBall", "Thermostat", "RoastingMachine", "DrainingTank", "Setback",
-    "BumpStop", "PhaseChange",
+    "RLCCircuit",
+    "RCCircuit",
+    "DCMotor",
+    "PIControl",
+    "ProbeLC",
+    "ProbeRC",
+    "MassSpringDamper",
+    "Pendulum",
+    "AtwoodPendulum",
+    "TwoInertias",
+    "TwoFalls",
+    "HeatBar",
+    "TwoBodyHeat",
+    "NewtonCooling",
+    "Robertson",
+    "VanDerPol",
+    "HIRES",
+    "E5",
+    "BouncingBall",
+    "Thermostat",
+    "RoastingMachine",
+    "DrainingTank",
+    "Setback",
+    "BumpStop",
+    "PhaseChange",
+    "Lorenz",
+    "Rossler",
+    "Duffing",
+    "LotkaVolterra",
 ]
 
 LIMIT = 700
@@ -93,8 +136,22 @@ def _trajectory(stem: str) -> dict | None:
     if "simulate" not in spec or "stop" not in spec["simulate"]:
         return None
     stop = float(spec["simulate"]["stop"])
+    # The model's own integrator, as the corpus tests run it and as the live panel does: E5's
+    # states live at 1e-20 and it does not integrate at all without its absolute tolerance
+    # (`Required step size is less than spacing between numbers`), and VanDerPol asks for LSODA.
+    section = spec["simulate"]
+    method = str(section.get("method", "Radau"))
+    tolerance = float(section.get("tolerance", 1e-6))
+    absolute = float(section["absolute"]) if section.get("absolute") is not None else None
     kernel = build(system)
-    result = simulate(kernel, stop=stop, times=np.linspace(0.0, stop, 300))
+    result = simulate(
+        kernel,
+        stop=stop,
+        times=np.linspace(0.0, stop, 300),
+        tolerance=tolerance,
+        absolute=absolute,
+        method=method,
+    )
     time = np.asarray(result.time, dtype=float)
     keep = _thin(time)
     names = list(system.modes[0].states)
