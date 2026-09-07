@@ -106,8 +106,10 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   the display units, at the nearest sample: the values appear beside each variable in the legend,
   and, while the legend is hidden in a narrow pane, in the footer instead.
 - **Measurement marks.** Click the chart to place a mark at the nearest sample; click again
-  for a second and the footer shows Δt and the change in every drawn variable between them.
-  Marks are sample indices, so they work in phase plots too.
+  for a second, and a readout shows Δt, and for every drawn variable its two values, their
+  change, and the **average rate** across the interval -- the secant slope, `Δvar/Δt`, in the
+  variable's unit over the time unit, which is a roast's rate of rise in °C/min. Marks are sample
+  indices, so they work in phase plots too.
 - **Level lines.** Shift-click to drop a horizontal line at the value under the pointer, on the
   strip it lands in: the level a variable is asked to reach. A dot marks where each drawn
   variable of that strip first crosses the level (both the fall and the rise, so a signal that

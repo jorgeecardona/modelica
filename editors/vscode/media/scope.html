@@ -1765,11 +1765,16 @@ function drawMarks(frag) {
   const lines = [{t: "Δt = " + fmt(toT(T[b] - T[a])) + " " + tUnit() + "   (" + fmt(toT(T[a])) + " → " + fmt(toT(T[b])) + ")", dim: false}];
   if (xVar) { const u = unitOf(xVar), xs = seriesOf(live, xVar);
     if (xs) lines.push({t: "Δ" + xVar + " = " + fmt(disp(xs[b], u) - disp(xs[a], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: false}); }
+  // The interval in the shown time unit, for the average rate across it: the secant slope, which
+  // is what "how fast did it rise between these two points" asks -- a roast's rate of rise, say.
+  const dt = toT(T[b] - T[a]);
   for (const nm of selected().slice(0, 6)) {
     const vs = D.series[nm]; if (!vs) continue;
     const u = unitOf(nm), v1 = disp(vs[a], u), v2 = disp(vs[b], u);
     if (v1 === null || v2 === null || !isFinite(v1) || !isFinite(v2)) continue;
-    lines.push({t: nm + ": " + fmt(v1) + " → " + fmt(v2) + "   Δ " + fmt(v2 - v1) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: true, nm});
+    const du = dispUnit(u) ? " " + dispUnit(u) : "";
+    const rate = dt !== 0 ? "   (" + fmt((v2 - v1) / dt) + (dispUnit(u) ? " " + dispUnit(u) : "") + "/" + tUnit() + ")" : "";
+    lines.push({t: nm + ": " + fmt(v1) + " → " + fmt(v2) + "   Δ " + fmt(v2 - v1) + du + rate, dim: true, nm});
   }
   const lh = 14, pad = 7, w = Math.max(...lines.map((l) => l.t.length)) * 6.3 + 2 * pad;
   const x0 = M.l + 8, y0 = M.t + 8;
