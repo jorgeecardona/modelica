@@ -75,9 +75,13 @@ def _douglas_peucker(
 _LOG_SPAN = 1e4
 """A horizon this many times the first positive instant is sampled, and read, on a log axis."""
 
+_GRID = 4000
+"""How many points the dense solution is read on for the main run. Generous, so a zoom still
+has samples inside its window; the dense-output evaluation is cheap next to the integration."""
+
 
 def _sample(
-    time: NDArray[np.float64], columns: list[NDArray[np.float64]], limit: int = 2000
+    time: NDArray[np.float64], columns: list[NDArray[np.float64]], limit: int = 4000
 ) -> list[int]:
     """Which instants to send the panel: evenly dense, and keeping every sharp feature.
 
@@ -105,10 +109,15 @@ def _sample(
     # The axis the run is read on. A stiff model over a long horizon -- E5 runs to 1e13 s and
     # finishes its kinetics by 1e3 -- has all its motion in the first decades, one point on a
     # linear axis, so when the horizon spans four decades or more the coordinate is log time,
-    # which is the axis such a run is drawn on and where its samples should be even.
+    # which is the axis such a run is drawn on and where its samples should be even. The span is
+    # measured against the 1st percentile of the positive instants, not the smallest: a solver
+    # routinely takes a tiny first step (Lorenz's is ~1e-4 on a 40 s run), and comparing to that
+    # made an ordinary run look like it spanned decades, so it was sampled dense-early and starved
+    # late -- exactly the thin resolution a zoom into the late part then showed.
     positive = time[time > 0.0]
-    logaxis = bool(positive.size) and float(time[-1]) / float(positive.min()) >= _LOG_SPAN
-    coord = np.log10(np.maximum(time, float(positive.min()))) if logaxis else time.astype(float)
+    floor = float(np.percentile(positive, 1)) if positive.size else 1.0
+    logaxis = bool(positive.size) and float(time[-1]) / floor >= _LOG_SPAN
+    coord = np.log10(np.maximum(time, floor)) if logaxis else time.astype(float)
     lo, hi = float(coord[0]), float(coord[-1])
     tx = (coord - lo) / ((hi - lo) or 1.0)
     # A uniform grid along that axis is most of the budget: consistent density, so a curve reads
@@ -231,15 +240,19 @@ def _integrate_from(  # noqa: PLR0913, PLR0917 - the run's knobs, passed straigh
     entry, so a hysteresis latch or a discrete variable set by an earlier event carries over.
     Only valid when the parameters did not change and the stop grew, which the panel checks.
     """
+    # The output grid the dense solution is read on. Evaluating the dense polynomial at these
+    # points is cheap (it is not more integration), so it is generous: the panel then has enough
+    # to stay smooth when zoomed in, where only the fraction of the samples inside the window is
+    # seen. `_sample` thins this and the solver's own steps down to what the panel is sent.
     p, y, w = kernel.start(0.0, params)
     if resume is not None:
         start = float(resume["t"])  # type: ignore[arg-type]
         y = np.asarray(resume["y"], dtype=float)
         w = np.asarray(resume["w"], dtype=float)
-        grid = np.linspace(start, stop, max(30, int(300 * (stop - start) / max(stop, 1e-12))))
+        grid = np.linspace(start, stop, max(200, int(_GRID * (stop - start) / max(stop, 1e-12))))
     else:
         start = 0.0
-        grid = np.linspace(0.0, stop, 300)
+        grid = np.linspace(0.0, stop, _GRID)
     plan = _Run(kernel, p, w, solver.tolerance, solver.atol, solver.method)
     result = plan.run(start, stop, y, grid)
     final = [float(np.asarray(result[state], dtype=float)[-1]) for state in states]
