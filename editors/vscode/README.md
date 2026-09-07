@@ -168,8 +168,9 @@ python3 -m http.server 8731          # the page's content-security policy blocks
 
 `--gallery` builds the corpus gallery from `media/scope.data.json`. `--host` adds a stand-in
 extension host that answers the panel's messages from the embedded record, so pinning,
-parameter overrides, the sweep, the sensitivity study and the automatic stops run end to end
-without VS Code; the messages the panel posted are in `window.__posted`.
+parameter overrides, the sweep, the sensitivity study, the automatic stops and a continued run
+(a larger stop, answered with a flat tail) run end to end without VS Code; the messages the
+panel posted are in `window.__posted`.
 
 ## Refreshing the corpus gallery data
 

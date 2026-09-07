@@ -12,9 +12,10 @@ webview's content-security policy blocks ``file://``:
 
 ``--host`` adds a stand-in for the extension host: `acquireVsCodeApi` exists, every
 ``simulate`` message the panel posts is recorded in ``window.__posted`` and answered from the
-embedded record -- an override of ``m_green`` scales every series, ``--until`` returns a note
-and a longer stop, ``--sensitivity`` returns one row per editable parameter -- so the compare,
-sweep, sensitivity and automatic-stop flows run end to end in a plain browser.
+embedded record -- an override scales every series, ``--until`` returns a note and a longer
+stop, ``--sensitivity`` returns one row per editable parameter, and a ``resume`` checkpoint
+returns only a flat tail past it -- so the compare, sweep, sensitivity, automatic-stop and
+continuation flows run end to end in a plain browser.
 """
 
 # A build script: printing what it wrote is the point.
@@ -44,6 +45,19 @@ window.__answer = (m) => {
   rec.stop = m.stop || base.stop;
   rec.autoNote = m.until ? (m.until === "event" ? "next event: (stand-in)" : "signals settled") : "";
   if (m.until) rec.stop = (m.from || base.stop) * 1.25;
+  if (m.resume && typeof m.resume.t === "number" && rec.stop > m.resume.t) {
+    // A continued run: only the tail past the checkpoint, flat at the last values, so the
+    // panel's stitching and the stop marker's move can be watched without a real solver.
+    const t0 = m.resume.t, k = 20;
+    rec.t = Array.from({ length: k + 1 }, (_, i) => t0 + ((rec.stop - t0) * i) / k);
+    for (const name of Object.keys(rec.series)) {
+      const col = base.series[name]; const last = col.length ? col[col.length - 1] : null;
+      rec.series[name] = rec.t.map(() => (last === null ? null : last * f));
+    }
+    rec.events = [];
+    rec.resumedFrom = t0;
+    rec.checkpoint = { t: rec.stop, y: m.resume.y, w: m.resume.w };
+  }
   if (m.sensitivity) {
     const editable = rec.parameters.filter((p) => !p.derived && p.value);
     rec.sensitivity = { response: m.sensitivity, step: m.sstep || 0.05, base: 100,
