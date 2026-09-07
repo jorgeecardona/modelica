@@ -77,17 +77,22 @@ _LOG_SPAN = 1e4
 
 
 def _sample(
-    time: NDArray[np.float64], columns: list[NDArray[np.float64]], limit: int = 700
+    time: NDArray[np.float64], columns: list[NDArray[np.float64]], limit: int = 2000
 ) -> list[int]:
-    """Which instants to send the panel: shape-preserving, so a spike keeps its apex every cycle.
+    """Which instants to send the panel: evenly dense, and keeping every sharp feature.
 
-    The solver's own steps cluster at a jump -- that is where it had to work -- and a uniform
-    stride over them kept the sample at the peak on some cycles and dropped it on others, so a
-    periodic impulse (van der Pol's der(x), a 0.01 s jump to 1350) rendered at a wandering
-    height. Douglas-Peucker per series keeps exactly the points a straight line cannot stand
-    in for -- the apex and the two shoulders of every spike, the knee of every corner -- and
-    the union over the series is what is kept, usually fewer points than the stride was. Event
-    instants (a repeated time) always stay, so a discontinuity draws as a vertical step.
+    Two parts. A uniform grid along the axis the run is drawn on gives a consistent density, so
+    a curve is a curve everywhere; and Douglas-Peucker over each series adds the sharp features
+    an even grid would step over -- the apex of a spike between two grid points, the knee of a
+    corner. The union is what is sent, with the event instants (a repeated time) always in, so a
+    discontinuity draws as a vertical step.
+
+    The uniform part is what a plain stride could not do on the solver's own steps: those cluster
+    at a jump, so a stride kept an impulse's peak on some cycles and missed it on others (van der
+    Pol's der(x), a 0.01 s jump to 1350, drew at a wandering height). Sampling by *time* rather
+    than by step index makes the density even; Douglas-Peucker then puts the peak back. Earlier
+    this function was Douglas-Peucker alone, which keeps only what a straight line cannot stand in
+    for -- minimal, so a many-swing run like Lorenz drew as sawtooth across the gentle stretches.
     """
     n = len(time)
     if n <= limit:
@@ -97,29 +102,35 @@ def _sample(
     breaks = np.flatnonzero(np.diff(time) <= 0.0)
     keep[breaks] = True
     keep[np.minimum(breaks + 1, n - 1)] = True
-    # Shape is judged on the axis the run will be read on. A stiff model over a long horizon --
-    # E5 runs to 1e13 s and finishes its kinetics by 1e3 -- has all its motion in the first
-    # decades, and on a linear axis that is one point: the sampler kept 14 samples of it. When
-    # the horizon spans four decades or more past the first positive instant, time is measured
-    # on a log scale, which is the axis such a run is drawn on.
+    # The axis the run is read on. A stiff model over a long horizon -- E5 runs to 1e13 s and
+    # finishes its kinetics by 1e3 -- has all its motion in the first decades, one point on a
+    # linear axis, so when the horizon spans four decades or more the coordinate is log time,
+    # which is the axis such a run is drawn on and where its samples should be even.
     positive = time[time > 0.0]
-    if positive.size and float(time[-1]) / float(positive.min()) >= _LOG_SPAN:
-        logt = np.log10(np.maximum(time, float(positive.min())))
-        tx = (logt - logt[0]) / (float(logt[-1] - logt[0]) or 1.0)
-    else:
-        tx = (time - time[0]) / (float(time[-1] - time[0]) or 1.0)
+    logaxis = bool(positive.size) and float(time[-1]) / float(positive.min()) >= _LOG_SPAN
+    coord = np.log10(np.maximum(time, float(positive.min()))) if logaxis else time.astype(float)
+    lo, hi = float(coord[0]), float(coord[-1])
+    tx = (coord - lo) / ((hi - lo) or 1.0)
+    # A uniform grid along that axis is most of the budget: consistent density, so a curve reads
+    # as a curve everywhere and not only where a corner forced a point. Douglas-Peucker alone --
+    # which keeps only what a straight line cannot stand in for -- left long chords across the
+    # gentle stretches of an oscillation, and Lorenz's forty seconds of swings drew as sawtooth.
+    base = max(2, int(limit * 0.75))
+    keep[np.clip(np.searchsorted(coord, np.linspace(lo, hi, base)), 0, n - 1)] = True
+    # The rest of the budget keeps the sharp features an even grid steps over: a spike between two
+    # grid points (van der Pol's der(x), a 0.01 s jump to 1350), the knee of a corner. Those are
+    # exactly the points a straight line cannot stand in for, at a tolerance of 0.2% of each
+    # series' range, loosened only if the union overruns the cap.
     normalised: list[NDArray[np.float64]] = []
     for column in columns:
         finite = column[np.isfinite(column)]
         if finite.size == 0:
             continue
         span = float(finite.max() - finite.min())
-        if span == 0.0:  # one value, or a flat line: nothing a straight line cannot stand in for
+        if span == 0.0:  # one value, or a flat line: an even grid already spans it
             continue
         normalised.append(np.nan_to_num((column - float(finite.min())) / span))
-    # A tolerance of 0.4% of each series' own range keeps every feature a reader could see;
-    # it is loosened only if the union still overruns the cap.
-    eps = 0.004
+    eps = 0.002
     picked = keep
     for _ in range(8):
         picked = keep.copy()
