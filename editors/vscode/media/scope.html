@@ -243,7 +243,14 @@
   .tchart .tval { fill: var(--dim); font-size: 9.5px; font-variant-numeric: tabular-nums; }
   .tchart .tmiss { fill: var(--dim); font-size: 9.5px; font-style: italic; }
   .legtitle { padding: 4px 12px 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .7px;
-    text-transform: uppercase; color: var(--dim); }
+    text-transform: uppercase; color: var(--dim); display: flex; align-items: baseline; gap: 6px; }
+  /* A filter over the variable list: with many connector-internal names (supply.p.i, ...) it
+     finds the few worth drawing, and `all`/`none` then act on just what it shows. */
+  #legfilter { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 11px; text-transform: none;
+    letter-spacing: 0; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--bg); color: var(--ink); }
+  #legfilter::placeholder { color: var(--dim); }
+  .legcount { color: var(--dim); font-weight: 500; letter-spacing: 0; text-transform: none; }
   .row { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; cursor: pointer;
     white-space: nowrap; }
   .row:hover { background: var(--panel); }
@@ -388,7 +395,7 @@
   </section>
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
-    <div class="legtitle">variables</div><div id="legend"></div>
+    <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="ptitle" hidden>parameters</div><div id="plist"></div>
     <div class="legtitle" id="stitle" hidden>sweep</div>
@@ -435,6 +442,9 @@ let names = [];          // series names
 let T = [];              // time
 let N = 0;
 let on = new Set();
+// A case-insensitive substring the legend is filtered to. Empty shows every variable. `all` and
+// `none` act on what it shows, so filtering to "der_" and clicking none drops just the rates.
+let legendFilter = "";
 let scale = "linear";
 let win = [0, 1];
 let drag = null;
@@ -589,6 +599,11 @@ function select(i) {
   if (!same || stopMoved) win = N ? [T[0], T[N - 1]] : [0, 1];
   lastModel = D.model; prevEnd = N ? T[N - 1] : 0;
   if (!same) {
+    // A different model: its variable names are different, so a filter from the last one would
+    // hide everything. Clear it.
+    legendFilter = "";
+    const lf = document.getElementById("legfilter");
+    if (lf) lf.value = "";
     // open on the moving variables
     on = new Set(names.filter((nm) => {
       const v = D.series[nm]; let a = v[0];
@@ -1226,9 +1241,17 @@ function drawUnits(frag) {
 }
 
 // -- legend, cursor --------------------------------------------------------------------
+// The variables the legend filter shows: every one whose name contains the filter text, or all
+// of them when the filter is empty. `paintLegend`, `all` and `none` all read this.
+function filteredNames() {
+  return legendFilter ? names.filter((nm) => nm.toLowerCase().includes(legendFilter)) : names;
+}
 function paintLegend(at) {
   const frag = document.createDocumentFragment();
-  for (const nm of names) {
+  const shown = filteredNames();
+  const count = document.getElementById("legcount");
+  if (count) count.textContent = legendFilter ? shown.length + "/" + names.length : "";
+  for (const nm of shown) {
     const row = document.createElement("div");
     row.className = "row" + (on.has(nm) ? "" : " off"); row.title = nm;
     const dot = document.createElement("span"); dot.className = "swatch";
@@ -1848,8 +1871,12 @@ svg.addEventListener("dblclick", () => {
   win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; guides = []; draw(); foot.textContent = restFooter();
 });
 document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; guides = []; draw(); foot.textContent = restFooter(); };
-document.getElementById("all").onclick = () => { on = new Set(names); draw(); };
-document.getElementById("none").onclick = () => { on = new Set(); draw(); };
+document.getElementById("all").onclick = () => { for (const nm of filteredNames()) on.add(nm); draw(); };
+document.getElementById("none").onclick = () => { for (const nm of filteredNames()) on.delete(nm); draw(); };
+const legFilter = document.getElementById("legfilter");
+if (legFilter) legFilter.addEventListener("input", (e) => {
+  legendFilter = e.target.value.trim().toLowerCase(); paintLegend();
+});
 document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
 // Speed: the relative tolerance the run is drawn at. A change is a fresh run (a checkpoint holds
 // only at its own tolerance), on the live run; the control is only live for an open .mo.

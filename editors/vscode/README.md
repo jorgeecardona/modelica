@@ -119,9 +119,14 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
 - **Events** are vertical lines, listed in the legend with their instant and the condition in
   Modelica that fired, as the model states it (`when probe >= T_drop`).
 - **Legend.** Click a variable to toggle it; `all`, `none` and `reset` act on the set. The
-  legend pane resizes by dragging its splitter and collapses on a double-click. Below 780 px
-  of panel width it is hidden by default and a `legend` button appears in the toolbar: it
-  opens the legend as a strip under the chart, with every section below reachable.
+  **filter** box by the `variables` heading narrows the list to the names that contain what you
+  type (case-insensitive), and `all` / `none` then act on just what it shows -- a component
+  model flattens to dozens of connector-internal variables (`supply.p.i`, `converter.flange.tau`,
+  the `der_` rates), and filtering to `der_` and clicking `none` drops all the rates at once. The
+  heading shows the shown-of-total count while a filter is active; a filtered-out variable that is
+  selected still draws. The legend pane resizes by dragging its splitter and collapses on a
+  double-click. Below 780 px of panel width it is hidden by default and a `legend` button appears
+  in the toolbar: it opens the legend as a strip under the chart, with every section reachable.
 
 ### Parameters and comparison
 
