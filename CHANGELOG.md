@@ -6,6 +6,13 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `modelica.sim.rustsim`: **the Rust backend, packaged.** `rustsim.simulate(system, stop, ...)`
+  takes the same knobs as `simulate` and returns the same `Result`, from a shared library:
+  the model's unit and the radau runtime as one source behind a C entry point, compiled once
+  with `rustc --crate-type cdylib`, kept under the source's content hash so an unchanged model
+  is never compiled twice, and called through `ctypes`. A run the driver stops raises
+  `SimulationError` with the driver's reason. Checked against the interpreter on a smooth
+  model, an event model and one that switches state sets; the event tallies agree exactly.
 - `modelica.sim.rust_radau`: **the chattering guard.** A relay with no hysteresis reaches its
   threshold and then crosses it at every step, each crossing carrying the run forward by the
   rearm nudge and nothing more; the Rust driver ran such a model to the horizon, or forever.

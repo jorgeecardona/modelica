@@ -98,9 +98,11 @@ account is `docs/rust-backend.md`.
 
 The chattering guard is ported too: the driver's standstill counter, `solve.py`'s two numbers,
 stops the relay with no hysteresis where the interpreter does, with the status `CHATTERING`
-(the interpreter names the relation; the driver returns the code). Still open: the packaging
-below -- `cdylib`, the content-hash cache, the FFI loader, WASM -- is decided but not built.
-Every test compiles a `main` with `rustc` and reads its stdout.
+(the interpreter names the relation; the driver returns the code). The native half of the
+packaging below is built: `modelica.sim.rustsim` compiles the source once to a `cdylib` under
+its content hash, loads it through `ctypes`, and `rustsim.simulate` returns the interpreter's
+`Result` (`tests/test_rustsim.py`). Still open: WASM, and carrying the event instants back
+across the boundary -- the compiled run reports how many crossings fired, not when.
 
 ## Execution model (decided)
 

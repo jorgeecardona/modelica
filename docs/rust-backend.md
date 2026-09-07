@@ -57,29 +57,40 @@ no reference numbers of the emitter's own. The Rust tests are skipped when there
 
 ## Using it now
 
-There is no packaged entry point yet. What the tests do is the way to use it: emit the unit,
-append the runtime, add a `main`, compile.
+`modelica.sim.rustsim` is the packaged entry point: the model and the runtime as one source
+behind a C function, compiled once with `rustc --crate-type cdylib` into a shared library kept
+under the source's content hash (`~/.cache/pymodelica/rust`, or `$PYMODELICA_CACHE/rust`),
+loaded through `ctypes`, and called with the same knobs as `modelica.sim.simulate`:
 
 ```python
-from modelica.sim.rustgen import unit
-from modelica.sim.rust_radau import CONSTANTS, LINALG, STEP, NEWTON, FIRST_STEP, INTEGRATE
+from modelica.sim import rustsim
 
-source = "\n".join([unit(system), *CONSTANTS, *LINALG, *STEP, *NEWTON, *FIRST_STEP, *INTEGRATE])
+run = rustsim.simulate(system, stop=3.0, points=300, tolerance=1e-8)
+run.result["h"]      # the same Result the interpreter returns: states and observed, by name
+run.events           # how many crossings fired; the instants are not carried back yet
+run.steps, run.evaluations, run.jacobians
 ```
 
-`main` builds the start point from `kernel.start(0.0)` (states, parameters, workspace), the
-event directions and latch slots from `kernel.code.events`, a grid, and calls
-`md_integrate(t0, t1, &y0, &p, &mut w, rtol, atol, &directions, &latches, &grid, &mut out,
-&mut obs)`; `tests/test_rustgen.py` has the complete program.
+A model that has not changed is never compiled twice; a change to the model, the emitter or
+the runtime is a different hash and a fresh build. `rustc` is needed only when the cache
+misses. A run the driver stops -- a step below the spacing of numbers, a Newton iteration that
+does not converge, a chattering model -- raises `SimulationError` with the driver's reason,
+as the interpreter would.
+
+For the pieces themselves, `rustsim.program(system)` is the source, and `tests/test_rustgen.py`
+shows the same runtime driven from a `main`.
 
 ## What is missing
 
 - **The chattering message.** The driver stops a chattering model where the interpreter does,
   with the status `CHATTERING`, but it returns a code where the interpreter names the relation
   that kept firing; the caller has to work that out from the model.
-- **Packaging.** The execution model is decided (compile once to a `cdylib`, keyed by the
-  system's content hash, loaded across an FFI boundary; WASM for the browser) and none of it is
-  built. The VS Code Scope and the notebooks still run the Python tier.
+- **The browser form.** The native half of the packaging is built: `rustsim` compiles to a
+  `cdylib` keyed by content hash and calls it across the FFI boundary. WebAssembly is the same
+  source under `--target wasm32-unknown-unknown` and is not built yet, and the VS Code Scope and
+  the notebooks still run the Python tier.
+- **Event instants.** The compiled run reports how many crossings fired, not when; the
+  interpreter's `Result.events` carries the instants and the causes.
 - **Size.** The dense LU is written for the single-digit state counts of the corpus. A
   method-of-lines model with hundreds of states is a separate decision.
 - **Direction.** The plan of record is an interpreter over the flat IR, so a model runs with no
