@@ -1,0 +1,99 @@
+summary = "A steel ball levitated under an electromagnet: the magnetic pull rises as the inverse square of the gap, so the open loop is unstable, and PD feedback on the coil voltage holds the ball at a 10 mm gap, catching it from a 2 mm displacement."
+teaches = ["an open-loop-unstable plant held by feedback", "a nonlinear force law", "electrical and mechanical coupled through a coil", "the equilibrium current balances gravity"]
+requires = []
+
+[parse]
+classes = ["MagLev"]
+
+[flatten]
+model = "MagLev"
+states = ["i", "v", "z"]
+equations = 6
+balanced = true
+
+# The plant in three states, which is what the reference integrates:
+#   i_ref = z_ref*sqrt(m*g/km)        the current that balances gravity at the target gap
+#   V = R*i_ref + Kp*(z - z_ref) + Kd*v   the PD law, biased by the holding voltage
+#   F = km*(i/z)^2                    the magnetic pull, an inverse square of the gap
+#   dz/dt = v
+#   m dv/dt = m*g - F                 the ball, gravity down and the magnet up
+#   L di/dt = V - R*i                 the coil
+# The force falls with the gap, so a ball that drops feels less pull and drops faster: the open
+# loop runs away. The PD term raises the current when the gap opens or the ball falls, which is
+# what turns an unstable equilibrium into a stable one -- the reason a real maglev is all control.
+[simulate]
+stop = 0.5
+tolerance = 1e-10
+
+# The catch: the ball starts 2 mm low, drops a little further as the loop responds, then is drawn
+# back up to the 10 mm gap. The current dips before it climbs to lift.
+[[simulate.point]]
+t = 0.02
+values = { z = 0.0108562538353, i = 0.145120306905 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.05
+values = { z = 0.0103253408521, i = 0.233945974165 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.1
+values = { z = 0.0100302059272, i = 0.221808971022 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.2
+values = { z = 0.0100013513854, i = 0.221894838153 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.5
+values = { z = 0.00999999997928, i = 0.221472317495 }
+rtol = 1e-6
+source = "reference"
+
+# The equilibrium current is a constant of the model, the value that balances gravity at the gap.
+[[simulate.invariant]]
+expr = "i_ref"
+value = 0.221472345903501
+atol = 1e-9
+
+# The loop holds the gap: the ball settles on the 10 mm setpoint, which an unstable plant can only
+# do under feedback.
+[[simulate.invariant]]
+expr = "z"
+value = 0.01
+rtol = 1e-3
+after = 0.3
+
+# And the coil settles on the holding current, where the magnetic force just balances gravity.
+[[simulate.invariant]]
+expr = "i"
+value = 0.221472345903501
+rtol = 1e-3
+after = 0.4
+
+# At steady state the magnetic pull equals the weight, m*g = 0.4905 N -- the ball hangs still.
+[[simulate.invariant]]
+expr = "F"
+value = 0.4905
+rtol = 1e-3
+after = 0.4
+
+# The ball neither crashes into the magnet nor falls away: the gap stays within a millimetre of
+# where it started and never below the setpoint, the whole claim of a working levitator.
+[[simulate.invariant]]
+expr = "z"
+min = 0.0099
+max = 0.0121
+
+# The current stays well inside the coil's range through the catch.
+[[simulate.invariant]]
+expr = "i"
+min = 0.10
+max = 0.40

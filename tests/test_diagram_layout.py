@@ -62,6 +62,7 @@ FLAT = {
     "HeatBar",
     "Lorenz",
     "LotkaVolterra",
+    "MagLev",
     "NewtonCooling",
     "Pendulum",
     "PhaseChange",
