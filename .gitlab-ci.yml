@@ -15,15 +15,23 @@ variables:
   # version-guard diffs against a base older than a shallow clone would contain.
   GIT_DEPTH: "0"
 
-# Avoid duplicate (branch + MR) pipelines.
+# Avoid duplicate (branch + MR) pipelines. A `vscode-v*` tag runs a pipeline too, for the
+# extension publish job below.
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
       when: never
     - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 ci:
+  # The Python gate runs on branches and MRs, not on a `vscode-v*` tag -- that tag is only for
+  # the extension publish below, and there is no reason to spin the whole moon graph for it.
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: on_success
   # OIDC Trusted Publishing: GitLab mints a short-lived id_token; scripts/pypi-publish
   # exchanges it for a one-shot PyPI token. The `pypi` environment matches the PyPI
   # publisher config (it is also recorded on non-publishing runs -- cosmetic only).
@@ -105,3 +113,27 @@ pages:
   artifacts:
     paths:
       - public
+
+# Publish the VS Code extension (editors/vscode) to the Visual Studio Marketplace, on a
+# `vscode-v<major>.<minor>.<patch>` tag only -- never on an ordinary push, so a release is a
+# deliberate act of tagging. It packages the plain-JS extension (no build step) and publishes
+# with @vscode/vsce, taking the token from the VSCE_PAT CI/CD variable (the same variable and
+# publisher as the react-lens extension; copy it into this project's Settings -> CI/CD ->
+# Variables, masked). The publisher in editors/vscode/package.json must match the token's
+# Marketplace publisher.
+publish:vscode:
+  image: node:22
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^vscode-v\d+\.\d+\.\d+$/
+  script:
+    - cd editors/vscode
+    - mkdir -p build
+    - npx @vscode/vsce package -o build/
+    - npx @vscode/vsce publish --packagePath build/*.vsix --pat "$VSCE_PAT"
+  artifacts:
+    paths:
+      - editors/vscode/build/*.vsix
+    expire_in: 30 days
+  environment:
+    name: marketplace
+    url: https://marketplace.visualstudio.com/publishers/JorgeCardona
