@@ -6,6 +6,20 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `modelica.ir.flatten`: **causal signal connectors, so `Modelica.Blocks` flattens.** A
+  connector written `connector RealInput = input Real` *is* a scalar, not a record of fields:
+  it aliases a predefined type and carries a causality but holds no members. It used to hit the
+  refusal that only a `type` may extend a predefined type. It now lays down as one leaf variable,
+  the way a `type` alias does, and stays a connector, so `connect(out, in)` equates the two -- an
+  output driving an input, the whole point of a signal wire; two outputs on one wire are refused
+  by name. The existing connection machinery needed no change. The bundled standard-library slice
+  gained `Modelica.Blocks` (`Sources.Constant`, `Math.Gain`/`Feedback`, `Continuous.Integrator`/
+  `FirstOrder`), wired by the real `RealInput`/`RealOutput`.
+- `modelica.sim.rustsim`: **the compiled run carries the event instants back.** `md_integrate`
+  gained an output buffer it writes each located crossing time into, threaded through the FFI
+  entry point, and `Run` gained `event_times` beside the count. The bouncing ball's six bounce
+  instants and a genset's load-switch instant match the interpreter to a microsecond; a smooth
+  model carries none. Only the event *cause* is still the interpreter's alone.
 - `modelica.sim.rustsim`: **the Rust backend, packaged.** `rustsim.simulate(system, stop, ...)`
   takes the same knobs as `simulate` and returns the same `Result`, from a shared library:
   the model's unit and the radau runtime as one source behind a C entry point, compiled once

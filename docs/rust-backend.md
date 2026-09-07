@@ -50,7 +50,7 @@ no reference numbers of the emitter's own. The Rust tests are skipped when there
 | `tests/test_rust_dialect.py` | 26 expressions compiled with `rustc -D warnings` equal the interpreter. |
 | per-function tests in `tests/test_rustgen.py` | `rhs`, `observe`, `indicators`, `jacobian` and every `transition` equal the interpreter at each model's start point, Newton blocks and rebasing switches included. |
 | reference points | The driver, run at the `.toml`'s tolerance, reproduces every state reference point of the event-free models to the point's own bar, the terms the interpreter is held to. |
-| events | For every model with events, the driver applies exactly the interpreter's number of crossings and its trajectory agrees on a 41-point grid (`rtol` 1e-4, `atol` 1e-3): the bouncing ball to 1e-14, the roaster's schedule, the thermostat, PhaseChange's twelve. |
+| events | For every model with events, the driver applies exactly the interpreter's number of crossings, at the same instants (to a microsecond), and its trajectory agrees on a 41-point grid (`rtol` 1e-4, `atol` 1e-3): the bouncing ball's six bounces to 1e-14, the roaster's schedule, the thermostat, PhaseChange's twelve. |
 | mode switch | Pendulum switches state set four times in two seconds; its coordinates, read from the observed-variable output, agree with the interpreter at 1e-8. |
 
 215 tests in the two files, at the time of writing.
@@ -67,7 +67,8 @@ from modelica.sim import rustsim
 
 run = rustsim.simulate(system, stop=3.0, points=300, tolerance=1e-8)
 run.result["h"]      # the same Result the interpreter returns: states and observed, by name
-run.events           # how many crossings fired; the instants are not carried back yet
+run.events           # how many crossings fired
+run.event_times      # when each one fired, the instants the driver located, in order
 run.steps, run.evaluations, run.jacobians
 ```
 
@@ -89,8 +90,10 @@ shows the same runtime driven from a `main`.
   `cdylib` keyed by content hash and calls it across the FFI boundary. WebAssembly is the same
   source under `--target wasm32-unknown-unknown` and is not built yet, and the VS Code Scope and
   the notebooks still run the Python tier.
-- **Event instants.** The compiled run reports how many crossings fired, not when; the
-  interpreter's `Result.events` carries the instants and the causes.
+- **Event causes.** The compiled run now carries the event instants back beside the count
+  (`run.event_times`, each crossing the driver located, checked against the interpreter to a
+  microsecond), but not the *cause*: the interpreter's `Result.events` names the relation that
+  fired at each instant, and the compiled run has only the time.
 - **Size.** The dense LU is written for the single-digit state counts of the corpus. A
   method-of-lines model with hundreds of states is a separate decision.
 - **Direction.** The plan of record is an interpreter over the flat IR, so a model runs with no
