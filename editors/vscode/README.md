@@ -103,6 +103,14 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
 - **Measurement marks.** Click the chart to place a mark at the nearest sample; click again
   for a second and the footer shows Δt and the change in every drawn variable between them.
   Marks are sample indices, so they work in phase plots too.
+- **Level lines.** Shift-click to drop a horizontal line at the value under the pointer, on the
+  strip it lands in: the level a variable is asked to reach. A dot marks where each drawn
+  variable of that strip first crosses the level (both the fall and the rise, so a signal that
+  dips through and climbs back is caught twice), with the crossing time on the axis and every
+  crossing in the footer, so "how long to 400 K" reads straight off the plot. Shift-click a line
+  again to lift it; double-click clears the marks and lines together. Level lines are a
+  time-view feature on a linear or by-unit / split scale (a horizontal line has no single time
+  in a phase plot, nor one value per pixel on a log axis).
 - **Events** are vertical lines, listed in the legend with their instant and the condition in
   Modelica that fired, as the model states it (`when probe >= T_drop`).
 - **Legend.** Click a variable to toggle it; `all`, `none` and `reset` act on the set. The

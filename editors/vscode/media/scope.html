@@ -143,6 +143,12 @@
      interval and each variable's change when there are two. */
   .mark { stroke: var(--ink); stroke-width: 1; opacity: .7; }
   .marklab { fill: var(--ink); font-size: 10px; font-weight: 650; }
+  /* Level guides: a horizontal line at a chosen value, with a dot where each drawn variable of
+     that strip first reaches it and a faint drop to the time axis, so "how long to 400 K" reads
+     straight off the plot. */
+  .guide { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 5 4; opacity: .55; }
+  .guidedrop { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 2 3; opacity: .5; }
+  .guidelab { font-size: 10px; font-weight: 650; font-variant-numeric: tabular-nums; }
   .measurebg { fill: var(--panel); stroke: var(--line); opacity: .94; }
   .measure { fill: var(--ink); font-size: 11px; font-variant-numeric: tabular-nums; }
   .measure.dim { fill: var(--dim); }
@@ -378,7 +384,7 @@
       <div class="runs" id="runs" hidden></div>
     </div>
     <div class="plotwrap"><svg id="chart"><g id="plot"></g><g id="hud"></g></svg></div>
-    <div class="foot" id="foot">drag to zoom · click to mark, twice for Δ · double-click to reset</div>
+    <div class="foot" id="foot">drag to zoom · click to mark, twice for Δ · shift-click for a level line · double-click to reset</div>
   </section>
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
@@ -482,6 +488,12 @@ let XD = [0, 1];
 // interval between them and every selected variable's change across it -- the drying phase's
 // length, turning point to first crack -- the way an oscilloscope's cursors do.
 let marks = [];
+// Level guides: horizontal lines at chosen values, each {value (SI), unit, near}. Placed by a
+// shift-click on a strip; the crossing of each drawn variable with the level reads off "how long
+// to reach it". STRIPS is the per-strip value<->pixel mapping the current draw() built, so a
+// guide can be placed and drawn against whichever strip its value belongs to.
+let guides = [];
+let STRIPS = [];
 // Measured logs overlaid on the plot: {name, t (seconds), series {column: values}, tscale}.
 // `tscale` is what the file's clock is multiplied by to get seconds (60 for a log in minutes).
 let LOGS = [];
@@ -1030,11 +1042,13 @@ function draw() {
     }
   }
 
+  STRIPS = [];
   if (scale === "split") drawSplit(frag);
   else if (scale === "units") drawUnits(frag);
   else drawOverlay(frag);
 
   drawMarks(frag);
+  drawGuides(frag);
   plot.replaceChildren(frag);
   hud.replaceChildren();
   paintLegend();
@@ -1043,6 +1057,13 @@ function draw() {
 // One shared y-scale, every selected variable on it. `linear`, `log |y|`, `normalised`.
 function drawOverlay(frag) {
   const dom = bounds();
+  // A level guide reads a value off a linear axis; register the shared strip so a shift-click
+  // here can place one. Log and normalised axes have no single value per pixel, so no strip.
+  if (scale === "linear" && !xVar) STRIPS.push({
+    unit: sharedUnit(), members: selected(), band: [M.t, box.h - M.b],
+    yFor: (v) => Y((v - dom[0]) / (dom[1] - dom[0])),
+    valAt: (py) => dom[0] + ((box.h - M.b - py) / (box.h - M.t - M.b)) * (dom[1] - dom[0]),
+  });
   // Ticks in display units when everything selected shares one unit (all temperatures, say):
   // laid at round display values and mapped back to data space. Otherwise plain SI.
   const su = scale === "linear" ? sharedUnit() : "";
@@ -1123,6 +1144,8 @@ function drawSplit(frag) {
     const pad = hi > lo ? (hi - lo) * 0.08 : (Math.abs(lo) * 0.08 || 1);
     lo -= pad; hi += pad;
     const yFor = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
+    STRIPS.push({unit: u, members: [nm], band: [top + i * stripH, top + (i + 1) * stripH],
+      yFor: yFor, valAt: (py) => lo + ((y1 - py) / (y1 - y0)) * (hi - lo)});
     eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, yFor, nm, ri)); drawLogPoints(frag, nm, yFor);
     if (!xVar) for (const rf of D.refs) { const rv = rf.values[nm];
       if (rv === undefined || rf.t < win[0] || rf.t > win[1]) continue;
@@ -1175,6 +1198,8 @@ function drawUnits(frag) {
     const pad = hi > lo ? (hi - lo) * 0.08 : (Math.abs(lo) * 0.08 || 1);
     lo -= pad; hi += pad;
     const yFor = (v) => y1 - ((v - lo) / (hi - lo)) * (y1 - y0);
+    STRIPS.push({unit: u, members: members.slice(), band: [edge[i], edge[i + 1]],
+      yFor: yFor, valAt: (py) => lo + ((y1 - py) / (y1 - y0)) * (hi - lo)});
     for (const nm of members) {
       eachRun(nm, (vs, ri) => drawPath(frag, vs, a, b, yFor, nm, ri)); drawLogPoints(frag, nm, yFor);
       if (!xVar) for (const rf of D.refs) { const rv = rf.values[nm];
@@ -1593,6 +1618,20 @@ function settledFooter() {
   return restFooter();
 }
 function restFooter() {
+  if (guides.length && !xVar && N) {
+    const [a, b] = visible();
+    const parts = [];
+    for (const g of guides.slice(0, 3)) {
+      const s = guideStrip(g); if (!s) continue;
+      const lvl = fmt(disp(g.value, g.unit)) + (dispUnit(g.unit) ? " " + dispUnit(g.unit) : "");
+      const hits = [];
+      for (const nm of s.members) { if (!on.has(nm)) continue;
+        const ts = crossings(nm, g.value, a, b);
+        if (ts.length) hits.push(nm + " " + ts.map((tc) => fmt(toT(tc))).join(", ") + " " + tUnit()); }
+      parts.push(lvl + (hits.length ? " → " + hits.join("; ") : " (not reached)"));
+    }
+    if (parts.length) return parts.join("   ·   ") + "   ·   shift-click to add, double-click to clear";
+  }
   if (marks.length === 1) return "mark at t = " + fmt(toT(T[marks[0]])) + " " + tUnit() + " · click again for the interval";
   if (marks.length === 2) {
     const [a, b] = [Math.min(...marks), Math.max(...marks)];
@@ -1601,7 +1640,7 @@ function restFooter() {
       if (xs) s += "   ·   Δ" + xVar + " = " + fmt(disp(xs[b], u) - disp(xs[a], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""); }
     return s + "   ·   double-click to clear";
   }
-  return "drag to zoom · click to mark, twice for Δ · double-click to reset";
+  return "drag to zoom · click to mark, twice for Δ · shift-click for a level line · double-click to reset";
 }
 function drawMarks(frag) {
   if (!marks.length || !N) return;
@@ -1632,6 +1671,84 @@ function drawMarks(frag) {
     if (l.nm) attrs.fill = colour(l.nm);
     frag.appendChild(el("text", attrs, l.t));
   });
+}
+
+// -- level guides ------------------------------------------------------------------------
+// A horizontal line at a chosen value on the strip it was dropped on: the level a variable is
+// asked to reach. Where each drawn member of that strip first crosses the level, a dot and a
+// drop to the axis mark the time -- "how long to 400 K". Time view only; a horizontal line has
+// no single time in a phase plot.
+function stripAt(py) {
+  for (const s of STRIPS) if (py >= s.band[0] - 0.5 && py <= s.band[1] + 0.5) return s;
+  return null;
+}
+// The strip a guide belongs to now: the one holding the variable it was dropped on (split can
+// repeat a unit across strips), else the first strip carrying its unit. Null if neither is drawn.
+function guideStrip(g) {
+  if (g.near) { const s = STRIPS.find((x) => x.members.includes(g.near)); if (s) return s; }
+  return STRIPS.find((x) => x.unit === g.unit) || null;
+}
+// Every time (interpolated) a variable's live trajectory reaches `level`, within [a, b]. A
+// signal that dips through the level and climbs back crosses twice, so both the fall and the
+// rise are reported -- the roaster's probe passes a temperature on its charge dip and again on
+// the roast. Capped so a fast oscillator does not flood the plot.
+function crossings(nm, level, a, b) {
+  const vs = D.series[nm]; if (!vs) return [];
+  const out = [];
+  for (let k = a; k < b && out.length < 8; k++) {
+    const v0 = vs[k], v1 = vs[k + 1];
+    if (v0 === null || v1 === null || !isFinite(v0) || !isFinite(v1)) continue;
+    const d0 = v0 - level, d1 = v1 - level;
+    if (d0 === 0) { out.push(T[k]); continue; }
+    if ((d0 < 0) !== (d1 < 0)) out.push(T[k] + (d0 / (d0 - d1)) * (T[k + 1] - T[k]));
+  }
+  return out;
+}
+function drawGuides(frag) {
+  if (!guides.length || xVar || !N) return;
+  const [a, b] = visible();
+  for (const g of guides) {
+    const s = guideStrip(g); if (!s) continue;
+    const y = s.yFor(g.value);
+    if (y < M.t - 0.5 || y > box.h - M.b + 0.5) continue;
+    frag.appendChild(el("line", {class: "guide", x1: M.l, x2: box.w - M.r, y1: y, y2: y}));
+    frag.appendChild(el("text", {class: "guidelab", x: M.l + 4, y: y - 3, fill: "var(--ink)"},
+      fmt(disp(g.value, g.unit)) + (dispUnit(g.unit) ? " " + dispUnit(g.unit) : "")));
+    // Every drawn member's crossings, gathered and sorted by x, so the dots (always shown) and
+    // the axis-time labels (shown only when clear of the last one) read left to right; two
+    // crossings a few pixels apart would otherwise overprint their times. The footer has them all.
+    const pts = [];
+    for (const nm of s.members) {
+      if (!on.has(nm)) continue;
+      for (const tc of crossings(nm, g.value, a, b)) {
+        if (tc >= win[0] && tc <= win[1]) pts.push({x: X(tc), tc, nm});
+      }
+    }
+    pts.sort((p, q) => p.x - q.x);
+    let lastLabel = -Infinity;
+    for (const p of pts) {
+      frag.appendChild(el("line", {class: "guidedrop", x1: p.x, x2: p.x, y1: y, y2: box.h - M.b}));
+      frag.appendChild(el("circle", {cx: p.x, cy: y, r: 3.2, fill: colour(p.nm)}));
+      if (p.x - lastLabel >= 46) {
+        frag.appendChild(el("text", {class: "guidelab", x: p.x + 4, y: box.h - M.b - 4, fill: colour(p.nm)},
+          fmt(toT(p.tc)) + " " + tUnit()));
+        lastLabel = p.x;
+      }
+    }
+  }
+}
+// A shift-click drops a level guide at the pointer's value on the strip under it, or lifts one
+// already within 6px. STRIPS is from the last draw(), so the mapping is the one on screen.
+function placeGuide(event) {
+  const r = svg.getBoundingClientRect();
+  const py = Math.min(Math.max(event.clientY - r.top, M.t), box.h - M.b);
+  const s = stripAt(py); if (!s) return;
+  const v = s.valAt(py); if (v === null || !isFinite(v)) return;
+  const hit = guides.findIndex((g) => { const gs = guideStrip(g); return gs && Math.abs(gs.yFor(g.value) - py) < 6; });
+  if (hit >= 0) guides.splice(hit, 1);
+  else guides.push({value: v, unit: s.unit, near: s.members[0] || null});
+  draw();
+  foot.textContent = restFooter();
 }
 
 // -- interaction -----------------------------------------------------------------------
@@ -1712,7 +1829,9 @@ svg.addEventListener("pointerup", (e) => {
   const span = logTime() ? lg(hi) - lg(lo) : hi - lo;
   const full = logTime() ? lg(XD[1]) - lg(XD[0]) : XD[1] - XD[0];
   if (span > full * 1e-4) { if (xVar) xwin = [lo, hi]; else win = [lo, hi]; }
-  // No band: a click. It places a measurement mark at the nearest sample.
+  // No band: a click. Shift places a horizontal level guide on the strip under the pointer; a
+  // plain click places a measurement mark at the nearest sample.
+  else if (e.shiftKey && !xVar) { placeGuide(e); return; }
   else placeMark(nearestIndex(t));
   draw();
 });
@@ -1722,9 +1841,9 @@ svg.addEventListener("pointerleave", () => {
 svg.addEventListener("dblclick", () => {
   // In 3D a double-click resets the camera, the convention Plotly and MATLAB share.
   if (view3d) { stopSpin(); resetCamera(); draw(); return; }
-  win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; draw(); foot.textContent = restFooter();
+  win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; guides = []; draw(); foot.textContent = restFooter();
 });
-document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; draw(); foot.textContent = restFooter(); };
+document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; guides = []; draw(); foot.textContent = restFooter(); };
 document.getElementById("all").onclick = () => { on = new Set(names); draw(); };
 document.getElementById("none").onclick = () => { on = new Set(); draw(); };
 document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
