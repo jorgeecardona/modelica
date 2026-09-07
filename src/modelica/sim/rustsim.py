@@ -69,6 +69,8 @@ pub extern "C" fn md_run(
     out: *mut f64,
     obs: *mut f64,
     nobs: usize,
+    events_out: *mut f64,
+    nev_out: usize,
     counters: *mut f64,
 ) -> i32 {
     unsafe fn view<'a>(ptr: *const f64, len: usize) -> &'a [f64] {
@@ -83,7 +85,8 @@ pub extern "C" fn md_run(
     let grid = unsafe { view(grid, npts) };
     let out = unsafe { view_mut(out, npts * n) };
     let obs = unsafe { view_mut(obs, npts * nobs) };
-    let r = md_integrate(t0, t1, y0, p, w, rtol, atol, dirs, lat, grid, out, obs);
+    let events_out = unsafe { view_mut(events_out, nev_out) };
+    let r = md_integrate(t0, t1, y0, p, w, rtol, atol, dirs, lat, grid, out, obs, events_out);
     let counters = unsafe { view_mut(counters, 8) };
     counters[0] = r.0 as f64;
     counters[1] = r.1 as f64;
@@ -199,8 +202,12 @@ class Run:
     """States and observed variables on the requested grid, by name, as the interpreter's."""
 
     events: int
-    """How many crossings fired. The instants are not carried back yet; the count is checked
-    exactly against the interpreter's, since a wrong tally is a structural bug."""
+    """How many crossings fired, checked exactly against the interpreter's since a wrong tally is
+    a structural bug."""
+
+    event_times: tuple[float, ...]
+    """When each crossing fired, in order -- the instants the driver located, carried back beside
+    the count. Several crossings that settle at one instant each carry that same time."""
 
     steps: int
     rejected: int
@@ -251,6 +258,9 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
     n, nobs = len(y0), len(kernel.code.observed)
     out = np.zeros(len(grid) * n, dtype=np.float64)
     obs = np.zeros(len(grid) * nobs, dtype=np.float64)
+    # A generous buffer for the event instants: far more than any well-behaved run fires, so the
+    # count and the instants agree; the chattering guard stops a runaway before it could overflow.
+    ev_out = np.zeros(max(4096, 8 * len(grid)), dtype=np.float64)
     counters = np.zeros(8, dtype=np.float64)
 
     # Every array goes across as its address: the entry point casts each to a slice of the
@@ -267,6 +277,7 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+        ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_void_p,
     ]  # fmt: skip
     status = run(
@@ -278,6 +289,7 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
         dirs.ctypes.data, lat.ctypes.data, len(dirs),
         grid.ctypes.data, len(grid),
         out.ctypes.data, obs.ctypes.data, nobs,
+        ev_out.ctypes.data, len(ev_out),
         counters.ctypes.data,
     )  # fmt: skip
     if status != 0:
@@ -286,9 +298,11 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
         raise SimulationError(message)
     names = (*system.modes[0].states, *kernel.code.observed)  # type: ignore[attr-defined]
     values = np.vstack([out.reshape(len(grid), n).T, obs.reshape(len(grid), nobs).T])
+    count = int(counters[6])
     return Run(
         result=Result(system.name, grid, names, values),
-        events=int(counters[6]),
+        events=count,
+        event_times=tuple(float(t) for t in ev_out[: min(count, len(ev_out))]),
         steps=int(counters[1]),
         rejected=int(counters[2]),
         evaluations=int(counters[3]),

@@ -3,9 +3,10 @@
 `modelica.sim.rustsim` is the packaging the Rust backend was missing: one shared library per
 model, built once and cached by content hash, loaded through ctypes, answering with the same
 `Result` the interpreter returns. These tests hold the three promises that make it usable --
-the trajectory is the interpreter's, the event count is the interpreter's, and the second call
-for a model does not compile -- on a model of each kind: smooth (RLCCircuit), with events
-(BouncingBall), and switching state sets at runtime (Pendulum, compared on its coordinates).
+the trajectory is the interpreter's, the events are the interpreter's (both the tally and the
+instants), and the second call for a model does not compile -- on a model of each kind: smooth
+(RLCCircuit), with events (BouncingBall), and switching state sets at runtime (Pendulum, compared
+on its coordinates).
 
 `rustc` is optional exactly as in `test_rustgen`: no compiler, no test.
 """
@@ -64,6 +65,12 @@ def test_the_compiled_run_matches_the_interpreter(
     assert run.events == len(reference.events), (
         f"{stem}: rust fired {run.events} events, interpreter {len(reference.events)}"
     )
+    # The instants, not only the tally: each crossing the driver located, against where the
+    # interpreter located it. BouncingBall's six bounces are the test that carries.
+    interp_times = [event.time for event in reference.events]
+    assert len(run.event_times) == len(interp_times)
+    for got, want in zip(run.event_times, interp_times, strict=True):
+        assert got == pytest.approx(want, abs=1e-6), f"{stem}: event at {got}, interpreter {want}"
     assert run.end == pytest.approx(stop)
     rows = numpy.clip(
         numpy.searchsorted(reference.time, grid, side="left"), 0, len(reference.time) - 1
