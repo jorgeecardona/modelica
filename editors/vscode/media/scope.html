@@ -839,6 +839,13 @@ function el(tag, attrs, text) {
   if (text !== undefined) node.textContent = text;
   return node;
 }
+// An event as its vertical line, carrying a <title> so hovering it says what fired and when --
+// the condition the model states and the instant -- without crossing to the legend list.
+function eventLine(e, cls) {
+  const line = el("line", {class: cls, x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b});
+  line.appendChild(el("title", {}, (e.cause || "event") + "   @   t = " + fmt(toT(e.t)) + " " + tUnit()));
+  return line;
+}
 
 // -- scales ----------------------------------------------------------------------------
 function bounds() {
@@ -1066,13 +1073,13 @@ function draw() {
   if (!xVar) {
     for (const e of D.events) {
       if (e.t < win[0] || e.t > win[1]) continue;
-      frag.appendChild(el("line", {class: "event", x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b}));
+      frag.appendChild(eventLine(e, "event"));
     }
     // A pinned run's events, fainter: where its schedule fired may differ from the live run's.
     for (let ri = 0; ri < RUNS.length - 1; ri++) {
       for (const e of ((RUNS[ri].data || {}).events || [])) {
         if (e.t < win[0] || e.t > win[1]) continue;
-        frag.appendChild(el("line", {class: "event pin", x1: X(e.t), x2: X(e.t), y1: M.t, y2: box.h - M.b}));
+        frag.appendChild(eventLine(e, "event pin"));
       }
     }
     // The stop marker: where the run ends, drawn as a handle. Drag it left to trim the horizon
