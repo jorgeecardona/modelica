@@ -97,6 +97,22 @@
   button:hover, select:hover { border-color: var(--dim); }
   button:focus-visible, select:focus-visible, .item:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* The plot-mode control: t · xy · xyz as one segmented switch, the pressed mode filled -- the
+     split between a Y(T) and a Y(X) plot that Simulink and System Modeler make, plus the third
+     axis. Log time is a property of the t axis, so it is a toggle shown in that mode only. */
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; border-left: 1px solid var(--line); padding: 2px 9px; }
+  .seg button:first-child { border-left: 0; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .seg button:disabled { opacity: .4; cursor: default; }
+  #logt[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  /* The axis slots: x, and in 3D y and z -- compact labelled picks with the unit in the option,
+     the pattern of Plotly's, Simulink's and Grafana's axis menus -- and a swap. */
+  .axes { display: inline-flex; align-items: baseline; gap: 5px; color: var(--dim); font-size: 12px; }
+  .axes label { display: inline-flex; align-items: baseline; gap: 3px; }
+  .axes select { max-width: 120px; }
+  /* The run controls (stop, the automatic stops, speed, Δt) sit apart from the view controls. */
+  .stopwrap:not([hidden]) { padding-right: 8px; border-right: 1px solid var(--line); }
   .foot { flex: none; height: 26px; padding: 5px 16px; border-top: 1px solid var(--line);
     color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden;
     font-variant-numeric: tabular-nums; }
@@ -173,14 +189,21 @@
   /* The sweep: one parameter over a range, one pinned run per value, and a small chart of a
      response read off each run against the parameter -- drop time against charge. */
   #stitle { margin-top: 12px; }
-  .sweepctl { padding: 0 12px 4px; font-size: 12px; }
-  .srow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; margin: 3px 0; }
-  .srow .l { color: var(--dim); }
-  .srow input { width: 58px; font: inherit; font-size: 11.5px; color: var(--ink); background: var(--panel);
-    border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; text-align: right;
-    font-variant-numeric: tabular-nums; }
-  .srow input#ssteps { width: 34px; }
-  .srow select { max-width: 100%; }
+  /* One form grid for the sweep and the sensitivity study: a dim label column and a control
+     column, so the fields line up down the panel and a row never breaks between its label and
+     its unit ("% compute" used to wrap onto a line of its own). A control cell can hold several
+     fields with words between them; a `.full` cell spans both columns. */
+  .frm { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 8px;
+    align-items: center; padding: 0 12px 6px; font-size: 12px; }
+  .frm .l { color: var(--dim); white-space: nowrap; }
+  .frm .c { display: flex; align-items: center; gap: 5px; min-width: 0; }
+  .frm .c .l { flex: none; }
+  .frm .full { grid-column: 1 / -1; }
+  .frm input { flex: 1 1 44px; min-width: 36px; width: auto; font: inherit; font-size: 11.5px;
+    color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+    padding: 2px 6px; text-align: right; font-variant-numeric: tabular-nums; }
+  .frm select { min-width: 0; max-width: 100%; flex: 1 1 auto; }
+  .frm button { flex: 1 1 auto; }
   .schart { display: block; width: 100%; height: 130px; margin-top: 4px; }
   .schart .rp { fill: var(--accent); }
   .schart .rl { stroke: var(--accent); fill: none; stroke-width: 1.4; }
@@ -260,6 +283,14 @@
     .stopwrap button { flex: 1 1 auto; }
     #scale { flex: 1 1 100%; }
     #timeunit, #disp { flex: 1 1 46%; }
+    .seg { flex: 0 0 auto; }
+    /* The axis slots take a row of their own and share it: each pick shrinks to fit, so three
+       slots, their letters and the swap sit in 400px without overflowing the toolbar. */
+    .axes { flex: 1 1 100%; flex-wrap: wrap; }
+    .axes label { flex: 1 1 90px; min-width: 0; }
+    .axes select { max-width: none; flex: 1 1 60px; min-width: 0; }
+    #view3, #logt { flex: 1 1 auto; }
+    .stopwrap:not([hidden]) { border-right: 0; padding-right: 0; }
     #pin, #all, #none, #reset, #legendbtn { flex: 1 1 auto; }
     .foot, .note, .srcnote { padding-left: 12px; padding-right: 12px; }
   }
@@ -299,7 +330,26 @@
             <option value="units">by unit</option>
             <option value="split">split (per-variable)</option>
           </select>
-          <select id="xaxis" title="what the x axis is: time, or a variable -- a phase plot, RoR against bean temperature or Lorenz's x against z"><option value="">x: time</option></select>
+          <span class="seg" id="mode" role="group" aria-label="plot mode" title="what the plot is: the variables against time, one variable against another (a phase plot), or three on three axes">
+            <button type="button" data-mode="t" aria-pressed="true">t</button>
+            <button type="button" data-mode="xy" aria-pressed="false">xy</button>
+            <button type="button" data-mode="xyz" aria-pressed="false">xyz</button>
+          </span>
+          <button type="button" id="logt" aria-pressed="false" title="time on a log axis, for a stiff run over a long horizon whose motion a linear axis crushes into the first pixels">log t</button>
+          <span class="axes" id="axes" hidden>
+            <label title="the variable on the x axis">x<select id="axx"></select></label>
+            <label id="axylab" title="the variable on the y axis" hidden>y<select id="axy"></select></label>
+            <label id="axzlab" title="the variable on the z axis" hidden>z<select id="axz"></select></label>
+            <button type="button" id="axswap" title="swap the x and y axes">&#8646;</button>
+          </span>
+          <select id="view3" hidden title="the camera: a preset view, a reset, or a slow turn that any drag stops">
+            <option value="">view…</option>
+            <option value="reset">reset view</option>
+            <option value="xy">top (x·y)</option>
+            <option value="xz">front (x·z)</option>
+            <option value="yz">side (y·z)</option>
+            <option value="spin">auto-rotate</option>
+          </select>
           <select id="timeunit" title="time axis unit: the data stays in seconds, only what is shown converts">
             <option value="s">seconds</option>
             <option value="min">minutes</option>
@@ -329,20 +379,22 @@
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="ptitle" hidden>parameters</div><div id="plist"></div>
     <div class="legtitle" id="stitle" hidden>sweep</div>
-    <div id="sweepctl" class="sweepctl" hidden>
-      <div class="srow"><select id="sparam" title="the parameter to sweep"></select></div>
-      <div class="srow"><span class="l">from</span><input id="sfrom" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"><span class="l">to</span><input id="sto" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"><span class="l">in</span><input id="ssteps" type="text" inputmode="numeric" spellcheck="false" autocomplete="off" value="5"><span class="l">runs</span></div>
-      <div class="srow"><button type="button" id="srun" title="simulate the model once per value, each as a pinned run">run sweep</button><button type="button" id="sclear" title="drop the sweep's runs">clear</button></div>
-      <div class="srow"><span class="l">response</span><select id="sresp" title="the number read off each run and plotted against the parameter"></select></div>
-      <svg id="schart" class="schart"></svg>
+    <div id="sweepctl" class="frm" hidden>
+      <div class="c full"><select id="sparam" title="the parameter to sweep"></select></div>
+      <span class="l">from</span><div class="c"><input id="sfrom" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"><span class="l">to</span><input id="sto" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"></div>
+      <span class="l">in</span><div class="c"><input id="ssteps" type="text" inputmode="numeric" spellcheck="false" autocomplete="off" value="5"><span class="l">runs</span></div>
+      <div class="c full"><button type="button" id="srun" title="simulate the model once per value, each as a pinned run">run sweep</button><button type="button" id="sclear" title="drop the sweep's runs">clear</button></div>
+      <span class="l">response</span><div class="c"><select id="sresp" title="the number read off each run and plotted against the parameter"></select></div>
+      <svg id="schart" class="schart full"></svg>
     </div>
     <div class="legtitle" id="ltitle" hidden>measured</div>
     <div id="loglist"></div>
     <div class="legtitle" id="ntitle" hidden>sensitivity</div>
-    <div id="sensctl" class="sweepctl" hidden>
-      <div class="srow"><span class="l">of</span><select id="nresp" title="the response: a variable's final value, or the time an event first fires"></select></div>
-      <div class="srow"><span class="l">to each parameter, &plusmn;</span><input id="nstep" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" value="5"><span class="l">%</span><button type="button" id="nrun" title="run every editable parameter a step either way (two simulations each) and read the response off each">compute</button></div>
-      <svg id="tchart" class="tchart"></svg>
+    <div id="sensctl" class="frm" hidden>
+      <span class="l">of</span><div class="c"><select id="nresp" title="the response: a variable's final value, or the time an event first fires"></select></div>
+      <span class="l" title="each editable parameter is run this far below and above its value">step</span><div class="c"><span class="l">&plusmn;</span><input id="nstep" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" value="5"><span class="l">%</span></div>
+      <div class="c full"><button type="button" id="nrun" title="run every editable parameter a step either way (two simulations each) and read the response off each">compute</button></div>
+      <svg id="tchart" class="tchart full"></svg>
     </div>
   </aside>
 </div>
@@ -413,6 +465,10 @@ let TFLOOR = 1e-12;
 let view3d = false;
 let rot3 = {az: -0.7, el: 0.45};
 let rot3drag = null;
+let mode = "t";             // the plot mode: "t" against time, "xy" a phase plot, "xyz" three axes
+let ax3 = [null, null, null]; // the three axis variables in xyz, set from the slots
+let zoom3 = 1;              // the camera's zoom, by wheel; double-click or "reset view" restores 1
+let spin3 = null;           // the auto-rotate interval while turning, null otherwise
 let XD = [0, 1];
 // Measurement marks: up to two sample indices set by clicking. One is a readout; two give the
 // interval between them and every selected variable's change across it -- the drying phase's
@@ -802,15 +858,16 @@ function range3(nm) {
   if (!isFinite(lo)) return [0, 1];
   return hi > lo ? [lo, hi] : [lo - 1, lo + 1];
 }
+// The colour of the trajectory at fraction `f` of the run: a ramp from blue to orange, so the
+// direction of travel and where the run spends its time can be read off the line.
+function ramp(f) { return "hsl(" + Math.round(220 - 200 * Math.max(0, Math.min(1, f))) + " 70% 50%)"; }
 function draw3d(frag) {
   // Centred on the whole plot, so it does not drift into a corner as the 2D margins change.
   const cx = box.w / 2, cy = box.h / 2;
-  const r = 0.4 * Math.min(box.w, box.h);
-  // The axes are the selected variables (the legend), the first three; fewer than three falls
-  // back to the first three variables so something always draws.
-  const chosen = selected();
-  const names3 = (chosen.length >= 3 ? chosen : names).slice(0, 3);
-  while (names3.length < 3) names3.push(names3[names3.length - 1] || names[0]);
+  const r = 0.4 * Math.min(box.w, box.h) * zoom3;
+  // The axes are the three slots; anything the model lacks falls back to the default triple.
+  const dflt = defaultAxes();
+  const names3 = ax3.map((nm, i) => (names.includes(nm) ? nm : dflt[i]));
   const rngs = names3.map((nm) => (nm ? range3(nm) : [0, 1]));
   const norm = (val, i) => {
     const [lo, hi] = rngs[i];
@@ -821,29 +878,50 @@ function draw3d(frag) {
   for (let i = 0; i < 3; i++) {
     const o = project3([0, 0, 0], cx, cy, r), e = project3(AX[i], cx, cy, r);
     frag.appendChild(el("line", {class: "grid", x1: o[0], y1: o[1], x2: e[0], y2: e[1]}));
+    const u = names3[i] ? dispUnit(unitOf(names3[i])) : "";
     frag.appendChild(el("text", {class: "tick", x: e[0], y: e[1] - 3, "text-anchor": "middle", "font-weight": 600,
-      fill: names3[i] ? colour(names3[i]) : "var(--dim)"}, names3[i] || "-"));
+      fill: names3[i] ? colour(names3[i]) : "var(--dim)"}, (names3[i] || "-") + (u ? "  " + u : "")));
   }
-  // The trajectory of each run, projected. The live run solid, pins dashed, as elsewhere.
+  // The trajectory of each run, projected. The live run is coloured by time -- drawn as a few
+  // dozen pieces, each in the ramp's colour for its stretch, which reads as a gradient without a
+  // path per point -- and pins are one dashed line in the first axis's colour, as elsewhere.
+  const live = RUNS.length - 1;
   for (let ri = 0; ri < RUNS.length; ri++) {
     const cols = names3.map((nm) => (nm ? seriesOf(ri, nm) : null));
     if (cols.some((c) => !c)) continue;
     const st = runStyle(ri);
-    let d = "", pen = false;
     const n = cols[0].length;
-    for (let k = 0; k < n; k++) {
-      const v = [cols[0][k], cols[1][k], cols[2][k]];
-      if (v.some((x) => x === null || x === undefined || !isFinite(x))) { pen = false; continue; }
-      const s = project3([norm(v[0], 0), norm(v[1], 1), norm(v[2], 2)], cx, cy, r);
-      d += (pen ? "L" : "M") + s[0].toFixed(1) + " " + s[1].toFixed(1) + " ";
-      pen = true;
+    const pieces = ri === live ? Math.min(48, Math.max(1, Math.floor(n / 8))) : 1;
+    const per = Math.ceil(n / pieces);
+    for (let q = 0; q < pieces; q++) {
+      const from = q * per, to = Math.min(n - 1, (q + 1) * per); // overlap one point so pieces join
+      let d = "", pen = false;
+      for (let k = from; k <= to; k++) {
+        const v = [cols[0][k], cols[1][k], cols[2][k]];
+        if (v.some((x) => x === null || x === undefined || !isFinite(x))) { pen = false; continue; }
+        const s = project3([norm(v[0], 0), norm(v[1], 1), norm(v[2], 2)], cx, cy, r);
+        d += (pen ? "L" : "M") + s[0].toFixed(1) + " " + s[1].toFixed(1) + " ";
+        pen = true;
+      }
+      if (!d) continue;
+      const stroke = ri === live ? ramp((q + 0.5) / pieces) : colour(names3[0] || names[0]);
+      const path = el("path", {d: d, fill: "none", "stroke-width": st.w, stroke: stroke, opacity: st.op, "stroke-linejoin": "round"});
+      if (st.dash) path.setAttribute("stroke-dasharray", st.dash);
+      frag.appendChild(path);
     }
-    const path = el("path", {d: d, fill: "none", "stroke-width": st.w, stroke: colour(names3[0] || names[0]), opacity: st.op});
-    if (st.dash) path.setAttribute("stroke-dasharray", st.dash);
-    frag.appendChild(path);
+  }
+  // A thin colourbar for the ramp, bottom right: the run's start to its end in the shown unit.
+  const bw = Math.min(140, box.w * 0.25), bx = box.w - bw - 14, by = box.h - 16;
+  const steps = 12;
+  for (let q = 0; q < steps; q++) {
+    frag.appendChild(el("rect", {x: bx + (q * bw) / steps, y: by, width: bw / steps + 0.5, height: 5, fill: ramp((q + 0.5) / steps)}));
+  }
+  if (N) {
+    frag.appendChild(el("text", {class: "tick", x: bx, y: by - 3, "text-anchor": "start"}, "t = " + fmt(toT(T[0]))));
+    frag.appendChild(el("text", {class: "tick", x: bx + bw, y: by - 3, "text-anchor": "end"}, fmt(toT(T[N - 1])) + " " + tUnit()));
   }
   foot.textContent = names3.map((nm, i) => "xyz"[i] + " = " + (nm || "-")).join("  ·  ")
-    + "   ·   drag to rotate · pick the axes in the legend (first three shown)";
+    + "   ·   drag to rotate · wheel to zoom · double-click to reset";
 }
 
 // -- drawing ---------------------------------------------------------------------------
@@ -1208,7 +1286,7 @@ function drawTornado() {
   if (!S || S.response !== key || !S.rows || !S.rows.length) {
     svgT.setAttribute("viewBox", "0 0 " + w + " 24"); svgT.style.height = "24px";
     const frag = document.createDocumentFragment();
-    frag.appendChild(el("text", {class: "tval", x: 0, y: 14}, S && S.rows && S.rows.length ? "computed for another response -- compute again" : "compute to see which parameter matters"));
+    frag.appendChild(el("text", {class: "tval", x: 0, y: 14}, S && S.rows && S.rows.length ? "another response -- compute again" : "compute to rank the parameters"));
     svgT.replaceChildren(frag); return;
   }
   const choice = responseChoices().find((c) => c.key === S.response);
@@ -1409,7 +1487,7 @@ function drawResponse() {
   });
   const xs = pts.map((q) => q.x), ys = pts.filter((q) => q.y !== null).map((q) => q.y);
   if (!xs.length) {
-    frag.appendChild(el("text", {class: "rtick", x: m.l, y: h / 2}, sweepChoice ? "run a sweep to plot " + sweepChoice.label : ""));
+    frag.appendChild(el("text", {class: "rtick", x: m.l, y: h / 2}, sweepChoice ? "run a sweep" : ""));
     svgR.replaceChildren(frag); return;
   }
   const xd = spanPad(Math.min(...xs), Math.max(...xs)), yd = ys.length ? spanPad(Math.min(...ys), Math.max(...ys)) : [0, 1];
@@ -1580,7 +1658,7 @@ svg.addEventListener("pointerdown", (e) => {
   if (!D) return;
   svg.setPointerCapture(e.pointerId);
   // In the 3D view a drag rotates the camera instead of zooming.
-  if (view3d) { rot3drag = {x: e.clientX, y: e.clientY, az: rot3.az, el: rot3.el}; return; }
+  if (view3d) { stopSpin(); rot3drag = {x: e.clientX, y: e.clientY, az: rot3.az, el: rot3.el}; return; }
   // Grabbing the stop handle moves the horizon; grabbing anywhere else starts a zoom band.
   if (e.target && e.target.classList && e.target.classList.contains("stopgrip")) { stopDrag = true; return; }
   drag = timeAt(e);
@@ -1611,7 +1689,11 @@ svg.addEventListener("pointerup", (e) => {
 svg.addEventListener("pointerleave", () => {
   if (drag === null && !stopDrag) { hud.replaceChildren(); foot.textContent = restFooter(); paintLegend(); }
 });
-svg.addEventListener("dblclick", () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; draw(); foot.textContent = restFooter(); });
+svg.addEventListener("dblclick", () => {
+  // In 3D a double-click resets the camera, the convention Plotly and MATLAB share.
+  if (view3d) { stopSpin(); resetCamera(); draw(); return; }
+  win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; draw(); foot.textContent = restFooter();
+});
 document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; draw(); foot.textContent = restFooter(); };
 document.getElementById("all").onclick = () => { on = new Set(names); draw(); };
 document.getElementById("none").onclick = () => { on = new Set(); draw(); };
@@ -1645,32 +1727,86 @@ document.getElementById("timeunit").onchange = (e) => {
 };
 // The x axis: time, or one of the model's variables for a phase plot. Changing it drops any x
 // zoom, since a zoom in one variable's units means nothing in another's.
-document.getElementById("xaxis").onchange = (e) => {
-  const v = e.target.value;
-  view3d = v === "__3d__";
-  LOGT = v === "__log__";
-  xVar = v && v !== "__log__" && v !== "__3d__" ? v : null;
-  xwin = null;
-  // Entering 3D, start on the natural triple: the first three states (Lorenz's x, y, z), unless
-  // the reader already has exactly three variables selected, which are then the axes.
-  if (view3d && selected().length !== 3) {
-    const base = (D && D.states && D.states.length >= 3 ? D.states : names).slice(0, 3);
-    on = new Set(base);
+// -- plot mode: t · xy · xyz ---------------------------------------------------------------
+// Against time, one variable against another, or three on three axes: the split Simulink and
+// System Modeler make between Y(T) and Y(X) plots, with the third axis added. The axis slots
+// follow the mode -- x in xy, x y z in xyz -- and are filled by default in legend order, the
+// first selected variables, as those tools do, then set outright from the slots. Log time is a
+// property of the t axis, so it is a toggle shown in that mode only.
+function defaultAxes() {
+  const picked = selected();
+  const base = picked.length >= 3 ? picked : (D && D.states && D.states.length >= 3 ? D.states : names);
+  const out = base.slice(0, 3);
+  while (out.length < 3 && names.length) out.push(names[out.length % names.length]);
+  return out;
+}
+function setMode(m) {
+  mode = m; view3d = m === "xyz"; xwin = null;
+  if (m === "t") xVar = null;
+  else if (m === "xy") { LOGT = false; if (!xVar || !names.includes(xVar)) xVar = defaultAxes()[0]; }
+  else { LOGT = false; xVar = null; if (ax3.some((nm) => !names.includes(nm))) ax3 = defaultAxes(); }
+  if (spin3 && m !== "xyz") stopSpin();
+  paintXAxis(); draw();
+}
+// The controls for the model shown: the pressed mode, xyz only with three variables to give it,
+// the slots filled with every variable and its unit. A choice the new model lacks falls back.
+function paintXAxis() {
+  if (view3d && names.length < 3) { view3d = false; mode = "t"; }
+  for (const b of document.querySelectorAll("#mode button")) b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
+  document.querySelector('#mode button[data-mode="xyz"]').disabled = names.length < 3;
+  const logt = document.getElementById("logt");
+  logt.hidden = mode !== "t"; logt.setAttribute("aria-pressed", String(LOGT));
+  document.getElementById("axes").hidden = mode === "t";
+  document.getElementById("axylab").hidden = mode !== "xyz";
+  document.getElementById("axzlab").hidden = mode !== "xyz";
+  document.getElementById("view3").hidden = mode !== "xyz";
+  const fill = (id, value) => {
+    const s = document.getElementById(id);
+    s.replaceChildren(...names.map((nm) => { const o = document.createElement("option"); o.value = nm;
+      const u = dispUnit(unitOf(nm)); o.textContent = nm + (u ? " (" + u + ")" : ""); return o; }));
+    s.value = value || "";
+  };
+  if (xVar && !names.includes(xVar)) { xVar = null; xwin = null; }
+  if (mode === "xy") fill("axx", xVar);
+  if (mode === "xyz") {
+    const dflt = defaultAxes();
+    ax3 = ax3.map((nm, i) => (names.includes(nm) ? nm : dflt[i]));
+    fill("axx", ax3[0]); fill("axy", ax3[1]); fill("axz", ax3[2]);
   }
+}
+for (const b of document.querySelectorAll("#mode button")) b.onclick = () => setMode(b.dataset.mode);
+document.getElementById("logt").onclick = () => { LOGT = !LOGT; paintXAxis(); draw(); };
+document.getElementById("axx").onchange = (e) => { if (mode === "xy") { xVar = e.target.value; xwin = null; } else ax3[0] = e.target.value; draw(); };
+document.getElementById("axy").onchange = (e) => { ax3[1] = e.target.value; draw(); };
+document.getElementById("axz").onchange = (e) => { ax3[2] = e.target.value; draw(); };
+// Swap, as Simulink's XY dialog has: x with y in xyz; in xy, x with the first variable drawn.
+document.getElementById("axswap").onclick = () => {
+  if (mode === "xyz") { [ax3[0], ax3[1]] = [ax3[1], ax3[0]]; }
+  else if (mode === "xy") {
+    const ys = selected().filter((nm) => nm !== xVar); if (!ys.length) return;
+    on.delete(ys[0]); on.add(xVar); xVar = ys[0]; xwin = null;
+  }
+  paintXAxis(); draw();
+};
+// The camera: preset views and a reset (MATLAB's rotate menu, ParaView's toolbar), a slow turn
+// that any drag stops (Plotly); double-click on the plot resets as well.
+function resetCamera() { rot3 = {az: -0.7, el: 0.45}; zoom3 = 1; }
+function stopSpin() { clearInterval(spin3); spin3 = null; }
+document.getElementById("view3").onchange = (e) => {
+  const v = e.target.value; e.target.value = "";
+  if (v === "reset") { stopSpin(); resetCamera(); }
+  else if (v === "xy") { stopSpin(); rot3 = {az: 0, el: Math.PI / 2 - 1e-3}; }
+  else if (v === "xz") { stopSpin(); rot3 = {az: 0, el: 0}; }
+  else if (v === "yz") { stopSpin(); rot3 = {az: Math.PI / 2, el: 0}; }
+  else if (v === "spin") { if (spin3) stopSpin(); else spin3 = setInterval(() => { rot3.az += 0.012; draw(); }, 40); }
   draw();
 };
-// The x-axis choices for the model shown: time first, then every variable, and -- when there are
-// three or more -- the 3D phase view, the one a chaotic model is meant to be seen in. A choice
-// the new model does not have falls back to time.
-function paintXAxis() {
-  const sel = document.getElementById("xaxis");
-  const threeD = names.length >= 3 ? [{v: "__3d__", t: "3D"}] : [];
-  const opts = [{v: "", t: "x: time"}, {v: "__log__", t: "x: log time"}, ...threeD, ...names.map((nm) => ({v: nm, t: "x: " + nm}))];
-  sel.replaceChildren(...opts.map((o) => { const e = document.createElement("option"); e.value = o.v; e.textContent = o.t; return e; }));
-  if (xVar && !names.includes(xVar)) { xVar = null; xwin = null; }
-  if (view3d && names.length < 3) view3d = false;
-  sel.value = view3d ? "__3d__" : LOGT ? "__log__" : (xVar || "");
-}
+svg.addEventListener("wheel", (e) => {
+  if (!view3d) return;
+  e.preventDefault();
+  zoom3 = Math.max(0.3, Math.min(6, zoom3 * (e.deltaY > 0 ? 0.9 : 1.1)));
+  draw();
+}, {passive: false});
 window.addEventListener("resize", draw);
 
 // Live stop-time control: ask the extension to re-simulate at a new stop, then swap in the data.

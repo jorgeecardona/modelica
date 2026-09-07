@@ -63,15 +63,20 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   physical unit share a strip and a scale, so the temperatures sit together and mass on its
   own), or `split` (one strip per variable). A single open `.mo` opens on its states grouped by
   unit, so nothing is crushed.
-- **`x:`** is time by default, **log time** for a stiff run over a long horizon (E5 runs to
-  1e13 s and finishes its kinetics by 1e3, which a linear axis puts in one pixel column; the
-  ticks become the decades), a variable: a **phase plot**, such as the rate of rise against
-  bean temperature or Lorenz's z against x; or, when the model has three or more variables,
-  **3D** -- three variables on three axes, the trajectory as one line you rotate by dragging.
-  This is the view a chaotic model is meant to be seen in (Lorenz's butterfly, Chua's double
-  scroll); against time those states look like noise. Three pickers choose the axes, defaulting
-  to the first three states. Events and reference points hide in a phase or 3D plot; against a
-  variable, the cursor picks the nearest sample by that variable's value.
+- **Plot mode, `t · xy · xyz`.** `t` draws the variables against time; **log t** (shown in
+  that mode) puts time on a log axis for a stiff run over a long horizon (E5 runs to 1e13 s
+  and finishes its kinetics by 1e3, which a linear axis puts in one pixel column; the ticks
+  become the decades). `xy` is a **phase plot**: the `x` slot picks the variable on the x axis
+  and the selected variables draw against it, such as the rate of rise against bean temperature
+  or Lorenz's z against x; `⇄` swaps x with the first drawn variable. `xyz` (offered with three
+  or more variables) is the **3D phase view**: three slots pick the axes, defaulting to the
+  first three states -- Lorenz's x, y, z, the butterfly -- with each option showing its unit
+  and `⇄` swapping x and y. The trajectory is coloured by time (blue to orange, with a small
+  colourbar) so direction reads off the line; pinned runs draw dashed. Drag to rotate, wheel to
+  zoom, double-click to reset the camera; the `view…` menu has a reset, top / front / side
+  presets, and an auto-rotate that any drag stops. This is the view a chaotic model is meant to
+  be seen in; against time those states look like noise. Events and reference points hide in a
+  phase or 3D plot; in `xy` the cursor picks the nearest sample by the x variable's value.
 - **Time in seconds or minutes.** The data stays in seconds; only the axis, the readouts and
   the rates convert: a `K/s` rate reads `K/min` in minutes.
 - **Display units:** `SI units` or `K as °C`. A bare kelvin value is shown in Celsius; a rate
