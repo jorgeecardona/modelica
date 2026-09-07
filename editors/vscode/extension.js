@@ -59,6 +59,8 @@ function ensurePanel(context) {
         resume: msg.resume || null,
         // The relative tolerance the panel asked for; null means the model's reference tolerance.
         tolerance: typeof msg.tolerance === "number" ? msg.tolerance : null,
+        // The largest gap between output points, in seconds; null lets the simulator choose.
+        maxDt: typeof msg.maxDt === "number" && msg.maxDt > 0 ? msg.maxDt : null,
       };
       runHelper(live.context, live.file, opts, (data) => {
         panel.webview.postMessage(
@@ -202,9 +204,13 @@ function runtimeCommand(context, cfg, file, opts) {
   const tolArg = typeof opts.tolerance === "number" && opts.tolerance > 0
     ? ["--tolerance", String(opts.tolerance)]
     : [];
+  // The largest gap between output points; omitted lets the simulator choose the density.
+  const maxDtArg = typeof opts.maxDt === "number" && opts.maxDt > 0
+    ? ["--max-dt", String(opts.maxDt)]
+    : [];
   return {
     cmd: python[0],
-    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...setArgs, ...sensArgs, ...resumeArgs, ...tolArg, ...libs],
+    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...setArgs, ...sensArgs, ...resumeArgs, ...tolArg, ...maxDtArg, ...libs],
   };
 }
 

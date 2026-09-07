@@ -80,10 +80,22 @@ _GRID = 4000
 has samples inside its window; the dense-output evaluation is cheap next to the integration."""
 
 
+_MAX_POINTS = 60000
+"""A hard ceiling on the points sent, so a tiny ``max_dt`` over a long horizon cannot run away."""
+
+
 def _sample(
-    time: NDArray[np.float64], columns: list[NDArray[np.float64]], limit: int = 4000
+    time: NDArray[np.float64],
+    columns: list[NDArray[np.float64]],
+    limit: int = 4000,
+    max_dt: float | None = None,
 ) -> list[int]:
     """Which instants to send the panel: evenly dense, and keeping every sharp feature.
+
+    When ``max_dt`` is set it is a resolution the caller demands: the returned instants are no
+    more than ``max_dt`` apart in time (down to what the run's own grid holds), so the line is
+    that dense everywhere. It overrides the point budget, up to a hard ceiling that keeps a tiny
+    step over a long horizon from running away.
 
     Two parts. A uniform grid along the axis the run is drawn on gives a consistent density, so
     a curve is a curve everywhere; and Douglas-Peucker over each series adds the sharp features
@@ -99,13 +111,21 @@ def _sample(
     for -- minimal, so a many-swing run like Lorenz drew as sawtooth across the gentle stretches.
     """
     n = len(time)
-    if n <= limit:
+    if n <= limit and max_dt is None:
         return list(range(n))
     keep = np.zeros(n, dtype=bool)
     keep[0] = keep[-1] = True
     breaks = np.flatnonzero(np.diff(time) <= 0.0)
     keep[breaks] = True
     keep[np.minimum(breaks + 1, n - 1)] = True
+    if max_dt is not None and max_dt > 0.0:
+        # A demanded resolution: keep an instant in every ``max_dt``-wide bin of time, so the gaps
+        # are bounded by ``max_dt`` where the run's grid is that fine. The first index of each bin
+        # is kept (its `np.diff` is non-zero), which is O(n) rather than a walk. The sharp features
+        # below are added on top, and the hard ceiling caps a runaway on a tiny step.
+        step = max(max_dt, float(time[-1] - time[0]) / _MAX_POINTS)
+        bins = np.floor((time - time[0]) / step)
+        keep[np.flatnonzero(np.diff(bins, prepend=bins[0] - 1.0) != 0.0)] = True
     # The axis the run is read on. A stiff model over a long horizon -- E5 runs to 1e13 s and
     # finishes its kinetics by 1e3 -- has all its motion in the first decades, one point on a
     # linear axis, so when the horizon spans four decades or more the coordinate is log time,
@@ -228,6 +248,7 @@ def _integrate_from(  # noqa: PLR0913, PLR0917 - the run's knobs, passed straigh
     resume: dict[str, object] | None,
     states: list[str],
     solver: _Solver,
+    max_dt: float | None = None,
 ) -> tuple[Result, dict[str, object]]:
     """The panel's main run, with a checkpoint out and, optionally, a checkpoint in.
 
@@ -243,15 +264,24 @@ def _integrate_from(  # noqa: PLR0913, PLR0917 - the run's knobs, passed straigh
     # The output grid the dense solution is read on. Evaluating the dense polynomial at these
     # points is cheap (it is not more integration), so it is generous: the panel then has enough
     # to stay smooth when zoomed in, where only the fraction of the samples inside the window is
-    # seen. `_sample` thins this and the solver's own steps down to what the panel is sent.
+    # seen. `_sample` thins this and the solver's own steps down to what the panel is sent. A
+    # demanded ``max_dt`` sets the spacing outright, capped so a tiny step cannot make a runaway
+    # grid, and `_sample` keeps it rather than thinning below it.
     p, y, w = kernel.start(0.0, params)
+    start = float(resume["t"]) if resume is not None else 0.0  # type: ignore[arg-type]
     if resume is not None:
-        start = float(resume["t"])  # type: ignore[arg-type]
         y = np.asarray(resume["y"], dtype=float)
         w = np.asarray(resume["w"], dtype=float)
-        grid = np.linspace(start, stop, max(200, int(_GRID * (stop - start) / max(stop, 1e-12))))
+    span = stop - start
+    if max_dt is not None and max_dt > 0.0:
+        # Half the demanded spacing, so every `max_dt`-wide bin the sampler keeps has a point to
+        # keep and the gap it leaves is actually bounded by `max_dt`, not the ~2x a coarser grid
+        # left when a bin boundary fell between two grid points.
+        count = min(_MAX_POINTS, max(2, int(2.0 * span / max_dt) + 1))
+        grid = np.linspace(start, stop, count)
+    elif resume is not None:
+        grid = np.linspace(start, stop, max(200, int(_GRID * span / max(stop, 1e-12))))
     else:
-        start = 0.0
         grid = np.linspace(0.0, stop, _GRID)
     plan = _Run(kernel, p, w, solver.tolerance, solver.atol, solver.method)
     result = plan.run(start, stop, y, grid)
@@ -483,6 +513,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     sstep: float = 0.05,
     resume: dict[str, object] | None = None,
     tolerance: float | None = None,
+    max_dt: float | None = None,
 ) -> dict[str, object]:
     system, kernel, units = _load(path, name, libraries)
     # The model's own integrator, unless the panel asked for a display tolerance. A model's
@@ -524,7 +555,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         stop, result, note = _auto_stop(kernel, states, until, frm, default, cap, params, solver)
     else:
         result, checkpoint = _integrate_from(
-            kernel, stop, params, resume, list(system.modes[0].states), solver
+            kernel, stop, params, resume, list(system.modes[0].states), solver, max_dt
         )
     time = np.asarray(result.time, dtype=float)
     # A parameter is one flat value; keep the ones that move, plus the states so a constant
@@ -536,7 +567,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         finite = column[np.isfinite(column)]
         if variable in states or (finite.size and float(finite.max() - finite.min()) > 0.0):
             full[variable] = column
-    keep = _sample(time, list(full.values()))
+    keep = _sample(time, list(full.values()), max_dt=max_dt)
     series: dict[str, list[float | None]] = {
         variable: [_r7(v) for v in column[keep]] for variable, column in full.items()
     }
@@ -691,6 +722,14 @@ def main() -> None:
         help="the relative tolerance for the run the panel draws, overriding the model's own "
         "(its method and absolute tolerance are kept); omit to use the model's reference tolerance",
     )
+    ap.add_argument(
+        "--max-dt",
+        dest="max_dt",
+        type=float,
+        default=None,
+        help="the largest gap between output points, in seconds: the resolution of the drawn "
+        "line, dense everywhere; omit to let the sampler choose",
+    )
     args = ap.parse_args()
 
     path = Path(args.path)
@@ -712,6 +751,7 @@ def main() -> None:
             if args.resume
             else None,
             tolerance=args.tolerance,
+            max_dt=args.max_dt,
         )
         print(json.dumps({"models": [record]}, separators=(",", ":"), allow_nan=False))
     except Exception as error:  # noqa: BLE001 - report every failure to the panel, never crash silently

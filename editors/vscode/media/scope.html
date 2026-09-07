@@ -290,6 +290,7 @@
               <option value="1e-8">fine</option>
               <option value="">exact</option>
             </select>
+            <label title="the largest gap between drawn points, in the shown time unit: the resolution of the line. Empty lets the panel choose. Smaller is denser and heavier.">&#916;t&nbsp;&#8804;&nbsp;<input id="maxdt" type="number" step="any" min="0" placeholder="auto"></label>
           </span>
           <select id="scale" title="vertical axis">
             <option value="linear">linear</option>
@@ -381,6 +382,11 @@ let RUNS = [];           // [{overrides, data, onBase}]
 let overrides = {};      // the live run's parameter overrides, name -> SI value
 let dispMode = "si";     // display units: "si", or "c" to print kelvin as celsius
 let timeMode = "s";      // time axis: "s" seconds, or "min" minutes -- the data stays in seconds
+// The largest gap between drawn points, in seconds, or null to let the panel choose the
+// density. A cap on Δt is a resolution the user sets outright: the run outputs a grid at this
+// spacing and the sampler keeps it, so the line is this dense everywhere, however far it is
+// zoomed. Smaller is denser and a bigger payload.
+let maxDt = null;
 // How hard the integrator works: the relative tolerance the panel asks for. "" means the
 // model's own reference tolerance (its .toml), which reproduces its reference points and, on a
 // stiff or chaotic model, is several times slower than looking at a trajectory needs. The
@@ -1521,6 +1527,19 @@ if (speedSel) {
   speedSel.value = speed;
   speedSel.onchange = (e) => { speed = e.target.value; if (LIVE) reRun(); };
 }
+// Max Δt: the field is in the shown time unit; the run works in seconds. Empty is auto. A change
+// re-runs at the same stop to resample the whole curve at the new density -- the stop has not
+// grown, so reRun starts from zero rather than continuing a tail.
+const maxdtInput = document.getElementById("maxdt");
+if (maxdtInput) {
+  const applyMaxDt = () => {
+    const shown = parseFloat(maxdtInput.value);
+    maxDt = Number.isFinite(shown) && shown > 0 ? fromT(shown) : null;
+    if (LIVE) reRun();
+  };
+  maxdtInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); applyMaxDt(); } });
+  maxdtInput.addEventListener("change", applyMaxDt);
+}
 document.getElementById("timeunit").onchange = (e) => {
   timeMode = e.target.value;
   const s = document.getElementById("stop");
@@ -1570,7 +1589,7 @@ function reRun(until) {
   const sameTol = D && (D.tolerance ?? null) === tol;
   const resume = (!until && ck && same && sameTol && stop > (D.stop || 0) * (1 + 1e-9)) ? ck : null;
   vscodeApi.postMessage({ type: "simulate", stop: stop, until: until, from: stop,
-    sets: overrides, runId: RUNS.length - 1, resume: resume, tolerance: tol });
+    sets: overrides, runId: RUNS.length - 1, resume: resume, tolerance: tol, maxDt: maxDt });
 }
 const stopInput = document.getElementById("stop");
 if (stopInput) {
