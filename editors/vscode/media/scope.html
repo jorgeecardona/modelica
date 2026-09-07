@@ -123,6 +123,13 @@
   /* The legend toggle exists for the narrow pane only; wide, the legend is always there. */
   #legendbtn { display: none; }
   #legendbtn[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  #stepbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  #steptitle { margin-top: 12px; }
+  /* One step-response row: the variable, then its final value and metrics in tabular figures. */
+  .steprow { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; white-space: nowrap;
+    font-variant-numeric: tabular-nums; }
+  .steprow .sn { font-weight: 600; }
+  .steprow .sm { color: var(--dim); font-size: 11px; }
   .split::after { content: ""; position: absolute; inset: 0 2px; background: var(--accent);
     opacity: 0; transition: opacity .12s; }
   .split:hover::after, .split.on::after { opacity: .6; }
@@ -378,6 +385,7 @@
             <option value="f">&deg;F</option>
             <option value="us">US units</option>
           </select>
+          <button type="button" id="stepbtn" aria-pressed="false" title="step-response metrics for each drawn variable: its final value, overshoot, 10-90% rise time and 2% settling time -- for a model driven from one state to another, like a controller reaching a setpoint">step</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
           <button type="button" id="csvbtn" title="save the drawn run as a CSV: a time column and one column per variable, in SI units -- re-importable as a measured log" hidden>csv</button>
@@ -398,6 +406,7 @@
   <aside class="legend">
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
+    <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
     <div class="legtitle" id="ptitle" hidden>parameters</div><div id="plist"></div>
     <div class="legtitle" id="stitle" hidden>sweep</div>
     <div id="sweepctl" class="frm" hidden>
@@ -446,6 +455,10 @@ let on = new Set();
 // A case-insensitive substring the legend is filtered to. Empty shows every variable. `all` and
 // `none` act on what it shows, so filtering to "der_" and clicking none drops just the rates.
 let legendFilter = "";
+// Step-response metrics: when on, each drawn variable's final value, overshoot, rise and settling
+// time are listed, and the latest settling instant is marked. For a model driven from one state
+// to another -- a controller reaching a setpoint, a motor running up.
+let stepOn = false;
 let scale = "linear";
 let win = [0, 1];
 let drag = null;
@@ -1000,6 +1013,7 @@ function draw() {
     plot.replaceChildren(frag);
     hud.replaceChildren();
     paintLegend();
+    paintStep();
     return;
   }
   // A narrow pane cannot spare 60px of gutter; tighten it so the plot keeps its width.
@@ -1070,9 +1084,20 @@ function draw() {
 
   drawMarks(frag);
   drawGuides(frag);
+  // The step-response settling instant, as a vertical marker: the latest time any drawn variable
+  // is still outside its 2% band, so "settled by here" reads off the plot.
+  if (stepOn && !xVar) {
+    const ts = settledAt();
+    if (ts !== null && ts >= win[0] && ts <= win[1]) {
+      const x = X(ts);
+      frag.appendChild(el("line", {class: "guide", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
+      frag.appendChild(el("text", {class: "guidelab", x: x + 3, y: M.t + 10, fill: "var(--ink)"}, "settled"));
+    }
+  }
   plot.replaceChildren(frag);
   hud.replaceChildren();
   paintLegend();
+  paintStep();
 }
 
 // One shared y-scale, every selected variable on it. `linear`, `log |y|`, `normalised`.
@@ -1900,6 +1925,10 @@ const legFilter = document.getElementById("legfilter");
 if (legFilter) legFilter.addEventListener("input", (e) => {
   legendFilter = e.target.value.trim().toLowerCase(); paintLegend();
 });
+const stepBtn = document.getElementById("stepbtn");
+if (stepBtn) stepBtn.onclick = () => {
+  stepOn = !stepOn; stepBtn.setAttribute("aria-pressed", String(stepOn)); draw();
+};
 document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
 // Speed: the relative tolerance the run is drawn at. A change is a fresh run (a checkpoint holds
 // only at its own tolerance), on the live run; the control is only live for an open .mo.
@@ -2213,6 +2242,77 @@ function paintEvents() {
     frag.appendChild(row);
   }
   document.getElementById("evlist").replaceChildren(frag);
+}
+
+// The step-response metrics of one variable over the whole run: where it ends, how far past that
+// it swung, and how long it took to rise and to settle. Defined for a signal driven from one
+// level to another; a flat or still-moving one reports what it can and leaves the rest null.
+function stepMetrics(nm) {
+  const vs = D.series[nm];
+  if (!vs || N < 3) return null;
+  const y0 = vs[0];
+  const tail = Math.max(1, Math.floor(N * 0.02));
+  let sum = 0, cnt = 0;
+  for (let k = N - tail; k < N; k++) { const v = vs[k]; if (v !== null && isFinite(v)) { sum += v; cnt++; } }
+  const yf = cnt ? sum / cnt : vs[N - 1];
+  const span = yf - y0;
+  const out = {final: yf, overshoot: 0, rise: null, settle: null, stepLike: false};
+  if (!isFinite(span) || Math.abs(span) < 1e-12 * (Math.abs(yf) || 1)) return out;
+  // The peak in the direction of the step, and how far past the final value it reached.
+  let peak = y0, lo = Infinity, hi = -Infinity;
+  for (let k = 0; k < N; k++) { const v = vs[k]; if (v === null || !isFinite(v)) continue;
+    if (span > 0 ? v > peak : v < peak) peak = v;
+    if (v < lo) lo = v; if (v > hi) hi = v; }
+  // A signal is step-like only if it actually changed level: its start-to-final move is a good
+  // fraction of its whole excursion. A transient that returns near its start (an armature current
+  // that spikes then decays to almost nothing) is not a step, so its overshoot -- thousands of
+  // percent of a near-zero final move -- is meaningless and only the final value is reported.
+  out.stepLike = hi > lo && Math.abs(span) >= 0.2 * (hi - lo);
+  out.overshoot = Math.max(0, (span > 0 ? peak - yf : yf - peak)) / Math.abs(span) * 100;
+  // The 10%-to-90% rise time, by linear interpolation of the first crossing of each level.
+  const crossT = (f) => { const target = y0 + span * f;
+    for (let k = 1; k < N; k++) { const a = vs[k - 1], b = vs[k];
+      if (a === null || b === null || !isFinite(a) || !isFinite(b)) continue;
+      if ((a - target) * (b - target) <= 0 && a !== b) return T[k - 1] + (target - a) / (b - a) * (T[k] - T[k - 1]); }
+    return null; };
+  const t10 = crossT(0.1), t90 = crossT(0.9);
+  if (t10 !== null && t90 !== null && t90 >= t10) out.rise = t90 - t10;
+  // The 2% settling time: the last instant the signal is still more than 2% of the span away.
+  const band = 0.02 * Math.abs(span);
+  let settle = null;
+  for (let k = 0; k < N; k++) { const v = vs[k]; if (v !== null && isFinite(v) && Math.abs(v - yf) > band) settle = T[k]; }
+  out.settle = settle;
+  return out;
+}
+// The latest settling instant across the drawn variables, for the plot marker; null if none.
+function settledAt() {
+  let latest = null;
+  for (const nm of selected()) { const m = stepMetrics(nm);
+    if (m && m.stepLike && m.settle !== null) latest = latest === null ? m.settle : Math.max(latest, m.settle); }
+  return latest;
+}
+function paintStep() {
+  const show = stepOn && !xVar && !view3d && N > 2;
+  document.getElementById("steptitle").hidden = !show;
+  const list = document.getElementById("steplist");
+  if (!show) { list.replaceChildren(); return; }
+  const frag = document.createDocumentFragment();
+  for (const nm of selected()) {
+    const m = stepMetrics(nm); if (!m) continue;
+    const u = unitOf(nm), du = dispUnit(u) ? " " + dispUnit(u) : "";
+    const row = document.createElement("div"); row.className = "steprow"; row.title = nm;
+    const sn = document.createElement("span"); sn.className = "sn"; sn.style.color = colour(nm); sn.textContent = nm;
+    const bits = ["final " + fmt(disp(m.final, u)) + du];
+    if (m.stepLike) {
+      if (m.overshoot > 0.05) bits.push("OS " + fmt(m.overshoot) + "%");
+      if (m.rise !== null) bits.push("tr " + fmt(toT(m.rise)) + " " + tUnit());
+      if (m.settle !== null) bits.push("ts " + fmt(toT(m.settle)) + " " + tUnit());
+    }
+    const sm = document.createElement("span"); sm.className = "sm"; sm.textContent = bits.join("  ·  ");
+    row.append(sn, sm);
+    frag.appendChild(row);
+  }
+  list.replaceChildren(frag);
 }
 
 // A resizable legend: drag the splitter to set its width, double-click to collapse and again

@@ -144,6 +144,15 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
 
 ### Studies
 
+- **Step response.** The **`step`** toggle reads the classic step metrics off each drawn variable:
+  its **final** value (the mean of the last 2 % of the run), its **overshoot** past that, its
+  **`tr`** 10-90 % rise time and its **`ts`** 2 % settling time -- the numbers a controller is
+  judged by, and the reason the servo drive and the roaster earn their keep. They are listed under
+  **step response** in the legend, and the latest settling instant is marked on the plot. Only a
+  variable that actually changed level gets the overshoot-and-time line; a transient that returns
+  near where it started (an armature current that spikes then decays) shows its final value alone,
+  since its overshoot against a near-zero move would be a meaningless thousands of percent. Time
+  view only.
 - **Sweep.** Pick a parameter, a range and a number of runs; **run sweep** simulates the model
   once per value, each as a pinned run, and plots a **response** against the parameter: a
   variable's final value or the time an event first fires. The response defaults to a model
