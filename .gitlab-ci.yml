@@ -15,23 +15,15 @@ variables:
   # version-guard diffs against a base older than a shallow clone would contain.
   GIT_DEPTH: "0"
 
-# Avoid duplicate (branch + MR) pipelines. A `vscode-v*` tag runs a pipeline too, for the
-# extension publish job below.
+# Avoid duplicate (branch + MR) pipelines.
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
       when: never
     - if: $CI_COMMIT_BRANCH
-    - if: $CI_COMMIT_TAG
 
 ci:
-  # The Python gate runs on branches and MRs, not on a `vscode-v*` tag -- that tag is only for
-  # the extension publish below, and there is no reason to spin the whole moon graph for it.
-  rules:
-    - if: $CI_COMMIT_TAG
-      when: never
-    - when: on_success
   # OIDC Trusted Publishing: GitLab mints a short-lived id_token; scripts/pypi-publish
   # exchanges it for a one-shot PyPI token. The `pypi` environment matches the PyPI
   # publisher config (it is also recorded on non-publishing runs -- cosmetic only).
@@ -114,22 +106,20 @@ pages:
     paths:
       - public
 
-# Publish the VS Code extension (editors/vscode) to the Visual Studio Marketplace, on a
-# `vscode-v<major>.<minor>.<patch>` tag only -- never on an ordinary push, so a release is a
-# deliberate act of tagging. It packages the plain-JS extension (no build step) and publishes
-# with @vscode/vsce, taking the token from the VSCE_PAT CI/CD variable (the same variable and
-# publisher as the react-lens extension; copy it into this project's Settings -> CI/CD ->
-# Variables, masked). The publisher in editors/vscode/package.json must match the token's
-# Marketplace publisher.
+# Publish the VS Code extension (editors/vscode) to the Visual Studio Marketplace, the same way
+# the Python package goes to PyPI: automatically on the default branch, and only when the
+# version is new. scripts/vsce-publish reads editors/vscode/package.json, asks the Marketplace
+# what it already has, and publishes only if this push bumped the version -- so an ordinary main
+# push is a no-op and a bump is a release, with no tag and no button. It gates on `ci`, so a
+# broken tree does not publish, and takes the token from the VSCE_PAT CI/CD variable (the same
+# variable and publisher, JorgeCardona, as the react-lens extension).
 publish:vscode:
   image: node:22
+  needs: ["ci"]
   rules:
-    - if: $CI_COMMIT_TAG =~ /^vscode-v\d+\.\d+\.\d+$/
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    - cd editors/vscode
-    - mkdir -p build
-    - npx @vscode/vsce package -o build/
-    - npx @vscode/vsce publish --packagePath build/*.vsix --pat "$VSCE_PAT"
+    - sh scripts/vsce-publish
   artifacts:
     paths:
       - editors/vscode/build/*.vsix

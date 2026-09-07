@@ -1,0 +1,38 @@
+#!/bin/sh
+# Publish the VS Code extension (editors/vscode) to the Visual Studio Marketplace, but only when
+# its version is new -- the same "publish on a fresh version, skip otherwise" the PyPI release
+# has, so an ordinary push to main is a no-op and a version bump is a release. Run by the
+# `publish:vscode` CI job on the default branch. Needs @vscode/vsce (via npx) and the VSCE_PAT
+# CI/CD variable (the Marketplace token, the same one react-lens uses).
+set -e
+cd "$(CDPATH= cd "$(dirname "$0")/../editors/vscode" && pwd)"
+
+version="$(node -p "require('./package.json').version")"
+publisher="$(node -p "require('./package.json').publisher")"
+name="$(node -p "require('./package.json').name")"
+id="$publisher.$name"
+
+# The versions the Marketplace already has. `vsce show` prints them in a "Version / Last Updated"
+# table (indented); this reads that column. It errors when the extension does not exist yet (a
+# first publish), which comes back empty. If our version is already listed, this push did not bump
+# it, so there is nothing to do -- matched whole-line and literal, so 0.1.42 is not a date or
+# 0.1.420.
+published="$(npx --yes @vscode/vsce show "$id" 2>/dev/null | awk '
+    /^[[:space:]]*Version[[:space:]]+Last Updated/ { intable = 1; next }
+    intable && NF == 0 { intable = 0 }
+    intable && $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+$/ { print $1 }
+')" || true
+if printf '%s\n' "$published" | grep -qxF "$version"; then
+    echo "vsce-publish: $id@$version is already on the Marketplace -- nothing to do."
+    exit 0
+fi
+
+if [ -z "${VSCE_PAT:-}" ]; then
+    echo "vsce-publish: VSCE_PAT is not set (add it in Settings -> CI/CD -> Variables)." >&2
+    exit 1
+fi
+
+echo "vsce-publish: publishing $id@$version (Marketplace has ${current:-nothing})."
+mkdir -p build
+npx --yes @vscode/vsce package -o build/
+npx --yes @vscode/vsce publish --packagePath build/*.vsix --pat "$VSCE_PAT"
