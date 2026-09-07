@@ -1,0 +1,83 @@
+summary = "A double pendulum with unit masses and rods, released from horizontal: the textbook chaotic machine, written in angles so it is an ODE, with its total energy as a variable the run must hold at zero."
+teaches = [
+  "chaos in a mechanism with two degrees of freedom",
+  "the equations of motion written out, not derived from a constraint",
+  "a conserved energy, exposed as a variable and asserted flat",
+  "a lower arm that winds: an angle with no bound, against a bounded velocity",
+]
+requires = []
+
+[parse]
+classes = ["DoublePendulum"]
+
+[flatten]
+model = "DoublePendulum"
+states = ["th1", "th2", "w1", "w2"]
+equations = 7
+index = 1
+balanced = true
+
+# The Pendulum in this corpus is written as a constraint, x^2 + y^2 = L^2, and is here for the
+# index reduction that costs. This one is written the other way: two angles, the Lagrangian
+# worked out to explicit accelerations sharing one denominator, 2 m1 + m2 - m2 cos(2 (th1 -
+# th2)), which for positive masses is never zero. Released from horizontal with both arms level
+# the energy is exactly zero -- no height above the pivot's level, no motion -- and it stays
+# zero: E is an observed variable, and the invariant below asks the run to hold it flat, as
+# Lotka-Volterra's conserved quantity is held. The lower arm flips over and over (th2 reaches
+# -26 rad in twenty seconds), so no bound on the angles is asserted; the velocities are bounded
+# by the energy and are.
+#
+# It is chaotic: the reference points sit within the first four seconds, where a run at 1e-10
+# agrees with scipy at 1e-12 to about 2e-11 and a run at 1e-8 to about 5e-9. The reference
+# points are scipy DOP853 at rtol = atol = 1e-12 from (pi/2, pi/2, 0, 0).
+[simulate]
+stop = 20.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 0.5
+values = { th1 = 0.570472051, th2 = 1.203875111, w1 = -2.789645766, w2 = -3.188062747 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 1.0
+values = { th1 = -0.625087700, th2 = -1.034585086, w1 = -3.922279573, w2 = -1.303099249 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 2.0
+values = { th1 = -0.482971534, th2 = -1.324048712, w1 = 3.065288192, w2 = 2.949271548 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 4.0
+values = { th1 = -0.475242115, th2 = -1.240450073, w1 = -1.903926054, w2 = -4.617760217 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+# The energy, exactly zero at the start, held flat over the whole run: at 1e-12 it drifts by
+# 5e-10 over twenty seconds and a run at the tolerance above by 2e-9 (measured), so 1e-7 leaves
+# fifty times the room and still catches a solver that leaks it.
+[[simulate.invariant]]
+expr = "E"
+value = 0.0
+atol = 1e-7
+
+# Velocities are bounded by the energy; the bounds are the extremes of a 1e-12 run over the
+# full horizon (w1 in [-6.43, 6.92], w2 in [-10.69, 8.41]) with a margin.
+[[simulate.invariant]]
+expr = "w1"
+min = -9.0
+max = 9.0
+
+[[simulate.invariant]]
+expr = "w2"
+min = -14.0
+max = 14.0
