@@ -152,6 +152,11 @@
     border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--dim);
     font-variant-numeric: tabular-nums; }
   .run.live { color: var(--ink); border-color: var(--accent); }
+  /* The run the parameters panel edits: a filled tag, so it is clear which instance a change
+     lands on when there is more than one. The whole chip (but its ×) selects it. */
+  .runs.pick .run { cursor: pointer; }
+  .run.sel { border-color: var(--accent); }
+  .run.sel .tag { background: var(--accent); color: var(--accent-ink); border-radius: 3px; padding: 0 4px; }
   .run .tag { font-weight: 650; }
   .run .dash { width: 18px; height: 0; border-top: 2px solid var(--ink); align-self: center; }
   .run .x { cursor: pointer; padding-left: 2px; }
@@ -465,6 +470,7 @@ let TFLOOR = 1e-12;
 let view3d = false;
 let rot3 = {az: -0.7, el: 0.45};
 let rot3drag = null;
+let activeRun = -1;         // which run the parameters panel edits; -1 or out of range means the live one
 let mode = "t";             // the plot mode: "t" against time, "xy" a phase plot, "xyz" three axes
 let ax3 = [null, null, null]; // the three axis variables in xyz, set from the slots
 let zoom3 = 1;              // the camera's zoom, by wheel; double-click or "reset view" restores 1
@@ -1865,15 +1871,22 @@ function paramUnit(name) {
 
 // The runs as chips: A, B, ... in order, the live one last and outlined, each with its line
 // style and what it overrides ("as written" for the model's own values); × drops a pinned run.
+// The index of the run the parameters panel edits: the selection, clamped, or the live run.
+function activeIdx() {
+  return (activeRun >= 0 && activeRun < RUNS.length) ? activeRun : RUNS.length - 1;
+}
 function paintRuns() {
   const holder = document.getElementById("runs");
   const show = LIVE && (RUNS.length > 1 || Object.keys(overrides).length > 0);
   holder.hidden = !show;
+  holder.classList.toggle("pick", RUNS.length > 1); // chips select a run to edit only when there are several
   if (!show) { holder.replaceChildren(); return; }
+  const active = activeIdx();
   const frag = document.createDocumentFragment();
   RUNS.forEach((run, ri) => {
     const live = ri === RUNS.length - 1;
-    const chip = document.createElement("span"); chip.className = "run" + (live ? " live" : "");
+    const chip = document.createElement("span");
+    chip.className = "run" + (live ? " live" : "") + (RUNS.length > 1 && ri === active ? " sel" : "");
     const st = runStyle(ri);
     const dash = document.createElement("span"); dash.className = "dash";
     dash.style.borderTopStyle = st.dash ? (st.dash.startsWith("2") || st.dash.startsWith("1") ? "dotted" : "dashed") : "solid";
@@ -1884,14 +1897,30 @@ function paintRuns() {
       ? ov.map(([k, v]) => k + " = " + fmt(disp(v, paramUnit(k))) + (dispUnit(paramUnit(k)) ? " " + dispUnit(paramUnit(k)) : "")).join(", ")
       : "as written";
     chip.append(dash, tag, what);
+    // Clicking the chip makes it the run the parameters panel edits (its own overrides); the ×
+    // still drops it. The live run is one of the choices, so a click always comes back to it.
+    if (RUNS.length > 1) {
+      chip.title = "edit this run's parameters";
+      chip.onclick = () => { activeRun = ri; paintRuns(); paintParams(); };
+    }
     if (!live) {
       const x = document.createElement("span"); x.className = "x"; x.textContent = "×"; x.title = "drop this run";
-      x.onclick = () => { RUNS.splice(ri, 1); paintRuns(); paintSweep(); draw(); };
+      x.onclick = (e) => { e.stopPropagation(); RUNS.splice(ri, 1); if (activeRun >= RUNS.length) activeRun = -1; paintRuns(); paintParams(); paintSweep(); draw(); };
       chip.appendChild(x);
     }
     frag.appendChild(chip);
   });
   holder.replaceChildren(frag);
+}
+// Re-simulate one run after its parameters changed: the live run through reRun (which owns the
+// stop and continuation), a pinned run to the shared stop with its own overrides and the same
+// tolerance, routed back by its runId.
+function reRunOne(idx) {
+  if (idx === RUNS.length - 1) { reRun(); return; }
+  if (!vscodeApi || !D) return;
+  foot.textContent = "re-simulating " + String.fromCharCode(65 + idx) + " …";
+  vscodeApi.postMessage({ type: "simulate", stop: D.stop, sets: RUNS[idx].overrides, runId: idx,
+    tolerance: speed ? Number(speed) : null, maxDt: maxDt });
 }
 
 // The model's parameters, editable. A value typed here overrides the model's (the field is
@@ -1900,9 +1929,16 @@ function paintRuns() {
 // units and are read back in them: type 20 for T_amb with °C on and the model gets 293.15 K.
 function paintParams() {
   const list = document.getElementById("plist"), title = document.getElementById("ptitle");
-  const ps = (LIVE && D && D.parameters) || [];
+  // Edit the selected run: its own parameter values and its own overrides. With one run that is
+  // the live one; with pins, whichever chip is selected. A change re-runs that instance.
+  const idx = activeIdx();
+  const isLive = idx === RUNS.length - 1;
+  const rec = isLive ? D : (RUNS[idx] && RUNS[idx].data);
+  const over = isLive ? overrides : (RUNS[idx] && RUNS[idx].overrides);
+  const ps = (LIVE && rec && rec.parameters) || [];
   title.hidden = !ps.length;
-  if (!ps.length) { list.replaceChildren(); return; }
+  title.textContent = ps.length && RUNS.length > 1 ? "parameters · " + String.fromCharCode(65 + idx) : "parameters";
+  if (!ps.length || !over) { list.replaceChildren(); return; }
   const frag = document.createDocumentFragment();
   for (const p of ps) {
     const row = document.createElement("div");
@@ -1921,18 +1957,18 @@ function paintParams() {
       const inp = document.createElement("input"); inp.type = "text"; inp.inputMode = "decimal";
       inp.spellcheck = false; inp.autocomplete = "off";
       inp.value = (shown !== null && isFinite(shown)) ? String(Number(shown.toPrecision(7))) : "";
-      if (p.name in overrides) inp.classList.add("set");
+      if (p.name in over) inp.classList.add("set");
       const apply = () => {
         const x = parseFloat(String(inp.value).trim().replace(",", ".")); if (!isFinite(x)) return;
-        overrides[p.name] = undisp(x, p.unit); reRun();
+        over[p.name] = undisp(x, p.unit); reRunOne(idx);
       };
       inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } });
       inp.addEventListener("change", apply);
       row.append(nm, inp, unit);
-      if (p.name in overrides) {
+      if (p.name in over) {
         const undo = document.createElement("span"); undo.className = "undo"; undo.textContent = "↺";
         undo.title = "back to the model's value";
-        undo.onclick = () => { delete overrides[p.name]; reRun(); };
+        undo.onclick = () => { delete over[p.name]; reRunOne(idx); };
         row.appendChild(undo);
       }
     }
@@ -2016,6 +2052,8 @@ window.addEventListener("message", (e) => {
       const had = RUNS[ri].data;
       RUNS[ri].data = (rec.resumedFrom !== null && rec.resumedFrom !== undefined && had) ? stitch(had, rec) : rec;
       rebase(RUNS[ri]); paintRuns(); paintSweep(); draw();
+      // If this is the run the panel is editing, its landed values (and derived reads) refresh.
+      if (ri === activeIdx()) paintParams();
       // The last run of a sweep has landed: the "sweeping …" notice has done its job.
       if (RUNS.every((r) => r.data)) foot.textContent = settledFooter();
     }
