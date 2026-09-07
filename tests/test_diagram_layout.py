@@ -68,6 +68,7 @@ FLAT = {
     "RoastingMachine",
     "Robertson",
     "Rossler",
+    "ServoDrive",
     "Setback",
     "Thermostat",
     "VanDerPol",

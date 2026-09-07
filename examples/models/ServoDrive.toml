@@ -1,0 +1,95 @@
+summary = "A DC motor under PI speed control: the loop brings the shaft from rest to a 100 rad/s setpoint, overshoots by 19 percent, and settles with no standing error because the integrator carries the holding voltage."
+teaches = ["a control loop closed on a physical plant", "three domains in one model", "the integrator kills the steady-state error", "overshoot from loop gain"]
+requires = []
+
+[parse]
+classes = ["ServoDrive"]
+
+[flatten]
+model = "ServoDrive"
+states = ["i", "w", "x"]
+equations = 6
+balanced = true
+
+# The whole drive in three states, which is what the reference integrates:
+#   e = w_ref - w                     the speed error the loop acts on
+#   v = Kp*e + Ki*x                   the PI controller's commanded armature voltage
+#   dx/dt = e                         the integral of the error, the loop's memory
+#   L di/dt = v - R*i - km*w          the armature loop, back-EMF included
+#   J dw/dt = km*i - b*w              the shaft, motor torque against load damping
+# Three domains meet here: the controller (a signal law) drives the electrical loop, whose
+# current makes the torque that turns the shaft, whose speed is measured back into the error.
+# The integrator is what makes the standing error zero: at rest it holds whatever voltage the
+# motor needs (R*i + km*w = 10.1 V) with e = 0, which a proportional-only loop cannot.
+[simulate]
+stop = 3.0
+tolerance = 1e-10
+
+# The run-up: the current spikes to draw the shaft up, the back-EMF builds, and the current
+# briefly reverses as the loop reins in the overshoot.
+[[simulate.point]]
+t = 0.05
+values = { i = 8.50678496379, w = 23.0010413117 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.2
+values = { i = -2.04340688062, w = 116.740837459 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.5
+values = { i = 0.504049334334, w = 113.346680586 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 1.0
+values = { i = 0.356964641051, w = 94.8131907025, x = 10.0340446802 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 3.0
+values = { i = 0.20583438022, w = 99.9740844543, x = 10.1012278768 }
+rtol = 1e-6
+source = "reference"
+
+# The loop reaches its setpoint: the speed settles on 100 rad/s to a fraction of a percent by
+# t = 2.5 s, which is the integral action closing the gap a proportional term would leave open.
+[[simulate.invariant]]
+expr = "w"
+value = 100.0
+rtol = 2e-3
+after = 2.5
+
+# And the error it acts on goes to zero, which is the whole claim of integral control.
+[[simulate.invariant]]
+expr = "e"
+value = 0.0
+atol = 0.2
+after = 2.5
+
+# The integral state settles on the holding voltage divided by the integral gain: at steady
+# state v = Ki*x = 10.1 V, so x = 10.1, the voltage the motor needs to hold 100 rad/s.
+[[simulate.invariant]]
+expr = "x"
+value = 10.1
+rtol = 2e-3
+after = 2.5
+
+# The step overshoots to 119 rad/s and no further: a stable loop rings once and settles, an
+# unstable one would run away past this ceiling.
+[[simulate.invariant]]
+expr = "w"
+min = -0.01
+max = 119.0
+
+# The armature current swings from a ten-amp run-up draw to a five-amp regenerative reversal as
+# the loop brakes the overshoot, then settles at the 0.2 A the load torque needs.
+[[simulate.invariant]]
+expr = "i"
+min = -5.2
+max = 10.6
