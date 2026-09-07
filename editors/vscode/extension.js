@@ -74,27 +74,30 @@ function ensurePanel(context) {
     } else if (msg && msg.type === "importLog") {
       importLog();
     } else if (msg && msg.type === "export" && typeof msg.csv === "string") {
-      exportCsv(msg.name, msg.csv);
+      exportText(msg.name, msg.csv, "CSV", "csv");
+    } else if (msg && msg.type === "exportSvg" && typeof msg.svg === "string") {
+      exportText(msg.name, msg.svg, "SVG image", "svg");
     }
   });
   return panel;
 }
 
-// The drawn run, saved to a CSV the panel built. The panel owns the data; the extension owns the
-// save dialog and the file system. Written next to the .mo it came from by default.
-function exportCsv(name, csv) {
-  const base = (typeof name === "string" && name) || "run.csv";
+// Text the panel built (a CSV of the run, or an SVG of the chart), saved to a file. The panel
+// owns the content; the extension owns the save dialog and the file system. Written next to the
+// .mo it came from by default.
+function exportText(name, text, label, ext) {
+  const base = (typeof name === "string" && name) || `run.${ext}`;
   const dir = live && live.file ? path.dirname(live.file) : undefined;
   vscode.window
     .showSaveDialog({
       defaultUri: dir ? vscode.Uri.file(path.join(dir, base)) : undefined,
-      filters: { "CSV": ["csv"] },
+      filters: { [label]: [ext] },
     })
     .then((uri) => {
       if (!uri) return;
       try {
-        fs.writeFileSync(uri.fsPath, csv);
-        vscode.window.showInformationMessage(`Saved ${path.basename(uri.fsPath)} (${csv.split("\n").length - 2} rows).`);
+        fs.writeFileSync(uri.fsPath, text);
+        vscode.window.showInformationMessage(`Saved ${path.basename(uri.fsPath)}.`);
       } catch (error) {
         vscode.window.showErrorMessage(`Could not save ${uri.fsPath}: ${error.message}`);
       }

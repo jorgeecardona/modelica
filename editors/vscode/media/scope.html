@@ -389,6 +389,7 @@
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
           <button type="button" id="csvbtn" title="save the drawn run as a CSV: a time column and one column per variable, in SI units -- re-importable as a measured log" hidden>csv</button>
+          <button type="button" id="svgbtn" title="save the chart as an SVG image, self-contained (colours inlined) for a report or slide" hidden>svg</button>
           <button id="all">all</button>
           <button id="none">none</button>
           <button id="reset" title="or double-click the chart">reset</button>
@@ -660,6 +661,7 @@ function select(i) {
   document.getElementById("pin").hidden = !LIVE;
   document.getElementById("logbtn").hidden = !vscodeApi;
   document.getElementById("csvbtn").hidden = !vscodeApi;
+  document.getElementById("svgbtn").hidden = !vscodeApi;
   paintEvents();
   paintXAxis();
   paintParams();
@@ -1512,6 +1514,37 @@ if (csvBtn) csvBtn.onclick = () => {
   if (!vscodeApi || !D || !N) return;
   vscodeApi.postMessage({ type: "export", name: (D.model || "run") + ".csv", csv: buildCsv() });
   foot.textContent = "saving " + (D.model || "run") + ".csv …";
+};
+// The chart as a self-contained SVG: clone it, write each element's computed style out as an
+// inline `style` attribute (so it renders with no page CSS), and lay an opaque background behind
+// it. The legend is HTML and not part of the picture; what is saved is the plot as drawn.
+const SVG_PROPS = ["fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-linejoin",
+  "opacity", "stroke-opacity", "fill-opacity", "font-family", "font-size", "font-weight", "text-anchor"];
+function buildSvg() {
+  const clone = svg.cloneNode(true);
+  const srcEls = svg.querySelectorAll("*"), cloneEls = clone.querySelectorAll("*");
+  for (let k = 0; k < srcEls.length; k++) {
+    const cs = getComputedStyle(srcEls[k]);
+    let style = "";
+    for (const p of SVG_PROPS) { const val = cs.getPropertyValue(p); if (val && val !== "none") style += p + ":" + val + ";"; }
+    if (style) cloneEls[k].setAttribute("style", style);
+  }
+  // An opaque ground behind the plot, the panel's own background, so the image is not transparent.
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect.setAttribute("x", "0"); rect.setAttribute("y", "0");
+  rect.setAttribute("width", String(box.w)); rect.setAttribute("height", String(box.h));
+  rect.setAttribute("fill", getComputedStyle(document.body).backgroundColor || "#fff");
+  clone.insertBefore(rect, clone.firstChild);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clone.setAttribute("width", String(box.w)); clone.setAttribute("height", String(box.h));
+  clone.setAttribute("viewBox", "0 0 " + box.w + " " + box.h);
+  return '<?xml version="1.0" encoding="UTF-8"?>\n' + clone.outerHTML + "\n";
+}
+const svgBtn = document.getElementById("svgbtn");
+if (svgBtn) svgBtn.onclick = () => {
+  if (!vscodeApi || !D || !N) return;
+  vscodeApi.postMessage({ type: "exportSvg", name: (D.model || "run") + ".svg", svg: buildSvg() });
+  foot.textContent = "saving " + (D.model || "run") + ".svg …";
 };
 
 // -- the sweep -----------------------------------------------------------------------------

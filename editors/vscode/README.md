@@ -188,6 +188,11 @@ not the display units. The header names the variables as the model does and the 
 `time`, so the file re-imports through `log…` as a measured log; a gap in a series is an empty
 cell.
 
+**`svg`** saves the chart itself as an SVG image, for a report or a slide. It is self-contained:
+every colour is inlined and an opaque background is laid behind it, so it renders the same
+anywhere, with no dependence on the panel's stylesheet or theme. The legend is not part of the
+image; what is saved is the plot as drawn, at its current zoom, scale and units.
+
 ## Settings
 
 | Setting | Default | What it does |
