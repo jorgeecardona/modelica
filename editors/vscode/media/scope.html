@@ -300,6 +300,9 @@
             <option value="split">split (per-variable)</option>
           </select>
           <select id="xaxis" title="what the x axis is: time, or a variable -- a phase plot, RoR against bean temperature or Lorenz's x against z"><option value="">x: time</option></select>
+          <span id="ax3wrap" class="ax3" hidden title="the three variables on the 3D axes; drag the plot to rotate">
+            <select id="ax3x"></select><select id="ax3y"></select><select id="ax3z"></select>
+          </span>
           <select id="timeunit" title="time axis unit: the data stays in seconds, only what is shown converts">
             <option value="s">seconds</option>
             <option value="min">minutes</option>
@@ -404,6 +407,15 @@ let xwin = null;
 // cursor stay in seconds. TFLOOR is the smallest positive instant, standing in for t = 0.
 let LOGT = false;
 let TFLOOR = 1e-12;
+// The 3D phase view: three variables on three axes, the trajectory as one projected line you
+// rotate by dragging. This is the view a chaotic model is meant to be seen in -- Lorenz's
+// butterfly, Rössler's spiral, Chua's double scroll -- where against time the states look like
+// noise. `ax3` are the three variable names (default the first three states); `rot3` is the
+// camera, azimuth and elevation in radians, turned by dragging on the plot.
+let view3d = false;
+let ax3 = [null, null, null];
+let rot3 = {az: -0.7, el: 0.45};
+let rot3drag = null;
 let XD = [0, 1];
 // Measurement marks: up to two sample indices set by clicking. One is a readout; two give the
 // interval between them and every selected variable's change across it -- the drying phase's
@@ -770,11 +782,83 @@ function xdom() {
 }
 const Y = (u) => box.h - M.b - u * (box.h - M.t - M.b);
 
+// -- the 3D phase view -----------------------------------------------------------------
+// Orthographic projection of a point already scaled to [-1, 1] on each axis: rotate about the
+// vertical (azimuth) then tilt (elevation), and drop the depth. Returns plot pixels.
+function project3(p, cx, cy, r) {
+  const ca = Math.cos(rot3.az), sa = Math.sin(rot3.az);
+  const ce = Math.cos(rot3.el), se = Math.sin(rot3.el);
+  // yaw about z, then pitch about the screen x
+  const x1 = p[0] * ca - p[1] * sa;
+  const y1 = p[0] * sa + p[1] * ca;
+  const z1 = p[2];
+  const yv = y1 * ce - z1 * se;
+  const screenY = y1 * se + z1 * ce;
+  return [cx + x1 * r, cy - screenY * r, yv]; // yv is depth, for nothing yet
+}
+// The [min,max] of a variable over the visible instants of the live run, for normalising to
+// [-1,1]; a flat variable gets a unit span so it maps to the middle.
+function range3(nm) {
+  const vs = D.series[nm] || [];
+  let lo = Infinity, hi = -Infinity;
+  for (const v of vs) { if (v === null || v === undefined || !isFinite(v)) continue; if (v < lo) lo = v; if (v > hi) hi = v; }
+  if (!isFinite(lo)) return [0, 1];
+  return hi > lo ? [lo, hi] : [lo - 1, lo + 1];
+}
+function draw3d(frag) {
+  const cx = M.l + (box.w - M.l - M.r) / 2, cy = M.t + (box.h - M.t - M.b) / 2;
+  const r = 0.42 * Math.min(box.w - M.l - M.r, box.h - M.t - M.b);
+  const names3 = ax3.map((nm) => (names.includes(nm) ? nm : null));
+  const rngs = names3.map((nm) => (nm ? range3(nm) : [0, 1]));
+  const norm = (val, i) => {
+    const [lo, hi] = rngs[i];
+    return (2 * (val - lo)) / (hi - lo) - 1;
+  };
+  // The three axes from the centre, each to its +1 end, labelled.
+  const AX = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  for (let i = 0; i < 3; i++) {
+    const o = project3([0, 0, 0], cx, cy, r), e = project3(AX[i], cx, cy, r);
+    frag.appendChild(el("line", {class: "grid", x1: o[0], y1: o[1], x2: e[0], y2: e[1]}));
+    frag.appendChild(el("text", {class: "tick", x: e[0], y: e[1] - 3, "text-anchor": "middle", "font-weight": 600,
+      fill: names3[i] ? colour(names3[i]) : "var(--dim)"}, names3[i] || "-"));
+  }
+  // The trajectory of each run, projected. The live run solid, pins dashed, as elsewhere.
+  for (let ri = 0; ri < RUNS.length; ri++) {
+    const cols = names3.map((nm) => (nm ? seriesOf(ri, nm) : null));
+    if (cols.some((c) => !c)) continue;
+    const st = runStyle(ri);
+    let d = "", pen = false;
+    const n = cols[0].length;
+    for (let k = 0; k < n; k++) {
+      const v = [cols[0][k], cols[1][k], cols[2][k]];
+      if (v.some((x) => x === null || x === undefined || !isFinite(x))) { pen = false; continue; }
+      const s = project3([norm(v[0], 0), norm(v[1], 1), norm(v[2], 2)], cx, cy, r);
+      d += (pen ? "L" : "M") + s[0].toFixed(1) + " " + s[1].toFixed(1) + " ";
+      pen = true;
+    }
+    const path = el("path", {d: d, fill: "none", "stroke-width": st.w, stroke: colour(names3[0] || names[0]), opacity: st.op});
+    if (st.dash) path.setAttribute("stroke-dasharray", st.dash);
+    frag.appendChild(path);
+  }
+  foot.textContent = "3D: " + names3.map((nm, i) => "xyz"[i] + " = " + (nm || "-")).join("  ·  ") + "   ·   drag to rotate";
+}
+
 // -- drawing ---------------------------------------------------------------------------
 function draw() {
   if (!D) return;
   readBg();
   box = {w: svg.clientWidth, h: svg.clientHeight};
+  // The 3D phase view owns the whole plot: its own projected axes and trajectory, no time frame.
+  if (view3d) {
+    M.l = 20;
+    svg.setAttribute("viewBox", "0 0 " + box.w + " " + box.h);
+    const frag = document.createDocumentFragment();
+    draw3d(frag);
+    plot.replaceChildren(frag);
+    hud.replaceChildren();
+    paintLegend();
+    return;
+  }
   // A narrow pane cannot spare 60px of gutter; tighten it so the plot keeps its width.
   M.l = box.w < 360 ? 40 : box.w < 520 ? 50 : 60;
   svg.setAttribute("viewBox", "0 0 " + box.w + " " + box.h);
@@ -1466,6 +1550,13 @@ function stopMarker(x) {
 }
 svg.addEventListener("pointermove", (e) => {
   if (!D) return;
+  if (rot3drag) {
+    // Turn the camera: horizontal drag is azimuth, vertical drag is elevation, clamped upright.
+    rot3.az = rot3drag.az + (e.clientX - rot3drag.x) * 0.01;
+    rot3.el = Math.max(-1.5, Math.min(1.5, rot3drag.el - (e.clientY - rot3drag.y) * 0.01));
+    draw();
+    return;
+  }
   if (stopDrag) {
     // Follow the pointer; the handle stays on the plot, the value may run past its right edge.
     const t = Math.max(timeAtFree(e), (win[1] - win[0]) * 0.01);
@@ -1486,11 +1577,14 @@ svg.addEventListener("pointermove", (e) => {
 svg.addEventListener("pointerdown", (e) => {
   if (!D) return;
   svg.setPointerCapture(e.pointerId);
+  // In the 3D view a drag rotates the camera instead of zooming.
+  if (view3d) { rot3drag = {x: e.clientX, y: e.clientY, az: rot3.az, el: rot3.el}; return; }
   // Grabbing the stop handle moves the horizon; grabbing anywhere else starts a zoom band.
   if (e.target && e.target.classList && e.target.classList.contains("stopgrip")) { stopDrag = true; return; }
   drag = timeAt(e);
 });
 svg.addEventListener("pointerup", (e) => {
+  if (rot3drag) { rot3drag = null; return; }
   if (stopDrag) {
     // "Show me until here": the marker's time becomes the stop, and the model re-runs to it.
     stopDrag = false;
@@ -1551,19 +1645,35 @@ document.getElementById("timeunit").onchange = (e) => {
 // zoom, since a zoom in one variable's units means nothing in another's.
 document.getElementById("xaxis").onchange = (e) => {
   const v = e.target.value;
+  view3d = v === "__3d__";
   LOGT = v === "__log__";
-  xVar = v && v !== "__log__" ? v : null;
+  xVar = v && v !== "__log__" && v !== "__3d__" ? v : null;
   xwin = null;
+  document.getElementById("ax3wrap").hidden = !view3d;
   draw();
 };
-// The x-axis choices for the model shown: time first, then every variable. A choice that the
-// new model does not have falls back to time.
+// The x-axis choices for the model shown: time first, then every variable, and -- when there are
+// three or more -- the 3D phase view, the one a chaotic model is meant to be seen in. A choice
+// the new model does not have falls back to time.
 function paintXAxis() {
   const sel = document.getElementById("xaxis");
-  const opts = [{v: "", t: "x: time"}, {v: "__log__", t: "x: log time"}, ...names.map((nm) => ({v: nm, t: "x: " + nm}))];
-  sel.replaceChildren(...opts.map((o) => { const el = document.createElement("option"); el.value = o.v; el.textContent = o.t; return el; }));
+  const threeD = names.length >= 3 ? [{v: "__3d__", t: "3D"}] : [];
+  const opts = [{v: "", t: "x: time"}, {v: "__log__", t: "x: log time"}, ...threeD, ...names.map((nm) => ({v: nm, t: "x: " + nm}))];
+  sel.replaceChildren(...opts.map((o) => { const e = document.createElement("option"); e.value = o.v; e.textContent = o.t; return e; }));
   if (xVar && !names.includes(xVar)) { xVar = null; xwin = null; }
-  sel.value = LOGT ? "__log__" : (xVar || "");
+  if (view3d && names.length < 3) view3d = false;
+  sel.value = view3d ? "__3d__" : LOGT ? "__log__" : (xVar || "");
+  // The three axis pickers: default to the first three states (Lorenz's x, y, z -- one unit
+  // group), any variable choosable. Keep a prior choice if the new model still has it.
+  const base = (D && D.states && D.states.length >= 3 ? D.states : names).slice(0, 3);
+  ax3 = ax3.map((nm, i) => (names.includes(nm) ? nm : base[i]));
+  for (let i = 0; i < 3; i++) {
+    const s = document.getElementById("ax3" + "xyz"[i]);
+    s.replaceChildren(...names.map((nm) => { const e = document.createElement("option"); e.value = nm; e.textContent = nm; return e; }));
+    s.value = ax3[i];
+    s.onchange = (ev) => { ax3[i] = ev.target.value; if (view3d) draw(); };
+  }
+  document.getElementById("ax3wrap").hidden = !view3d;
 }
 window.addEventListener("resize", draw);
 

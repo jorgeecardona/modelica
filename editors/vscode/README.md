@@ -65,9 +65,13 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   unit, so nothing is crushed.
 - **`x:`** is time by default, **log time** for a stiff run over a long horizon (E5 runs to
   1e13 s and finishes its kinetics by 1e3, which a linear axis puts in one pixel column; the
-  ticks become the decades), or any variable: a **phase plot**, such as the rate of rise
-  against bean temperature or Lorenz's z against x. Events and reference points hide in a
-  phase plot; the cursor then picks the nearest sample by the x variable's value.
+  ticks become the decades), a variable: a **phase plot**, such as the rate of rise against
+  bean temperature or Lorenz's z against x; or, when the model has three or more variables,
+  **3D** -- three variables on three axes, the trajectory as one line you rotate by dragging.
+  This is the view a chaotic model is meant to be seen in (Lorenz's butterfly, Chua's double
+  scroll); against time those states look like noise. Three pickers choose the axes, defaulting
+  to the first three states. Events and reference points hide in a phase or 3D plot; against a
+  variable, the cursor picks the nearest sample by that variable's value.
 - **Time in seconds or minutes.** The data stays in seconds; only the axis, the readouts and
   the rates convert: a `K/s` rate reads `K/min` in minutes.
 - **Display units:** `SI units` or `K as °C`. A bare kelvin value is shown in Celsius; a rate
