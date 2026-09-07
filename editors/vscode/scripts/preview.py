@@ -43,6 +43,10 @@ window.__answer = (m) => {
   rec.parameters = (base.parameters || []).map((p) => ({ ...p, value: sets[p.name] !== undefined ? sets[p.name] : p.value }));
   for (const k of Object.keys(rec.series)) rec.series[k] = rec.series[k].map((v) => (v === null ? null : v * f));
   rec.stop = m.stop || base.stop;
+  // Echo the tolerance the panel asked for, so the speed control's badge and re-run can be seen
+  // (the stand-in does not actually re-integrate at it).
+  rec.tolerance = typeof m.tolerance === "number" ? m.tolerance : null;
+  if (rec.solver && rec.tolerance !== null) rec.solver = { ...rec.solver, tolerance: rec.tolerance };
   rec.autoNote = m.until ? (m.until === "event" ? "next event: (stand-in)" : "signals settled") : "";
   if (m.until) rec.stop = (m.from || base.stop) * 1.25;
   if (m.resume && typeof m.resume.t === "number" && rec.stop > m.resume.t) {

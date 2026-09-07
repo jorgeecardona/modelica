@@ -18,7 +18,7 @@ import argparse
 import json
 import sys
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -72,6 +72,10 @@ def _douglas_peucker(
     return keep
 
 
+_LOG_SPAN = 1e4
+"""A horizon this many times the first positive instant is sampled, and read, on a log axis."""
+
+
 def _sample(
     time: NDArray[np.float64], columns: list[NDArray[np.float64]], limit: int = 700
 ) -> list[int]:
@@ -93,7 +97,17 @@ def _sample(
     breaks = np.flatnonzero(np.diff(time) <= 0.0)
     keep[breaks] = True
     keep[np.minimum(breaks + 1, n - 1)] = True
-    tx = (time - time[0]) / (float(time[-1] - time[0]) or 1.0)
+    # Shape is judged on the axis the run will be read on. A stiff model over a long horizon --
+    # E5 runs to 1e13 s and finishes its kinetics by 1e3 -- has all its motion in the first
+    # decades, and on a linear axis that is one point: the sampler kept 14 samples of it. When
+    # the horizon spans four decades or more past the first positive instant, time is measured
+    # on a log scale, which is the axis such a run is drawn on.
+    positive = time[time > 0.0]
+    if positive.size and float(time[-1]) / float(positive.min()) >= _LOG_SPAN:
+        logt = np.log10(np.maximum(time, float(positive.min())))
+        tx = (logt - logt[0]) / (float(logt[-1] - logt[0]) or 1.0)
+    else:
+        tx = (time - time[0]) / (float(time[-1] - time[0]) or 1.0)
     normalised: list[NDArray[np.float64]] = []
     for column in columns:
         finite = column[np.isfinite(column)]
@@ -133,9 +147,13 @@ def _load(path: Path, name: str, libraries: list[str]) -> tuple[System, Kernel, 
     """
     sources: list[object] = []
     search = [Path(lib) for lib in libraries]
-    sibling = path.parent / "library"
-    if sibling.is_dir():
-        search.append(sibling)
+    # A `library/` folder holding the components a model uses, found without configuration: beside
+    # the model, and one level up, which is where the corpus keeps it -- `examples/library/` is a
+    # sibling of `examples/models/`, so opening `examples/models/BumpStop.mo` resolves
+    # `Translational` with no `pymodelica.library` set.
+    for folder in (path.parent / "library", path.parent.parent / "library"):
+        if folder.is_dir() and folder not in search:
+            search.append(folder)
     for entry in search:
         if entry.is_dir():
             sources.extend(parse(f.read_text(encoding="utf-8")) for f in sorted(entry.glob("*.mo")))
@@ -440,9 +458,18 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     sensitivity: str | None = None,
     sstep: float = 0.05,
     resume: dict[str, object] | None = None,
+    tolerance: float | None = None,
 ) -> dict[str, object]:
     system, kernel, units = _load(path, name, libraries)
+    # The model's own integrator, unless the panel asked for a display tolerance. A model's
+    # `.toml` names the tolerance that reproduces its reference points -- 1e-10 for the chaotic
+    # double pendulum -- which is far tighter than looking at a trajectory needs and, on a
+    # chaotic model, several times slower. `--tolerance` overrides the relative tolerance for
+    # the run the panel draws, keeping the model's method and its absolute tolerance (E5 lives
+    # below any coarse floor and needs its own). "reference" in the panel sends no override.
     solver = _solver(path)
+    if tolerance is not None and tolerance > 0:
+        solver = replace(solver, tolerance=tolerance)
     states = set(system.modes[0].states)
     sets = sets or {}
     # Overrides go through `vector`, which recomputes everything downstream of a changed
@@ -520,12 +547,16 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         "parameters": parameters,
         "overrides": sets,
         "sensitivity": sens,
-        # The integrator this run used -- the model's own, from its .toml -- so the panel can say.
+        # The integrator this run used -- the model's, from its .toml, unless the panel asked for
+        # a display tolerance -- so the panel can say. `tolerance` echoes the override the panel
+        # sent (None for the model's reference run), which is what the panel compares a continued
+        # run against: a checkpoint holds only at the tolerance it was taken at.
         "solver": {
             "method": solver.method,
             "tolerance": solver.tolerance,
             "absolute": solver.absolute,
         },
+        "tolerance": tolerance,
         # Where this run ended, for the next call to continue from; and, when this call did
         # continue, where it took over -- so the panel appends the tail to what it has.
         "checkpoint": checkpoint,
@@ -629,6 +660,13 @@ def main() -> None:
         help="a checkpoint JSON {t, y, w} from an earlier run's output: continue from it to "
         "--stop instead of starting at t = 0 (same parameters, larger stop)",
     )
+    ap.add_argument(
+        "--tolerance",
+        type=float,
+        default=None,
+        help="the relative tolerance for the run the panel draws, overriding the model's own "
+        "(its method and absolute tolerance are kept); omit to use the model's reference tolerance",
+    )
     args = ap.parse_args()
 
     path = Path(args.path)
@@ -649,6 +687,7 @@ def main() -> None:
             resume=json.loads(Path(args.resume).read_text(encoding="utf-8"))
             if args.resume
             else None,
+            tolerance=args.tolerance,
         )
         print(json.dumps({"models": [record]}, separators=(",", ":"), allow_nan=False))
     except Exception as error:  # noqa: BLE001 - report every failure to the panel, never crash silently

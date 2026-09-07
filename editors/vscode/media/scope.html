@@ -285,6 +285,11 @@
             <label title="simulation stop time -- Enter to re-run, or drag the marker on the plot">t&nbsp;&#8594;&nbsp;<input id="stop" type="number" step="any" min="0"><span class="unitlab" id="stopunit"></span></label>
             <button type="button" id="nextev" title="continue until the next event (bounded by the pymodelica.autoStopMax setting)">&#8594; event</button>
             <button type="button" id="settle" title="stop where the signals settle: every state within 1% of its final value (bounded by pymodelica.autoStopMax)">&#8677; settle</button>
+            <select id="speed" title="how hard the integrator works: fast for looking, exact to reproduce the model's reference run. A chaotic model draws a different path at each -- the trajectory only means one thing at the tolerance its references were taken at.">
+              <option value="1e-6">fast</option>
+              <option value="1e-8">fine</option>
+              <option value="">exact</option>
+            </select>
           </span>
           <select id="scale" title="vertical axis">
             <option value="linear">linear</option>
@@ -376,11 +381,23 @@ let RUNS = [];           // [{overrides, data, onBase}]
 let overrides = {};      // the live run's parameter overrides, name -> SI value
 let dispMode = "si";     // display units: "si", or "c" to print kelvin as celsius
 let timeMode = "s";      // time axis: "s" seconds, or "min" minutes -- the data stays in seconds
+// How hard the integrator works: the relative tolerance the panel asks for. "" means the
+// model's own reference tolerance (its .toml), which reproduces its reference points and, on a
+// stiff or chaotic model, is several times slower than looking at a trajectory needs. The
+// double pendulum's .toml asks for 1e-10 (~2.5 s); at the fast default it draws in a quarter
+// second. A change of speed is a fresh run, never a continuation.
+let speed = "1e-6";
 // The x axis. null is time; a variable name makes a phase plot, every selected variable drawn
 // against that one at the same instants (RoR against bean temperature, Lorenz x against z).
 // `xwin` is a zoom in that variable's units, `XD` the domain X() maps from, set once per draw.
 let xVar = null;
 let xwin = null;
+// Time on a log axis ("x: log time"): a stiff model over a long horizon -- E5 runs to 1e13 s
+// and finishes its kinetics by 1e3 -- has all its motion in the first decades, which a linear
+// axis puts in one pixel column. Only the mapping changes; the data, the window and the
+// cursor stay in seconds. TFLOOR is the smallest positive instant, standing in for t = 0.
+let LOGT = false;
+let TFLOOR = 1e-12;
 let XD = [0, 1];
 // Measurement marks: up to two sample indices set by clicking. One is a readout; two give the
 // interval between them and every selected variable's change across it -- the drying phase's
@@ -449,7 +466,14 @@ function paintSolver() {
   const s = D && D.solver;
   if (!s || !s.method) { el.textContent = ""; return; }
   const tol = Number(s.tolerance);
-  el.textContent = s.method + " · " + (Number.isFinite(tol) ? tol.toExponential(0).replace("e-", "e-").replace("e+", "e") : "");
+  // A star marks a display tolerance -- the run is drawn faster than the model's reference and,
+  // on a chaotic model, along a different path; no star means the model's own reference run.
+  const shown = tol.toExponential(0).replace("e-", "e-").replace("e+", "e");
+  const exact = D.tolerance === null || D.tolerance === undefined;
+  el.textContent = Number.isFinite(tol) ? s.method + " · " + shown + (exact ? "" : "*") : s.method;
+  el.title = exact
+    ? "the model's own reference run: its .toml method and tolerance"
+    : "a display tolerance for speed (the * ); pick 'exact' to reproduce the model's reference run";
 }
 
 function select(i) {
@@ -702,7 +726,23 @@ function project(nm, dom) {
 }
 // X maps a value of the x-axis domain -- time, or the phase variable -- onto the plot; `XD` is
 // that domain, set once per draw() by xdom(). The inverse, for the pointer, is domAt().
-const X = (v) => M.l + ((v - XD[0]) / (XD[1] - XD[0])) * (box.w - M.l - M.r);
+const lg = (v) => Math.log10(Math.max(v, TFLOOR));
+const logTime = () => LOGT && !xVar;
+const X = (v) => {
+  const [a, b] = logTime() ? [lg(XD[0]), lg(XD[1])] : XD;
+  const u = logTime() ? lg(v) : v;
+  return M.l + ((u - a) / (b - a)) * (box.w - M.l - M.r);
+};
+// The inverse of X over a domain: the value at fraction `f` of the plot's width.
+function domAt(f, dom) {
+  if (logTime()) { const a = lg(dom[0]), b = lg(dom[1]); return Math.pow(10, a + f * (b - a)); }
+  return dom[0] + f * (dom[1] - dom[0]);
+}
+function lgFloor() {
+  let m = Infinity;
+  for (let k = 0; k < N; k++) { const v = T[k]; if (v > 0 && v < m) m = v; }
+  return isFinite(m) ? m : 1e-12;
+}
 // The x value of run `ri` at time index `k`: the time itself, or that run's phase variable.
 function xOfRun(ri, k) {
   if (!xVar) return T[k];
@@ -736,6 +776,7 @@ function draw() {
 
   // The x domain for this draw: the time window, or the phase variable's range.
   XD = xdom();
+  TFLOOR = lgFloor();
 
   // Shared frame: the x grid and the two axes, full height. Against time, ticks are laid at
   // round values of the *shown* time unit (whole minutes, say) and mapped back to seconds for
@@ -744,11 +785,21 @@ function draw() {
   const xu = xVar ? unitOf(xVar) : "";
   const shown = xVar ? (v) => disp(v, xu) : toT;
   const back = xVar ? (v) => undisp(v, xu) : fromT;
-  for (const dv of ticks(shown(XD[0]), shown(XD[1]), Math.max(2, Math.round(box.w / 90)))) {
-    const x = X(back(dv));
+  // On a log time axis the ticks are the decades of the shown unit -- 1, 10, 100 min in
+  // minutes, not the seconds' decades relabelled as 1.667, 16.67 -- mapped back to seconds.
+  const xticks = logTime()
+    ? (() => {
+        const out = [];
+        const lo = Math.log10(shown(Math.max(XD[0], TFLOOR))), hi = Math.log10(shown(XD[1]));
+        for (let k = Math.ceil(lo - 1e-9); k <= Math.floor(hi + 1e-9); k++) out.push(back(Math.pow(10, k)));
+        return out;
+      })()
+    : ticks(shown(XD[0]), shown(XD[1]), Math.max(2, Math.round(box.w / 90))).map(back);
+  for (const tv of xticks) {
+    const x = X(tv);
     if (x < M.l - 0.5 || x > box.w - M.r + 0.5) continue;
     frag.appendChild(el("line", {class: "grid", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
-    frag.appendChild(el("text", {class: "tick", x: x, y: box.h - 9, "text-anchor": "middle"}, fmt(dv)));
+    frag.appendChild(el("text", {class: "tick", x: x, y: box.h - 9, "text-anchor": "middle"}, fmt(shown(tv))));
   }
   if (xVar) {
     frag.appendChild(el("text", {class: "tick", x: box.w - M.r, y: box.h - M.b - 5, "text-anchor": "end",
@@ -1389,14 +1440,14 @@ function drawMarks(frag) {
 function timeAt(event) {
   const r = svg.getBoundingClientRect();
   const x = Math.min(Math.max(event.clientX - r.left, M.l), r.width - M.r);
-  return XD[0] + ((x - M.l) / (r.width - M.l - M.r)) * (XD[1] - XD[0]);
+  return domAt((x - M.l) / (r.width - M.l - M.r), XD);
 }
 // Like timeAt but not clamped at the plot's right edge: past it the time keeps growing at the
 // plot's own scale, which is how dragging the stop marker outward extends the horizon.
 function timeAtFree(event) {
   const r = svg.getBoundingClientRect();
   const x = Math.max(event.clientX - r.left, M.l);
-  return win[0] + ((x - M.l) / (r.width - M.l - M.r)) * (win[1] - win[0]);
+  return domAt((x - M.l) / (r.width - M.l - M.r), win);
 }
 // The stop marker as one SVG group: a dashed line the full plot height, a grip at the axis to
 // grab, and a label. Drawn in `plot` at rest and in `hud` while being dragged.
@@ -1446,7 +1497,11 @@ svg.addEventListener("pointerup", (e) => {
   if (drag === null) return;
   const t = timeAt(e); const lo = Math.min(drag, t), hi = Math.max(drag, t); drag = null;
   // A band zooms the x domain: the time window, or -- in a phase plot -- the phase variable.
-  if (hi - lo > (XD[1] - XD[0]) * 1e-4) { if (xVar) xwin = [lo, hi]; else win = [lo, hi]; }
+  // A band narrower than a ten-thousandth of the plot is a click, not a zoom -- measured on the
+  // axis as drawn, so on a log time axis a decade counts as wide however few seconds it holds.
+  const span = logTime() ? lg(hi) - lg(lo) : hi - lo;
+  const full = logTime() ? lg(XD[1]) - lg(XD[0]) : XD[1] - XD[0];
+  if (span > full * 1e-4) { if (xVar) xwin = [lo, hi]; else win = [lo, hi]; }
   // No band: a click. It places a measurement mark at the nearest sample.
   else placeMark(nearestIndex(t));
   draw();
@@ -1459,6 +1514,13 @@ document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : 
 document.getElementById("all").onclick = () => { on = new Set(names); draw(); };
 document.getElementById("none").onclick = () => { on = new Set(); draw(); };
 document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
+// Speed: the relative tolerance the run is drawn at. A change is a fresh run (a checkpoint holds
+// only at its own tolerance), on the live run; the control is only live for an open .mo.
+const speedSel = document.getElementById("speed");
+if (speedSel) {
+  speedSel.value = speed;
+  speedSel.onchange = (e) => { speed = e.target.value; if (LIVE) reRun(); };
+}
 document.getElementById("timeunit").onchange = (e) => {
   timeMode = e.target.value;
   const s = document.getElementById("stop");
@@ -1469,7 +1531,9 @@ document.getElementById("timeunit").onchange = (e) => {
 // The x axis: time, or one of the model's variables for a phase plot. Changing it drops any x
 // zoom, since a zoom in one variable's units means nothing in another's.
 document.getElementById("xaxis").onchange = (e) => {
-  xVar = e.target.value || null;
+  const v = e.target.value;
+  LOGT = v === "__log__";
+  xVar = v && v !== "__log__" ? v : null;
   xwin = null;
   draw();
 };
@@ -1477,10 +1541,10 @@ document.getElementById("xaxis").onchange = (e) => {
 // new model does not have falls back to time.
 function paintXAxis() {
   const sel = document.getElementById("xaxis");
-  const opts = [{v: "", t: "x: time"}, ...names.map((nm) => ({v: nm, t: "x: " + nm}))];
+  const opts = [{v: "", t: "x: time"}, {v: "__log__", t: "x: log time"}, ...names.map((nm) => ({v: nm, t: "x: " + nm}))];
   sel.replaceChildren(...opts.map((o) => { const el = document.createElement("option"); el.value = o.v; el.textContent = o.t; return el; }));
   if (xVar && !names.includes(xVar)) { xVar = null; xwin = null; }
-  sel.value = xVar || "";
+  sel.value = LOGT ? "__log__" : (xVar || "");
 }
 window.addEventListener("resize", draw);
 
@@ -1501,9 +1565,12 @@ function reRun(until) {
   // automatic stop, a shorter horizon -- is a fresh run.
   const ck = D && D.checkpoint;
   const same = D && JSON.stringify(D.overrides || {}) === JSON.stringify(overrides || {});
-  const resume = (!until && ck && same && stop > (D.stop || 0) * (1 + 1e-9)) ? ck : null;
+  // A checkpoint holds only at the tolerance it was taken at; changing the speed re-runs.
+  const tol = speed ? Number(speed) : null;
+  const sameTol = D && (D.tolerance ?? null) === tol;
+  const resume = (!until && ck && same && sameTol && stop > (D.stop || 0) * (1 + 1e-9)) ? ck : null;
   vscodeApi.postMessage({ type: "simulate", stop: stop, until: until, from: stop,
-    sets: overrides, runId: RUNS.length - 1, resume: resume });
+    sets: overrides, runId: RUNS.length - 1, resume: resume, tolerance: tol });
 }
 const stopInput = document.getElementById("stop");
 if (stopInput) {

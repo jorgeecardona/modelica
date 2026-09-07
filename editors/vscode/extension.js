@@ -19,6 +19,9 @@ const os = require("os");
 let panel = null;
 let live = null; // { context, file } -- the .mo the panel is currently showing, for re-runs
 let resumeCounter = 0; // names the temp file a resume checkpoint travels by, one per call
+// The relative tolerance the panel opens at -- "fast", matching scope.html's speed default, so
+// the first draw is quick even when the model's .toml asks for a tight reference tolerance.
+const DISPLAY_TOLERANCE = 1e-6;
 
 function nonce() {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -54,6 +57,8 @@ function ensurePanel(context) {
         sensitivity: msg.sensitivity || null, sstep: Number(msg.sstep) || 0.05,
         // A checkpoint {t, y, w} from the run this one extends: integrate only the new tail.
         resume: msg.resume || null,
+        // The relative tolerance the panel asked for; null means the model's reference tolerance.
+        tolerance: typeof msg.tolerance === "number" ? msg.tolerance : null,
       };
       runHelper(live.context, live.file, opts, (data) => {
         panel.webview.postMessage(
@@ -193,9 +198,13 @@ function runtimeCommand(context, cfg, file, opts) {
     fs.writeFileSync(ckpt, JSON.stringify(opts.resume));
     resumeArgs = ["--resume", ckpt];
   }
+  // The relative tolerance the panel draws at; omitted lets the model's reference tolerance stand.
+  const tolArg = typeof opts.tolerance === "number" && opts.tolerance > 0
+    ? ["--tolerance", String(opts.tolerance)]
+    : [];
   return {
     cmd: python[0],
-    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...setArgs, ...sensArgs, ...resumeArgs, ...libs],
+    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...setArgs, ...sensArgs, ...resumeArgs, ...tolArg, ...libs],
   };
 }
 
@@ -237,8 +246,12 @@ function simulateActive(context, document) {
     return;
   }
   const file = doc.fileName;
-  const stop = vscode.workspace.getConfiguration("pymodelica").get("stop", 0);
-  runHelper(context, file, { stop: Number(stop) }, (data) => {
+  const cfg = vscode.workspace.getConfiguration("pymodelica");
+  const stop = cfg.get("stop", 0);
+  // The panel opens at the "fast" display tolerance so the first draw is quick even for a
+  // chaotic model whose .toml asks for a tight reference tolerance; the speed control in the
+  // panel changes it, and DISPLAY_TOLERANCE matches the panel's default so the two agree.
+  runHelper(context, file, { stop: Number(stop), tolerance: DISPLAY_TOLERANCE }, (data) => {
     if (data.error) {
       vscode.window.showErrorMessage(`${path.basename(file)}: ${data.error}`);
       return;

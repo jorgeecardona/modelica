@@ -18,9 +18,11 @@ example models instead, each integrated to its reference points.
 **pymodelica: Overlay a Measured Log (CSV)…** puts measured data on the chart (see below).
 
 The model's sibling `<name>.toml`, when there is one, sets the run: `[simulate].stop`,
-`tolerance`, `method` and `absolute` are honoured, so the panel shows the run the model's
-reference points were checked against. A sibling `library/` folder is loaded first, so a model
-built from components resolves; **pymodelica.library** adds more files or folders.
+`method` and `absolute` are honoured, and its `tolerance` is the **exact** speed below. A
+`library/` folder holding the components a model uses is loaded automatically, whether it sits
+beside the `.mo` or one directory up (the corpus keeps it at `examples/library`, a sibling of
+`examples/models`, so a component model like `BumpStop.mo` resolves with nothing configured);
+**pymodelica.library** adds more files or folders.
 
 ## The panel
 
@@ -28,6 +30,18 @@ Two badges in the header tell you what drew the picture: the extension version (
 the integrator in use (`Radau · 1e-6`, or the model's own, `LSODA · 1e-9` for VanDerPol).
 After upgrading the extension the old extension host keeps running until the window reloads,
 so an old version number here means reload the window (**Developer: Reload Window**).
+
+### Speed
+
+The **speed** control sets how hard the integrator works: **fast** (relative tolerance 1e-6,
+the default), **fine** (1e-8), or **exact** (the model's own `.toml` tolerance, the run its
+reference points were taken at). A model's reference tolerance can be far tighter than looking
+at a trajectory needs -- the chaotic double pendulum asks for 1e-10, about 2.5 s, where fast
+draws in a quarter second. The badge by the version shows the tolerance in use, with a `*` when
+it is a display tolerance rather than the model's own. On a chaotic model each speed draws a
+*different* path: the trajectory only means one thing at the tolerance its references were taken
+at, so switch to **exact** to see that one. The model's method (LSODA for VanDerPol) and its
+absolute tolerance (E5's 1.7e-24) are kept at every speed.
 
 ### Time horizon
 
@@ -49,7 +63,9 @@ so an old version number here means reload the window (**Developer: Reload Windo
   physical unit share a strip and a scale, so the temperatures sit together and mass on its
   own), or `split` (one strip per variable). A single open `.mo` opens on its states grouped by
   unit, so nothing is crushed.
-- **`x:`** is time by default, or any variable: a **phase plot**, such as the rate of rise
+- **`x:`** is time by default, **log time** for a stiff run over a long horizon (E5 runs to
+  1e13 s and finishes its kinetics by 1e3, which a linear axis puts in one pixel column; the
+  ticks become the decades), or any variable: a **phase plot**, such as the rate of rise
   against bean temperature or Lorenz's z against x. Events and reference points hide in a
   phase plot; the cursor then picks the nearest sample by the x variable's value.
 - **Time in seconds or minutes.** The data stays in seconds; only the axis, the readouts and
