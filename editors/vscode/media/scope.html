@@ -300,9 +300,6 @@
             <option value="split">split (per-variable)</option>
           </select>
           <select id="xaxis" title="what the x axis is: time, or a variable -- a phase plot, RoR against bean temperature or Lorenz's x against z"><option value="">x: time</option></select>
-          <span id="ax3wrap" class="ax3" hidden title="the three variables on the 3D axes; drag the plot to rotate">
-            <select id="ax3x"></select><select id="ax3y"></select><select id="ax3z"></select>
-          </span>
           <select id="timeunit" title="time axis unit: the data stays in seconds, only what is shown converts">
             <option value="s">seconds</option>
             <option value="min">minutes</option>
@@ -410,10 +407,10 @@ let TFLOOR = 1e-12;
 // The 3D phase view: three variables on three axes, the trajectory as one projected line you
 // rotate by dragging. This is the view a chaotic model is meant to be seen in -- Lorenz's
 // butterfly, Rössler's spiral, Chua's double scroll -- where against time the states look like
-// noise. `ax3` are the three variable names (default the first three states); `rot3` is the
-// camera, azimuth and elevation in radians, turned by dragging on the plot.
+// noise. The axes are the selected variables (the legend), first three; entering 3D selects the
+// first three states, so it opens on the natural triple. `rot3` is the camera, azimuth and
+// elevation in radians, turned by dragging on the plot.
 let view3d = false;
-let ax3 = [null, null, null];
 let rot3 = {az: -0.7, el: 0.45};
 let rot3drag = null;
 let XD = [0, 1];
@@ -806,9 +803,14 @@ function range3(nm) {
   return hi > lo ? [lo, hi] : [lo - 1, lo + 1];
 }
 function draw3d(frag) {
-  const cx = M.l + (box.w - M.l - M.r) / 2, cy = M.t + (box.h - M.t - M.b) / 2;
-  const r = 0.42 * Math.min(box.w - M.l - M.r, box.h - M.t - M.b);
-  const names3 = ax3.map((nm) => (names.includes(nm) ? nm : null));
+  // Centred on the whole plot, so it does not drift into a corner as the 2D margins change.
+  const cx = box.w / 2, cy = box.h / 2;
+  const r = 0.4 * Math.min(box.w, box.h);
+  // The axes are the selected variables (the legend), the first three; fewer than three falls
+  // back to the first three variables so something always draws.
+  const chosen = selected();
+  const names3 = (chosen.length >= 3 ? chosen : names).slice(0, 3);
+  while (names3.length < 3) names3.push(names3[names3.length - 1] || names[0]);
   const rngs = names3.map((nm) => (nm ? range3(nm) : [0, 1]));
   const norm = (val, i) => {
     const [lo, hi] = rngs[i];
@@ -840,7 +842,8 @@ function draw3d(frag) {
     if (st.dash) path.setAttribute("stroke-dasharray", st.dash);
     frag.appendChild(path);
   }
-  foot.textContent = "3D: " + names3.map((nm, i) => "xyz"[i] + " = " + (nm || "-")).join("  ·  ") + "   ·   drag to rotate";
+  foot.textContent = names3.map((nm, i) => "xyz"[i] + " = " + (nm || "-")).join("  ·  ")
+    + "   ·   drag to rotate · pick the axes in the legend (first three shown)";
 }
 
 // -- drawing ---------------------------------------------------------------------------
@@ -850,7 +853,6 @@ function draw() {
   box = {w: svg.clientWidth, h: svg.clientHeight};
   // The 3D phase view owns the whole plot: its own projected axes and trajectory, no time frame.
   if (view3d) {
-    M.l = 20;
     svg.setAttribute("viewBox", "0 0 " + box.w + " " + box.h);
     const frag = document.createDocumentFragment();
     draw3d(frag);
@@ -1649,7 +1651,12 @@ document.getElementById("xaxis").onchange = (e) => {
   LOGT = v === "__log__";
   xVar = v && v !== "__log__" && v !== "__3d__" ? v : null;
   xwin = null;
-  document.getElementById("ax3wrap").hidden = !view3d;
+  // Entering 3D, start on the natural triple: the first three states (Lorenz's x, y, z), unless
+  // the reader already has exactly three variables selected, which are then the axes.
+  if (view3d && selected().length !== 3) {
+    const base = (D && D.states && D.states.length >= 3 ? D.states : names).slice(0, 3);
+    on = new Set(base);
+  }
   draw();
 };
 // The x-axis choices for the model shown: time first, then every variable, and -- when there are
@@ -1663,17 +1670,6 @@ function paintXAxis() {
   if (xVar && !names.includes(xVar)) { xVar = null; xwin = null; }
   if (view3d && names.length < 3) view3d = false;
   sel.value = view3d ? "__3d__" : LOGT ? "__log__" : (xVar || "");
-  // The three axis pickers: default to the first three states (Lorenz's x, y, z -- one unit
-  // group), any variable choosable. Keep a prior choice if the new model still has it.
-  const base = (D && D.states && D.states.length >= 3 ? D.states : names).slice(0, 3);
-  ax3 = ax3.map((nm, i) => (names.includes(nm) ? nm : base[i]));
-  for (let i = 0; i < 3; i++) {
-    const s = document.getElementById("ax3" + "xyz"[i]);
-    s.replaceChildren(...names.map((nm) => { const e = document.createElement("option"); e.value = nm; e.textContent = nm; return e; }));
-    s.value = ax3[i];
-    s.onchange = (ev) => { ax3[i] = ev.target.value; if (view3d) draw(); };
-  }
-  document.getElementById("ax3wrap").hidden = !view3d;
 }
 window.addEventListener("resize", draw);
 
