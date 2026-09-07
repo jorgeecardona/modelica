@@ -120,7 +120,9 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   in a phase plot, nor one value per pixel on a log axis).
 - **Events** are vertical lines, listed in the legend with their instant and the condition in
   Modelica that fired, as the model states it (`when probe >= T_drop`).
-- **Legend.** Click a variable to toggle it; `all`, `none` and `reset` act on the set. The
+- **Legend.** Click a variable to toggle it; **alt-click** to *solo* it -- show only that one,
+  which on a component model of dozens of variables beats clicking the rest off; alt-click it
+  again to bring back the set that was on before. `all`, `none` and `reset` act on the set. The
   **filter** box by the `variables` heading narrows the list to the names that contain what you
   type (case-insensitive), and `all` / `none` then act on just what it shows -- a component
   model flattens to dozens of connector-internal variables (`supply.p.i`, `converter.flange.tau`,

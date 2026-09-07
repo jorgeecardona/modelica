@@ -460,6 +460,9 @@ let legendFilter = "";
 // time are listed, and the latest settling instant is marked. For a model driven from one state
 // to another -- a controller reaching a setpoint, a motor running up.
 let stepOn = false;
+// The selection an alt-click "solo" replaced, to restore when the same variable is soloed again.
+// Alt-click a legend row to show only that variable; alt-click it again to bring the rest back.
+let preSolo = null;
 let scale = "linear";
 let win = [0, 1];
 let drag = null;
@@ -615,8 +618,9 @@ function select(i) {
   lastModel = D.model; prevEnd = N ? T[N - 1] : 0;
   if (!same) {
     // A different model: its variable names are different, so a filter from the last one would
-    // hide everything. Clear it.
+    // hide everything. Clear it, and any solo it left.
     legendFilter = "";
+    preSolo = null;
     const lf = document.getElementById("legfilter");
     if (lf) lf.value = "";
     // open on the moving variables
@@ -1282,7 +1286,7 @@ function paintLegend(at) {
   if (count) count.textContent = legendFilter ? shown.length + "/" + names.length : "";
   for (const nm of shown) {
     const row = document.createElement("div");
-    row.className = "row" + (on.has(nm) ? "" : " off"); row.title = nm;
+    row.className = "row" + (on.has(nm) ? "" : " off");
     const dot = document.createElement("span"); dot.className = "swatch";
     dot.style.background = colour(nm);
     const name = document.createElement("span"); name.className = "name"; name.textContent = nm;
@@ -1295,7 +1299,20 @@ function paintLegend(at) {
       }).join(" │ ");
     }
     row.append(dot, name, value);
-    row.onclick = () => { on.has(nm) ? on.delete(nm) : on.add(nm); draw(); };
+    row.title = nm + "  ·  alt-click to show only this";
+    row.onclick = (e) => {
+      if (e.altKey) {
+        // Solo: show only this variable. Alt-clicking the one already soloed restores the set
+        // that was on before the solo began, so it is its own undo; soloing another variable
+        // keeps that original, so the restore is always to where you started, not the last solo.
+        if (preSolo !== null && on.size === 1 && on.has(nm)) { on = preSolo; preSolo = null; }
+        else { if (preSolo === null) preSolo = new Set(on); on = new Set([nm]); }
+      } else {
+        on.has(nm) ? on.delete(nm) : on.add(nm);
+        preSolo = null;  // a plain toggle ends the solo, so its undo no longer applies
+      }
+      draw();
+    };
     frag.appendChild(row);
   }
   legend.replaceChildren(frag);
@@ -1957,8 +1974,8 @@ svg.addEventListener("dblclick", () => {
   win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; guides = []; draw(); foot.textContent = restFooter();
 });
 document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; guides = []; draw(); foot.textContent = restFooter(); };
-document.getElementById("all").onclick = () => { for (const nm of filteredNames()) on.add(nm); draw(); };
-document.getElementById("none").onclick = () => { for (const nm of filteredNames()) on.delete(nm); draw(); };
+document.getElementById("all").onclick = () => { for (const nm of filteredNames()) on.add(nm); preSolo = null; draw(); };
+document.getElementById("none").onclick = () => { for (const nm of filteredNames()) on.delete(nm); preSolo = null; draw(); };
 const legFilter = document.getElementById("legfilter");
 if (legFilter) legFilter.addEventListener("input", (e) => {
   legendFilter = e.target.value.trim().toLowerCase(); paintLegend();
