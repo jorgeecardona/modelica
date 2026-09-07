@@ -17,6 +17,14 @@ example models instead, each integrated to its reference points.
 
 **pymodelica: Overlay a Measured Log (CSV)…** puts measured data on the chart (see below).
 
+A model that references the real **Modelica Standard Library** names resolves against a
+bundled slice, loaded automatically: `Modelica.Electrical.Analog`, `Modelica.Mechanics.
+Translational` and `Rotational`, and `Modelica.Thermal.HeatTransfer` -- the physical domains,
+whose connectors carry a potential and a flow. It is a curated subset, not the whole MSL, so a
+model reaching for a part that is not there fails by name (`Modelica has no nested class X`);
+turn it off with **pymodelica.standardLibrary**. Blocks is not in it yet: its causal signal
+connector needs a language feature the front end does not have.
+
 The model's sibling `<name>.toml`, when there is one, sets the run: `[simulate].stop`,
 `method` and `absolute` are honoured, and its `tolerance` is the **exact** speed below. A
 `library/` folder holding the components a model uses is loaded automatically, whether it sits

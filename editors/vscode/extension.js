@@ -175,7 +175,13 @@ function runtimeCommand(context, cfg, file, opts) {
   }
   const python = cfg.get("python", ["uv", "run", "--extra", "sim", "python"]);
   const helper = path.join(context.extensionPath, "python", "simulate_file.py");
-  const libs = cfg.get("library", []).flatMap((dir) => ["--library", dir]);
+  // The bundled standard-library slice, always loaded, so a model that references the real
+  // Modelica.* names (Electrical.Analog, Blocks, Mechanics, Thermal) resolves without any
+  // configuration. It is a curated subset, not the whole MSL; unless turned off.
+  const stdlib = cfg.get("standardLibrary", true)
+    ? ["--library", path.join(context.extensionPath, "stdlib")]
+    : [];
+  const libs = [...stdlib, ...cfg.get("library", []).flatMap((dir) => ["--library", dir])];
   const stopArg = opts.stop > 0 ? ["--stop", String(opts.stop)] : [];
   // The farthest an automatic stop may probe; 0 lets the simulator pick ten times the current
   // stop. A cap, so a model that never settles comes back in seconds rather than running away.

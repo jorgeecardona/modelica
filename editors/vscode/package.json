@@ -2,7 +2,7 @@
   "name": "pymodelica-scope",
   "displayName": "pymodelica Simulation Scope",
   "description": "Simulate the Modelica .mo file you are editing and see its trajectory, in an interactive chart inside VS Code.",
-  "version": "0.1.40",
+  "version": "0.1.41",
   "publisher": "jorgeecardona",
   "license": "MIT",
   "repository": {
@@ -125,6 +125,11 @@
           "type": "boolean",
           "default": false,
           "description": "Re-simulate the model when you save a .mo file (only while the Scope panel is open)."
+        },
+        "pymodelica.standardLibrary": {
+          "type": "boolean",
+          "default": true,
+          "description": "Load the bundled slice of the Modelica Standard Library, so a model that references the real Modelica.* names (Electrical.Analog, Blocks, Mechanics, Thermal) resolves without configuration. A curated subset, not the whole MSL."
         }
       }
     }
