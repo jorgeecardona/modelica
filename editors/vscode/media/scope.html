@@ -1299,11 +1299,16 @@ function paintLegend(at) {
     const name = document.createElement("span"); name.className = "name"; name.textContent = nm;
     const value = document.createElement("span"); value.className = "value";
     if (at !== undefined && on.has(nm)) {
-      // One value per run in run order (A │ B ...), in display units.
+      // One value per run in run order (A │ B ...), in display units; with exactly two runs
+      // pinned to compare, their difference too, since reading the effect of a change is the
+      // reason they are side by side. The offset cancels in a difference, so `disp` is exact.
       const u = unitOf(nm);
-      value.textContent = RUNS.map((_, ri) => {
-        const vs = seriesOf(ri, nm); return fmt(disp(vs ? vs[at] : null, u));
-      }).join(" │ ");
+      const shown = RUNS.map((_, ri) => { const vs = seriesOf(ri, nm); return vs ? vs[at] : null; });
+      let text = shown.map((x) => fmt(disp(x, u))).join(" │ ");
+      if (shown.length === 2 && shown[0] !== null && shown[1] !== null && isFinite(shown[0]) && isFinite(shown[1])) {
+        text += "   Δ " + fmt(disp(shown[1], u) - disp(shown[0], u));
+      }
+      value.textContent = text;
     }
     row.append(dot, name, value);
     row.title = nm + "  ·  alt-click to show only this";

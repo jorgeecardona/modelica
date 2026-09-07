@@ -141,7 +141,8 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   (`m_dry` follows `m_green`). Overrides go through the simulator's sweep vector, so everything
   downstream is recomputed.
 - **`+ compare`** pins the current run: it keeps drawing, dashed, while you change parameters,
-  and the legend shows each run's value at the cursor. Pinned runs appear as chips above the
+  and the legend shows each run's value at the cursor -- and, with exactly two runs side by side,
+  their difference (`Δ`), which is the effect of the change read straight off. Pinned runs appear as chips above the
   chart, each naming what it overrides, with a `×` that drops the run. **Click a chip** to edit
   that run's parameters: the panel switches to that instance (its title shows the letter), and a
   change re-runs only it, so A and B can hold different parameters. Pinned runs extend with the
