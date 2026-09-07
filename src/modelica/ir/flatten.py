@@ -314,6 +314,31 @@ def _base_of(found: Found | BaseType, scope: Scope) -> tuple[BaseType, ir.Modifi
     return current, collected
 
 
+def _signal_base(found: Found, scope: Scope) -> tuple[BaseType, ir.Modification] | None:
+    """A signal connector's predefined base, or ``None`` if it is an ordinary record connector.
+
+    ``connector RealInput = input Real`` is a connector that *is* a scalar: it aliases a
+    predefined type (directly, or through a ``type`` alias) and carries a causality, but holds no
+    fields of its own. It lays down as one leaf variable the way a ``type`` alias does, rather
+    than instantiating a record with no members -- which would fold its ``extends Real`` and be
+    refused, since only ``type`` classes may extend a predefined type. A connector that extends
+    another connector, or declares its own fields, is a record and returns ``None`` so it
+    instantiates the usual way.
+    """
+    cls = found.cls
+    if cls.restriction != "connector" or cls.components or len(cls.extends) != 1:
+        return None
+    inner = scope.inside(found)
+    extends = cls.extends[0]
+    target = inner.resolve(extends.type_name)
+    if isinstance(target, str):
+        return target, extends.modification
+    if target.cls.restriction == "type":
+        base, attributes = _base_of(target, inner)
+        return base, _merge(extends.modification, attributes)
+    return None
+
+
 # --------------------------------------------------------------------------------------
 # Reference prefixing
 # --------------------------------------------------------------------------------------
@@ -1362,6 +1387,14 @@ class _Flattener:
                         f"{'.'.join(path)}: expandable connectors are not supported yet",
                     )
                 self.connectors[path] = resolved
+                signal = _signal_base(resolved, member.scope)
+                if signal is not None:
+                    # A signal connector (`connector RealInput = input Real`) is a scalar, not a
+                    # record: lay it down as one leaf, the causality already on the component. It
+                    # is still a connector -- registered above -- so `connect()` joins two of them.
+                    base, attributes = signal
+                    self._leaf(component, path, _merge(attributes, total), base, variability)
+                    return
             self.instantiate(resolved, member.scope, path, total, variability, inners)
             return
         base, attributes = _base_of(resolved, member.scope)
@@ -1671,6 +1704,11 @@ class _Flattener:
     # -- connect expansion ------------------------------------------------------------
 
     def _connector_leaves(self, found: Found, scope: Scope) -> list[_ConnectorLeaf]:
+        if _signal_base(found, scope) is not None:
+            # A signal connector is its own single scalar leaf: no fields to walk, the connector
+            # instance *is* the variable (an empty relative path). Its causality is the class's,
+            # so `_one_source_only` can tell the driving end from the driven one.
+            return [_ConnectorLeaf((), "none", found.cls.causality)]
         leaves: list[_ConnectorLeaf] = []
         for name, member in effective(found, scope).members.items():
             resolved = member.scope.resolve(member.component.type_name)

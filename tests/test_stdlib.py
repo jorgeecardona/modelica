@@ -5,8 +5,8 @@ with the VS Code extension, so a model that references the real names -- `Modeli
 Analog.Basic.Resistor`, `Modelica.Mechanics.Translational.Components.Spring` -- resolves without
 configuration. It is not the whole MSL and never will be here; these tests hold that what it does
 ship flattens and integrates to the analytic answer, so a broken component is caught before it
-reaches a user. Blocks is deliberately absent (its causal `input Real` connector is a front-end
-gap), which is asserted too, so the slice cannot quietly regrow a domain that does not work.
+reaches a user. Blocks is here too now that its causal `input Real` connector flattens: the
+signal domain wires and simulates like the physical ones.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from modelica.ir.causalize import causalize
 from modelica.lang import parse
@@ -176,22 +175,55 @@ def test_translational_spring_damper_settles() -> None:
     assert abs(s[-1]) < 0.02  # damped, so it has settled at rest by the end
 
 
-def test_blocks_is_absent_until_the_causal_connector_lands() -> None:
-    """Blocks is left out on purpose; a model that reaches for it fails by name, not silently."""
-    from modelica.ir.flatten import FlattenError  # noqa: PLC0415 - the error this test is about
+def test_blocks_first_order_follows_a_step_like_one_minus_exp() -> None:
+    """A constant into a first-order block, wired by causal connectors: y follows 1 - e^{-t/T}."""
+    result = _simulate(
+        """
+        model Step
+          Modelica.Blocks.Sources.Constant setpoint(k = 1);
+          Modelica.Blocks.Continuous.FirstOrder plant(k = 1, T = 2);
+        equation
+          connect(setpoint.y, plant.u);
+        end Step;
+        """,
+        "Step",
+        stop=6.0,
+    )
+    t = np.asarray(result.time)
+    y = np.asarray(result["plant.y"])
+    assert np.max(np.abs(y - (1.0 - np.exp(-t / 2.0)))) < 1e-3
 
-    source = "model B Modelica.Blocks.Sources.Constant c(k = 1); equation end B;"
-    with pytest.raises(FlattenError, match="Blocks"):
-        causalize(flatten([parse(STDLIB.read_text(encoding="utf-8")), parse(source)], "B"))
+
+def test_blocks_proportional_loop_reaches_its_offset_steady_state() -> None:
+    """A closed loop (setpoint, feedback, gain, plant) settles to k/(1+k), the P-control offset."""
+    result = _simulate(
+        """
+        model Loop
+          Modelica.Blocks.Sources.Constant setpoint(k = 1);
+          Modelica.Blocks.Math.Feedback error;
+          Modelica.Blocks.Math.Gain controller(k = 5);
+          Modelica.Blocks.Continuous.FirstOrder plant(k = 1, T = 1);
+        equation
+          connect(setpoint.y, error.u1);
+          connect(plant.y, error.u2);
+          connect(error.y, controller.u);
+          connect(controller.y, plant.u);
+        end Loop;
+        """,
+        "Loop",
+        stop=5.0,
+    )
+    assert abs(float(np.asarray(result["plant.y"])[-1]) - 5.0 / 6.0) < 1e-4
 
 
 def test_every_shipped_domain_instantiates() -> None:
-    """One class from each domain flattens, so the slice's four packages all resolve."""
+    """One class from each domain flattens, so the slice's five packages all resolve."""
     probes = {
         "Electrical": "Modelica.Electrical.Analog.Basic.Inductor e;",
         "Translational": "Modelica.Mechanics.Translational.Components.SpringDamper t;",
         "Rotational": "Modelica.Mechanics.Rotational.Components.Damper r;",
         "Thermal": "Modelica.Thermal.HeatTransfer.Components.ThermalConductor h;",
+        "Blocks": "Modelica.Blocks.Math.Gain b;",
     }
     lib = parse(STDLIB.read_text(encoding="utf-8"))
     for domain, decl in probes.items():

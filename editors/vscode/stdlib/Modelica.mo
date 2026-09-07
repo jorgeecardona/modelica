@@ -287,4 +287,59 @@ package Modelica "A curated slice of the Modelica Standard Library, under its re
     end HeatTransfer;
   end Thermal;
 
+  package Blocks "Modelica.Blocks: causal signal blocks wired by real-valued connectors."
+    package Interfaces
+      connector RealInput = input Real "A real signal arriving at a block";
+      connector RealOutput = output Real "A real signal leaving a block";
+
+      partial block SISO "One real input, one real output"
+        Modelica.Blocks.Interfaces.RealInput u "Input signal";
+        Modelica.Blocks.Interfaces.RealOutput y "Output signal";
+      end SISO;
+    end Interfaces;
+
+    package Sources
+      block Constant "Holds a constant output value"
+        parameter Real k = 1 "Constant output value";
+        Modelica.Blocks.Interfaces.RealOutput y "Output signal";
+      equation
+        y = k;
+      end Constant;
+    end Sources;
+
+    package Math
+      block Gain "Output the input scaled by a constant"
+        extends Modelica.Blocks.Interfaces.SISO;
+        parameter Real k = 1 "Gain";
+      equation
+        y = k * u;
+      end Gain;
+
+      block Feedback "Output the difference of two inputs, u1 minus u2"
+        Modelica.Blocks.Interfaces.RealInput u1 "Setpoint";
+        Modelica.Blocks.Interfaces.RealInput u2 "Measurement";
+        Modelica.Blocks.Interfaces.RealOutput y "Error, u1 minus u2";
+      equation
+        y = u1 - u2;
+      end Feedback;
+    end Math;
+
+    package Continuous
+      block Integrator "Output the time integral of the input"
+        extends Modelica.Blocks.Interfaces.SISO(y(start = 0, fixed = true));
+        parameter Real k = 1 "Integrator gain";
+      equation
+        der(y) = k * u;
+      end Integrator;
+
+      block FirstOrder "Output lags the input with a first-order time constant"
+        extends Modelica.Blocks.Interfaces.SISO(y(start = 0, fixed = true));
+        parameter Real k = 1 "Steady-state gain";
+        parameter Modelica.Units.SI.Time T = 1 "Time constant";
+      equation
+        der(y) = (k * u - y) / T;
+      end FirstOrder;
+    end Continuous;
+  end Blocks;
+
 end Modelica;
