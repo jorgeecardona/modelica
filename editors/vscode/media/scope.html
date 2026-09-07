@@ -380,6 +380,7 @@
           </select>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
+          <button type="button" id="csvbtn" title="save the drawn run as a CSV: a time column and one column per variable, in SI units -- re-importable as a measured log" hidden>csv</button>
           <button id="all">all</button>
           <button id="none">none</button>
           <button id="reset" title="or double-click the chart">reset</button>
@@ -645,6 +646,7 @@ function select(i) {
   }
   document.getElementById("pin").hidden = !LIVE;
   document.getElementById("logbtn").hidden = !vscodeApi;
+  document.getElementById("csvbtn").hidden = !vscodeApi;
   paintEvents();
   paintXAxis();
   paintParams();
@@ -1465,6 +1467,27 @@ function paintLogs() {
   list.replaceChildren(frag);
 }
 document.getElementById("logbtn").onclick = () => { if (vscodeApi) vscodeApi.postMessage({ type: "importLog" }); };
+// The drawn run as CSV text: time first, then every variable, in SI (the honest data, not the
+// display units). Named as the model names them and with a `time` column, so it re-imports as a
+// measured log. A gap (a null) is an empty cell. Variable names carry no commas, so no escaping.
+function buildCsv() {
+  const lines = [["time", ...names].join(",")];
+  for (let k = 0; k < N; k++) {
+    const cells = [T[k]];
+    for (const nm of names) {
+      const vs = D.series[nm], v = vs ? vs[k] : null;
+      cells.push(v === null || v === undefined || !isFinite(v) ? "" : v);
+    }
+    lines.push(cells.join(","));
+  }
+  return lines.join("\n") + "\n";
+}
+const csvBtn = document.getElementById("csvbtn");
+if (csvBtn) csvBtn.onclick = () => {
+  if (!vscodeApi || !D || !N) return;
+  vscodeApi.postMessage({ type: "export", name: (D.model || "run") + ".csv", csv: buildCsv() });
+  foot.textContent = "saving " + (D.model || "run") + ".csv …";
+};
 
 // -- the sweep -----------------------------------------------------------------------------
 // One parameter over a range, one run per value, and a response read off each run plotted

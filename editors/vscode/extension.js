@@ -73,9 +73,32 @@ function ensurePanel(context) {
       });
     } else if (msg && msg.type === "importLog") {
       importLog();
+    } else if (msg && msg.type === "export" && typeof msg.csv === "string") {
+      exportCsv(msg.name, msg.csv);
     }
   });
   return panel;
+}
+
+// The drawn run, saved to a CSV the panel built. The panel owns the data; the extension owns the
+// save dialog and the file system. Written next to the .mo it came from by default.
+function exportCsv(name, csv) {
+  const base = (typeof name === "string" && name) || "run.csv";
+  const dir = live && live.file ? path.dirname(live.file) : undefined;
+  vscode.window
+    .showSaveDialog({
+      defaultUri: dir ? vscode.Uri.file(path.join(dir, base)) : undefined,
+      filters: { "CSV": ["csv"] },
+    })
+    .then((uri) => {
+      if (!uri) return;
+      try {
+        fs.writeFileSync(uri.fsPath, csv);
+        vscode.window.showInformationMessage(`Saved ${path.basename(uri.fsPath)} (${csv.split("\n").length - 2} rows).`);
+      } catch (error) {
+        vscode.window.showErrorMessage(`Could not save ${uri.fsPath}: ${error.message}`);
+      }
+    });
 }
 
 // A measured log, overlaid. The panel asks; the extension owns the file dialog and the file

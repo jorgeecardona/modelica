@@ -171,6 +171,14 @@ format:
 Loaded logs are listed in the legend under **measured**, with their clock in the current time
 unit.
 
+### Saving the run
+
+**`csv`** saves the drawn run to a CSV file (a save dialog opens, defaulting beside the `.mo`):
+a `time` column and one column per variable, in SI units -- the honest data behind the chart,
+not the display units. The header names the variables as the model does and the clock column is
+`time`, so the file re-imports through `log…` as a measured log; a gap in a series is an empty
+cell.
+
 ## Settings
 
 | Setting | Default | What it does |
