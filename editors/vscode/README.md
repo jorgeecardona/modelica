@@ -87,9 +87,12 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   phase or 3D plot; in `xy` the cursor picks the nearest sample by the x variable's value.
 - **Time in seconds or minutes.** The data stays in seconds; only the axis, the readouts and
   the rates convert: a `K/s` rate reads `K/min` in minutes.
-- **Display units:** `SI units` or `K as °C`. A bare kelvin value is shown in Celsius; a rate
-  such as `K/s` is never offset. With minutes and °C together a roaster's rate of rise reads
-  in °C/min.
+- **Display units:** `SI units`, `°C`, `°F`, or `US units`. Temperature converts (kelvin or
+  degC to °C or °F); `US units` also shows metres as feet, kilograms as pounds, newtons as
+  pounds-force, watts as horsepower. Only the printed value converts, never the data. A rate
+  keeps the offset out -- `K/s` becomes `°F/s`, scaled but not shifted -- and follows the time
+  axis, so with minutes a roaster's rate of rise reads in °C/min or °F/min. Adding a system is
+  one entry in the display table.
 
 ### Reading the chart
 

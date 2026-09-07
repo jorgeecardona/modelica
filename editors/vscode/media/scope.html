@@ -361,7 +361,9 @@
           </select>
           <select id="disp" title="display units: the data stays SI, only what is printed converts">
             <option value="si">SI units</option>
-            <option value="c">K as &deg;C</option>
+            <option value="c">&deg;C</option>
+            <option value="f">&deg;F</option>
+            <option value="us">US units</option>
           </select>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
@@ -437,7 +439,7 @@ let cssbg = "#ffffff";
 // interpolated onto the live run's time grid so every drawing loop shares one x.
 let RUNS = [];           // [{overrides, data, onBase}]
 let overrides = {};      // the live run's parameter overrides, name -> SI value
-let dispMode = "si";     // display units: "si", or "c" to print kelvin as celsius
+let dispMode = "si";     // display units: si, c (°C), f (°F), us (imperial) -- see DISPLAY
 let timeMode = "s";      // time axis: "s" seconds, or "min" minutes -- the data stays in seconds
 // The largest gap between drawn points, in seconds, or null to let the panel choose the
 // density. A cap on Δt is a resolution the user sets outright: the run outputs a grid at this
@@ -650,26 +652,48 @@ function cleanStop(v) { return v > 0 ? Number(v.toPrecision(4)) : 0; }
 // The data stays SI; only what is printed converts, through this table, so a kelvin reads as
 // the celsius you have intuition for. Affine per unit, with the inverse for reading a typed
 // value back. A table rather than a special case, so more conversions can follow.
-const DISPLAY = { c: { K: { unit: "°C", to: (v) => v - 273.15, from: (v) => v + 273.15 } } };
-function dispOf(unit) { const t = DISPLAY[dispMode]; return (t && t[unit]) || null; }
-// A rate per second follows the time axis: with the axis in minutes, K/s is shown as K/min
-// (x60). That is the roaster's rate of rise, and in °C mode it reads °C/min -- the same number,
-// since an offset cancels in a rate, only the label changes.
-function rateScale(unit) { return timeMode === "min" && /\/s$/.test(unit) ? 60 : 1; }
+// Each mode maps an SI base unit to a display unit and an affine, shown = a*si + b (the offset
+// b is only temperature). A rate (a unit ending /s or /s2) shows its numerator converted by that
+// base's scale -- an offset cancels in a rate, only the factor stays -- and then follows the time
+// axis. Adding a system is adding a column here, nothing else.
+const DISPLAY = {
+  si: {},
+  c: { K: {unit: "°C", a: 1, b: -273.15} },
+  f: { K: {unit: "°F", a: 9 / 5, b: -459.67}, degC: {unit: "°F", a: 9 / 5, b: 32} },
+  us: {
+    K: {unit: "°F", a: 9 / 5, b: -459.67}, degC: {unit: "°F", a: 9 / 5, b: 32},
+    m: {unit: "ft", a: 3.280839895, b: 0}, kg: {unit: "lb", a: 2.204622622, b: 0},
+    N: {unit: "lbf", a: 0.224808943, b: 0}, J: {unit: "ft·lbf", a: 0.737562149, b: 0},
+    W: {unit: "hp", a: 0.001341022, b: 0},
+  },
+};
+function affineOf(unit) { const t = DISPLAY[dispMode]; return (t && t[unit]) || null; }
+function isRate(unit) { return /\/s\d*$/.test(unit); }
+function baseOf(unit) { return unit.replace(/\/s\d*$/, ""); }
+// A rate per second also follows the time axis: with the axis in minutes, K/s is shown per
+// minute (x60) -- the roaster's rate of rise, °C/min or °F/min depending on the mode.
+function rateScale(unit) { return timeMode === "min" && isRate(unit) ? 60 : 1; }
 function disp(v, unit) {
   if (v === null || v === undefined || !isFinite(v)) return v;
-  const c = dispOf(unit);
-  return (c ? c.to(v) : v) * rateScale(unit);
+  if (isRate(unit)) { const c = affineOf(baseOf(unit)); return v * (c ? c.a : 1) * rateScale(unit); }
+  const c = affineOf(unit); return c ? c.a * v + c.b : v;
 }
-function undisp(v, unit) { const x = v / rateScale(unit); const c = dispOf(unit); return c ? c.from(x) : x; }
-// The unit as printed: converted when the display mode says so, rates in the axis's time unit,
-// and Modelica's "degC" spelled °C.
+function undisp(v, unit) {
+  if (isRate(unit)) { const c = affineOf(baseOf(unit)); return v / ((c ? c.a : 1) * rateScale(unit)); }
+  const c = affineOf(unit); return c ? (v - c.b) / c.a : v;
+}
+// The unit as printed: converted when the mode says so, rates in the axis's time unit, and
+// Modelica's "degC" spelled °C.
 function dispUnit(unit) {
-  const c = dispOf(unit); if (c) return c.unit;
-  let u = unit === "degC" ? "°C" : unit;
-  if (timeMode === "min" && /\/s$/.test(u)) u = u.replace(/\/s$/, "/min");
-  if (dispMode === "c" && /^K\//.test(u)) u = u.replace(/^K\//, "°C/");
-  return u;
+  if (isRate(unit)) {
+    const base = baseOf(unit), tail = unit.slice(base.length); // "/s" or "/s2"
+    const c = affineOf(base);
+    let u = (c ? c.unit : base === "degC" ? "°C" : base) + tail;
+    if (timeMode === "min") u = u.replace(/\/s(\d*)$/, "/min$1");
+    return u;
+  }
+  const c = affineOf(unit); if (c) return c.unit;
+  return unit === "degC" ? "°C" : unit;
 }
 function unitOf(nm) { return (D && D.units && D.units[nm] !== undefined) ? D.units[nm] : ""; }
 // The one unit every selected variable shares, else "": an overlay axis can only be labelled
