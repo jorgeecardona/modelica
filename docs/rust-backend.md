@@ -49,7 +49,7 @@ no reference numbers of the emitter's own. The Rust tests are skipped when there
 | --- | --- |
 | `tests/test_rust_dialect.py` | 26 expressions compiled with `rustc -D warnings` equal the interpreter. |
 | per-function tests in `tests/test_rustgen.py` | `rhs`, `observe`, `indicators`, `jacobian` and every `transition` equal the interpreter at each model's start point, Newton blocks and rebasing switches included. |
-| reference points | The driver reproduces every `.toml` state reference point of the event-free models to 1e-6. |
+| reference points | The driver, run at the `.toml`'s tolerance, reproduces every state reference point of the event-free models to the point's own bar, the terms the interpreter is held to. |
 | events | For every model with events, the driver applies exactly the interpreter's number of crossings and its trajectory agrees on a 41-point grid (`rtol` 1e-4, `atol` 1e-3): the bouncing ball to 1e-14, the roaster's schedule, the thermostat, PhaseChange's twelve. |
 | mode switch | Pendulum switches state set four times in two seconds; its coordinates, read from the observed-variable output, agree with the interpreter at 1e-8. |
 

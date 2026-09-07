@@ -362,11 +362,14 @@ def test_the_rust_integrator_reproduces_the_toml_reference(model: Path) -> None:
     The AOT "integrator and model compile together" unit. rustgen emits rhs and jacobian, the
     radau runtime calls them by name, and rustc compiles the whole into one binary that
     integrates from the model's start to its stop. The reference is the model's own recorded
-    trajectory in its .toml, at the tolerance (1e-8) that reproduces it to well within the file's
-    1e-6 comparison bar -- so this checks the Rust integrator against a number neither it nor the
-    Python radau invented. Run over every supported model with state references, so the stiff
-    ones (Robertson, VanDerPol) and the implicit tangent (AtwoodPendulum) are exercised too, not
-    only the linear RLCCircuit.
+    trajectory in its .toml, run at the tolerance the .toml names and held to each point's own
+    bar, exactly as `tests/test_examples.py` holds the interpreter -- so this checks the Rust
+    integrator against a number neither it nor the Python radau invented, on the terms the model
+    set. (It used to run at a fixed 1e-8 against a fixed 1e-6: Chua's late point, where x passes
+    through zero, failed that while the interpreter passed the file's bar, which is the kind of
+    disagreement between two tiers that a shared bar prevents.) Run over every supported model
+    with state references, so the stiff ones (Robertson, VanDerPol) and the implicit tangent
+    (AtwoodPendulum) are exercised too, not only the linear RLCCircuit.
     """
     pytest.importorskip("numpy")
     build = pytest.importorskip("modelica.sim.kernel").build
@@ -383,6 +386,10 @@ def test_the_rust_integrator_reproduces_the_toml_reference(model: Path) -> None:
     names = system.modes[0].states
     n = len(states)
     stop = float(spec["simulate"]["stop"])
+    # The model's own integrator settings, the same rule `simulate` applies: the absolute
+    # tolerance defaults to the relative one.
+    rtol = float(spec["simulate"].get("tolerance", 1e-6))
+    atol = float(spec["simulate"].get("absolute", rtol))
 
     program = "\n".join(
         [
@@ -403,7 +410,7 @@ def test_the_rust_integrator_reproduces_the_toml_reference(model: Path) -> None:
             "    let dirs: [f64; 0] = [];",
             "    let lat: [i64; 0] = [];",
             "    let mut obs: [f64; 0] = [];",
-            f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &grid, &mut out, &mut obs);",
+            f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, {rtol!r}f64, {atol!r}f64, &dirs, &lat, &grid, &mut out, &mut obs);",
             "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
             '    println!("{}", printed.join(" "));',
             "}",
@@ -412,11 +419,14 @@ def test_the_rust_integrator_reproduces_the_toml_reference(model: Path) -> None:
     )
     out = _compile_and_run(program, system.name)
     for i, point in enumerate(refs):
+        # Each point's own bar; `.toml` points carry at least one of the two (the corpus test
+        # holds that), and a missing one means exact, as `numpy.isclose` reads it.
+        rel, absolute = float(point.get("rtol", 0.0)), float(point.get("atol", 0.0))
         for q, name in enumerate(names):
             if name not in point["values"]:
                 continue
-            assert out[i * n + q] == pytest.approx(point["values"][name], rel=1e-6, abs=1e-9), (
-                f"{system.name} t={point['t']} {name}"
+            assert out[i * n + q] == pytest.approx(point["values"][name], rel=rel, abs=absolute), (
+                f"{system.name} t={point['t']} {name} (rtol {rel:g}, atol {absolute:g})"
             )
 
 
