@@ -65,7 +65,10 @@ class RoastingMachine(Model):
     Q_max = parameter(Real, 1.32e5, unit="W", doc="Burner at 100 percent")
     tau_probe = parameter(Real, 18.1, unit="s", doc="Bean probe time constant")
     T_drop = parameter(
-        Real, 216, unit="degC", doc="The drop: the probe reading at which the roaster pulls the batch"
+        Real,
+        216,
+        unit="degC",
+        doc="The drop: the probe reading at which the roaster pulls the batch",
     )
 
     T_mach = Real("Machine temperature", unit="K", start=510.53, fixed=True)

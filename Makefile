@@ -1,7 +1,11 @@
 # modelica -- task runner. uv is the only tool needed.
 # One-time setup after cloning:  make install-hooks
 .DEFAULT_GOAL := help
-.PHONY: help install-hooks format lint typecheck test check version-ahead bump build docs docs-prose
+.PHONY: help install-hooks format lint format-check typecheck test check version-ahead bump build docs docs-prose
+
+# The scope CI's format-check runs over -- broader than lint's src+tests, so an unformatted
+# example (a .py twin) is caught locally before the push rather than in the pipeline.
+FMT_SCOPE := src tests examples docs/notebooks
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -13,11 +17,14 @@ install-hooks: ## point git at the tracked .githooks/ (pre-commit + pre-push)
 	@echo "hooks installed: core.hooksPath -> .githooks"
 
 format: ## auto-format + autofix lint (ruff)
-	uv run ruff format src tests
+	uv run ruff format $(FMT_SCOPE)
 	uv run ruff check --fix src tests
 
 lint: ## lint (ruff) -- same as CI
 	uv run ruff check src tests
+
+format-check: ## fail if anything in the CI scope is not ruff-formatted -- same as CI
+	uv run ruff format --check $(FMT_SCOPE)
 
 typecheck: ## type-check (pyright) -- same as CI
 	uv run pyright
@@ -25,7 +32,7 @@ typecheck: ## type-check (pyright) -- same as CI
 test: ## run the test suite
 	uv run pytest -q
 
-check: lint typecheck test ## the full CI test stage: lint + typecheck + test
+check: lint format-check typecheck test ## the full CI test stage: lint + format + typecheck + test
 
 version-ahead: ## fail unless pyproject version is greater than origin/main (when src/ changed)
 	sh scripts/check-version-ahead
