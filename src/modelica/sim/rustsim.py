@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from modelica.sim.kernel import build as build_kernel
-from modelica.sim.result import Result
+from modelica.sim.result import Event, Result
 from modelica.sim.rust_radau import CONSTANTS, FIRST_STEP, INTEGRATE, LINALG, NEWTON, STEP
 from modelica.sim.rustgen import unit
 from modelica.sim.solve import SimulationError
@@ -70,6 +70,7 @@ pub extern "C" fn md_run(
     obs: *mut f64,
     nobs: usize,
     events_out: *mut f64,
+    ev_index_out: *mut f64,
     nev_out: usize,
     counters: *mut f64,
 ) -> i32 {
@@ -86,7 +87,8 @@ pub extern "C" fn md_run(
     let out = unsafe { view_mut(out, npts * n) };
     let obs = unsafe { view_mut(obs, npts * nobs) };
     let events_out = unsafe { view_mut(events_out, nev_out) };
-    let r = md_integrate(t0, t1, y0, p, w, rtol, atol, dirs, lat, grid, out, obs, events_out);
+    let ev_index_out = unsafe { view_mut(ev_index_out, nev_out) };
+    let r = md_integrate(t0, t1, y0, p, w, rtol, atol, dirs, lat, grid, out, obs, events_out, ev_index_out);
     let counters = unsafe { view_mut(counters, 8) };
     counters[0] = r.0 as f64;
     counters[1] = r.1 as f64;
@@ -209,6 +211,11 @@ class Run:
     """When each crossing fired, in order -- the instants the driver located, carried back beside
     the count. Several crossings that settle at one instant each carry that same time."""
 
+    event_list: tuple[Event, ...]
+    """The crossings as the interpreter reports them: the instant, the index of the indicator that
+    fired, and its cause in Modelica -- the same `Event` the interpreter's `Result.events` holds.
+    The index comes back beside the instant over the FFI; the cause is read from the model."""
+
     steps: int
     rejected: int
     evaluations: int
@@ -258,9 +265,12 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
     n, nobs = len(y0), len(kernel.code.observed)
     out = np.zeros(len(grid) * n, dtype=np.float64)
     obs = np.zeros(len(grid) * nobs, dtype=np.float64)
-    # A generous buffer for the event instants: far more than any well-behaved run fires, so the
-    # count and the instants agree; the chattering guard stops a runaway before it could overflow.
-    ev_out = np.zeros(max(4096, 8 * len(grid)), dtype=np.float64)
+    # Two generous parallel buffers for the events -- the instant and the index of the indicator
+    # that fired -- far more than any well-behaved run needs; the chattering guard stops a runaway
+    # before it could overflow. The cause is read from the model, not carried across.
+    ev_cap = max(4096, 8 * len(grid))
+    ev_out = np.zeros(ev_cap, dtype=np.float64)
+    ev_idx = np.zeros(ev_cap, dtype=np.float64)
     counters = np.zeros(8, dtype=np.float64)
 
     # Every array goes across as its address: the entry point casts each to a slice of the
@@ -277,7 +287,7 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
-        ctypes.c_void_p, ctypes.c_size_t,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_void_p,
     ]  # fmt: skip
     status = run(
@@ -289,7 +299,7 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
         dirs.ctypes.data, lat.ctypes.data, len(dirs),
         grid.ctypes.data, len(grid),
         out.ctypes.data, obs.ctypes.data, nobs,
-        ev_out.ctypes.data, len(ev_out),
+        ev_out.ctypes.data, ev_idx.ctypes.data, ev_cap,
         counters.ctypes.data,
     )  # fmt: skip
     if status != 0:
@@ -299,10 +309,17 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
     names = (*system.modes[0].states, *kernel.code.observed)  # type: ignore[attr-defined]
     values = np.vstack([out.reshape(len(grid), n).T, obs.reshape(len(grid), nobs).T])
     count = int(counters[6])
+    kept = min(count, ev_cap)
+    # The full events, as the interpreter reports them: the instant and index come back over the
+    # FFI, the cause `str(...)` is read from the model's own indicator list by that index.
+    event_list = tuple(
+        Event(float(ev_out[k]), int(ev_idx[k]), str(events[int(ev_idx[k])])) for k in range(kept)
+    )
     return Run(
         result=Result(system.name, grid, names, values),
         events=count,
-        event_times=tuple(float(t) for t in ev_out[: min(count, len(ev_out))]),
+        event_times=tuple(event.time for event in event_list),
+        event_list=event_list,
         steps=int(counters[1]),
         rejected=int(counters[2]),
         evaluations=int(counters[3]),

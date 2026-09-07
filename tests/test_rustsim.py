@@ -3,8 +3,8 @@
 `modelica.sim.rustsim` is the packaging the Rust backend was missing: one shared library per
 model, built once and cached by content hash, loaded through ctypes, answering with the same
 `Result` the interpreter returns. These tests hold the three promises that make it usable --
-the trajectory is the interpreter's, the events are the interpreter's (both the tally and the
-instants), and the second call for a model does not compile -- on a model of each kind: smooth
+the trajectory is the interpreter's, the events are the interpreter's (the tally, the instants and
+the causes), and the second call for a model does not compile -- on a model of each kind: smooth
 (RLCCircuit), with events (BouncingBall), and switching state sets at runtime (Pendulum, compared
 on its coordinates).
 
@@ -50,7 +50,7 @@ def _system(stem: str):  # noqa: ANN202 - the return type is System, imported la
 def test_the_compiled_run_matches_the_interpreter(
     stem: str, names: tuple[str, ...] | None, tmp_path: Path
 ) -> None:
-    """Same grid, same tolerance, same names: the two tiers agree, and so do the event tallies.
+    """Same grid, same tolerance, same names: the two tiers agree, and so do the events.
 
     ``names`` picks what is compared: the states by default, and for a model that switches
     state sets the coordinates, which mean the same in every set where the states do not.
@@ -65,12 +65,16 @@ def test_the_compiled_run_matches_the_interpreter(
     assert run.events == len(reference.events), (
         f"{stem}: rust fired {run.events} events, interpreter {len(reference.events)}"
     )
-    # The instants, not only the tally: each crossing the driver located, against where the
-    # interpreter located it. BouncingBall's six bounces are the test that carries.
-    interp_times = [event.time for event in reference.events]
-    assert len(run.event_times) == len(interp_times)
-    for got, want in zip(run.event_times, interp_times, strict=True):
-        assert got == pytest.approx(want, abs=1e-6), f"{stem}: event at {got}, interpreter {want}"
+    # The whole events, not only the tally: each crossing the driver located -- its instant, the
+    # index of the indicator that fired, and its cause -- against the interpreter's. BouncingBall's
+    # six bounces are the test that carries.
+    assert len(run.event_list) == len(reference.events)
+    for got, want in zip(run.event_list, reference.events, strict=True):
+        assert got.time == pytest.approx(want.time, abs=1e-6), (
+            f"{stem}: event at {got.time}, want {want.time}"
+        )
+        assert got.index == want.index, f"{stem}: event index {got.index}, want {want.index}"
+        assert got.cause == want.cause, f"{stem}: event cause {got.cause!r}, want {want.cause!r}"
     assert run.end == pytest.approx(stop)
     rows = numpy.clip(
         numpy.searchsorted(reference.time, grid, side="left"), 0, len(reference.time) - 1

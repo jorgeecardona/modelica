@@ -547,6 +547,7 @@ fn md_integrate(
     out: &mut [f64],
     obs: &mut [f64],
     events_out: &mut [f64],
+    ev_index_out: &mut [f64],
 ) -> (i32, usize, usize, usize, usize, usize, usize, f64) {
     let n = y0.len();
     // Observed variables at every grid point, grid.len() by nobs, alongside the states in
@@ -806,10 +807,12 @@ fn md_integrate(
                 transition(e, te, &ev_y, p, w, &mut y_new);
                 for q in 0..n { ev_y[q] = y_new[q]; }
                 fired_flags[e] = true;
-                // Carry the instant back, one per fired crossing: several may settle at one `te`,
-                // and each gets that same time, so the count and the instants agree. A buffer too
-                // small to hold them all keeps the earliest and the count still tallies.
+                // Carry the instant and the crossing's index back, one per fired crossing: several
+                // may settle at one `te`, and each gets that same time with its own index, so the
+                // caller can name the cause. A buffer too small keeps the earliest; the count still
+                // tallies.
                 if events_total < events_out.len() { events_out[events_total] = te; }
+                if events_total < ev_index_out.len() { ev_index_out[events_total] = e as f64; }
                 events_total += 1;
                 pending = -1;
                 indicators(te, &ev_y, p, w, &mut z_ev);

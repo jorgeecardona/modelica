@@ -15,11 +15,12 @@ source of truth and is bumped automatically when shipped source changes.
   by name. The existing connection machinery needed no change. The bundled standard-library slice
   gained `Modelica.Blocks` (`Sources.Constant`, `Math.Gain`/`Feedback`, `Continuous.Integrator`/
   `FirstOrder`), wired by the real `RealInput`/`RealOutput`.
-- `modelica.sim.rustsim`: **the compiled run carries the event instants back.** `md_integrate`
-  gained an output buffer it writes each located crossing time into, threaded through the FFI
-  entry point, and `Run` gained `event_times` beside the count. The bouncing ball's six bounce
-  instants and a genset's load-switch instant match the interpreter to a microsecond; a smooth
-  model carries none. Only the event *cause* is still the interpreter's alone.
+- `modelica.sim.rustsim`: **the compiled run carries the events back in full.** `md_integrate`
+  gained two output buffers it writes each located crossing's instant and indicator index into,
+  threaded through the FFI entry point; `rustsim` reads the cause from the model by that index, so
+  `Run.event_list` is the interpreter's `Result.events` -- instant, index and cause. The bouncing
+  ball's six bounces, the roaster's nine and a genset's load switch match the interpreter's events
+  exactly (instants to a microsecond); a smooth model carries none.
 - `modelica.sim.rustsim`: **the Rust backend, packaged.** `rustsim.simulate(system, stop, ...)`
   takes the same knobs as `simulate` and returns the same `Result`, from a shared library:
   the model's unit and the radau runtime as one source behind a C entry point, compiled once
