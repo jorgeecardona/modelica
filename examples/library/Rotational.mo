@@ -39,4 +39,12 @@ package Rotational "Minimal 1-D rotational mechanics, after Modelica.Mechanics.R
     flange.phi = phi0;
   end Fixed;
 
+  model SpeedSensor "Reports a flange's speed as a signal, drawing no torque: the sensor a speed loop reads"
+    Flange flange "Flange whose speed is measured";
+    Blocks.OutPort w "Measured angular velocity";
+  equation
+    w.signal = der(flange.phi);
+    flange.tau = 0;
+  end SpeedSensor;
+
 end Rotational;

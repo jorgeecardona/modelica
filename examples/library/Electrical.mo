@@ -68,6 +68,13 @@ package Electrical "Minimal analog electrical components, after Modelica.Electri
     annotation(Icon(graphics = {Line(points = {{-90, 0}, {-30, 0}}), Line(points = {{30, 0}, {90, 0}}), Ellipse(extent = {{-30, 30}, {30, -30}}), Line(points = {{-16, 0}, {-4, 0}}), Line(points = {{-10, -6}, {-10, 6}}), Line(points = {{4, 0}, {16, 0}}), Text(extent = {{-100.0, 62.0}, {100.0, 40.0}}, textString = "%name")}));
   end ConstantVoltage;
 
+  model SignalVoltage "A voltage source driven by a signal: the actuator a controller moves the circuit through"
+    extends OnePort;
+    Blocks.InPort v_signal "Commanded voltage";
+  equation
+    v = v_signal.signal;
+  end SignalVoltage;
+
   model Ground "Reference potential; every circuit needs exactly one"
     Pin p annotation(Placement(transformation(extent = {{-4.0, 86.0}, {4.0, 94.0}})));
   equation

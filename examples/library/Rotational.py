@@ -1,5 +1,14 @@
 """The Python twin of ``Rotational.mo``."""
 
+import sys
+from pathlib import Path
+
+# `SpeedSensor` reports its flange's speed as a signal, so the rotational domain reaches into
+# the block domain beside it.
+sys.path.append(str(Path(__file__).resolve().parent))
+
+import Blocks
+
 from modelica.build import Connector, Model, Real, alias, der, flow, package, parameter, to_modelica
 
 Angle = alias("Angle", Real, unit="rad")
@@ -51,6 +60,17 @@ class Fixed(Model):
 
     def equations(self):
         yield self.flange.phi == self.phi0
+
+
+class SpeedSensor(Model):
+    """Reports a flange's speed as a signal, drawing no torque: the sensor a speed loop reads"""
+
+    flange = Flange("Flange whose speed is measured")
+    w = Blocks.OutPort("Measured angular velocity")
+
+    def equations(self):
+        yield self.w.signal == der(self.flange.phi)
+        yield self.flange.tau == 0
 
 
 PACKAGE = package(

@@ -8,10 +8,11 @@ Modelica it stands for.
 import sys
 from pathlib import Path
 
-# `HeatingResistor` dissipates into a thermal port, so the electrical domain reaches into
-# the thermal one that sits beside it.
+# `HeatingResistor` dissipates into a thermal port and `SignalVoltage` is driven by a signal, so
+# the electrical domain reaches into the thermal and the block domains that sit beside it.
 sys.path.append(str(Path(__file__).resolve().parent))
 
+import Blocks
 import Thermal
 
 from modelica.build import (
@@ -184,6 +185,15 @@ class ConstantVoltage(OnePort):
 
     def equations(self):
         yield self.v == self.V
+
+
+class SignalVoltage(OnePort):
+    """A voltage source driven by a signal: the actuator a controller moves the circuit through"""
+
+    v_signal = Blocks.InPort("Commanded voltage")
+
+    def equations(self):
+        yield self.v == self.v_signal.signal
 
 
 class Ground(Model):
