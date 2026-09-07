@@ -96,9 +96,13 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
 
 ### Reading the chart
 
-- **Drag** to zoom in time (or in x, in a phase plot). **Double-click** the chart to reset the
-  zoom and clear the marks. **Hover** for a cursor readout of every drawn variable, in the
-  display units, at the nearest sample: the values appear beside each variable in the legend,
+- **Drag** to zoom in time (or in x, in a phase plot). Zooming into a window the run only
+  samples sparsely re-reads it at full density over just that span, so the sub-second spike of
+  a two-minute run is sharp without touching the resolution knob (the automatic form of `Δt ≤`):
+  the integration is unchanged, only the output is read more finely where you are looking. A
+  live `.mo` only, and only when the window is actually sparse. **Double-click** the chart to
+  reset the zoom and clear the marks. **Hover** for a cursor readout of every drawn variable, in
+  the display units, at the nearest sample: the values appear beside each variable in the legend,
   and, while the legend is hidden in a narrow pane, in the footer instead.
 - **Measurement marks.** Click the chart to place a mark at the nearest sample; click again
   for a second and the footer shows Δt and the change in every drawn variable between them.

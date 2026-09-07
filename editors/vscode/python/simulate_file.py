@@ -80,6 +80,11 @@ _GRID = 4000
 has samples inside its window; the dense-output evaluation is cheap next to the integration."""
 
 
+_WINDOW_GRID = 2500
+"""Points laid over a zoom's window on a resample, on top of the ordinary grid. Under the send
+budget on its own, so the window is kept whole and the rest of the horizon fills what is left."""
+
+
 _MAX_POINTS = 60000
 """A hard ceiling on the points sent, so a tiny ``max_dt`` over a long horizon cannot run away."""
 
@@ -89,6 +94,7 @@ def _sample(
     columns: list[NDArray[np.float64]],
     limit: int = 4000,
     max_dt: float | None = None,
+    window: tuple[float, float] | None = None,
 ) -> list[int]:
     """Which instants to send the panel: evenly dense, and keeping every sharp feature.
 
@@ -96,6 +102,11 @@ def _sample(
     more than ``max_dt`` apart in time (down to what the run's own grid holds), so the line is
     that dense everywhere. It overrides the point budget, up to a hard ceiling that keeps a tiny
     step over a long horizon from running away.
+
+    When ``window`` is set the caller has zoomed in and wants the run re-read at full density
+    there: every instant inside ``[lo, hi]`` is kept (the run's grid is built dense in that span
+    by `_integrate_from`), and the rest of the horizon is thinned to what is left of the budget,
+    so a zoom into the sub-second spike of a two-minute run draws sharp without a manual knob.
 
     Two parts. A uniform grid along the axis the run is drawn on gives a consistent density, so
     a curve is a curve everywhere; and Douglas-Peucker over each series adds the sharp features
@@ -111,13 +122,19 @@ def _sample(
     for -- minimal, so a many-swing run like Lorenz drew as sawtooth across the gentle stretches.
     """
     n = len(time)
-    if n <= limit and max_dt is None:
+    if n <= limit and max_dt is None and window is None:
         return list(range(n))
     keep = np.zeros(n, dtype=bool)
     keep[0] = keep[-1] = True
     breaks = np.flatnonzero(np.diff(time) <= 0.0)
     keep[breaks] = True
     keep[np.minimum(breaks + 1, n - 1)] = True
+    if window is not None:
+        # Every instant the zoom is looking at, kept outright. The grid is dense there, so this is
+        # the resolution; the uniform-and-features pass below then fills the rest of the horizon
+        # from what budget is left. The dense span is sized under the budget, so this cannot on its
+        # own overrun it.
+        keep[(time >= window[0]) & (time <= window[1])] = True
     if max_dt is not None and max_dt > 0.0:
         # A demanded resolution: keep an instant in every ``max_dt``-wide bin of time, so the gaps
         # are bounded by ``max_dt`` where the run's grid is that fine. The first index of each bin
@@ -249,6 +266,7 @@ def _integrate_from(  # noqa: PLR0913, PLR0917 - the run's knobs, passed straigh
     states: list[str],
     solver: _Solver,
     max_dt: float | None = None,
+    window: tuple[float, float] | None = None,
 ) -> tuple[Result, dict[str, object]]:
     """The panel's main run, with a checkpoint out and, optionally, a checkpoint in.
 
@@ -279,6 +297,14 @@ def _integrate_from(  # noqa: PLR0913, PLR0917 - the run's knobs, passed straigh
         # left when a bin boundary fell between two grid points.
         count = min(_MAX_POINTS, max(2, int(2.0 * span / max_dt) + 1))
         grid = np.linspace(start, stop, count)
+    elif window is not None:
+        # A zoom asks for full density inside its span without a manual `max_dt`: the whole
+        # horizon at the ordinary grid, with a dense band laid over the window, so the integration
+        # is unchanged (its adaptive steps already resolve the dynamics) and only the output is
+        # read more finely where the panel is looking. `_sample` keeps every band point.
+        lo, hi = max(start, window[0]), min(stop, window[1])
+        band = np.linspace(lo, hi, _WINDOW_GRID) if hi > lo else np.empty(0)
+        grid = np.unique(np.concatenate([np.linspace(0.0, stop, _GRID), band]))
     elif resume is not None:
         grid = np.linspace(start, stop, max(200, int(_GRID * span / max(stop, 1e-12))))
     else:
@@ -514,6 +540,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     resume: dict[str, object] | None = None,
     tolerance: float | None = None,
     max_dt: float | None = None,
+    window: tuple[float, float] | None = None,
 ) -> dict[str, object]:
     system, kernel, units = _load(path, name, libraries)
     # The model's own integrator, unless the panel asked for a display tolerance. A model's
@@ -555,7 +582,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         stop, result, note = _auto_stop(kernel, states, until, frm, default, cap, params, solver)
     else:
         result, checkpoint = _integrate_from(
-            kernel, stop, params, resume, list(system.modes[0].states), solver, max_dt
+            kernel, stop, params, resume, list(system.modes[0].states), solver, max_dt, window
         )
     time = np.asarray(result.time, dtype=float)
     # A parameter is one flat value; keep the ones that move, plus the states so a constant
@@ -567,7 +594,7 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         finite = column[np.isfinite(column)]
         if variable in states or (finite.size and float(finite.max() - finite.min()) > 0.0):
             full[variable] = column
-    keep = _sample(time, list(full.values()), max_dt=max_dt)
+    keep = _sample(time, list(full.values()), max_dt=max_dt, window=window)
     series: dict[str, list[float | None]] = {
         variable: [_r7(v) for v in column[keep]] for variable, column in full.items()
     }
@@ -730,6 +757,15 @@ def main() -> None:
         help="the largest gap between output points, in seconds: the resolution of the drawn "
         "line, dense everywhere; omit to let the sampler choose",
     )
+    ap.add_argument(
+        "--window",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("LO", "HI"),
+        help="re-read the run at full density inside [LO, HI] seconds (a zoom's span): the "
+        "integration is unchanged, only the output is sampled dense there and thinned elsewhere",
+    )
     args = ap.parse_args()
 
     path = Path(args.path)
@@ -752,6 +788,7 @@ def main() -> None:
             else None,
             tolerance=args.tolerance,
             max_dt=args.max_dt,
+            window=tuple(args.window) if args.window else None,
         )
         print(json.dumps({"models": [record]}, separators=(",", ":"), allow_nan=False))
     except Exception as error:  # noqa: BLE001 - report every failure to the panel, never crash silently

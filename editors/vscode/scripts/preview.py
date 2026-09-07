@@ -62,6 +62,23 @@ window.__answer = (m) => {
     rec.resumedFrom = t0;
     rec.checkpoint = { t: rec.stop, y: m.resume.y, w: m.resume.w };
   }
+  if (m.window && m.window.length === 2) {
+    // A resample-on-zoom: re-read the run dense inside the window and thin outside, by
+    // interpolating the base series onto a grid that is a fine linspace over [lo, hi] plus the
+    // base's own instants elsewhere. The stop is unchanged, so the panel holds the zoom.
+    const lo = m.window[0], hi = m.window[1], bt = base.t, K = 400;
+    const dense = Array.from({ length: K + 1 }, (_, i) => lo + ((hi - lo) * i) / K);
+    const grid = [...bt.filter((t) => t < lo || t > hi), ...dense].sort((a, b) => a - b);
+    const at = (col, t) => {
+      let j = 0; while (j < bt.length - 1 && bt[j + 1] < t) j++;
+      const t0 = bt[j], t1 = bt[Math.min(j + 1, bt.length - 1)];
+      const v0 = col[j], v1 = col[Math.min(j + 1, col.length - 1)];
+      if (v0 === null || v1 === null) return v0;
+      return t1 > t0 ? v0 + (v1 - v0) * ((t - t0) / (t1 - t0)) : v0;
+    };
+    rec.t = grid;
+    for (const name of Object.keys(rec.series)) rec.series[name] = grid.map((t) => { const v = at(base.series[name], t); return v === null ? null : v * f; });
+  }
   if (m.sensitivity) {
     const editable = rec.parameters.filter((p) => !p.derived && p.value);
     rec.sensitivity = { response: m.sensitivity, step: m.sstep || 0.05, base: 100,

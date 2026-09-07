@@ -61,6 +61,8 @@ function ensurePanel(context) {
         tolerance: typeof msg.tolerance === "number" ? msg.tolerance : null,
         // The largest gap between output points, in seconds; null lets the simulator choose.
         maxDt: typeof msg.maxDt === "number" && msg.maxDt > 0 ? msg.maxDt : null,
+        // A zoom's [lo, hi] span in seconds to re-read at full density; null is the whole horizon.
+        window: Array.isArray(msg.window) && msg.window.length === 2 ? msg.window : null,
       };
       runHelper(live.context, live.file, opts, (data) => {
         panel.webview.postMessage(
@@ -211,12 +213,15 @@ function runtimeCommand(context, cfg, file, opts) {
     ? ["--tolerance", String(opts.tolerance)]
     : [];
   // The largest gap between output points; omitted lets the simulator choose the density.
+  const windowArg = Array.isArray(opts.window) && opts.window.length === 2
+    ? ["--window", String(opts.window[0]), String(opts.window[1])]
+    : [];
   const maxDtArg = typeof opts.maxDt === "number" && opts.maxDt > 0
     ? ["--max-dt", String(opts.maxDt)]
     : [];
   return {
     cmd: python[0],
-    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...setArgs, ...sensArgs, ...resumeArgs, ...tolArg, ...maxDtArg, ...libs],
+    args: [...python.slice(1), helper, file, ...stopArg, ...untilArg, ...setArgs, ...sensArgs, ...resumeArgs, ...tolArg, ...maxDtArg, ...windowArg, ...libs],
   };
 }
 

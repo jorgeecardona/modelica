@@ -452,6 +452,10 @@ let timeMode = "s";      // time axis: "s" seconds, or "min" minutes -- the data
 // spacing and the sampler keeps it, so the line is this dense everywhere, however far it is
 // zoomed. Smaller is denser and a bigger payload.
 let maxDt = null;
+// Resample-on-zoom: a time zoom into a sparse window asks the simulator to re-read the run at
+// full density over just that span (the automatic form of the max-Δt knob). `resampling` guards
+// against a second request while one is in flight; it is cleared when the live run lands.
+let resampling = false;
 // How hard the integrator works: the relative tolerance the panel asks for. "" means the
 // model's own reference tolerance (its .toml), which reproduces its reference points and, on a
 // stiff or chaotic model, is several times slower than looking at a trajectory needs. The
@@ -1828,7 +1832,7 @@ svg.addEventListener("pointerup", (e) => {
   // axis as drawn, so on a log time axis a decade counts as wide however few seconds it holds.
   const span = logTime() ? lg(hi) - lg(lo) : hi - lo;
   const full = logTime() ? lg(XD[1]) - lg(XD[0]) : XD[1] - XD[0];
-  if (span > full * 1e-4) { if (xVar) xwin = [lo, hi]; else win = [lo, hi]; }
+  if (span > full * 1e-4) { if (xVar) xwin = [lo, hi]; else { win = [lo, hi]; maybeResample(lo, hi); } }
   // No band: a click. Shift places a horizontal level guide on the strip under the pointer; a
   // plain click places a measurement mark at the nearest sample.
   else if (e.shiftKey && !xVar) { placeGuide(e); return; }
@@ -1981,6 +1985,24 @@ function reRun(until) {
   const resume = (!until && ck && same && sameTol && stop > (D.stop || 0) * (1 + 1e-9)) ? ck : null;
   vscodeApi.postMessage({ type: "simulate", stop: stop, until: until, from: stop,
     sets: overrides, runId: RUNS.length - 1, resume: resume, tolerance: tol, maxDt: maxDt });
+}
+// A time zoom into a window the current run samples sparsely re-reads the run at full density
+// over just that span: the automatic form of the max-Δt knob, so the sub-second spike of a
+// two-minute run is sharp without one. Live .mo only (the gallery cannot re-simulate), the time
+// view only (a phase plot has no time window), and only when the window is actually sparse and a
+// real sub-span -- zooming into an already-dense region, or barely at all, re-fetches nothing.
+// The re-run keeps the stop and parameters, so `select()` holds the zoom when the data lands.
+function maybeResample(lo, hi) {
+  if (!LIVE || !vscodeApi || xVar || !D || !N || resampling) return;
+  if (hi - lo >= 0.9 * (T[N - 1] - T[0])) return;      // essentially the whole run: no gain
+  let inWin = 0;
+  for (let k = 0; k < N; k++) if (T[k] >= lo && T[k] <= hi) inWin++;
+  if (inWin >= 300) return;                             // already dense enough here
+  resampling = true;
+  const tol = speed ? Number(speed) : null;
+  foot.textContent = "sharpening this window …";
+  vscodeApi.postMessage({ type: "simulate", stop: D.stop, sets: overrides,
+    runId: RUNS.length - 1, tolerance: tol, maxDt: maxDt, window: [lo, hi] });
 }
 const stopInput = document.getElementById("stop");
 if (stopInput) {
@@ -2174,6 +2196,7 @@ window.addEventListener("message", (e) => {
     const liveIdx = RUNS.length - 1;
     const ri = (typeof m.runId === "number" && m.runId >= 0 && m.runId < RUNS.length) ? m.runId : liveIdx;
     if (ri === liveIdx) {
+      resampling = false;  // whatever landed, a resample request is no longer outstanding
       // The live run defines the time grid: swap it in (select() rebases the pinned runs onto
       // it), then bring any pinned run whose stop differs -- an automatic stop may have moved
       // it -- to the same horizon, so the comparison covers the same span.
