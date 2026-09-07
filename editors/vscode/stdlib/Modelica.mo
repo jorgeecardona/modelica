@@ -172,6 +172,15 @@ package Modelica "A curated slice of the Modelica Standard Library, under its re
         equation
           f = d * der(s_rel);
         end Damper;
+
+        model SpringDamper "Linear 1D translational spring and damper in parallel"
+          extends Modelica.Mechanics.Translational.Interfaces.PartialCompliant;
+          parameter Modelica.Units.SI.TranslationalSpringConstant c = 1 "Spring constant";
+          parameter Modelica.Units.SI.TranslationalDampingConstant d = 1 "Damping constant";
+          parameter Modelica.Units.SI.Position s_rel0 = 0 "Unstretched length";
+        equation
+          f = c * (s_rel - s_rel0) + d * der(s_rel);
+        end SpringDamper;
       end Components;
     end Translational;
 
@@ -217,6 +226,19 @@ package Modelica "A curated slice of the Modelica Standard Library, under its re
           flange_b.tau = tau;
           flange_a.tau = -tau;
         end Spring;
+
+        model Damper "Linear 1D rotational damper"
+          parameter Modelica.Units.SI.RotationalDampingConstant d = 1 "Damping constant";
+          Modelica.Units.SI.Angle phi_rel "Relative angle";
+          Modelica.Units.SI.Torque tau "Torque through the damper";
+          Modelica.Mechanics.Rotational.Interfaces.Flange flange_a;
+          Modelica.Mechanics.Rotational.Interfaces.Flange flange_b;
+        equation
+          phi_rel = flange_b.phi - flange_a.phi;
+          tau = d * der(phi_rel);
+          flange_b.tau = tau;
+          flange_a.tau = -tau;
+        end Damper;
       end Components;
     end Rotational;
   end Mechanics;

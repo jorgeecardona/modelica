@@ -114,6 +114,68 @@ def test_rotational_inertia_spring_is_a_cosine() -> None:
     assert np.max(np.abs(np.asarray(result["flywheel.phi"]) - 0.5 * np.cos(3.0 * time))) < 1e-3
 
 
+def test_rotational_inertia_and_damper_spins_down_exponentially() -> None:
+    """An inertia braked by a damper to a fixed flange: J w' = -d w, so w = w0 e^{-(d/J) t}."""
+    result = _simulate(
+        """
+        model RotDamp
+          Modelica.Mechanics.Rotational.Components.Fixed wall(phi0 = 0);
+          Modelica.Mechanics.Rotational.Components.Damper brake(d = 2);
+          Modelica.Mechanics.Rotational.Components.Inertia flywheel(J = 1, phi(start = 0, fixed = true), w(start = 5, fixed = true));
+        equation
+          connect(wall.flange, brake.flange_a);
+          connect(brake.flange_b, flywheel.flange_a);
+        end RotDamp;
+        """,
+        "RotDamp",
+        stop=3.0,
+    )
+    time = np.asarray(result.time)
+    assert np.max(np.abs(np.asarray(result["flywheel.w"]) - 5.0 * np.exp(-2.0 * time))) < 1e-3
+
+
+def test_electrical_lc_tank_oscillates_at_one_over_sqrt_lc() -> None:
+    """An L-C tank with the capacitor charged: v_C(t) = v0 cos(t), omega = 1/sqrt(L C) = 1."""
+    result = _simulate(
+        """
+        model LC
+          Modelica.Electrical.Analog.Basic.Capacitor cap(C = 1, v(start = 1, fixed = true));
+          Modelica.Electrical.Analog.Basic.Inductor ind(L = 1, i(start = 0, fixed = true));
+          Modelica.Electrical.Analog.Basic.Ground g;
+        equation
+          connect(cap.p, ind.p);
+          connect(cap.n, ind.n);
+          connect(cap.n, g.p);
+        end LC;
+        """,
+        "LC",
+        stop=6.0,
+    )
+    time = np.asarray(result.time)
+    assert np.max(np.abs(np.asarray(result["cap.v"]) - np.cos(time))) < 1e-3
+
+
+def test_translational_spring_damper_settles() -> None:
+    """A mass on a spring-damper starts displaced and, being damped, settles to rest at zero."""
+    result = _simulate(
+        """
+        model MSD
+          Modelica.Mechanics.Translational.Components.Fixed wall(s0 = 0);
+          Modelica.Mechanics.Translational.Components.SpringDamper sd(c = 100, d = 4, s_rel0 = 0);
+          Modelica.Mechanics.Translational.Components.Mass mass(m = 1, s(start = 1, fixed = true), v(start = 0, fixed = true));
+        equation
+          connect(wall.flange, sd.flange_a);
+          connect(sd.flange_b, mass.flange_a);
+        end MSD;
+        """,
+        "MSD",
+        stop=6.0,
+    )
+    s = np.asarray(result["mass.s"])
+    assert np.max(np.abs(s)) < 1.001  # the spring pulls it back, never past the start amplitude
+    assert abs(s[-1]) < 0.02  # damped, so it has settled at rest by the end
+
+
 def test_blocks_is_absent_until_the_causal_connector_lands() -> None:
     """Blocks is left out on purpose; a model that reaches for it fails by name, not silently."""
     from modelica.ir.flatten import FlattenError  # noqa: PLC0415 - the error this test is about
@@ -127,8 +189,8 @@ def test_every_shipped_domain_instantiates() -> None:
     """One class from each domain flattens, so the slice's four packages all resolve."""
     probes = {
         "Electrical": "Modelica.Electrical.Analog.Basic.Inductor e;",
-        "Translational": "Modelica.Mechanics.Translational.Components.Damper t;",
-        "Rotational": "Modelica.Mechanics.Rotational.Components.Inertia r;",
+        "Translational": "Modelica.Mechanics.Translational.Components.SpringDamper t;",
+        "Rotational": "Modelica.Mechanics.Rotational.Components.Damper r;",
         "Thermal": "Modelica.Thermal.HeatTransfer.Components.ThermalConductor h;",
     }
     lib = parse(STDLIB.read_text(encoding="utf-8"))
