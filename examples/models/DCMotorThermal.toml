@@ -1,0 +1,102 @@
+summary = "A loaded DC motor warms as it runs: the winding's ohmic loss heats it, and the hotter winding resists more, so the current settles and then creeps as the temperature climbs."
+teaches = ["three domains coupled in one model", "temperature feeding back into resistance", "heat splitting at a thermal node"]
+requires = ["Electrical", "Rotational", "Machines", "Thermal"]
+
+[parse]
+classes = ["DCMotorThermal"]
+
+[flatten]
+model = "DCMotorThermal"
+states = ["coil.i", "rotor.phi", "rotor.w", "winding_mass.T"]
+index = 1
+equations = 50
+balanced = true
+
+# The whole model in four equations, which is what the reference integrates:
+#   Lw di/dt = V - R(T)*i - k*w         the electrical loop, back-EMF included
+#   J  dw/dt = k*i - d*w                the shaft, driven against viscous friction
+#   dphi/dt  = w
+#   C  dT/dt = R(T)*i^2 - G*(T - T_amb) the winding heats on its own loss, cools to ambient
+# with R(T) = R_ref*(1 + alpha*(T - T_ref)), so the thermal state reaches back into the
+# electrical one. The electrical constant Lw/Rw = 0.1 s and the mechanical J/(d + k^2/Rw) =
+# 0.033 s are hundredths of a second; the thermal C/G = 40 s is minutes, so the current runs
+# up and settles at once and then drifts down as the winding warms over the next two minutes.
+[simulate]
+stop = 120.0
+tolerance = 1e-10
+
+# The run-up: the current spikes to ten amps before the back-EMF builds, then falls back.
+[[simulate.point]]
+t = 0.05
+values = { "coil.i" = 8.52370691466, "rotor.w" = 5.8242627831 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.5
+values = { "coil.i" = 2.80125493177, "rotor.w" = 21.266672768 }
+rtol = 1e-6
+source = "reference"
+
+# Mechanically settled, thermally still cold: the winding has barely begun to warm.
+[[simulate.point]]
+t = 5.0
+values = { "coil.i" = 2.18118397538, "rotor.w" = 21.812148372, "winding_mass.T" = 293.93471753 }
+rtol = 1e-6
+source = "reference"
+
+# One thermal time constant in: the winding is 3 K over ambient and its resistance has risen,
+# so the current sits a hair below where it was at t = 5 s. That drop is the whole point.
+[[simulate.point]]
+t = 40.0
+values = { "coil.i" = 2.17939336498, "rotor.w" = 21.7940638061, "winding_mass.T" = 296.273199233 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 120.0
+values = { "coil.i" = 2.17826794195, "rotor.w" = 21.7826975565, "winding_mass.T" = 297.744917578 }
+rtol = 1e-6
+source = "reference"
+
+# The source holds its 12 V across the whole electrical loop.
+[[simulate.invariant]]
+expr = "supply.p.v - supply.n.v"
+value = 12.0
+atol = 1e-9
+
+# Torque balance where the shaft leaves the converter: what the converter makes, the rotor
+# and the friction take.
+[[simulate.invariant]]
+expr = "converter.flange.tau + rotor.flange_a.tau"
+value = 0.0
+atol = 1e-9
+
+# The winding's heat splits at one node: what the loss makes flows into the mass and on to
+# ambient, and the three port flows sum to zero. This is the coupling made a conservation law.
+[[simulate.invariant]]
+expr = "winding.heat_port.Q_flow + winding_mass.port.Q_flow + to_ambient.port_a.Q_flow"
+value = 0.0
+atol = 1e-9
+
+# Steady state: 12 = R(T)*i + k*w with k*i = d*w gives i settling near 2.18 A. The approach
+# is monotone here, so a 1 percent band from t = 100 s is where the envelope actually is.
+[[simulate.invariant]]
+expr = "coil.i"
+value = 2.178267942
+rtol = 1e-2
+after = 100.0
+
+# The winding starts at ambient and climbs toward its steady rise, never past it.
+[[simulate.invariant]]
+expr = "winding_mass.T"
+min = 293.14
+max = 298.0
+
+# The run-up draws five times the running current: 10.2 A against 2.18 A, with a brief
+# negative swing as the back-EMF overshoots. Sizing the supply for the steady state alone
+# is how a real one browns out at start.
+[[simulate.invariant]]
+expr = "coil.i"
+min = -0.06
+max = 10.25

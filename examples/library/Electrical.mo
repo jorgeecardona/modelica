@@ -30,6 +30,20 @@ package Electrical "Minimal analog electrical components, after Modelica.Electri
     annotation(Icon(graphics = {Line(points = {{-90, 0}, {-52, 0}}), Line(points = {{-52, 0}, {-42, 22}, {-22, -22}, {-2, 22}, {18, -22}, {38, 22}, {48, 0}, {52, 0}}), Line(points = {{52, 0}, {90, 0}}), Text(extent = {{-100.0, 62.0}, {100.0, 40.0}}, textString = "%name")}));
   end Resistor;
 
+  model HeatingResistor "A resistor whose resistance rises with its port temperature, losing v*i as heat"
+    extends OnePort;
+    parameter Resistance R_ref = 1 "Resistance at the reference temperature";
+    parameter Real alpha(unit = "1/K") = 0 "Temperature coefficient of resistance";
+    parameter Real T_ref(unit = "K") = 293.15 "Reference temperature";
+    Resistance R_actual "Resistance at the port temperature";
+    Thermal.HeatPort heat_port "Where the ohmic loss goes";
+  equation
+    R_actual = R_ref * (1 + alpha * (heat_port.T - T_ref));
+    v = R_actual * i;
+    heat_port.Q_flow = -v * i;
+    annotation(Icon(graphics = {Line(points = {{-90, 0}, {-52, 0}}), Line(points = {{-52, 0}, {-42, 22}, {-22, -22}, {-2, 22}, {18, -22}, {38, 22}, {48, 0}, {52, 0}}), Line(points = {{52, 0}, {90, 0}}), Line(points = {{0, -22}, {0, -58}}), Text(extent = {{-100.0, 62.0}, {100.0, 40.0}}, textString = "%name")}));
+  end HeatingResistor;
+
   model Capacitor "i = C*der(v) -- introduces one state, v"
     extends OnePort;
     parameter Capacitance C = 1 "Capacitance";

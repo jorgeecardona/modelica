@@ -5,6 +5,15 @@ the module *is* the package -- ``Electrical.Resistor(R=100)`` reads exactly like
 Modelica it stands for.
 """
 
+import sys
+from pathlib import Path
+
+# `HeatingResistor` dissipates into a thermal port, so the electrical domain reaches into
+# the thermal one that sits beside it.
+sys.path.append(str(Path(__file__).resolve().parent))
+
+import Thermal
+
 from modelica.build import (
     Connector,
     Model,
@@ -85,6 +94,41 @@ class Resistor(OnePort):
 
     def equations(self):
         yield self.v == self.R * self.i
+
+
+class HeatingResistor(OnePort):
+    """A resistor whose resistance rises with its port temperature, losing v*i as heat"""
+
+    R_ref = parameter(Resistance, 1, doc="Resistance at the reference temperature")
+    alpha = parameter(Real, 0, unit="1/K", doc="Temperature coefficient of resistance")
+    T_ref = parameter(Real, 293.15, unit="K", doc="Reference temperature")
+    R_actual = Resistance("Resistance at the port temperature")
+    heat_port = Thermal.HeatPort("Where the ohmic loss goes")
+
+    ICON = icon(
+        shape("Line", points=[(-90, 0), (-52, 0)]),
+        shape(
+            "Line",
+            points=[
+                (-52, 0),
+                (-42, 22),
+                (-22, -22),
+                (-2, 22),
+                (18, -22),
+                (38, 22),
+                (48, 0),
+                (52, 0),
+            ],
+        ),
+        shape("Line", points=[(52, 0), (90, 0)]),
+        shape("Line", points=[(0, -22), (0, -58)]),
+        shape("Text", extent=NAME, textString="%name"),
+    )
+
+    def equations(self):
+        yield self.R_actual == self.R_ref * (1 + self.alpha * (self.heat_port.T - self.T_ref))
+        yield self.v == self.R_actual * self.i
+        yield self.heat_port.Q_flow == -self.v * self.i
 
 
 class Capacitor(OnePort):
