@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
+from modelica import ir
 from modelica.ir.causalize import causalize
 from modelica.lang import parse
 from modelica.sim import flatten
@@ -393,6 +394,40 @@ def _parse_sets(items: list[str]) -> dict[str, float]:
     return out
 
 
+def _per_second(unit: str) -> str:
+    """A rate's unit, composed as Modelica writes it: ``K`` to ``K/s``, ``rad/s`` to ``rad/s2``."""
+    if not unit:
+        return "1/s"
+    if unit.endswith("/s2"):
+        return unit[:-3] + "/s3"
+    if unit.endswith("/s"):
+        return unit[:-2] + "/s2"
+    return unit + "/s"
+
+
+def _fill_units(units: dict[str, str], system: System) -> None:
+    """Give the derivatives and the aliases the units the flat model leaves blank.
+
+    A derivative carries the state's unit over time: der(T_bean) is K/s, not dimensionless,
+    which is also what keeps a °C display from wrongly subtracting 273.15 from a *rate* (only a
+    bare "K" is converted, never "K/s"). The flattener leaves a derivative's unit blank, so it is
+    filled from the variable it differentiates -- the state named by the mode's derivative map,
+    and also any ``der_<v>`` the model observes without ``v`` being a state in this mode
+    (Pendulum's ``der_vx`` while it integrates ``[y, vy]``). When the derivative *is* another
+    state (``der(th1) = w1``), ``der_th1`` survives only as an alias of it, and any alias of a
+    bare variable (``a = b``) carries that variable's unit.
+    """
+    for state, derivative in system.modes[0].derivative.items():
+        units[derivative] = _per_second(units.get(state, ""))
+    # Observed derivatives are in the system's variables, not necessarily in the flat model's.
+    for variable in sorted({*units, *(v.name for v in system.variables)}):
+        if not units.get(variable) and variable.startswith("der_") and units.get(variable[4:]):
+            units[variable] = _per_second(units[variable[4:]])
+    for alias, expr in system.aliases.items():
+        if not units.get(alias) and isinstance(expr, ir.Ref) and units.get(expr.name):
+            units[alias] = units[expr.name]
+
+
 def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
     path: Path,
     name: str,
@@ -458,14 +493,10 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         {"t": _r7(event.time), "cause": str(getattr(event, "cause", ""))}
         for event in (getattr(result, "events", []) or [])
     ]
-    # `units` came from the flat model in `_load`, aliases included.
-    # A derivative carries the state's unit over time: der(T_bean) is K/s, not dimensionless,
-    # which is also what keeps a °C display from wrongly subtracting 273.15 from a *rate* (only
-    # a bare "K" is converted, never "K/s"). The flattener leaves the derivative variable's unit
-    # blank, so fill it from the state it differentiates, named by the mode's derivative map.
-    for state, derivative in system.modes[0].derivative.items():
-        base = units.get(state, "")
-        units[derivative] = f"{base}/s" if base else "1/s"
+
+    # `units` came from the flat model in `_load`, aliases included; derivatives and aliases of
+    # a bare variable get theirs here.
+    _fill_units(units, system)
     # The sensitivity study, when asked for: 2N more runs, so only on request.
     sens = (
         _sensitivity(system, kernel, stop, sets, sensitivity, sstep, result, solver)
