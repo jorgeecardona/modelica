@@ -1,0 +1,98 @@
+summary = "A governed generator set: a PI speed governor runs the shaft up to 100 rad/s, and when a resistive load is switched on at t = 1 s the speed dips to 94 and the governor pulls it back, the classic load-rejection test of a genset."
+teaches = ["a speed governor rejecting a load", "an event switches a load on", "electrical braking couples into the shaft", "the integrator holds the speed with no offset"]
+requires = []
+
+[parse]
+classes = ["Genset"]
+
+[flatten]
+model = "Genset"
+states = ["w", "x"]
+equations = 7
+balanced = true
+
+# The set in two states, which is what the reference integrates:
+#   R_load = if time < t_load then R_open else R_closed   the load, switched on at t_load
+#   i = k*w / (R_gen + R_load)          the current the generator drives through the load
+#   tau_gen = k*i                       the braking torque that current makes on the shaft
+#   tau_eng = Kp*(w_ref - w) + Ki*x     the engine torque the governor commands
+#   dx/dt = w_ref - w                   the governor's integral memory
+#   J dw/dt = tau_eng - b*w - tau_gen   the shaft, engine against friction and the generator
+# Before t_load the load is open, the current is nearly nothing, and the governor holds 100 rad/s.
+# When the load closes the generator suddenly brakes the shaft, the speed dips, and the integral
+# term winds up the engine torque until the speed is back on its setpoint with no standing error.
+[simulate]
+stop = 3.0
+tolerance = 1e-10
+
+# Run-up complete, load still open: the shaft is near its setpoint and draws almost no current.
+[[simulate.point]]
+t = 0.5
+values = { w = 99.2265426708, i = 0.00496107907959 }
+rtol = 1e-6
+source = "reference"
+
+# Just after the load closes at t = 1 s: the current has jumped to 19 A and the speed is dipping.
+[[simulate.point]]
+t = 1.05
+values = { w = 94.4419456459, i = 18.8883891292 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 1.2
+values = { w = 97.5619238505, i = 19.5123847701 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 2.0
+values = { w = 99.9997880135, i = 19.9999576027 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 3.0
+values = { w = 100.000000005, i = 20.000000001 }
+rtol = 1e-6
+source = "reference"
+
+# The load switches on exactly once, at t = 1 s.
+[simulate.events]
+times = [1.0]
+atol = 1e-6
+
+# The governor rejects the load: the speed is back on 100 rad/s by t = 2.5 s, which the integral
+# term is what makes possible -- a proportional-only governor would hold a lower speed under load.
+[[simulate.invariant]]
+expr = "w"
+value = 100.0
+rtol = 1e-3
+after = 2.5
+
+# And the load current settles at 20 A, the 2 ohm load across the 100 rad/s back-EMF.
+[[simulate.invariant]]
+expr = "i"
+value = 20.0
+rtol = 1e-3
+after = 2.5
+
+# The engine holds the shaft against the generator's brake: 11 N*m at steady, 10 of it the load.
+[[simulate.invariant]]
+expr = "tau_eng"
+value = 11.0
+rtol = 1e-3
+after = 2.5
+
+# The speed stays bounded through the run-up overshoot and the load dip: it never runs away and
+# never stalls, the whole claim of a governed set.
+[[simulate.invariant]]
+expr = "w"
+min = -0.01
+max = 121.0
+
+# The current is zero before the load and never past what the closed load draws.
+[[simulate.invariant]]
+expr = "i"
+min = -0.01
+max = 20.1

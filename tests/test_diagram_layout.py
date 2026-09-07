@@ -58,6 +58,7 @@ FLAT = {
     "DrainingTank",
     "Duffing",
     "E5",
+    "Genset",
     "HIRES",
     "HeatBar",
     "Lorenz",
