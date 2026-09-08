@@ -416,6 +416,50 @@ def element(name: str, indices: Sequence[int]) -> str:
     return f"{name}[{', '.join(str(i) for i in indices)}]"
 
 
+def _element(  # noqa: PLR0911 -- one case per node type, as its neighbours have
+    node: ir.Expr, indices: tuple[int, ...], shapes: Mapping[_Path, tuple[int, ...]]
+) -> ir.Expr:
+    """One scalar element of an array-valued expression, at ``indices``.
+
+    The counterpart of :func:`element` for equations rather than declarations: an equation
+    between arrays is one equation *per element*, and this reads out that element by
+    subscripting every array-valued reference and leaving scalars (parameters, ``time``, a
+    literal) to broadcast. A reference is array-valued exactly when its flat path is a key of
+    ``shapes`` -- the same map the declaration filled when it scalarised the component -- so a
+    coefficient like ``a`` in ``der(x) = a * x`` is left alone while ``x`` becomes ``x[i]``.
+
+    The structure carries the broadcast for free: ``der(x)`` becomes ``der(x[i])``,
+    ``-x`` becomes ``-x[i]``, ``a * x`` becomes ``a * x[i]``. What this does *not* do is
+    contract -- an array product or reduction has no elementwise reading and is refused in
+    :meth:`_Flattener._shape` before it ever reaches here.
+    """
+
+    def go(inner: ir.Expr) -> ir.Expr:
+        return _element(inner, indices, shapes)
+
+    match node:
+        case ir.Ref(parts=parts) if parts in shapes:
+            return ir.Ref((*parts[:-1], element(parts[-1], indices)))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, go(operand))
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, go(lhs), go(rhs))
+        case ir.Call(name=name, args=args):
+            return ir.Call(name, tuple(go(a) for a in args))
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            # The condition selects the same arm for every element, so it stays whole; only
+            # the two array-valued arms are read out.
+            return ir.IfExpr(condition, go(then), go(otherwise))
+        case ir.Array(elements=elements):
+            first, *rest = indices
+            return _element(elements[first - 1], tuple(rest), shapes)
+        case ir.Matrix(rows=rows):
+            row, column, *rest = indices
+            return _element(rows[row - 1][column - 1], tuple(rest), shapes)
+        case _:
+            return node
+
+
 def _integer(node: ir.Expr, values: Mapping[str, float], what: str) -> int:
     """Evaluate ``node`` to a positive integer, or say why it is not one.
 
@@ -805,29 +849,52 @@ def _inline_all(found: Found, scope: Scope, call: ir.Call, depth: int) -> dict[s
 
 
 def _element_of(scalar: ir.Component, indices: tuple[int, ...], path: _Path) -> ir.Component:
-    """One element of an array component, with its own share of an array-valued binding.
+    """One element of an array component, with its own share of every array-valued piece.
 
     ``parameter Real t[4] = {0, 1, 2, 3}`` declares four parameters with four values, and the
     expansion above makes four components -- so without this each of them carries the *whole*
-    literal as its binding and the model ends at "array equations are not supported yet".
+    literal as its binding and the model ends at "array equations are not supported yet". The
+    same is true of an array-valued attribute: ``Real x[2](start = {1, 2})`` gives its two
+    elements two different starts, so the ``start`` entry is indexed exactly as the binding is.
 
-    A scalar binding is left exactly as it is, because that is the broadcast every array in
-    the corpus relies on: ``Real T[n](start = T_0)`` gives every cell the same start, and
+    A scalar piece is left exactly as it is, because that is the broadcast every array in the
+    corpus relies on: ``Real T[n](start = T_0)`` gives every cell the same start, and
     `HeatBar` would stop working if this indexed into it.
     """
-    value = scalar.modification.value
+    modification = _index_modification(scalar.modification, indices, path)
+    if modification is scalar.modification:
+        return scalar
+    return replace(scalar, modification=modification)
+
+
+def _index_modification(
+    modification: ir.Modification, indices: tuple[int, ...], path: _Path
+) -> ir.Modification:
+    """The modification of one element: its binding and every attribute indexed to ``indices``."""
+    value = _index_value(modification.value, indices, path)
+    entries = {
+        key: _index_modification(entry, indices, path)
+        for key, entry in modification.entries.items()
+    }
+    if value is modification.value and all(
+        entries[key] is entry for key, entry in modification.entries.items()
+    ):
+        return modification
+    return replace(modification, value=value, entries=entries)
+
+
+def _index_value(value: ir.Expr | None, indices: tuple[int, ...], path: _Path) -> ir.Expr | None:
+    """Read out one element of an array literal, or leave a scalar to broadcast."""
     for index in indices:
         if not isinstance(value, ir.Array):
-            return scalar  # a scalar binding broadcasts, which is what every array here does
+            return value  # a scalar broadcasts, which is what every array here relies on
         if len(value.elements) != 0 and index > len(value.elements):
             raise FlattenError(
                 f"{'.'.join(path)!r} is declared with {index} or more elements and its value"
                 f" lists {len(value.elements)}"
             )
         value = value.elements[index - 1]
-    if value is scalar.modification.value:
-        return scalar
-    return replace(scalar, modification=replace(scalar.modification, value=value))
+    return value
 
 
 def _bind(name: str, inputs: Sequence[ir.Component], call: ir.Call) -> dict[str, ir.Expr]:
@@ -1242,6 +1309,14 @@ class _Flattener:
     before the model exists: an array's shape and a subscript. Nothing else uses it -- the
     solver reads bindings from the variables themselves.
     """
+    shapes: dict[_Path, tuple[int, ...]] = field(default_factory=dict[_Path, "tuple[int, ...]"])
+    """The size of every array component declared so far, by flat path.
+
+    An array component is scalarised into its elements at declaration, but an equation
+    written between whole arrays -- ``der(x) = -x`` for ``Real x[2]`` -- has to be scalarised
+    too, and that needs to know a bare reference is an array and how big. Filled by
+    :meth:`_array` and read by :meth:`_shape` / :func:`_element` when an equation is split.
+    """
 
     # -- components -------------------------------------------------------------------
 
@@ -1435,6 +1510,10 @@ class _Flattener:
         ]
         if any(size < 0 for size in sizes):
             raise FlattenError(f"{'.'.join(path)!r} has a negative dimension: {sizes}")
+        # Remember the shape under the flat path, so an equation written between whole arrays
+        # can be scalarised the way this declaration is. Keyed by the same tuple a reference
+        # to the array prefixes to, which is what lets `_element` recognise it later.
+        self.shapes[tuple(path)] = tuple(sizes)
         scalar = replace(component, dimensions=())
         for indices in product(*(range(1, size + 1) for size in sizes)):
             self._component(
@@ -1541,7 +1620,61 @@ class _Flattener:
             if target is not None
         ]
 
-    def _equation(  # noqa: C901, PLR0913 -- one arm per equation form; the scope
+    def _shape(self, node: ir.Expr) -> tuple[int, ...]:  # noqa: C901, PLR0911 -- one node arm each
+        """The array shape of an already-flattened expression, ``()`` for a scalar.
+
+        Enough of it to scalarise an equation, and no more. A reference is array-valued when
+        its flat path is a key of :attr:`shapes`; ``der``/``pre``/``noEvent``/``smooth`` and
+        the elementwise operators pass a shape straight through, and ``+``/``-`` and an
+        ordinary function call broadcast their operands. A ``*``, ``/`` or ``^`` between two
+        arrays is a contraction (matrix product, dot product, matrix power), which has no
+        elementwise reading -- it is refused here, with the loop as the way to write it,
+        rather than silently scalarised into the wrong thing.
+        """
+        match node:
+            case ir.Ref(parts=parts):
+                return self.shapes.get(parts, ())
+            case ir.Unary(operand=operand):
+                return self._shape(operand)
+            case ir.Call(name="der" | "pre" | "noEvent" | "smooth", args=args) if args:
+                return self._shape(args[-1])
+            case ir.Call(args=args):
+                shape: tuple[int, ...] = ()
+                for argument in args:
+                    shape = self._merge_shape(shape, self._shape(argument))
+                return shape
+            case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+                left, right = self._shape(lhs), self._shape(rhs)
+                if op in ("*", "/", "^") and left and right:
+                    raise FlattenError(
+                        "an array product is not supported yet; write the equation over"
+                        " the elements in a `for` loop"
+                    )
+                return self._merge_shape(left, right)
+            case ir.IfExpr(then=then, otherwise=otherwise):
+                return self._merge_shape(self._shape(then), self._shape(otherwise))
+            case ir.Array(elements=elements):
+                inner = self._shape(elements[0]) if elements else ()
+                return (len(elements), *inner)
+            case ir.Matrix(rows=rows):
+                return (len(rows), len(rows[0]) if rows else 0)
+            case _:
+                return ()
+
+    @staticmethod
+    def _merge_shape(left: tuple[int, ...], right: tuple[int, ...]) -> tuple[int, ...]:
+        """The shape two operands share, broadcasting a scalar against an array.
+
+        Equal shapes are that shape; a scalar takes the other's; two different array shapes
+        are a modelling error caught here rather than passed on as a wrong equation count.
+        """
+        if right in (left, ()):
+            return left
+        if left == ():
+            return right
+        raise FlattenError(f"array shapes {left} and {right} do not match in an equation")
+
+    def _equation(  # noqa: C901, PLR0912, PLR0913 -- one arm per equation form; the scope
         # resolves a call, the outer map a name
         self,
         equation: ir.Equation,
@@ -1585,7 +1718,23 @@ class _Flattener:
                 # The span rides along. Flattening rewrites *names*, so the equation a block
                 # holds is still the one the modeller wrote, and saying where it was written
                 # is the difference between "block 7" and a line a reader can open.
-                sink.append(ir.Equal(carry(lhs), carry(rhs), span))
+                left, right = carry(lhs), carry(rhs)
+                shape = self._merge_shape(self._shape(left), self._shape(right))
+                if not shape:
+                    sink.append(ir.Equal(left, right, span))
+                else:
+                    # One equation between arrays is one scalar equation per element, the same
+                    # split the declaration already did for the variables. `_element` reads out
+                    # element `indices` of each side; the span is shared, so every scalar row
+                    # points back at the one line the modeller wrote.
+                    for indices in product(*(range(1, size + 1) for size in shape)):
+                        sink.append(
+                            ir.Equal(
+                                _element(left, indices, self.shapes),
+                                _element(right, indices, self.shapes),
+                                span,
+                            )
+                        )
             case ir.Assert(condition=condition, message=message, level=level, span=span):
                 # No unknown is bound here, so it goes beside the equations, not among
                 # them: causalization must never count an assert. The level is left as it

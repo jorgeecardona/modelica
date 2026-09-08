@@ -6,6 +6,16 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **Array equations scalarise element by element.** An equation written between whole arrays --
+  `der(x) = -x` for `Real x[2]`, `der(T) = -T` for `Real T[2, 2]` -- is now expanded into one scalar
+  equation per element, the same split the declaration already does for the variables, so a vector
+  field no longer has to be written as an explicit `for` loop over its elements (`TorusHeat` still
+  uses the loop; it now has the shorter form beside it). An array-valued `start` is split the same
+  way, so `Real x[2](start = {1, 2})` gives its elements two different starts. A scalar broadcasts
+  across the array (`der(x) = -a * x + 1`, `start = x0`), and an elementwise function call
+  (`-sin(x)`) is read out per element. What is not elementwise is refused rather than mis-expanded:
+  an array product like `x * y` (a contraction, not a per-element operation) says so and names the
+  `for` loop as the way to write it.
 - `examples/TorusHeat`: **the heat equation on a flat torus, a 2-D method-of-lines PDE.** Diffusion
   over an 8x8 periodic grid (64 states), the space discretised by hand and the edges wrapped with
   `mod` so there is no boundary -- HeatBar's one-dimensional recipe on the simplest manifold. The
