@@ -110,7 +110,9 @@ over the chart listing them all -- so the ones below need not be memorised.
   samples sparsely re-reads it at full density over just that span, so the sub-second spike of
   a two-minute run is sharp without touching the resolution knob (the automatic form of `Δt ≤`):
   the integration is unchanged, only the output is read more finely where you are looking. A
-  live `.mo` only, and only when the window is actually sparse. **Double-click** the chart to
+  live `.mo` only, and only when the window is actually sparse. Once zoomed, the **left and right
+  arrow keys** pan the window a quarter of its width at a time, stopping at the ends of the run.
+  **Double-click** the chart to
   reset the zoom and clear the marks. **Hover** for a cursor readout of every drawn variable, in
   the display units, at the nearest sample: a line marks the instant and a dot sits on each
   variable's curve where it crosses -- in every scale, the by-unit and split strips included,

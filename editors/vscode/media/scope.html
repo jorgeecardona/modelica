@@ -450,6 +450,7 @@
             <div>
               <div class="helpsec">chart</div>
               <div class="hk"><b>drag</b><span>zoom the time window (or the x variable in a phase plot)</span></div>
+              <div class="hk"><b>← / →</b><span>pan the zoomed time window left or right</span></div>
               <div class="hk"><b>click</b><span>drop a mark to read every variable's value there; a second click reads Δ, the average rate and ∫ between the two</span></div>
               <div class="hk"><b>shift-click</b><span>drop a level line and read off where each curve crosses it</span></div>
               <div class="hk"><b>drag the ⇥ marker</b><span>move the stop time and re-run to there</span></div>
@@ -2741,6 +2742,21 @@ helpBtn.addEventListener("click", () => setHelp(helpCard.hidden));
 document.getElementById("helpclose").addEventListener("click", () => setHelp(false));
 // A click on the backdrop (but not on the panel itself) closes it.
 helpCard.addEventListener("click", (e) => { if (e.target === helpCard) setHelp(false); });
+// Pan the zoomed time window left or right by a quarter of its width, keeping the width and
+// stopping at the ends of the run -- the natural follow-up to a drag-zoom or an event zoom, where
+// otherwise the only way past the window's edge is to zoom out and in again. A no-op when the view
+// is not zoomed (nothing to pan to) or in a phase plot (the x axis is a variable, not time).
+function panWindow(dir) {
+  if (!N || xVar) return false;
+  const t0 = T[0], t1 = T[N - 1], full = t1 - t0, w = win[1] - win[0];
+  if (!(full > 0) || !(w < full * 0.999)) return false;
+  let lo = win[0] + dir * w * 0.25, hi = win[1] + dir * w * 0.25;
+  if (lo < t0) { lo = t0; hi = t0 + w; }
+  if (hi > t1) { hi = t1; lo = t1 - w; }
+  win = [lo, hi];
+  draw();
+  return true;
+}
 document.addEventListener("keydown", (e) => {
   const t = e.target;
   const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
@@ -2748,6 +2764,9 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !errBar.hidden) { clearError(); return; }
   if (e.key === "?" && !typing) { e.preventDefault(); setHelp(helpCard.hidden); }
   if ((e.key === "c" || e.key === "C") && !typing && !e.metaKey && !e.ctrlKey) copyReadout();
+  if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing && panWindow(e.key === "ArrowLeft" ? -1 : 1)) {
+    e.preventDefault();
+  }
 });
 // `c` copies the readout to the clipboard as plain text: the two-mark measurement if a pair is
 // down (its interval, and every drawn variable's Δ, rate and integral), otherwise the values
