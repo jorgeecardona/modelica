@@ -1818,7 +1818,19 @@ function drawMarks(frag) {
     if (v1 === null || v2 === null || !isFinite(v1) || !isFinite(v2)) continue;
     const du = dispUnit(u) ? " " + dispUnit(u) : "";
     const rate = dt !== 0 ? "   (" + fmt((v2 - v1) / dt) + (dispUnit(u) ? " " + dispUnit(u) : "") + "/" + tUnit() + ")" : "";
-    lines.push({t: nm + ": " + fmt(v1) + " → " + fmt(v2) + "   Δ " + fmt(v2 - v1) + du + rate, dim: true, nm});
+    // The trapezoidal integral over the interval, the complement of the rate: the charge under a
+    // current, the volume under a flow, the energy under a power. Time view only, where the marks
+    // are two instants and dt is the width of each panel. Displayed units throughout, so an
+    // offset unit (degC) integrates in degC-seconds -- consistent with how Delta and rate read.
+    let area = 0;
+    if (!xVar) for (let k = a; k < b; k++) {
+      const p = disp(vs[k], u), q = disp(vs[k + 1], u);
+      if (p === null || q === null || !isFinite(p) || !isFinite(q)) { area = null; break; }
+      area += 0.5 * (p + q) * (toT(T[k + 1]) - toT(T[k]));
+    } else area = null;
+    const iu = dispUnit(u) ? " " + dispUnit(u) + "·" + tUnit() : " " + tUnit();
+    const integral = area !== null ? "   ∫ " + fmt(area) + iu : "";
+    lines.push({t: nm + ": " + fmt(v1) + " → " + fmt(v2) + "   Δ " + fmt(v2 - v1) + du + rate + integral, dim: true, nm});
   }
   const lh = 14, pad = 7, w = Math.max(...lines.map((l) => l.t.length)) * 6.3 + 2 * pad;
   const x0 = M.l + 8, y0 = M.t + 8;
