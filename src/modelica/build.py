@@ -84,6 +84,7 @@ __all__ = [
     "alias",
     "and_",
     "array",
+    "assert_",
     "assign",
     "break_",
     "call",
@@ -493,6 +494,17 @@ def assign(target: Operand, value: Operand) -> ir.Assign:
 def when(condition: Operand, *body: ir.Statement) -> ir.When:
     """``when condition then body end when;`` -- fires at the instant it becomes true."""
     return ir.When((ir.WhenBranch(_lift(condition), body),))
+
+
+def assert_(condition: Operand, message: str, *, warning: bool = False) -> ir.Assert:
+    """``assert(condition, message);`` -- a runtime check the simulator evaluates.
+
+    A false ``condition`` stops the run with ``message``; ``warning=True`` downgrades it to
+    ``AssertionLevel.warning``, which reports the message once and lets the run finish. It binds
+    no unknown, so it never changes what the model computes -- it only guards the model's range.
+    """
+    level = ir.Ref(("AssertionLevel", "warning")) if warning else None
+    return ir.Assert(_lift(condition), _lift(message), level)
 
 
 def break_() -> ir.Break:

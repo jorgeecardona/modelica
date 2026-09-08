@@ -53,6 +53,7 @@ FLAT = {
     "AtwoodPendulum",
     "BouncingBall",
     "Brusselator",
+    "BuckConverter",
     "CSTR",
     "Chua",
     "DoublePendulum",

@@ -1,0 +1,111 @@
+summary = "An averaged buck converter under PI voltage control. The switching is averaged away into a duty cycle D that a PI loop sets, so the model is smooth: from rest the output rings up past 12 V and the inductor current swings negative as the loop reins it in, then both settle -- 12 V across the load, 2 A through the inductor, D at exactly V_ref/V_in = 0.5. Two asserts guard the averaged switch: D must stay in [0, 1], because a buck can neither invert its output nor boost above its input."
+teaches = ["power electronics as an averaged model, no switching events", "a duty cycle is the control, bounded to [0, 1]", "PI control holds the output against the load", "asserts guard a model's physical range"]
+requires = []
+
+[parse]
+classes = ["BuckConverter"]
+
+[flatten]
+model = "BuckConverter"
+states = ["i_ind", "v_out", "x"]
+equations = 5
+balanced = true
+
+# The converter in three states, which is what the reference integrates:
+#   e = vref - v_out                     the output voltage error
+#   D = Kp*e + Ki*x                    the PI loop sets the duty cycle
+#   dx/dt = e                          the integral of the error
+#   L di_ind/dt = D*Vin - v_out            the inductor sees the averaged switch node minus the output
+#   C dv_out/dt = i_ind - v_out/Rload        the capacitor is charged by the inductor, drained by the load
+# The averaging is the whole idea: a real buck chops V_in on and off at tens of kHz, and D is the
+# fraction of each period it is on. Replacing the switch by D*Vin drops the fast carrier and keeps
+# the loop dynamics, which is what a control designer works with. Steady state is v_out = 12 V,
+# i_ind = 2 A, D = V_ref/V_in = 0.5, x = D/Ki. Two asserts state what "averaged switch" requires:
+# D in [0, 1]. The reference run keeps D in [0.01, 0.60], so they hold; a bad gain or setpoint
+# would push D out of range and stop the run with the reason.
+[simulate]
+stop = 0.3
+tolerance = 1e-10
+
+# The ring-up: the loop drives the duty cycle hard to charge the output, the voltage overshoots
+# 12 V, and the inductor current swings negative as the loop brakes the overshoot.
+[[simulate.point]]
+t = 0.005
+values = { i_ind = 7.6354741965, v_out = 5.382855777, x = 0.027127509049 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.02
+values = { i_ind = -1.1534186031, v_out = 10.833631913, x = 0.065307852076 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.05
+values = { i_ind = 1.367238207, v_out = 11.602798828, x = 0.093271090439 }
+rtol = 1e-6
+source = "reference"
+
+# The settle: the integral term takes over, the error goes to zero, and the output holds 12 V.
+[[simulate.point]]
+t = 0.1
+values = { i_ind = 1.9897740092, v_out = 12.000402014, x = 0.099576689492 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.3
+values = { i_ind = 1.9999995581, v_out = 11.999999773, x = 0.099999992377 }
+rtol = 1e-6
+source = "reference"
+
+# The regulated output: 12 V across the load, held to a fraction of a percent by the integrator.
+[[simulate.invariant]]
+expr = "v_out"
+value = 12.0
+rtol = 2e-3
+after = 0.15
+
+# The inductor carries the load current the output needs: 12 V over 6 ohm is 2 A.
+[[simulate.invariant]]
+expr = "i_ind"
+value = 2.0
+rtol = 3e-3
+after = 0.15
+
+# The integral state settles on the holding duty cycle over the integral gain: at steady state
+# D = Ki*x = 0.5, so x = 0.1.
+[[simulate.invariant]]
+expr = "x"
+value = 0.1
+rtol = 3e-3
+after = 0.15
+
+# The averaged-buck relation closes at steady state: with the inductor current no longer changing,
+# the switch-node average equals the output, D*Vin = v_out = 12 V. This is the converter's own law.
+[[simulate.invariant]]
+expr = "D * Vin - v_out"
+value = 0.0
+atol = 5e-3
+after = 0.15
+
+# The output overshoots to 13 V and no further before it settles: a stable loop rings once.
+[[simulate.invariant]]
+expr = "v_out"
+min = -0.01
+max = 13.0
+
+# The inductor current swings from a 10.6 A charging draw to a 6.7 A reversal as the loop brakes
+# the overshoot, then holds the 2 A the load needs.
+[[simulate.invariant]]
+expr = "i_ind"
+min = -6.7
+max = 10.6
+
+# The duty cycle stays inside the [0, 1] the averaged switch requires -- the same bound the model's
+# asserts guard, checked here as a trajectory range as well.
+[[simulate.invariant]]
+expr = "D"
+min = -0.001
+max = 0.61
