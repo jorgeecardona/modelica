@@ -217,12 +217,13 @@ _CHAIN: dict[str, Callable[[ir.Expr], ir.Expr]] = {
 def _multiary(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr | None:
     """Derivative rules for the functions that are not a single-argument chain.
 
-    ``floor``/``ceil`` (piecewise constant), ``min``/``max`` (the active argument), ``atan2`` and
-    ``mod``. Returns ``None`` when the call is none of these, so the single-argument table gets
-    its turn.
+    ``floor``/``ceil``/``div`` (piecewise constant), ``min``/``max`` (the active argument),
+    ``atan2``, and ``mod``/``rem`` (numerator minus an integer factor). Returns ``None`` when the
+    call is none of these, so the single-argument table gets its turn.
     """
-    if node.name in ("floor", "ceil"):
+    if node.name in ("floor", "ceil", "div"):
         # Piecewise constant: zero derivative between its steps, which is where it is smooth.
+        # `div(a, b)` is the truncated quotient, an integer, so it is constant in both arguments.
         return ZERO
     if len(node.args) != 2:  # noqa: PLR2004 - the rules below are all the two-argument forms
         return None
@@ -237,9 +238,11 @@ def _multiary(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr | Non
         return div(
             sub(mul(b, _derive(a, leaf)), mul(a, _derive(b, leaf))), add(mul(b, b), mul(a, a))
         )
-    if node.name == "mod":
-        # mod(a, b) = a - floor(a/b)*b; the integer factor is constant between its steps.
-        return sub(_derive(a, leaf), mul(ir.Call("floor", (div(a, b),)), _derive(b, leaf)))
+    if node.name in ("mod", "rem"):
+        # mod(a, b) = a - floor(a/b)*b and rem(a, b) = a - div(a, b)*b; the integer factor is
+        # constant between its steps, so d = da - factor*db.
+        factor = ir.Call("floor", (div(a, b),)) if node.name == "mod" else ir.Call("div", (a, b))
+        return sub(_derive(a, leaf), mul(factor, _derive(b, leaf)))
     return None
 
 

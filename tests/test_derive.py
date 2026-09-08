@@ -152,15 +152,20 @@ def test_atan2_uses_the_quotient_rule() -> None:
     assert _at(d_dx(a, "y"), x=1.0, y=2.0) == pytest.approx(-1.0 / 5.0)
 
 
-def test_floor_and_ceil_have_zero_derivative() -> None:
+def test_floor_ceil_and_div_have_zero_derivative() -> None:
     assert _at(d_dx(ir.Call("floor", (X,)), "x"), x=2.3) == pytest.approx(0.0)
     assert _at(d_dx(ir.Call("ceil", (X,)), "x"), x=2.3) == pytest.approx(0.0)
+    assert _at(d_dx(ir.Call("div", (X, Y)), "x"), x=7.0, y=2.0) == pytest.approx(0.0)
+    assert _at(d_dx(ir.Call("div", (X, Y)), "y"), x=7.0, y=2.0) == pytest.approx(0.0)
 
 
-def test_mod_differentiates_by_its_numerator() -> None:
+def test_mod_and_rem_differentiate_by_their_numerator() -> None:
     m = ir.Call("mod", (X, Y))
     assert _at(d_dx(m, "x"), x=1.3, y=2.0) == pytest.approx(1.0)  # d/dx mod = 1
     assert _at(d_dx(m, "y"), x=3.0, y=2.0) == pytest.approx(-1.0)  # -floor(3/2) = -1
+    r = ir.Call("rem", (X, Y))
+    assert _at(d_dx(r, "x"), x=1.3, y=2.0) == pytest.approx(1.0)  # d/dx rem = 1
+    assert _at(d_dx(r, "y"), x=7.0, y=2.0) == pytest.approx(-3.0)  # -div(7, 2) = -3
 
 
 # --------------------------------------------------------------------------------------

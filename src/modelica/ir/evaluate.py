@@ -78,10 +78,12 @@ _PAIRS: dict[str, Callable[[float, float], float]] = {
         math.fmod(a, b) + b if math.fmod(a, b) and (a < 0) != (b < 0) else math.fmod(a, b)
     ),
     "rem": math.fmod,
+    "div": lambda a, b: float(math.trunc(a / b)),
 }
 """The two-argument built-ins. ``mod`` floors and ``rem`` truncates, which is Modelica's
 distinction and not Python's -- `math.fmod` is `rem`, and using it for both is the mistake
-this table exists to avoid."""
+this table exists to avoid. ``div`` is the truncated quotient `rem` is the remainder of, added
+for the same reason as `floor`: a derivative rule spells `rem`'s in terms of it."""
 
 
 # The numeric operators, as tables rather than a `match`. Both take two numbers and the
