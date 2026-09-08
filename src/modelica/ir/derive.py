@@ -247,7 +247,7 @@ def _multiary(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr | Non
     return None
 
 
-def _call(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:
+def _call(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:  # noqa: PLR0911 -- one rule per operator family
     if node.name in ("der", "pre"):
         # `der(x)` differentiates to the derivative of the *variable* `der_x`, so that
         # higher derivatives stay ordinary unknowns. `pre(x)` is constant between events.
@@ -261,6 +261,11 @@ def _call(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:
         # `noEvent`, the last for `smooth(order, expr)`. Emit strips the wrapper from generated code.
         *rest, arg = node.args
         return ir.Call(node.name, (*rest, _derive(arg, leaf)))
+    if node.name == "homotopy":
+        # homotopy(actual, simplified) is the actual once initialisation is done, so its derivative
+        # is the derivative of the actual -- the first argument -- and no wrapper is kept, since emit
+        # strips homotopy from the generated code entirely (it is not a run-time operator).
+        return _derive(node.args[0], leaf)
     if node.name in ("abs", "sign"):
         # Differentiable away from zero, which is where an event indicator should have
         # split the trajectory anyway; at zero the derivative is the solver's problem.

@@ -6,6 +6,14 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **`homotopy(actual, simplified)` is taken at its actual value.** The standard operator that
+  helps an initialisation converge by walking a path from a simplified model to the actual one is
+  now supported: with no continuation run, its value is the actual (the first argument), which is
+  what the expression is worth once initialisation is done. It evaluates, differentiates and emits
+  (interpreter and Rust backend alike) as that first argument -- the opposite end from `noEvent`
+  and `smooth`, which are transparent to their last -- and the simplified branch is discarded,
+  including any relations in it, so they do not become events nothing reads. This was the last
+  operator still refused.
 - **`terminate(message)` ends a run at the instant its `when` fires.** The standard Modelica
   operator that stops the analysis when a model is defined only up to some condition -- a tank
   that empties, a decay past a threshold -- is now supported end to end, in the interpreter and

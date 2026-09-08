@@ -230,9 +230,19 @@ def _identifier(name: str, taken: set[str]) -> str:
 
 
 def _unwrap(node: ir.Expr) -> ir.Expr:
-    """See through the wrappers that carry no arithmetic."""
-    while isinstance(node, ir.Call) and node.name in _TRANSPARENT and node.args:
-        node = node.args[-1]
+    """See through the wrappers that carry no arithmetic.
+
+    ``noEvent``/``smooth``/``pre`` carry their value in the *last* argument; ``homotopy`` carries
+    its actual value in the *first* -- both are stripped from the generated code, leaving the
+    expression they wrap.
+    """
+    while isinstance(node, ir.Call) and node.args:
+        if node.name in _TRANSPARENT:
+            node = node.args[-1]
+        elif node.name == "homotopy":
+            node = node.args[0]
+        else:
+            break
     return node
 
 
@@ -571,6 +581,10 @@ def _relations(node: ir.Expr) -> Iterator[ir.Binary]:
     match node:
         case ir.Call(name=name) if name in _TRANSPARENT:
             return
+        case ir.Call(name="homotopy", args=args) if args:
+            # Only the actual (first argument) is emitted, so only its relations become events;
+            # the simplified branch is discarded and its relations would be indicators nothing reads.
+            yield from _relations(args[0])
         case ir.Binary(op=op) if op in _CROSSINGS:
             yield node
         case ir.Binary(lhs=lhs, rhs=rhs):

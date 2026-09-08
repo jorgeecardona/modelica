@@ -131,7 +131,7 @@ def _lookup(name: str, env: Mapping[str, Value], where: ir.Span | None = None) -
         raise EvaluationError(f"nothing in the environment answers {name!r}{at(where)}") from None
 
 
-def _call(node: ir.Call, env: Mapping[str, Value]) -> Value:
+def _call(node: ir.Call, env: Mapping[str, Value]) -> Value:  # noqa: PLR0911 -- one rule per operator family
     # `der`/`pre` are lookups of synthetic names, not computations: their values are
     # decided by causalization and event handling, never by the expression itself.
     if node.name in ("der", "pre"):
@@ -144,6 +144,11 @@ def _call(node: ir.Call, env: Mapping[str, Value]) -> Value:
         # `noEvent`, the second (after the continuity order) for `smooth(order, expr)`. The order is
         # dropped here as noEvent's flag is; emit does the same by unwrapping to the last argument.
         return evaluate(node.args[-1], env)
+    if node.name == "homotopy":
+        # homotopy(actual, simplified) walks an initialisation from the simplified model to the
+        # actual one; with no continuation run its value is the actual, which is what it is once
+        # initialisation is done. The FIRST argument, the opposite end from noEvent/smooth.
+        return evaluate(node.args[0], env)
     args = [_number(evaluate(a, env), a) for a in node.args]
     if node.name == "sign":
         (x,) = args
