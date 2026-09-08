@@ -69,6 +69,29 @@ You can use each layer without the layers above it.
 Read [the architecture notes](https://jorgeecardona.gitlab.io/pymodelica/architecture/)
 for the data model and the order the layers were built in.
 
+## What of Modelica it handles
+
+The language is large and this is pre-alpha, so the honest summary is a table, not a claim of
+completeness. The per-model measurement against the full Modelica Standard Library lives in
+[the coverage notes](https://jorgeecardona.gitlab.io/pymodelica/ideas/coverage/): about 95 % of
+its example models parse, fewer simulate end to end. The frontier there is one column below.
+
+| Area | Handled | Not yet |
+| --- | --- | --- |
+| Equations | `der`, algebraic, `connect` (flow/potential and signal), `when` with `reinit`, structural `if`-equations (a parameter or constant condition), `for`, `assert` | an `if`-equation on a *continuous* condition (a run-time structural switch, which is a `when`) |
+| Expressions | full arithmetic and relations, `if`-expressions, every built-in math function, `smooth` / `noEvent` / `pre`, a second derivative written `der(der(x))` | `spatialDistribution`, `delay`, `homotopy` |
+| Structure | components, `extends` with modification, conditional components, `redeclare`, `import` (all three forms), nested packages | operator overloading, external (C) functions, `impure` |
+| Types | `Real` / `Integer` / `Boolean`, discrete variables, enumerations, unit and `min`/`max` attributes, type aliases | |
+| Functions | user-defined functions with `algorithm` bodies, `if` and `for` statements | |
+| Arrays | indexed access, array parameters and starts, element-wise equations through a `for` loop, multi-dimensional grids | array-valued (vectorised) equations such as `der(x) = A * x` |
+| Numerics | index reduction (Pantelides), alias elimination, BLT sorting, adaptive stiff integration (Radau, LSODA), state events, a sparse Jacobian | a symplectic integrator |
+| Standards | FMI 3.0 (import and export), SSP 2.0 co-simulation | |
+
+The bundled Modelica Standard Library slice carries `Units.SI`, `Electrical.Analog`,
+`Mechanics.Translational` and `Rotational`, `Thermal.HeatTransfer`, and a piece of `Blocks`,
+under their real names, so a model that references `Modelica.*` resolves without configuration. It
+is a curated subset, not the whole library.
+
 ## See a model
 
 A Modelica model is a graph. The components are the boxes and `connect()` gives the lines.
