@@ -584,6 +584,9 @@ let xwin = null;
 // The angle variable in a polar phase plot: `xVar` is then the radius and this is the angle, and
 // the trajectory is (radius*cos(angle), radius*sin(angle)). Only read while `coords === "polar"`.
 let thVar = null;
+// The live run's polar plot as drawn, so the cursor can snap to it: the pixel point of each sample
+// (null across a pen-lift), and the radius and angle series behind them. Set by drawPolar each draw.
+let polarLive = null;
 // Time on a log axis ("x: log time"): a stiff model over a long horizon -- E5 runs to 1e13 s
 // and finishes its kinetics by 1e3 -- has all its motion in the first decades, which a linear
 // axis puts in one pixel column. Only the mapping changes; the data, the window and the
@@ -1397,12 +1400,40 @@ function drawPolar(frag) {
     const path = el("path", {d: d, fill: "none", "stroke-width": st.w, stroke: colour(rName), opacity: st.op, "stroke-linejoin": "round"});
     if (st.dash) path.setAttribute("stroke-dasharray", st.dash);
     frag.appendChild(path);
-    if (run.ri === live) { phaseArrows(frag, px, colour(rName), st.op); phaseEndpoints(frag, px, colour(rName), st.op); }
+    if (run.ri === live) {
+      phaseArrows(frag, px, colour(rName), st.op); phaseEndpoints(frag, px, colour(rName), st.op);
+      polarLive = {px: px, rs: seriesOf(live, rName), ts: seriesOf(live, thName)};
+    }
   }
   const du = dispUnit(u);
   frag.appendChild(el("text", {class: "tick", x: M.l, y: M.t - 5, "text-anchor": "start", "font-weight": 600},
     rName + "·cos / ·sin(" + thName + ")" + (du ? "   " + du : "")));
-  foot.textContent = "polar   ·   x = " + rName + "·cos(" + thName + "),  y = " + rName + "·sin(" + thName + ")   ·   switch to Cartesian for the cursor and marks";
+  foot.textContent = "polar   ·   x = " + rName + "·cos(" + thName + "),  y = " + rName + "·sin(" + thName + ")   ·   hover to read a point";
+}
+// The cursor for the polar plot: snap to the nearest live-run sample in pixels, dot it, and read
+// its time, radius and angle in the footer. The 2D counterpart of `cursor()`; it works off the
+// pixel points `drawPolar` stored, so the mapping is exactly the one on screen.
+function polarCursor(event) {
+  if (!polarLive || !polarLive.px.length) return;
+  const r = svg.getBoundingClientRect();
+  const mx = event.clientX - r.left, my = event.clientY - r.top;
+  let best = -1, bestD = Infinity;
+  for (let k = 0; k < polarLive.px.length; k++) {
+    const p = polarLive.px[k]; if (!p) continue;
+    const d = (p.x - mx) * (p.x - mx) + (p.y - my) * (p.y - my);
+    if (d < bestD) { bestD = d; best = k; }
+  }
+  if (best < 0) { cursorIndex = null; hud.replaceChildren(); foot.textContent = restFooter(); return; }
+  cursorIndex = best;
+  const p = polarLive.px[best];
+  const dot = el("circle", {cx: p.x, cy: p.y, r: 4, fill: cssbg, stroke: colour(xVar), "stroke-width": 2});
+  hud.replaceChildren(dot);
+  const rv = polarLive.rs[best], tv = polarLive.ts[best];
+  const ru = unitOf(xVar), tu = unitOf(thVar);
+  const withUnit = (v, un) => fmt(disp(v, un)) + (dispUnit(un) ? " " + dispUnit(un) : "");
+  foot.textContent = "t = " + fmt(toT(T[best])) + " " + tUnit()
+    + "   ·   " + xVar + " = " + withUnit(rv, ru)
+    + "   ·   " + thVar + " = " + withUnit(tv, tu);
 }
 
 // -- drawing ---------------------------------------------------------------------------
@@ -2419,6 +2450,9 @@ function stopMarker(x) {
 }
 svg.addEventListener("pointermove", (e) => {
   if (!D) return;
+  // The polar plot has its own equal-aspect frame, not the shared x-domain, so its cursor snaps to
+  // the trajectory in pixels rather than reading a time off X().
+  if (mode === "xy" && coords === "polar") { polarCursor(e); return; }
   if (rot3drag) {
     // Turn the camera: horizontal drag is azimuth, vertical drag is elevation, clamped upright.
     rot3.az = rot3drag.az + (e.clientX - rot3drag.x) * 0.01;
@@ -2445,6 +2479,8 @@ svg.addEventListener("pointermove", (e) => {
 });
 svg.addEventListener("pointerdown", (e) => {
   if (!D) return;
+  // The polar plot is read-only for now (a cursor, no drag-zoom or marks), so a press does nothing.
+  if (mode === "xy" && coords === "polar") return;
   svg.setPointerCapture(e.pointerId);
   // In the 3D view a drag rotates the camera instead of zooming.
   if (view3d) { stopSpin(); rot3drag = {x: e.clientX, y: e.clientY, az: rot3.az, el: rot3.el}; return; }
