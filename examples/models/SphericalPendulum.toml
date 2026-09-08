@@ -1,0 +1,81 @@
+summary = "A spherical pendulum: a bob on a rigid rod free to swing in all directions, so it traces a path on a sphere rather than in a plane. In the angles (theta from the downward vertical, phi around it) the motion is the Lagrangian one -- theta feels gravity and the centrifugal push of the azimuthal spin, phi is carried by the Coriolis term that conserves the vertical angular momentum sin(theta)^2 * w_phi. Started at theta = 1 rad with a pure azimuthal rate, the bob does not fall through the bottom (the angular-momentum barrier keeps theta away from zero) nor reach the top; it oscillates in theta between about 0.47 and 1.0 rad while phi precesses, so the trace is a rosette wrapped on the sphere. Two quantities are conserved for all time -- the energy and the vertical angular momentum -- and they grade the integrator exactly as in the Kepler, Henon-Heiles and Schwarzschild benchmarks. Because the rod is rigid the radius is constant, so the state reads directly as spherical coordinates (r, theta, phi): it is the corpus's first genuine spherical-coordinate trajectory."
+teaches = ["a 2-degree-of-freedom pendulum in three dimensions, the Lagrangian angular equations", "conserved energy and vertical angular momentum as the invariants, extending the Hamiltonian line", "the Coriolis coupling that keeps the bob off the poles (the sin(theta) in the denominator)", "a genuine spherical-coordinate trajectory (constant r) for the 3-D spherical view"]
+requires = []
+
+[parse]
+classes = ["SphericalPendulum"]
+
+[flatten]
+model = "SphericalPendulum"
+states = ["theta", "phi", "w_theta", "w_phi"]
+index = 1
+balanced = true
+
+# Started at theta = 1 rad, phi = 0, with no polar rate and an azimuthal rate of 2 rad/s. The bob
+# swings between theta ~ 0.47 and 1.0 rad and precesses about 5.5 turns of phi over ten seconds.
+# References are scipy DOP853 at 1e-12; Radau tracks them to about 1e-10 through result.at.
+[simulate]
+stop = 10.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 2.0
+values = { theta = 0.9308295195, phi = 7.2590311517, w_theta = 0.9115769413, w_phi = 2.2010726763 }
+rtol = 1e-7
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 4.0
+values = { theta = 0.7444769217, phi = 14.4451826553, w_theta = 1.5142349011, w_phi = 3.0844510902 }
+rtol = 1e-7
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 6.0
+values = { theta = 0.5288222484, phi = 21.3929402114, w_theta = 1.1369312540, w_phi = 5.5636139823 }
+rtol = 1e-7
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 8.0
+values = { theta = 0.4938648074, phi = 27.9963735418, w_theta = -0.7630703073, w_phi = 6.3022004504 }
+rtol = 1e-7
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { theta = 0.6884476129, phi = 34.8474018368, w_theta = -1.5538683179, w_phi = 3.5083027214 }
+rtol = 1e-7
+atol = 1e-8
+source = "reference"
+
+# The energy is conserved for all time: 0.5*(w_theta^2 + sin(theta)^2*w_phi^2) - g*cos(theta) with
+# rod = 1, held to the last bits of the mantissa (Radau drifts it by about 1e-12 over the run).
+[[simulate.invariant]]
+expr = "0.5 * (w_theta ^ 2 + sin(theta) ^ 2 * w_phi ^ 2) - 9.81 * cos(theta)"
+value = -3.8842187840
+atol = 1e-6
+
+# The vertical angular momentum sin(theta)^2 * w_phi is conserved: the Coriolis term in the phi
+# equation is exactly what keeps it constant, and it is the barrier that stops the bob reaching a
+# pole. The invariant that makes this a genuine two-conserved-quantity benchmark.
+[[simulate.invariant]]
+expr = "sin(theta) ^ 2 * w_phi"
+value = 1.4161468365
+atol = 1e-6
+
+# The rod is rigid, so the radial coordinate is exactly the rod length for all time.
+[[simulate.invariant]]
+expr = "r"
+value = 1.0
+atol = 1e-12
+
+# The bob never reaches a pole (the angular-momentum barrier) nor rises above where it started.
+[[simulate.invariant]]
+expr = "theta"
+min = 0.47
+max = 1.001

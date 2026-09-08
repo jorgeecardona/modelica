@@ -6,6 +6,16 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `examples/SphericalPendulum`: **a pendulum free to swing in 3D, the first genuine
+  spherical-coordinate trajectory.** A bob on a rigid rod traces a path on a sphere: in the angles
+  (`theta` from the downward vertical, `phi` around it) the motion is the Lagrangian one, with the
+  Coriolis coupling that conserves the vertical angular momentum keeping the bob off the poles.
+  Started at `theta = 1` rad with a pure azimuthal rate, it oscillates in `theta` between about 0.47
+  and 1.0 rad while `phi` precesses about 5.5 turns, a rosette wrapped on the sphere. Two quantities
+  are conserved -- the energy and the vertical angular momentum `sin(theta)^2 * w_phi` -- and grade
+  the integrator as in the Kepler, Henon-Heiles and Schwarzschild benchmarks; both hold to about
+  1e-12. The rigid rod keeps the radius constant, so the state reads directly as `(r, theta, phi)`
+  for the new 3-D spherical view. Six scipy reference points at 1e-12, matched to 1e-10.
 - **`homotopy(actual, simplified)` is taken at its actual value.** The standard operator that
   helps an initialisation converge by walking a path from a simplified model to the actual one is
   now supported: with no continuation run, its value is the actual (the first argument), which is
