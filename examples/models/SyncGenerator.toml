@@ -1,0 +1,96 @@
+summary = "A synchronous generator tied to an infinite bus, as the swing equation. The rotor angle delta measures how far the machine leads the grid; the electrical power it delivers is Pmax*sin(delta), so the angle both sets the power and is driven by the imbalance between mechanical power in and electrical power out. Started 0.36 rad below its operating angle, the rotor accelerates, overshoots to 0.70 rad, and the damping rings it down to the equilibrium delta = asin(Pm/Pmax) = 0.5625 rad (32 degrees), where the two powers balance."
+teaches = ["electromechanical coupling: rotor angle sets electrical power and is driven by it", "the swing equation, a driven damped oscillator that is not a constraint pendulum", "a stable machine damps to its power-angle equilibrium", "an assert guards against losing synchronism"]
+requires = []
+
+[parse]
+classes = ["SyncGenerator"]
+
+[flatten]
+model = "SyncGenerator"
+states = ["delta", "w"]
+equations = 3
+balanced = true
+
+# The machine in two states, which is what the reference integrates:
+#   Pe = Pmax*sin(delta)               the power-angle curve: electrical power out
+#   d(delta)/dt = w                    the rotor angle advances with its speed deviation
+#   M dw/dt = Pm - Pe - D*w            the swing: net accelerating power against damping
+# This is genuinely electromechanical, not a mechanical pendulum wearing an electrical hat: the
+# term Pmax*sin(delta) is the power transferred across the transmission reactance, and it both
+# loads the shaft and is set by the shaft's angle. Unlike the corpus `Pendulum`, which is a
+# position constraint solved by index reduction, this is a plain index-1 pair. Steady state is
+# w = 0 and Pe = Pm, i.e. delta = asin(Pm/Pmax) = 0.5625 rad. The assert guards the model's
+# domain: past delta = pi the machine has slipped a pole and the swing equation no longer
+# describes it -- the stable swing here stays near 0.7 rad, so it never fires.
+[simulate]
+stop = 5.0
+tolerance = 1e-10
+
+# The first swing: the rotor accelerates from its low starting angle, races through the
+# equilibrium, and overshoots as the inertia carries it past.
+[[simulate.point]]
+t = 0.1
+values = { delta = 0.30081076772, w = 1.7445837695 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.3
+values = { delta = 0.64517141259, w = 1.0453487751 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.6
+values = { delta = 0.60282454946, w = -0.69223575567 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 1.0
+values = { delta = 0.54506928948, w = 0.24865828131 }
+rtol = 1e-6
+source = "reference"
+
+# The damped settle: the oscillation rings down and the rotor holds its power-angle equilibrium.
+[[simulate.point]]
+t = 5.0
+values = { delta = 0.56253480058 }
+rtol = 1e-6
+source = "reference"
+
+# The operating angle, reached after the swing damps out: delta = asin(0.8/1.5) = 0.5625 rad,
+# where the electrical power out matches the mechanical power in.
+[[simulate.invariant]]
+expr = "delta"
+value = 0.5625362445
+rtol = 2e-3
+after = 3.0
+
+# The speed deviation returns to zero: the rotor turns at exactly synchronous speed again.
+[[simulate.invariant]]
+expr = "w"
+value = 0.0
+atol = 0.01
+after = 3.0
+
+# The power balance closes: at the equilibrium the electrical power delivered equals the
+# mechanical power supplied, Pe = Pm = 0.8. This is the machine's own steady-state law.
+[[simulate.invariant]]
+expr = "Pe - Pm"
+value = 0.0
+atol = 5e-3
+after = 3.0
+
+# The rotor swings to 0.70 rad and no further before it settles: a stable machine rings once,
+# well inside the pi the assert guards.
+[[simulate.invariant]]
+expr = "delta"
+min = 0.19
+max = 0.7
+
+# The speed overshoots to about 2 rad/s on the first swing, then bounds tighten as it damps.
+[[simulate.invariant]]
+expr = "w"
+min = -0.71
+max = 2.0

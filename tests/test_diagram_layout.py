@@ -75,6 +75,7 @@ FLAT = {
     "Rossler",
     "ServoDrive",
     "Setback",
+    "SyncGenerator",
     "Thermoelectric",
     "Thermostat",
     "VanDerPol",
