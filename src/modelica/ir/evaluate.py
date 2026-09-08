@@ -70,6 +70,9 @@ _FUNCTIONS: dict[str, Callable[[float], float]] = {
     # reference, and a reference that knows fewer functions than the compiler is not one.
     "ceil": math.ceil,
     "floor": math.floor,
+    # `integer(x)` is the largest integer not greater than x -- floor, typed Integer. In a Real
+    # context that is just its value, so it evaluates and emits exactly as `floor`.
+    "integer": math.floor,
 }
 
 _PAIRS: dict[str, Callable[[float, float], float]] = {

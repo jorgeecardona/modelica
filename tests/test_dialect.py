@@ -55,6 +55,9 @@ CASES: list[tuple[str, dict[str, float]]] = [
     ("abs(a) + abs(b)", {"a": -3.0, "b": 4.0}),
     ("sign(a) + sign(b) + sign(c)", {"a": -3.0, "b": 0.0, "c": 4.0}),
     ("floor(a) + ceil(b)", {"a": 2.7, "b": 2.1}),
+    # `integer(x)` is `floor(x)`, so a negative argument tells it apart from truncation: it must
+    # be -3, not -2, and each dialect has to spell it the way its `floor` is spelled.
+    ("integer(a) + integer(b)", {"a": 2.7, "b": -2.3}),
     # `mod` rounds toward minus infinity and `rem` truncates. C's `fmod` is `rem`, so a
     # dialect that mapped `mod` onto it would be wrong here and nowhere else.
     ("mod(a, b)", {"a": -7.0, "b": 3.0}),

@@ -217,13 +217,14 @@ _CHAIN: dict[str, Callable[[ir.Expr], ir.Expr]] = {
 def _multiary(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr | None:
     """Derivative rules for the functions that are not a single-argument chain.
 
-    ``floor``/``ceil``/``div`` (piecewise constant), ``min``/``max`` (the active argument),
-    ``atan2``, and ``mod``/``rem`` (numerator minus an integer factor). Returns ``None`` when the
-    call is none of these, so the single-argument table gets its turn.
+    ``floor``/``ceil``/``integer``/``div`` (piecewise constant), ``min``/``max`` (the active
+    argument), ``atan2``, and ``mod``/``rem`` (numerator minus an integer factor). Returns ``None``
+    when the call is none of these, so the single-argument table gets its turn.
     """
-    if node.name in ("floor", "ceil", "div"):
+    if node.name in ("floor", "ceil", "integer", "div"):
         # Piecewise constant: zero derivative between its steps, which is where it is smooth.
-        # `div(a, b)` is the truncated quotient, an integer, so it is constant in both arguments.
+        # `integer(x)` is `floor(x)` typed Integer; `div(a, b)` is the truncated quotient, also an
+        # integer, constant in both arguments.
         return ZERO
     if len(node.args) != 2:  # noqa: PLR2004 - the rules below are all the two-argument forms
         return None

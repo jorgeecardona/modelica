@@ -152,9 +152,10 @@ def test_atan2_uses_the_quotient_rule() -> None:
     assert _at(d_dx(a, "y"), x=1.0, y=2.0) == pytest.approx(-1.0 / 5.0)
 
 
-def test_floor_ceil_and_div_have_zero_derivative() -> None:
+def test_floor_ceil_integer_and_div_have_zero_derivative() -> None:
     assert _at(d_dx(ir.Call("floor", (X,)), "x"), x=2.3) == pytest.approx(0.0)
     assert _at(d_dx(ir.Call("ceil", (X,)), "x"), x=2.3) == pytest.approx(0.0)
+    assert _at(d_dx(ir.Call("integer", (X,)), "x"), x=2.3) == pytest.approx(0.0)
     assert _at(d_dx(ir.Call("div", (X, Y)), "x"), x=7.0, y=2.0) == pytest.approx(0.0)
     assert _at(d_dx(ir.Call("div", (X, Y)), "y"), x=7.0, y=2.0) == pytest.approx(0.0)
 
