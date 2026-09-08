@@ -478,3 +478,30 @@ end M;
     assert system.index >= 2, f"index {system.index} on a model with a constraint"
     assert len(system.states) == 1, f"one position is free, not {len(system.states)}"
     _assert_causal(system, source)
+
+
+def test_an_over_determined_model_names_the_equation_with_nothing_to_solve() -> None:
+    """The refusal points at the extra equation, not at the algorithm that gave up on it.
+
+    Two equations for the one algebraic ``y`` and a state ``x``: ``y = 2*x`` already computes
+    ``y``, so ``y = 3*x`` has nothing left. Pantelides differentiates it forever looking for a
+    variable to solve for, and used to report only that index reduction "did not terminate".
+    A modeller who wrote one equation too many needs to be told *which* equation is spare and
+    *that* the model is over-determined, the way the under-determined case names its variable.
+    The equation is shown as source (``y = 3 * x``), not as the IR repr.
+    """
+    source = """model M
+  Real x(start = 0, fixed = true);
+  Real y;
+equation
+  der(x) = -x;
+  y = 2 * x;
+  y = 3 * x;
+end M;
+"""
+    with pytest.raises(CausalizationError) as caught:
+        _causalize(source)
+    message = str(caught.value)
+    assert "y = 3 * x" in message, message
+    assert "over-determined" in message, message
+    assert "Equal(" not in message, "the equation is shown as source, not the IR repr"

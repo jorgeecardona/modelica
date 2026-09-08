@@ -52,6 +52,7 @@ from modelica.ir.derive import (
 from modelica.ir.flat import FlatVariable
 from modelica.ir.rewrite import contains, isolated, names, residual, solve_for, substitute
 from modelica.ir.system import Block, Mode, System
+from modelica.lang.unparse import unparse_equation
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping
@@ -523,6 +524,15 @@ def _reach(
     return False
 
 
+def _show(equation: ir.Equal) -> str:
+    """One equation as Modelica source, for an error message a modeller can act on.
+
+    The raw IR repr names every node type and is unreadable; ``der(x) = -k * x`` is what the
+    modeller wrote, and is what points at the equation to remove.
+    """
+    return " ".join(line.strip() for line in unparse_equation(equation)).rstrip(";")
+
+
 def _reduce_index(work: _Work) -> None:
     """Differentiate equations until every one of them can be assigned a top-order variable."""
     assign: dict[str, int] = {}
@@ -536,7 +546,19 @@ def _reduce_index(work: _Work) -> None:
                 break
             budget -= 1
             if budget <= 0:
-                raise CausalizationError(f"{work.name}: index reduction did not terminate")
+                # Pantelides differentiates an equation until it can be solved for a top-order
+                # variable, and terminates only when the model is structurally well-posed. Running
+                # out of budget means it never could: the equation this chain started from has
+                # nothing to solve for even after being differentiated, which is over-determination
+                # (an extra or duplicate equation) or a structural singularity, not a deep index.
+                # Naming that equation -- as the under-determined case names its variable -- points
+                # at what to remove, rather than reporting a failed algorithm.
+                raise CausalizationError(
+                    f"{work.name}: no way to solve equation `{_show(work.equations[start])}` -- "
+                    f"differentiating it {_BUDGET} times never left it a variable to compute. "
+                    "The model is over-determined (an extra or duplicate equation) or structurally "
+                    "singular; check that the number of equations matches the number of unknowns."
+                )
             for name in variables:
                 _ensure_derivative(work, name)
             for equation in equations:
@@ -669,7 +691,8 @@ class _Matching:
         for index in pending:
             if not self.augment(index, set()):
                 raise CausalizationError(
-                    f"{self.work.name}: no unknown left for equation {self.work.equations[index]!r}"
+                    f"{self.work.name}: no unknown left for equation "
+                    f"`{_show(self.work.equations[index])}`"
                 )
         return self.matched
 
