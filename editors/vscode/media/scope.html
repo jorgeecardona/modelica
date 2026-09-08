@@ -2134,7 +2134,7 @@ document.getElementById("scale").onchange = (e) => { scale = e.target.value; dra
 const speedSel = document.getElementById("speed");
 if (speedSel) {
   speedSel.value = speed;
-  speedSel.onchange = (e) => { speed = e.target.value; if (LIVE) reRun(); };
+  speedSel.onchange = (e) => { speed = e.target.value; savePrefs(); if (LIVE) reRun(); };
 }
 // Max Δt: the field is in the shown time unit; the run works in seconds. Empty is auto. A change
 // re-runs at the same stop to resample the whole curve at the new density -- the stop has not
@@ -2151,6 +2151,7 @@ if (maxdtInput) {
 }
 document.getElementById("timeunit").onchange = (e) => {
   timeMode = e.target.value;
+  savePrefs();
   const s = document.getElementById("stop");
   if (LIVE && s && D) s.value = cleanStop(toT(D.stop));
   document.getElementById("stopunit").textContent = " " + tUnit();
@@ -2294,7 +2295,7 @@ if (stopInput) {
 }
 document.getElementById("nextev").onclick = () => reRun("event");
 document.getElementById("settle").onclick = () => reRun("settle");
-document.getElementById("disp").onchange = (e) => { dispMode = e.target.value; paintParams(); paintRuns(); paintSweep(); draw(); };
+document.getElementById("disp").onchange = (e) => { dispMode = e.target.value; savePrefs(); paintParams(); paintRuns(); paintSweep(); draw(); };
 // Pin: freeze the live run as a comparison. A copy with its overrides and data is inserted
 // before the live one, so the live run stays last (solid, editable) and the pinned copy draws
 // dashed behind it -- change a parameter and the two diverge on the same axes.
@@ -2569,8 +2570,10 @@ function setLegend(px) {
 }
 split.addEventListener("pointerdown", (e) => { splitDrag = true; split.classList.add("on"); split.setPointerCapture(e.pointerId); });
 split.addEventListener("pointermove", (e) => { if (splitDrag) setLegend(window.innerWidth - e.clientX - 3); });
-split.addEventListener("pointerup", () => { splitDrag = false; split.classList.remove("on"); });
-split.addEventListener("dblclick", () => setLegend(legendWidth < 40 ? 208 : 0));
+// Save on drag-end and on the collapse toggle, not inside setLegend, which a drag calls on every
+// pointermove -- one write when the width settles, not dozens while it moves.
+split.addEventListener("pointerup", () => { splitDrag = false; split.classList.remove("on"); savePrefs(); });
+split.addEventListener("dblclick", () => { setLegend(legendWidth < 40 ? 208 : 0); savePrefs(); });
 // Narrow pane: the legend is hidden by the layout, and this button brings it back as a strip
 // under the chart (see the 780px media query). Wide, the button itself is hidden.
 const legendBtn = document.getElementById("legendbtn");
@@ -2670,6 +2673,38 @@ function load() {
   buildRail();
   select(0);
 }
+// View preferences that outlast a reload: the display units, the time unit, the solver speed and
+// the legend width. Not the scale -- a freshly opened model auto-picks its own (a single .mo opens
+// in split-by-unit), and overriding that with a remembered scale would fight the per-model choice.
+// Stored per browser origin; wrapped in try/catch because storage can be unavailable or full, and a
+// remembered preference is never worth failing the panel over.
+const PREFS_KEY = "pymodelica.scope.prefs";
+function savePrefs() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ dispMode, timeMode, speed, legendWidth }));
+  } catch (e) { /* storage unavailable; skip */ }
+}
+function loadPrefs() {
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem(PREFS_KEY) || "null"); } catch (e) { p = null; }
+  if (!p || typeof p !== "object") return;
+  // Apply a stored value only if it is still a valid option of its control, so a key left over
+  // from an older build can never wedge the panel into a mode that no longer exists.
+  const useSel = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val != null && [...el.options].some((o) => o.value === val)) { el.value = val; return true; }
+    return false;
+  };
+  if (useSel("disp", p.dispMode)) dispMode = p.dispMode;
+  if (useSel("timeunit", p.timeMode)) timeMode = p.timeMode;
+  if (useSel("speed", p.speed)) speed = p.speed;
+  if (typeof p.legendWidth === "number" && p.legendWidth >= 0 && p.legendWidth <= 480) {
+    legendWidth = p.legendWidth;
+    document.documentElement.style.setProperty("--legend-w", legendWidth + "px");
+    document.body.classList.toggle("legend-collapsed", legendWidth < 40);
+  }
+}
+loadPrefs();
 load();
 </script>
 
