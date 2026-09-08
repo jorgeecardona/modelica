@@ -907,7 +907,20 @@ function drawPath(frag, vs, a, b, yOf, nm, ri) {
     "stroke-linejoin": "round", opacity: st.op};
   if (st.dash) attrs["stroke-dasharray"] = st.dash;
   frag.appendChild(el("path", attrs));
-  if (arrows) phaseArrows(frag, pts, colour(nm), st.op);
+  if (arrows) { phaseArrows(frag, pts, colour(nm), st.op); phaseEndpoints(frag, pts, colour(nm), st.op); }
+}
+// The two ends of a phase trajectory: a hollow ring where time begins, a filled dot where it ends,
+// both in the variable's colour with a background halo so they read over the curve. The arrows say
+// which way it runs; these say where it came from and where it settled -- a decaying spiral's start
+// at the rim and its rest at the centre, a pursuer's launch and its final position.
+function phaseEndpoints(frag, pts, color, op) {
+  const start = pts.find((p) => p);
+  const end = [...pts].reverse().find((p) => p);
+  if (!start || !end) return;
+  frag.appendChild(el("circle", {cx: start.x, cy: start.y, r: 5, fill: "none", stroke: cssbg, "stroke-width": 3, opacity: op}));
+  frag.appendChild(el("circle", {cx: start.x, cy: start.y, r: 4, fill: cssbg, stroke: color, "stroke-width": 1.6, opacity: op}));
+  frag.appendChild(el("circle", {cx: end.x, cy: end.y, r: 5.5, fill: cssbg, opacity: op}));
+  frag.appendChild(el("circle", {cx: end.x, cy: end.y, r: 3.6, fill: color, opacity: op}));
 }
 // A few evenly-spaced arrowheads along a curve, pointing the way time increases. Spaced by arc
 // length (not sample index, which would bunch them where the trajectory dawdles) and never laid

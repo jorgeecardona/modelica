@@ -78,7 +78,9 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   become the decades). `xy` is a **phase plot**: the `x` slot picks the variable on the x axis
   and the selected variables draw against it, such as the rate of rise against bean temperature
   or Lorenz's z against x; `⇄` swaps x with the first drawn variable. A few arrowheads along the
-  live run's curve point the way time runs, so a phase loop shows which way it travels. `xyz` (offered with three
+  live run's curve point the way time runs, and a hollow ring marks where the trajectory begins and
+  a filled dot where it ends, so a decaying spiral shows its start at the rim and its rest at the
+  centre. `xyz` (offered with three
   or more variables) is the **3D phase view**: three slots pick the axes, defaulting to the
   first three states -- Lorenz's x, y, z, the butterfly -- with each option showing its unit
   and `⇄` swapping x and y. The trajectory is coloured by time (blue to orange, with a small
