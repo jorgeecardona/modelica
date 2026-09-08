@@ -6,6 +6,12 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `examples/HenonHeiles`: **the Henon-Heiles system, a second Hamiltonian benchmark.** A star in a
+  galactic potential `0.5*(x^2 + y^2) + x^2*y - y^3/3`, two degrees of freedom, run at energy 0.1125
+  (below the escape energy 1/6, a bounded regular orbit). Where Kepler is integrable and closed-form,
+  this one is non-integrable; both carry the energy as the invariant that grades the integrator.
+  Radau holds it to 1e-13 over fifty time units, and the orbit is regular enough that a 1e-11 run
+  and a 1e-12 reference stay within 3e-6, so its six scipy points pin the trajectory point for point.
 - `examples/KeplerOrbit`: **the Kepler two-body problem, the canonical Hamiltonian benchmark.**
   An eccentric orbit (e = 0.6, period 2*pi) under inverse-square gravity, run for three orbits.
   Its point is its two constants of motion, held as invariants rather than integrated: the energy
