@@ -1,0 +1,95 @@
+summary = "Two tanks in series, filling from a constant inflow and draining by gravity. The first tank drains into the second through a coupling valve whose flow follows Torricelli's law -- proportional to the square root of the level DIFFERENCE between the tanks -- and the second drains to atmosphere through its own valve, proportional to the square root of its own level. Because the coupling flow depends on both levels, the tanks interact: the second tank's level feeds back into how fast the first one drains. Starting nearly empty, both levels climb toward a steady state where the inflow exactly balances each outflow. This is the textbook interacting-tank process, the level-control example every process-dynamics course opens with."
+teaches = ["an interacting two-tank level system, the canonical process-control plant", "Torricelli outflow: valve flow proportional to the square root of the head", "coupling through a level difference, so one tank's state changes another's drain rate", "approach to a hydraulic steady state where inflow balances outflow"]
+requires = []
+
+[parse]
+classes = ["TwoTank"]
+
+[flatten]
+model = "TwoTank"
+states = ["h1", "h2"]
+equations = 4
+balanced = true
+
+# Two levels and two Torricelli flows:
+#   q1 = k1*sqrt(h1 - h2)          the coupling valve, driven by the level difference
+#   q2 = k2*sqrt(h2)              the outlet valve of tank 2, driven by its own level
+#   area1*d(h1)/dt = q_in - q1    tank 1 fills from the inflow, drains into tank 2
+#   area2*d(h2)/dt = q1 - q2      tank 2 fills from tank 1, drains to atmosphere
+# The coupling flow q1 depends on BOTH levels, so the two states are genuinely coupled: raising
+# tank 2 slows the drain out of tank 1. Starting at (h1, h2) = (0.5, 0.1) m, both levels rise
+# monotonically toward the steady state h2 -> (q_in/k2)^2 = 1.5625 m, h1 - h2 -> (q_in/k1)^2 =
+# 0.6944 m (so h1 -> 2.2569 m), where each Torricelli outflow has grown to match the 0.5 m3/s
+# inflow. The head difference h1 - h2 stays positive throughout (never below 0.316 m), so the
+# square root is always evaluated on a positive argument.
+[simulate]
+stop = 60.0
+tolerance = 1e-10
+
+# The early fill: both tanks well below steady state, levels climbing fast.
+[[simulate.point]]
+t = 2.0
+values = { h1 = 0.70535890361, h2 = 0.3844438321 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 5.0
+values = { h1 = 0.99264395647, h2 = 0.60523287467 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { h1 = 1.3401194929, h2 = 0.8631539773 }
+rtol = 1e-6
+source = "reference"
+
+# The slow approach: the outflows have grown to nearly match the inflow, so the levels crawl the
+# last stretch toward steady state (the slowest mode has a time constant near 18 s).
+[[simulate.point]]
+t = 20.0
+values = { h1 = 1.7532964306, h2 = 1.1755892588 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 40.0
+values = { h1 = 2.0944512209, h2 = 1.4370943096 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 60.0
+values = { h1 = 2.2029457678, h2 = 1.5207721041 }
+rtol = 1e-6
+source = "reference"
+
+# Both tanks fill monotonically from their starting levels up toward the steady state, never
+# overshooting it: the levels are bounded below by where they started and above by where the
+# inflow-outflow balance puts them.
+[[simulate.invariant]]
+expr = "h1"
+min = 0.499
+max = 2.257
+
+[[simulate.invariant]]
+expr = "h2"
+min = 0.099
+max = 1.5625
+
+# The head that drives the coupling valve stays strictly positive -- tank 1 sits above tank 2
+# for the whole run -- and approaches the steady-state difference (q_in/k1)^2 = 0.6944 m.
+[[simulate.invariant]]
+expr = "h1 - h2"
+min = 0.3
+max = 0.695
+
+# The outflow from tank 2 never exceeds the inflow while the system is still filling: the tank is
+# below its steady level, so its Torricelli outflow k2*sqrt(h2) is below q_in = 0.5 m3/s, which it
+# reaches only in the limit. This invariant is a Modelica expression over the parameters and a
+# builtin, evaluated along the trajectory.
+[[simulate.invariant]]
+expr = "k2 * sqrt(h2)"
+min = 0.12
+max = 0.5001
