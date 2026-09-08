@@ -11,7 +11,7 @@ class SchwarzschildOrbit(Model):
         Real, 4, doc="Specific angular momentum, conserved; > sqrt(12)*M for a bound orbit"
     )
     r = Real("Areal radius, in units of the mass", start=20, fixed=True)
-    phi = Real("Azimuthal angle in the equatorial plane", start=0, fixed=True)
+    phi = Real("Azimuthal angle in the equatorial plane", unit="rad", start=0, fixed=True)
     vr = Real("Radial rate dr/dtau, per unit proper time", start=0, fixed=True)
 
     def equations(self):
