@@ -7,9 +7,10 @@ yet", so a vector field had to be written as an explicit ``for`` loop over its e
 ``TorusHeat`` still does). The loop form keeps working; this adds the whole-array form beside
 it, including the per-element share of an array-valued ``start``.
 
-What is *not* elementwise is refused rather than mis-scalarised: ``x * y`` between two arrays
-is a product with no element-by-element reading, and it says so and names the loop as the way
-to write the thing it cannot.
+A ``*`` between two arrays is a contraction, not elementwise, and is scalarised as such: the
+dot product ``a * x``, the matrix-vector ``A * x`` (``der(x) = A * x``, the linear system), and
+the matrix-matrix ``A * B`` all become the sums they stand for. Array ``/`` and ``^`` have no
+such reading and are refused, naming the loop as the way to write them.
 """
 
 from __future__ import annotations
@@ -114,20 +115,108 @@ def test_an_elementwise_function_call_scalarises() -> None:
     assert sorted(str(s) for s in system.states) == ["x[1]", "x[2]"]
 
 
-def test_an_array_product_is_refused_and_names_the_loop() -> None:
-    """``x * y`` between two arrays is a contraction, not elementwise: refused by name."""
-    with pytest.raises(FlattenError, match="array product is not supported"):
+def test_a_matrix_vector_product_is_the_linear_system() -> None:
+    """``der(x) = A * x`` with a rotation matrix turns ``x`` in the plane: cos and sin.
+
+    The case the whole feature is named for. ``(A * x)[i]`` is the sum over ``j`` of
+    ``A[i, j] * x[j]``, and the implicit solver's Jacobian of it has to be ``A`` for the run to
+    hold its shape -- the closed form catches a wrong contraction and a wrong derivative alike.
+    """
+    system = _system(
+        """
+        model Rotation
+          parameter Real A[2, 2] = {{0, -1}, {1, 0}};
+          Real x[2](start = {1, 0}, fixed = true);
+        equation
+          der(x) = A * x;
+        end Rotation;
+        """,
+        "Rotation",
+    )
+    result = simulate(system, stop=3.0, tolerance=1e-10)
+    time = result.time
+    assert np.max(np.abs(result["x[1]"] - np.cos(time))) < 1e-9
+    assert np.max(np.abs(result["x[2]"] - np.sin(time))) < 1e-9
+
+
+def test_a_dot_product_scalarises_to_a_sum() -> None:
+    """``s = a * x`` between two vectors is the scalar sum over the elements."""
+    system = _system(
+        """
+        model Dot
+          parameter Real a[3] = {1, 2, 3};
+          Real x[3](start = {1, 1, 1}, fixed = true);
+          Real s;
+        equation
+          der(x) = -x;
+          s = a * x;
+        end Dot;
+        """,
+        "Dot",
+    )
+    result = simulate(system, stop=1.0, tolerance=1e-10)
+    # a . x = (1 + 2 + 3) * e^{-t} = 6 e^{-t}.
+    assert np.max(np.abs(result["s"] - 6.0 * np.exp(-result.time))) < 1e-9
+
+
+def test_a_matrix_matrix_product_scalarises() -> None:
+    """``C = A * B`` is the matrix product, each entry a sum over the shared dimension."""
+    system = _system(
+        """
+        model MatMul
+          parameter Real A[2, 2] = {{2, 0}, {0, 3}};
+          parameter Real B[2, 2] = {{1, 4}, {5, 1}};
+          Real C[2, 2];
+          Real k(start = 0, fixed = true);
+        equation
+          C = A * B;
+          der(k) = 0;
+        end MatMul;
+        """,
+        "MatMul",
+    )
+    result = simulate(system, stop=0.1, tolerance=1e-10)
+    # [[2,0],[0,3]] * [[1,4],[5,1]] = [[2,8],[15,3]].
+    assert result["C[1, 1]"][0] == pytest.approx(2.0)
+    assert result["C[1, 2]"][0] == pytest.approx(8.0)
+    assert result["C[2, 1]"][0] == pytest.approx(15.0)
+    assert result["C[2, 2]"][0] == pytest.approx(3.0)
+
+
+def test_array_divide_and_power_are_refused_and_name_the_loop() -> None:
+    """Only ``*`` contracts; array ``/`` and ``^`` have no reading and say so."""
+    for operator in ("/", "^"):
+        with pytest.raises(FlattenError, match="is not supported"):
+            _system(
+                f"""
+                model Bad
+                  Real x[2](start = {{1, 1}}, fixed = true);
+                  Real y[2](start = {{1, 1}}, fixed = true);
+                equation
+                  der(x) = x {operator} y;
+                  der(y) = -y;
+                end Bad;
+                """,
+                "Bad",
+            )
+
+
+def test_a_nonconforming_product_is_refused() -> None:
+    """A matrix and a vector whose inner dimensions differ cannot be multiplied."""
+    with pytest.raises(FlattenError, match="do not conform for a product"):
         _system(
             """
-            model Prod
-              Real x[2](start = {1, 1}, fixed = true);
-              Real y[2](start = {1, 1}, fixed = true);
+            model Mismatch
+              parameter Real M[2, 3] = {{1, 2, 3}, {4, 5, 6}};
+              parameter Real w[2] = {1, 1};
+              Real y[2];
+              Real k(start = 0, fixed = true);
             equation
-              der(x) = x * y;
-              der(y) = -y;
-            end Prod;
+              y = M * w;
+              der(k) = 0;
+            end Mismatch;
             """,
-            "Prod",
+            "Mismatch",
         )
 
 

@@ -6,6 +6,15 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **Array products scalarise: the dot product, matrix-vector, and matrix-matrix.** A `*` between
+  two arrays is a contraction, not an elementwise operation, and is now expanded into the sums it
+  stands for: `der(x) = A * x` (the linear system the feature is named for) becomes
+  `der(x[i]) = sum_j A[i, j] * x[j]`, a dot product `a * x` becomes a scalar sum, and a
+  matrix-matrix `A * B` becomes the matrix product. The last dimension of the left runs against the
+  first of the right and both drop out, so a non-conforming product is refused by name. Array `/`
+  and `^` still have no elementwise reading and are refused with the `for` loop as the way to write
+  them. This closes the last array-equation gap, leaving elementwise equations (already supported)
+  and products handled together.
 - `examples/SphericalPendulum`: **a pendulum free to swing in 3D, the first genuine
   spherical-coordinate trajectory.** A bob on a rigid rod traces a path on a sphere: in the angles
   (`theta` from the downward vertical, `phi` around it) the motion is the Lagrangian one, with the

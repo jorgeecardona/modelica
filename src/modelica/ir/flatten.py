@@ -416,7 +416,7 @@ def element(name: str, indices: Sequence[int]) -> str:
     return f"{name}[{', '.join(str(i) for i in indices)}]"
 
 
-def _element(  # noqa: PLR0911 -- one case per node type, as its neighbours have
+def _element(  # noqa: C901, PLR0911 -- one case per node type, as its neighbours have
     node: ir.Expr, indices: tuple[int, ...], shapes: Mapping[_Path, tuple[int, ...]]
 ) -> ir.Expr:
     """One scalar element of an array-valued expression, at ``indices``.
@@ -429,9 +429,10 @@ def _element(  # noqa: PLR0911 -- one case per node type, as its neighbours have
     coefficient like ``a`` in ``der(x) = a * x`` is left alone while ``x`` becomes ``x[i]``.
 
     The structure carries the broadcast for free: ``der(x)`` becomes ``der(x[i])``,
-    ``-x`` becomes ``-x[i]``, ``a * x`` becomes ``a * x[i]``. What this does *not* do is
-    contract -- an array product or reduction has no elementwise reading and is refused in
-    :meth:`_Flattener._shape` before it ever reaches here.
+    ``-x`` becomes ``-x[i]``, ``a * x`` becomes ``a * x[i]``. A ``*`` between two arrays is the
+    one place an element is *not* a subscript: it is a contraction -- ``(A * x)[i]`` is the sum
+    over ``j`` of ``A[i, j] * x[j]`` -- so that case builds the sum out of the elements of each
+    side (a dot product, a matrix-vector or a matrix-matrix product, all the same rule).
     """
 
     def go(inner: ir.Expr) -> ir.Expr:
@@ -442,6 +443,28 @@ def _element(  # noqa: PLR0911 -- one case per node type, as its neighbours have
             return ir.Ref((*parts[:-1], element(parts[-1], indices)))
         case ir.Unary(op=op, operand=operand):
             return ir.Unary(op, go(operand))
+        case ir.Binary(op="*", lhs=lhs, rhs=rhs) if _infer_shape(lhs, shapes) and _infer_shape(
+            rhs, shapes
+        ):
+            # A product of two arrays contracts the last dimension of the left with the first of
+            # the right: the output index splits into the part that stays on the left and the part
+            # that stays on the right, and the element is the sum over the shared dimension.
+            left_shape = _infer_shape(lhs, shapes)
+            contracted = left_shape[-1]
+            left_out = indices[: len(left_shape) - 1]
+            right_out = indices[len(left_shape) - 1 :]
+            terms = [
+                ir.Binary(
+                    "*",
+                    _element(lhs, (*left_out, j), shapes),
+                    _element(rhs, (j, *right_out), shapes),
+                )
+                for j in range(1, contracted + 1)
+            ]
+            summed = terms[0]
+            for term in terms[1:]:
+                summed = ir.Binary("+", summed, term)
+            return summed
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             return ir.Binary(op, go(lhs), go(rhs))
         case ir.Call(name=name, args=args):
@@ -458,6 +481,69 @@ def _element(  # noqa: PLR0911 -- one case per node type, as its neighbours have
             return _element(rows[row - 1][column - 1], tuple(rest), shapes)
         case _:
             return node
+
+
+def _merge_shape(left: tuple[int, ...], right: tuple[int, ...]) -> tuple[int, ...]:
+    """The shape two operands share, broadcasting a scalar against an array.
+
+    Equal shapes are that shape; a scalar takes the other's; two different array shapes are a
+    modelling error caught here rather than passed on as a wrong equation count.
+    """
+    if right in (left, ()):
+        return left
+    if left == ():
+        return right
+    raise FlattenError(f"array shapes {left} and {right} do not match in an equation")
+
+
+def _infer_shape(  # noqa: C901, PLR0911, PLR0912 -- one node arm each
+    node: ir.Expr, shapes: Mapping[_Path, tuple[int, ...]]
+) -> tuple[int, ...]:
+    """The array shape of an already-flattened expression, ``()`` for a scalar.
+
+    A reference is array-valued when its flat path is a key of ``shapes``; ``der``/``pre``/
+    ``noEvent``/``smooth`` and the elementwise operators pass a shape through, and ``+``/``-``
+    and a function call broadcast their operands. A ``*`` between two arrays is a contraction --
+    the last dimension of the left runs against the first of the right and both drop out, so a
+    vector times a vector is a scalar, a matrix times a vector a vector, a matrix times a matrix
+    a matrix. Array ``/`` and ``^`` have no elementwise reading and are refused.
+    """
+    match node:
+        case ir.Ref(parts=parts):
+            return shapes.get(parts, ())
+        case ir.Unary(operand=operand):
+            return _infer_shape(operand, shapes)
+        case ir.Call(name="der" | "pre" | "noEvent" | "smooth", args=args) if args:
+            return _infer_shape(args[-1], shapes)
+        case ir.Call(args=args):
+            shape: tuple[int, ...] = ()
+            for argument in args:
+                shape = _merge_shape(shape, _infer_shape(argument, shapes))
+            return shape
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            left, right = _infer_shape(lhs, shapes), _infer_shape(rhs, shapes)
+            if left and right:
+                if op != "*":
+                    raise FlattenError(
+                        f"an array `{op}` is not supported; a product is `*`, and anything else"
+                        " must be written over the elements in a `for` loop"
+                    )
+                if left[-1] != right[0]:
+                    raise FlattenError(
+                        f"array shapes {left} and {right} do not conform for a product"
+                        f" ({left[-1]} against {right[0]})"
+                    )
+                return (*left[:-1], *right[1:])
+            return _merge_shape(left, right)
+        case ir.IfExpr(then=then, otherwise=otherwise):
+            return _merge_shape(_infer_shape(then, shapes), _infer_shape(otherwise, shapes))
+        case ir.Array(elements=elements):
+            inner = _infer_shape(elements[0], shapes) if elements else ()
+            return (len(elements), *inner)
+        case ir.Matrix(rows=rows):
+            return (len(rows), len(rows[0]) if rows else 0)
+        case _:
+            return ()
 
 
 def _integer(node: ir.Expr, values: Mapping[str, float], what: str) -> int:
@@ -1633,61 +1719,11 @@ class _Flattener:
             if target is not None
         ]
 
-    def _shape(self, node: ir.Expr) -> tuple[int, ...]:  # noqa: C901, PLR0911 -- one node arm each
-        """The array shape of an already-flattened expression, ``()`` for a scalar.
+    def _shape(self, node: ir.Expr) -> tuple[int, ...]:
+        """The array shape of an already-flattened expression, against this model's arrays."""
+        return _infer_shape(node, self.shapes)
 
-        Enough of it to scalarise an equation, and no more. A reference is array-valued when
-        its flat path is a key of :attr:`shapes`; ``der``/``pre``/``noEvent``/``smooth`` and
-        the elementwise operators pass a shape straight through, and ``+``/``-`` and an
-        ordinary function call broadcast their operands. A ``*``, ``/`` or ``^`` between two
-        arrays is a contraction (matrix product, dot product, matrix power), which has no
-        elementwise reading -- it is refused here, with the loop as the way to write it,
-        rather than silently scalarised into the wrong thing.
-        """
-        match node:
-            case ir.Ref(parts=parts):
-                return self.shapes.get(parts, ())
-            case ir.Unary(operand=operand):
-                return self._shape(operand)
-            case ir.Call(name="der" | "pre" | "noEvent" | "smooth", args=args) if args:
-                return self._shape(args[-1])
-            case ir.Call(args=args):
-                shape: tuple[int, ...] = ()
-                for argument in args:
-                    shape = self._merge_shape(shape, self._shape(argument))
-                return shape
-            case ir.Binary(op=op, lhs=lhs, rhs=rhs):
-                left, right = self._shape(lhs), self._shape(rhs)
-                if op in ("*", "/", "^") and left and right:
-                    raise FlattenError(
-                        "an array product is not supported yet; write the equation over"
-                        " the elements in a `for` loop"
-                    )
-                return self._merge_shape(left, right)
-            case ir.IfExpr(then=then, otherwise=otherwise):
-                return self._merge_shape(self._shape(then), self._shape(otherwise))
-            case ir.Array(elements=elements):
-                inner = self._shape(elements[0]) if elements else ()
-                return (len(elements), *inner)
-            case ir.Matrix(rows=rows):
-                return (len(rows), len(rows[0]) if rows else 0)
-            case _:
-                return ()
-
-    @staticmethod
-    def _merge_shape(left: tuple[int, ...], right: tuple[int, ...]) -> tuple[int, ...]:
-        """The shape two operands share, broadcasting a scalar against an array.
-
-        Equal shapes are that shape; a scalar takes the other's; two different array shapes
-        are a modelling error caught here rather than passed on as a wrong equation count.
-        """
-        if right in (left, ()):
-            return left
-        if left == ():
-            return right
-        raise FlattenError(f"array shapes {left} and {right} do not match in an equation")
-
-    def _equation(  # noqa: C901, PLR0912, PLR0913 -- one arm per equation form; the scope
+    def _equation(  # noqa: C901, PLR0913 -- one arm per equation form; the scope
         # resolves a call, the outer map a name
         self,
         equation: ir.Equation,
@@ -1732,22 +1768,21 @@ class _Flattener:
                 # holds is still the one the modeller wrote, and saying where it was written
                 # is the difference between "block 7" and a line a reader can open.
                 left, right = carry(lhs), carry(rhs)
-                shape = self._merge_shape(self._shape(left), self._shape(right))
-                if not shape:
-                    sink.append(ir.Equal(left, right, span))
-                else:
-                    # One equation between arrays is one scalar equation per element, the same
-                    # split the declaration already did for the variables. `_element` reads out
-                    # element `indices` of each side; the span is shared, so every scalar row
-                    # points back at the one line the modeller wrote.
-                    for indices in product(*(range(1, size + 1) for size in shape)):
-                        sink.append(
-                            ir.Equal(
-                                _element(left, indices, self.shapes),
-                                _element(right, indices, self.shapes),
-                                span,
-                            )
+                shape = _merge_shape(self._shape(left), self._shape(right))
+                # One equation between arrays is one scalar equation per element, the same split
+                # the declaration did for the variables. `_element` reads out element `indices` of
+                # each side; the span is shared, so every scalar row points back at the one line the
+                # modeller wrote. A scalar equation runs the loop once with no index -- `_element` is
+                # then the identity, unless it holds a contraction (a dot product `s = a * x`), which
+                # it still expands into the sum.
+                for indices in product(*(range(1, size + 1) for size in shape)):
+                    sink.append(
+                        ir.Equal(
+                            _element(left, indices, self.shapes),
+                            _element(right, indices, self.shapes),
+                            span,
                         )
+                    )
             case ir.Assert(condition=condition, message=message, level=level, span=span):
                 # No unknown is bound here, so it goes beside the equations, not among
                 # them: causalization must never count an assert. The level is left as it

@@ -83,7 +83,7 @@ its example models parse, fewer simulate end to end. The frontier there is one c
 | Structure | components, `extends` with modification, conditional components, `redeclare`, `import` (all three forms), nested packages | operator overloading, external (C) functions, `impure` |
 | Types | `Real` / `Integer` / `Boolean`, discrete variables, enumerations, unit and `min`/`max` attributes, type aliases | |
 | Functions | user-defined functions with `algorithm` bodies, `if` and `for` statements | |
-| Arrays | indexed access, array parameters and starts, element-wise array equations both vectorised (`der(x) = -x`, a scalar broadcast, an element-wise function call) and written out with a `for` loop, multi-dimensional grids | an array *product* or contraction such as `der(x) = A * x` (write it over the elements in a `for` loop) |
+| Arrays | indexed access, array parameters and starts, element-wise array equations (`der(x) = -x`, a scalar broadcast, an element-wise call) and array *products* (the dot product, matrix-vector `der(x) = A * x`, matrix-matrix), a `for` loop, multi-dimensional grids | array `/` and `^` (write them over the elements in a `for` loop) |
 | Numerics | index reduction (Pantelides), alias elimination, BLT sorting, adaptive stiff integration (Radau, LSODA), state events, a sparse Jacobian | a symplectic integrator |
 | Standards | FMI 3.0 (import and export), SSP 2.0 co-simulation | |
 
