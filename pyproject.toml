@@ -133,6 +133,7 @@ dev = [
     # one. Dev-only and not an extra: unlike `musil`, this answers a question about *this
     # package*, never about a caller's model.
     "hypothesis>=6.100",
+    "pytest-parallex>=0.2.3",
 ]
 
 [tool.pytest.ini_options]
