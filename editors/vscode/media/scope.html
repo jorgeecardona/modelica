@@ -1253,14 +1253,31 @@ function draw() {
 
   drawMarks(frag);
   drawGuides(frag);
-  // The step-response settling instant, as a vertical marker: the latest time any drawn variable
-  // is still outside its 2% band, so "settled by here" reads off the plot.
+  // The step-response settling instants: one vertical marker per drawn step-like variable at the
+  // time it last left its 2% band, each in the variable's colour and labelled with the instant, so
+  // "settled by here" reads off the plot per signal rather than as one anonymous line -- a servo's
+  // position, or each stream of a heat exchanger, settling at its own time. Labels that would stack
+  // on near-coincident settles are dropped; the line still draws.
   if (stepOn && !xVar) {
-    const ts = settledAt();
-    if (ts !== null && ts >= win[0] && ts <= win[1]) {
-      const x = X(ts);
-      frag.appendChild(el("line", {class: "guide", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
-      frag.appendChild(el("text", {class: "guidelab", x: x + 3, y: M.t + 10, fill: "var(--ink)"}, "settled"));
+    const settles = [];
+    for (const nm of selected()) {
+      const m = stepMetrics(nm);
+      if (m && m.stepLike && m.settle !== null && m.settle >= win[0] && m.settle <= win[1]) {
+        settles.push({nm, t: m.settle});
+      }
+    }
+    settles.sort((a, b) => a.t - b.t);
+    let lastX = -Infinity, row = 0;
+    for (const s of settles) {
+      const x = X(s.t);
+      frag.appendChild(el("line", {x1: x, x2: x, y1: M.t, y2: box.h - M.b,
+        stroke: colour(s.nm), "stroke-width": 1, "stroke-dasharray": "5 4", opacity: 0.6}));
+      // Labels near each other in x would overlap (each is ~90px wide), so stack them onto
+      // successive rows rather than dropping any: every step-like signal keeps its own instant.
+      row = x - lastX < 92 ? row + 1 : 0;
+      lastX = x;
+      frag.appendChild(el("text", {class: "guidelab", x: x + 3, y: M.t + 10 + row * 12, fill: colour(s.nm)},
+        "settled " + fmt(toT(s.t)) + " " + tUnit()));
     }
   }
   plot.replaceChildren(frag);
@@ -2586,13 +2603,6 @@ function stepMetrics(nm) {
   for (let k = 0; k < N; k++) { const v = vs[k]; if (v !== null && isFinite(v) && Math.abs(v - yf) > band) settle = T[k]; }
   out.settle = settle;
   return out;
-}
-// The latest settling instant across the drawn variables, for the plot marker; null if none.
-function settledAt() {
-  let latest = null;
-  for (const nm of selected()) { const m = stepMetrics(nm);
-    if (m && m.stepLike && m.settle !== null) latest = latest === null ? m.settle : Math.max(latest, m.settle); }
-  return latest;
 }
 function paintStep() {
   const show = stepOn && !xVar && !view3d && N > 2;
