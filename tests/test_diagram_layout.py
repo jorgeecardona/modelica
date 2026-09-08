@@ -70,6 +70,7 @@ FLAT = {
     "Pendulum",
     "PhaseChange",
     "PumpTank",
+    "PurePursuit",
     "RoastingMachine",
     "Robertson",
     "Rossler",

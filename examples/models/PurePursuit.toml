@@ -1,0 +1,94 @@
+summary = "A pursuer under pure-pursuit guidance: it always steers its heading toward a fixed target, turning at a rate proportional to the bearing error. The bearing is atan2 of the relative position, so the steering law depends on where the pursuer is. Starting abeam of the target and heading the wrong way, it swings its heading onto the line of sight within two seconds and then runs straight down it, closing the range steadily -- the geometry a homing missile or a dog chasing a ball traces out."
+teaches = ["pure-pursuit guidance, heading toward a moving bearing", "atan2 of a state: the bearing depends on where the pursuer is", "a heading law that turns proportional to the bearing error", "convergence onto the line of sight, then a straight run-in"]
+requires = []
+
+[parse]
+classes = ["PurePursuit"]
+
+[flatten]
+model = "PurePursuit"
+states = ["x", "y", "theta"]
+equations = 4
+balanced = true
+
+# The pursuer in three states, which is what the reference integrates:
+#   thd = atan2(yt - y, xt - x)         the bearing to the target from where the pursuer is
+#   d(theta)/dt = k*(thd - theta)       steer the heading toward the bearing
+#   dx/dt = V*cos(theta)                move at constant speed on the current heading
+#   dy/dt = V*sin(theta)
+# The bearing is a function of the pursuer's own position, so the heading law is genuinely
+# nonlinear in the state, and the Jacobian of d(theta)/dt with respect to x and y is the
+# derivative of atan2. Starting at (0, 8) heading east while the target sits at (10, 0), the
+# pursuer turns to the bearing (theta -> -0.693 rad) within two seconds and then holds it,
+# running in a straight line at the target; the range never reaches zero over the horizon, so
+# the bearing stays well defined.
+[simulate]
+stop = 8.0
+tolerance = 1e-10
+
+# The turn-in: the pursuer swings its heading from east onto the bearing to the target.
+[[simulate.point]]
+t = 0.5
+values = { x = 0.46785537927, y = 7.8403944216, theta = -0.53181411239 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 2.0
+values = { x = 1.6551268776, y = 6.9256820479, theta = -0.69074886733 }
+rtol = 1e-6
+source = "reference"
+
+# The straight run-in: heading aligned with the line of sight, the pursuer closes the range at
+# constant speed.
+[[simulate.point]]
+t = 4.0
+values = { x = 3.194505658, y = 5.6488453221, theta = -0.69278661759 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 6.0
+values = { x = 4.7334375202, y = 4.3714696046, theta = -0.69279285821 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 8.0
+values = { x = 6.2723680015, y = 3.0940922235, theta = -0.69279287845 }
+rtol = 1e-6
+source = "reference"
+
+# The heading settles on the line of sight and holds it: for a fixed target, pure pursuit runs
+# straight in once aligned, so theta stops changing.
+[[simulate.invariant]]
+expr = "theta"
+value = -0.69279287845
+rtol = 2e-3
+after = 3.0
+
+# The steering error goes to zero: the pursuer's heading matches the bearing to the target, which
+# is the whole claim of the guidance law once it has turned in.
+[[simulate.invariant]]
+expr = "thd - theta"
+value = 0.0
+atol = 1e-3
+after = 3.0
+
+# The pursuer moves into the first quadrant of its travel, never past the target it is chasing.
+[[simulate.invariant]]
+expr = "x"
+min = -0.001
+max = 6.3
+
+[[simulate.invariant]]
+expr = "y"
+min = 3.0
+max = 8.001
+
+# The heading turns from east down to the bearing and no further: it never swings past the target
+# or wraps around, so the atan2 stays on one branch.
+[[simulate.invariant]]
+expr = "theta"
+min = -0.7
+max = 0.001
