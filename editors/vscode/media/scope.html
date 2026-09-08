@@ -868,8 +868,13 @@ function rebase(run) {
 const DASHES = ["6 4", "2 3", "9 3 2 3", "1 3"];
 function runStyle(ri) {
   const back = RUNS.length - 1 - ri;
-  return back === 0 ? {dash: null, w: 1.8, op: 1}
-    : {dash: DASHES[Math.min(back - 1, DASHES.length - 1)], w: 1.4, op: .85};
+  if (back === 0) return {dash: null, w: 1.8, op: 1};
+  // Pinned runs cycle the dash patterns, but a sweep can pin more runs than there are patterns and
+  // the oldest then share one -- so also fade the opacity along the run order (oldest faintest),
+  // which never runs out and reads as the sweep's own gradient. A single pinned run stays full.
+  const nPinned = RUNS.length - 1;
+  const op = nPinned > 1 ? 0.45 + 0.4 * (ri / (nPinned - 1)) : 0.85;
+  return {dash: DASHES[Math.min(back - 1, DASHES.length - 1)], w: 1.4, op};
 }
 function seriesOf(ri, nm) {
   return ri === RUNS.length - 1 ? (D.series[nm] || null) : ((RUNS[ri].onBase || {})[nm] || null);
@@ -2413,6 +2418,7 @@ function paintRuns() {
     const st = runStyle(ri);
     const dash = document.createElement("span"); dash.className = "dash";
     dash.style.borderTopStyle = st.dash ? (st.dash.startsWith("2") || st.dash.startsWith("1") ? "dotted" : "dashed") : "solid";
+    dash.style.opacity = String(st.op);  // match the chart's per-run fade so the chip is a true key
     const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = String.fromCharCode(65 + ri);
     const what = document.createElement("span");
     const ov = Object.entries(run.overrides || {});
