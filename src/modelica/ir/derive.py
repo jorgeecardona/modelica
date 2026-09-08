@@ -255,9 +255,12 @@ def _call(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:
         if not isinstance(arg, ir.Ref):
             raise DerivativeError(f"{node.name}() needs a variable, got {arg!r}")
         return ZERO if node.name == "pre" else leaf(ir.Ref((der_name(arg.name),)))
-    if node.name == "noEvent":
-        (arg,) = node.args
-        return ir.Call("noEvent", (_derive(arg, leaf),))
+    if node.name in ("noEvent", "smooth"):
+        # Transparent wrappers: the derivative keeps the wrapper (and smooth's leading continuity
+        # order) around the derivative of the expression it carries -- the sole argument for
+        # `noEvent`, the last for `smooth(order, expr)`. Emit strips the wrapper from generated code.
+        *rest, arg = node.args
+        return ir.Call(node.name, (*rest, _derive(arg, leaf)))
     if node.name in ("abs", "sign"):
         # Differentiable away from zero, which is where an event indicator should have
         # split the trajectory anyway; at zero the derivative is the solver's problem.

@@ -52,6 +52,10 @@ CASES: list[tuple[str, dict[str, float]]] = [
     ("exp(a) - log(b)", {"a": 1.0, "b": 7.0}),
     ("atan2(a, b)", {"a": 1.0, "b": -2.0}),
     ("min(a, b) + max(a, b)", {"a": 3.0, "b": -4.0}),
+    # `smooth(order, expr)` is a solver hint with the value of `expr`; both dialects unwrap it, so
+    # the number is `expr` and the order is dropped -- checked here because it is transparent, not
+    # arithmetic, and a dialect that forgot to see through it would produce a call C cannot compile.
+    ("smooth(0, a * b)", {"a": 3.0, "b": -4.0}),
     ("abs(a) + abs(b)", {"a": -3.0, "b": 4.0}),
     ("sign(a) + sign(b) + sign(c)", {"a": -3.0, "b": 0.0, "c": 4.0}),
     ("floor(a) + ceil(b)", {"a": 2.7, "b": 2.1}),

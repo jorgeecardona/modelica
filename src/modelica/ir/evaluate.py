@@ -139,9 +139,11 @@ def _call(node: ir.Call, env: Mapping[str, Value]) -> Value:
         if not isinstance(arg, ir.Ref):
             raise EvaluationError(f"{node.name}() needs a variable, got {arg!r}")
         return _lookup(f"{node.name}({arg.name})", env, arg.span)
-    if node.name == "noEvent":
-        (arg,) = node.args
-        return evaluate(arg, env)
+    if node.name in ("noEvent", "smooth"):
+        # Both are solver hints with the value of their expression argument -- the only argument for
+        # `noEvent`, the second (after the continuity order) for `smooth(order, expr)`. The order is
+        # dropped here as noEvent's flag is; emit does the same by unwrapping to the last argument.
+        return evaluate(node.args[-1], env)
     args = [_number(evaluate(a, env), a) for a in node.args]
     if node.name == "sign":
         (x,) = args

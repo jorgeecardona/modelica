@@ -111,6 +111,22 @@ def test_pre_is_constant_between_events() -> None:
     assert d_dt(ir.Call("pre", (X,))) == num(0.0)
 
 
+def test_smooth_is_transparent_to_value_and_derivative() -> None:
+    """``smooth(order, expr)`` has the value of ``expr`` and differentiates through it.
+
+    The order is a continuity hint for the solver's event detection, so it changes no number:
+    the value is ``expr``, and the derivative keeps the wrapper around the derivative of ``expr``
+    with the order carried through unchanged -- the same shape ``noEvent`` takes. Before this rule
+    a stiff model that wrapped a term in ``smooth`` was refused at the Jacobian with
+    "no derivative rule for 'smooth'", even though emit already treated it as transparent.
+    """
+    inner = mul(X, X)
+    expr = ir.Call("smooth", (ir.IntLiteral(2), inner))
+    assert evaluate(expr, {"x": 4.0}) == 16.0
+    assert d_dt(expr) == ir.Call("smooth", (ir.IntLiteral(2), d_dt(inner)))
+    assert evaluate(d_dt(expr), {"x": 4.0, "der(x)": 1.0}) == pytest.approx(8.0)
+
+
 def test_product_rule_folds_away_constant_factors() -> None:
     # d/dt (k * x) with k a parameter is k * der(x), not 0 * x + k * der(x).
     assert d_dt(mul(ref("k"), X), constants={"k"}) == mul(ref("k"), der("x"))
