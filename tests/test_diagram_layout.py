@@ -67,6 +67,7 @@ FLAT = {
     "NewtonCooling",
     "Pendulum",
     "PhaseChange",
+    "PumpTank",
     "RoastingMachine",
     "Robertson",
     "Rossler",

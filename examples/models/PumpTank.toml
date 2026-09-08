@@ -1,0 +1,124 @@
+summary = "A DC motor drives a positive-displacement pump that fills a tank. The empty tank offers no head, so the motor first races to 113 rad/s, then as the water rises the head loads the shaft back down to 50 rad/s and the current climbs to 14 A. Three domains and three separated timescales: the armature settles in hundredths of a second, the tank fills over minutes."
+teaches = ["electrical, rotational and hydraulic in one model", "well-separated timescales in one run", "a rising head is a load that grows with the state it fills", "steady state is inflow equal to outflow"]
+requires = []
+
+[parse]
+classes = ["PumpTank"]
+
+[flatten]
+model = "PumpTank"
+states = ["i", "w", "h"]
+equations = 5
+balanced = true
+
+# The pump station in three states, which is what the reference integrates:
+#   Q = kq*w                          the pump delivers flow in proportion to shaft speed
+#   tau_pump = c_load*h               the head it has built pushes back on the shaft
+#   L di/dt = V - R*i - k*w           the armature loop, back-EMF included
+#   J dw/dt = k*i - b*w - tau_pump    the shaft: motor torque against friction and the head
+#   A dh/dt = Q - h/Rv                the tank: pump inflow against a linear outlet
+# The coupling runs one way through the chain (voltage -> current -> torque -> speed -> flow
+# -> head) and then bites back: the head it raises is a torque on the shaft that raised it, so
+# the fast electrical and mechanical loops reach a moving quasi-steady state that the slow tank
+# drags down over minutes. Steady state is i = 14 A, w = 50 rad/s, h = 2 m, where the motor
+# torque k*i balances the head load c_load*h and the pump inflow kq*w balances the outlet h/Rv.
+[simulate]
+stop = 400.0
+tolerance = 1e-10
+
+# The spin-up against an empty tank: the current spikes as the shaft accelerates, the back-EMF
+# builds, and the speed shoots past its final value because there is almost no head to load it.
+[[simulate.point]]
+t = 0.2
+values = { i = 12.290289075, w = 63.663591642, h = 0.0026075924383 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 1.0
+values = { i = 1.5802269494, w = 112.20062649, h = 0.034642997923 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 5.0
+values = { i = 2.408319605, w = 107.9318315, h = 0.2067254848 }
+rtol = 1e-6
+source = "reference"
+
+# The tank filling drags the shaft down: as h rises the head torque grows, the speed falls, and
+# the current climbs to hold the motor against the load.
+[[simulate.point]]
+t = 30.0
+values = { i = 7.4645769202, w = 82.662134887, h = 0.98894661926 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 120.0
+values = { i = 13.169514565, w = 54.150523534, h = 1.8715209258 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 400.0
+values = { i = 13.998644942, w = 50.006772184, h = 1.9997903677 }
+rtol = 1e-6
+source = "reference"
+
+# Steady state, reached over minutes: the shaft holds 50 rad/s, the current holds 14 A, and the
+# tank holds 2 m of head. The slow timescale is the tank; the fast loops have long since settled.
+[[simulate.invariant]]
+expr = "w"
+value = 50.0
+rtol = 2e-3
+after = 300.0
+
+[[simulate.invariant]]
+expr = "i"
+value = 14.0
+rtol = 2e-3
+after = 300.0
+
+[[simulate.invariant]]
+expr = "h"
+value = 2.0
+rtol = 3e-3
+after = 300.0
+
+# The tank's own balance: at steady state the pump inflow equals the outlet flow, so der(h) is
+# zero. This is the hydraulic conservation law, read straight off the two flows.
+[[simulate.invariant]]
+expr = "Q - h / Rv"
+value = 0.0
+atol = 2e-4
+after = 300.0
+
+# The shaft's balance across all three domains: the motor torque k*i is spent on bearing drag
+# b*w and the head load tau_pump. That it sums to zero is what holds the speed steady.
+[[simulate.invariant]]
+expr = "k * i - b * w - tau_pump"
+value = 0.0
+atol = 2e-3
+after = 300.0
+
+# The speed races to 113 rad/s against the empty tank and no further: a light load lets the
+# motor run fast, and 113 is the no-head ceiling the friction alone would hold.
+[[simulate.invariant]]
+expr = "w"
+min = -0.01
+max = 112.8
+
+# The current draws a 20 A inrush as the shaft accelerates from rest, then never exceeds the
+# 14 A it settles on.
+[[simulate.invariant]]
+expr = "i"
+min = -0.01
+max = 20.6
+
+# The tank fills monotonically from empty and levels off at 2 m: it never overshoots, because a
+# linear outlet cannot push water back up the pump.
+[[simulate.invariant]]
+expr = "h"
+min = -0.001
+max = 2.001
