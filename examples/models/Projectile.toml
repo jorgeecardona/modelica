@@ -1,0 +1,72 @@
+summary = "A ball thrown straight up at 30 m/s, with quadratic air drag opposing its motion. Which force law acts is chosen by a structural if-equation on the Boolean parameter `drag`: with drag on, the ball feels gravity plus a resistance proportional to the square of its speed and always pointing against the velocity; with drag off, only gravity, the textbook vacuum parabola. Drag makes the flight asymmetric -- the ball is decelerated harder on the way up than gravity alone would (so it climbs less), and on the way down it is held back toward a terminal speed, so it falls slower than it rose. The apex, 33.5 m, sits well below the 45.9 m a vacuum shot would reach. The if-equation is resolved when the model is flattened, so this is the drag branch; flipping the parameter reflattens to the vacuum one."
+teaches = ["a structural if-equation choosing the equations from a parameter, resolved at flatten", "quadratic air drag, cd*v*abs(v), a force that always opposes the velocity", "the asymmetric rise and fall drag gives a projectile, unlike the symmetric vacuum parabola", "approach to a terminal velocity on the way down"]
+requires = []
+
+[parse]
+classes = ["Projectile"]
+
+[flatten]
+model = "Projectile"
+states = ["y", "vy"]
+equations = 2
+balanced = true
+
+# Height and vertical velocity, with the force law picked by the structural if-equation:
+#   d(y)/dt = vy
+#   if drag then m*d(vy)/dt = -m*g - cd*vy*abs(vy)   else   m*d(vy)/dt = -m*g   end if
+# `drag` is a parameter, so flattening keeps one branch -- here the drag branch (drag = true), the
+# one the reference points below belong to; a run of the vacuum branch would reach a higher, later,
+# symmetric apex and disagree with them. Thrown from y = 0 at vy = 30 m/s, the ball climbs to a
+# 33.5 m apex at t = 2.48 s (a vacuum shot would reach 45.9 m) and is still falling at t = 5 s, its
+# speed heading for the terminal -sqrt(m*g/cd) = -33.1 m/s. vy decreases monotonically throughout.
+[simulate]
+stop = 5.0
+tolerance = 1e-10
+
+# The climb: gravity and drag both decelerate the ball, so it slows faster than free fall.
+[[simulate.point]]
+t = 0.5
+values = { y = 12.94052339, vy = 22.06889873 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 1.0
+values = { y = 22.30613116, vy = 15.57537132 }
+rtol = 1e-6
+source = "reference"
+
+# Near the apex, where the velocity passes through zero.
+[[simulate.point]]
+t = 2.0
+values = { y = 32.32160506, vy = 4.779571397 }
+rtol = 1e-6
+source = "reference"
+
+# The fall: drag now opposes the downward motion, so the descent is gentler than the rise.
+[[simulate.point]]
+t = 3.0
+values = { y = 32.17235858, vy = -5.024103413 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 4.0
+values = { y = 22.55961746, vy = -13.94588802 }
+rtol = 1e-6
+source = "reference"
+
+# The ball stays above the launch point for the whole run and never climbs past the drag apex,
+# which is well under the 45.9 m a vacuum shot of the same speed would reach -- the visible cost of
+# the drag branch the if-equation selected.
+[[simulate.invariant]]
+expr = "y"
+min = -0.001
+max = 33.5
+
+# The velocity falls monotonically from the launch speed toward the terminal velocity: gravity and
+# drag together never let it increase, so it stays within (-21, 30] over the run.
+[[simulate.invariant]]
+expr = "vy"
+min = -21.0
+max = 30.001

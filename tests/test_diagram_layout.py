@@ -71,6 +71,7 @@ FLAT = {
     "NewtonCooling",
     "Pendulum",
     "PhaseChange",
+    "Projectile",
     "PumpTank",
     "PurePursuit",
     "RoastingMachine",

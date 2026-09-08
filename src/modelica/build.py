@@ -102,6 +102,7 @@ __all__ = [
     "for_statement",
     "icon",
     "if_",
+    "if_equation",
     "if_statement",
     "import_",
     "inner",
@@ -512,6 +513,26 @@ def assign(target: Operand, value: Operand) -> ir.Assign:
 def when(condition: Operand, *body: ir.Statement) -> ir.When:
     """``when condition then body end when;`` -- fires at the instant it becomes true."""
     return ir.When((ir.WhenBranch(_lift(condition), body),))
+
+
+def if_equation(
+    condition: Operand,
+    *body: ir.Equation,
+    elseif: Sequence[tuple[Operand, Sequence[ir.Equation]]] = (),
+    otherwise: Sequence[ir.Equation] = (),
+) -> ir.IfEquation:
+    """``if c then ... else ... end if;`` as an *equation*, which :func:`if_` is not.
+
+    A structural conditional: flattening evaluates the condition -- a parameter or a constant --
+    and keeps the equations of the branch that holds, the way :func:`if_statement` selects
+    statements and a conditional component selects itself. A condition on a continuous variable is
+    refused at flatten, because switching which equations exist at run time is a :func:`when`, not
+    this. ``elseif`` takes ``(condition, body)`` pairs and stays flat, as :func:`if_statement`'s
+    does, so the printed source keeps the shape it was written in.
+    """
+    branches = [ir.IfBranch(_lift(condition), body)]
+    branches += [ir.IfBranch(_lift(c), tuple(b)) for c, b in elseif]
+    return ir.IfEquation(tuple(branches), tuple(otherwise))
 
 
 def assert_(condition: Operand, message: str, *, warning: bool = False) -> ir.Assert:
