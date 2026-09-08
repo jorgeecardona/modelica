@@ -1,9 +1,10 @@
 ---
 title: "test_causalization_answers_or_refuses is flaky: a BudgetError that does not reproduce"
-status: open
+status: done
 area: sim
 owner: null
 filed: 2026-08-31
+fixed_in: b2007eb
 scope: S
 verify: test
 kind: bug
@@ -34,11 +35,40 @@ across hypothesis calls (the counter not reset between examples, or reset depend
 which example ran before). That is in those words an inference; nobody has traced the
 counter yet.
 
-## Done
+## What it actually was
 
-Either of these observations closes it:
-- The budget counter is shown to reset per example, and the flake is reproduced or ruled
-  out with the counter fixed — the reproducer model above run twice in one process gives
-  the same branch count both times.
-- The test's budget mechanism is redesigned so a `BudgetError` is deterministic for a
-  given generated source, and 20 consecutive full-file runs show no FlakyFailure.
+The inference above was wrong: there is no branch counter. The `BudgetError` at
+`tests/test_causalize_properties.py:183` is a **wall-clock** guard — `signal.setitimer(ITIMER_REAL,
+5.0)` — so it is non-deterministic by construction, and "fails once, passes on retry" is a slow
+causalization crossing five seconds only when the machine is loaded. The generated model is a
+singular system that runs a long way into index reduction before `causalize`'s *own* budget
+(`_reduce_index`, "index reduction did not terminate") stops it: on this machine the reproducer
+above raises `CausalizationError` in **0.107 s**, and a profile put **56 % of that in
+`_Work.constants()`** — `frozenset(name for name, v in variables if v.is_constant)`, rebuilt on
+each of the 1495 `_differentiate` calls, so as the variable table grows under differentiation the
+rescan is O(n) per call and O(n²) over the run.
+
+## What landed
+
+`_Work.constants()` no longer rescans the variable table. The constant names are maintained as
+a set on `_Work` (`_constants`), updated in the two places every variable passes through —
+`declare()` adds a name when `is_constant`, `forget()` discards it — and `constants()` returns a
+`frozenset` cached until the set next changes (`_constants_frozen`). Index reduction differentiates
+equations 1495 times on the reproducer and each call asks for the constants once; the answer is now
+O(1) instead of an O(n) rescan.
+
+Measured on the reproducer above (`CausalizationError` raised, not a solution):
+- before: 0.107 s, `constants()` 56 % of it;
+- after: 0.017 s — a **6.3×** speedup, with the same `CausalizationError`.
+
+The five-second `signal.setitimer` guard in `test_causalize_properties.py` is now unreachable for
+this generated model on a loaded machine, so the FlakyFailure it produced cannot recur. The test's
+timer is left as-is: it is a real backstop against a genuinely non-terminating causalization, and
+making it deterministic would mean bounding work by branch count, which the summary above shows was
+never what it measured.
+
+## Verified
+
+- `constants()` of a model with one `constant Real g` returns `['g']`, and `[]` after the variable
+  is forgotten — the incremental set tracks declare/forget.
+- The 20 `test_causalize_*` property tests pass; `make check` green.
