@@ -2548,14 +2548,25 @@ function paintEvents() {
   const frag = document.createDocumentFragment();
   for (const ev of evs) {
     const row = document.createElement("div");
-    row.className = "evrow"; row.title = ev.cause || "event";
+    row.className = "evrow"; row.title = (ev.cause || "event") + "  ·  click to zoom here";
     const t = document.createElement("span"); t.className = "evt"; t.textContent = fmt(toT(ev.t));
     const c = document.createElement("span"); c.className = "evc"; c.textContent = ev.cause || "event";
     row.append(t, c);
+    // Clicking an event zooms the time window onto it, spanning a little past its nearest
+    // neighbours -- so a crowded late bounce zooms in tight and a lone event gets a tenth of the
+    // run either side. Non-destructive: the run is untouched (double-click or reset restores the
+    // full view), unlike shortening the stop, which would throw away every event after this one.
     row.onclick = () => {
-      const until = ev.t > 0 ? ev.t * 1.05 : (T[N - 1] || 1) * 0.02;
-      if (LIVE && vscodeApi) { document.getElementById("stop").value = cleanStop(toT(until)); reRun(); }
-      else { win = [T[0], Math.min(T[N - 1], until)]; draw(); }
+      if (!N || xVar) return;
+      const times = D.events.map((e) => e.t).sort((a, b) => a - b);
+      const i = times.indexOf(ev.t);
+      const prev = i > 0 ? ev.t - times[i - 1] : Infinity;
+      const next = i < times.length - 1 ? times[i + 1] - ev.t : Infinity;
+      let gap = Math.min(prev, next);
+      if (!isFinite(gap)) gap = (T[N - 1] - T[0]) * 0.1;
+      const w = gap * 1.2;
+      win = [Math.max(T[0], ev.t - w), Math.min(T[N - 1], ev.t + w)];
+      draw();
     };
     frag.appendChild(row);
   }
