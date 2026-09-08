@@ -78,7 +78,7 @@ its example models parse, fewer simulate end to end. The frontier there is one c
 
 | Area | Handled | Not yet |
 | --- | --- | --- |
-| Equations | `der`, algebraic, `connect` (flow/potential and signal), `when` with `reinit`, structural `if`-equations (a parameter or constant condition), `for`, `assert` | an `if`-equation on a *continuous* condition (a run-time structural switch, which is a `when`) |
+| Equations | `der`, algebraic, `connect` (flow/potential and signal), `when` with `reinit`, `terminate`, structural `if`-equations (a parameter or constant condition), `for`, `assert` | an `if`-equation on a *continuous* condition (a run-time structural switch, which is a `when`) |
 | Expressions | full arithmetic and relations, `if`-expressions, every built-in math function, `smooth` / `noEvent` / `pre`, a second derivative written `der(der(x))` | `spatialDistribution`, `delay`, `homotopy` |
 | Structure | components, `extends` with modification, conditional components, `redeclare`, `import` (all three forms), nested packages | operator overloading, external (C) functions, `impure` |
 | Types | `Real` / `Integer` / `Boolean`, discrete variables, enumerations, unit and `min`/`max` attributes, type aliases | |

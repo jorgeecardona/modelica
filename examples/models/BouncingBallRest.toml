@@ -1,0 +1,88 @@
+summary = "A bouncing ball that comes to rest: the well-posed companion to BouncingBall, with a discrete flag that sticks it to the floor once a rebound would be smaller than v_min, so the whole run is defined instead of falling through the floor past the Zeno point."
+teaches = ["a discrete Boolean state that switches the dynamics (an if-expression on it)", "resolving Zeno behaviour with a rest mode rather than a terminal time", "when/reinit/pre alongside a discrete assignment"]
+requires = []
+
+[parse]
+classes = ["BouncingBallRest"]
+
+[flatten]
+model = "BouncingBallRest"
+states = ["h", "v"]
+index = 1
+balanced = true
+
+# The same free fall as BouncingBall until the rebound speed would fall below v_min = 0.1 m/s.
+# The impact speeds are v1 = sqrt(2*g*h0) = 4.42945 m/s and then e^n * v1, so the rebound after
+# bounce n is e^(n+1) * v1; that drops below v_min at the 17th bounce, where `resting` latches
+# true, `h` and `v` are reinitialised to zero, and the dynamics switch to der(h) = der(v) = 0.
+# After that the ball stays on the floor for the rest of the run rather than falling through it.
+[simulate]
+stop = 6.0
+tolerance = 1e-10
+
+[simulate.events]
+times = [
+  0.4515236410,
+  1.1739614663,
+  1.7519117259,
+  2.2142719329,
+  2.5841600976,
+  2.8800706283,
+  3.1167990514,
+  3.3061817881,
+  3.4576879752,
+  3.5788929222,
+  3.6758568763,
+  3.7534280353,
+  3.8154849571,
+  3.8651304878,
+  3.9048469040,
+  3.9366200264,
+  3.9620385111,
+]
+atol = 1e-5
+
+# Between bounces this is exactly free fall, the same as BouncingBall.
+[[simulate.point]]
+t = 0.2
+values = { h = 0.80380, v = -1.9620 }
+rtol = 1e-6
+source = "analytic"
+
+# The ball has come to rest well before this: it is sitting on the floor at zero velocity, which
+# is the whole reason this model exists. BouncingBall at the same instant is metres below the
+# floor and still accelerating.
+[[simulate.point]]
+t = 5.0
+values = { h = 0.0, v = 0.0 }
+atol = 1e-9
+source = "reference"
+
+# The floor is a floor and the ball never rises above where it started: unlike BouncingBall, this
+# holds for the entire run, not just up to the Zeno point.
+[[simulate.invariant]]
+expr = "h"
+min = 0.0
+max = 1.0
+atol = 1e-12
+
+# Energy only ever decreases, and only at bounces -- give or take the last bit of the mantissa.
+[[simulate.invariant]]
+expr = "0.5 * v ^ 2 + 9.81 * h"
+min = 0.0
+max = 9.81
+atol = 1e-12
+
+# Once at rest, it stays at rest: after the last bounce the height is pinned at zero for good.
+[[simulate.invariant]]
+expr = "h"
+min = -1e-9
+max = 1e-9
+after = 4.5
+
+# And so is the velocity -- the ball does not creep.
+[[simulate.invariant]]
+expr = "v"
+min = -1e-9
+max = 1e-9
+after = 4.5

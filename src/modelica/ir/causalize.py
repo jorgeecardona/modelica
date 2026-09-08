@@ -1021,6 +1021,10 @@ def _statement(statement: ir.Statement, work: _Work) -> ir.Statement:
         case ir.Assign(target=target, value=value) | ir.Reinit(target=target, value=value):
             rewritten = simplify(substitute(_name_derivatives(value, work), work.aliases))
             return type(statement)(target, rewritten)
+        case ir.CallStatement(call=ir.Call(name="terminate")):
+            # `terminate(...)` names no variable to rewrite -- its message is a literal and it
+            # binds nothing -- so it passes through untouched for the event loop to act on.
+            return statement
         case _:  # pragma: no cover - flattening refuses algorithm sections above this
             raise CausalizationError(f"{type(statement).__name__} cannot appear in a 'when' body")
 

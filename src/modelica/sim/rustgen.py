@@ -28,7 +28,15 @@ from modelica.ir import nodes as ir
 from modelica.ir.derive import ZERO
 from modelica.ir.rewrite import residual
 from modelica.sim.dialect import RUST
-from modelica.sim.emit import ITERATIONS, TOLERANCE, EmitError, Emitter, block_jacobian, iterated
+from modelica.sim.emit import (
+    ITERATIONS,
+    TOLERANCE,
+    EmitError,
+    Emitter,
+    block_jacobian,
+    is_terminate,
+    iterated,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -260,7 +268,13 @@ def _transition(emitter: Emitter, position: int, system: System, mode: Mode) -> 
         *(f"out[{slot}] = y[{slot}]" for slot in range(len(mode.states))),
     ]
     for k, event in enumerate(events):
-        taken = [emitter.statement(statement, slots) for statement in event.body]
+        # A `terminate(...)` moves no state; the Rust event loop stops when its crossing fires
+        # (the `terminates` array), so like the Python transition it contributes no line here.
+        taken = [
+            emitter.statement(statement, slots)
+            for statement in event.body
+            if not is_terminate(statement)
+        ]
         if event.latch is not None:
             taken.append(f"    w[{event.latch}] = 1.0 - w[{event.latch}]")
         moving = event.trigger.switch

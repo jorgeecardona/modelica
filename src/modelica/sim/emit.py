@@ -393,7 +393,25 @@ class Trigger:
     :attr:`latch` is ``None``.
     """
 
+    terminates: bool = False
+    """Whether acting on this crossing ends the run.
+
+    True for a ``when`` branch holding ``terminate(...)`` -- the standard Modelica operator
+    that successfully ends the analysis at the instant its condition becomes true. On the
+    public record beside :attr:`reinitialises` for the same reason: the event loop in
+    :mod:`modelica.sim.solve` has to stop when it fires rather than integrate on, and the
+    Rust loop is handed the same fact as an array. `BouncingBall` never uses it; a model that
+    is only defined up to some condition -- a tank that empties, a decay past a threshold --
+    is what it is for.
+    """
+
+    message: str = ""
+    """The ``terminate`` message, reported as the reason the run stopped. Empty when the
+    crossing is not a terminate."""
+
     def __str__(self) -> str:
+        if self.terminates:
+            return f"terminate: {self.message}" if self.message else "terminate"
         if self.switch is not None:
             return f"switch to {self.condition}"
         return f"when {self.condition}" if self.direction else f"{self.condition} changed"
@@ -516,6 +534,30 @@ def _indicator(condition: ir.Expr) -> ir.Expr:
             raise EmitError(
                 f"a when-condition has to be a relation, not {unparse_expr(condition)!r}"
             )
+
+
+def is_terminate(statement: ir.Statement) -> bool:
+    """A ``terminate(...)`` call statement in a ``when`` body.
+
+    Public because the Rust code generator drops the same statements from its transition, and
+    a second spelling of "is this a terminate?" would be a discrepancy waiting to happen.
+    """
+    return isinstance(statement, ir.CallStatement) and statement.call.name == "terminate"
+
+
+def _terminating(body: tuple[ir.Statement, ...]) -> tuple[bool, str]:
+    """Whether a ``when`` body ends the run, and the ``terminate`` message it ends with.
+
+    ``terminate("reason")`` flattens to a bare call statement, kept intact so its message
+    rides here. The message is a string literal in every well-formed use; anything else, or a
+    bare ``terminate()``, leaves the reason empty rather than refused -- the run still stops.
+    """
+    for statement in body:
+        if isinstance(statement, ir.CallStatement) and statement.call.name == "terminate":
+            first = statement.call.args[0] if statement.call.args else None
+            message = first.value if isinstance(first, ir.StringLiteral) else ""
+            return True, message
+    return False, ""
 
 
 def _relations(node: ir.Expr) -> Iterator[ir.Binary]:
@@ -1584,6 +1626,8 @@ class Emitter:
                     reinitialises=any(
                         isinstance(statement, ir.Reinit) for statement in branch.body
                     ),
+                    terminates=_terminating(branch.body)[0],
+                    message=_terminating(branch.body)[1],
                 ),
                 body=branch.body,
             )
@@ -1722,7 +1766,9 @@ class Emitter:
         states = {name: slot for slot, name in enumerate(mode.states)}
         body = [*self.unpack(mode), *(self.blocks(mode) if events else []), "out[:] = y"]
         for k, event in enumerate(events):
-            lines = [self.statement(s, states) for s in event.body]
+            # A `terminate(...)` moves no state; the event loop stops the run when its crossing
+            # fires (`Trigger.terminates`), so it contributes no line to the transition.
+            lines = [self.statement(s, states) for s in event.body if not is_terminate(s)]
             if event.latch is not None:
                 lines.append(f"    w[{event.latch}] = 1.0 - w[{event.latch}]")
             if (moving := event.trigger.switch) is not None and event.origin == position:

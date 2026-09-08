@@ -258,6 +258,9 @@ STEP: Final = (
     # More than MD_CHATTER events without the run moving on by MD_STANDSTILL: the model is
     # chattering, and the run stops where it stood rather than running forever.
     "const CHATTERING: i32 = 3;",
+    # A `when` branch holding `terminate(...)` fired: the model is defined only up to this
+    # instant, so the run stops there cleanly, the same as `solve.py` breaking its loop.
+    "const TERMINATED: i32 = 4;",
     "",
     "// Scaled root-mean-square norm: sqrt(mean(x*x)). radau.py:273.",
     "#[allow(dead_code)]",
@@ -543,6 +546,7 @@ fn md_integrate(
     atol: f64,
     directions: &[f64],
     latches: &[i64],
+    terminates: &[i64],
     grid: &[f64],
     out: &mut [f64],
     obs: &mut [f64],
@@ -791,6 +795,20 @@ fn md_integrate(
             for q in 0..n {
                 ev_y[q] = y[q]
                     + fired_x * (quad[q * 3] + fired_x * (quad[q * 3 + 1] + fired_x * quad[q * 3 + 2]));
+            }
+
+            if terminates[fired as usize] != 0 {
+                // A `terminate(...)` fired: the model is defined only up to this crossing. Record
+                // the instant and its index (the caller names the reason), move to it, and stop --
+                // there is no transition to apply and nothing meaningful past it. `solve.py` breaks
+                // its loop here for the same reason.
+                if events_total < events_out.len() { events_out[events_total] = te; }
+                if events_total < ev_index_out.len() { ev_index_out[events_total] = fired as f64; }
+                events_total += 1;
+                t = te;
+                for q in 0..n { y[q] = ev_y[q]; }
+                status = TERMINATED;
+                break;
             }
 
             // Modelica's event iteration (`solve.py`'s `_settle`): apply the crossing that

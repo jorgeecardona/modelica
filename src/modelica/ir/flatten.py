@@ -586,6 +586,10 @@ def _substitute_statement(node: ir.Statement, values: Mapping[str, ir.Expr]) -> 
             return ir.Assign(target, _substitute(value, values))
         case ir.Reinit(target=target, value=value):
             return ir.Reinit(target, _substitute(value, values))
+        case ir.CallStatement(call=ir.Call(name="terminate", args=args, named=named), span=span):
+            return ir.CallStatement(
+                (), ir.Call("terminate", tuple(_substitute(a, values) for a in args), named), span
+            )
         case _:  # pragma: no cover - unreachable while `when` bodies are simple statements
             raise FlattenError(
                 f"{type(node).__name__} inside a 'for' equation is not supported yet"
@@ -1208,6 +1212,15 @@ def _prefix_statement(node: ir.Statement, prefix: _Path, local: frozenset[str]) 
             return ir.Assign(_prefix_ref(target, prefix, local), _prefix_expr(value, prefix, local))
         case ir.Reinit(target=target, value=value):
             return ir.Reinit(_prefix_ref(target, prefix, local), _prefix_expr(value, prefix, local))
+        case ir.CallStatement(call=ir.Call(name="terminate", args=args, named=named), span=span):
+            # `terminate("reason")` ends the run at the instant its `when` fires. It binds no
+            # unknown and moves no state, so it is carried through as it was written, message
+            # and all -- the emitter reads the message off it and the event loop stops there.
+            return ir.CallStatement(
+                (),
+                ir.Call("terminate", tuple(_prefix_expr(a, prefix, local) for a in args), named),
+                span,
+            )
         case _:  # pragma: no cover - unreachable while `when` bodies are simple statements
             raise FlattenError(f"{type(node).__name__} inside a 'when' is not supported yet")
 

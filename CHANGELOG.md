@@ -6,6 +6,21 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **`terminate(message)` ends a run at the instant its `when` fires.** The standard Modelica
+  operator that stops the analysis when a model is defined only up to some condition -- a tank
+  that empties, a decay past a threshold -- is now supported end to end, in the interpreter and
+  the compiled Rust backend alike. It is a state event like any other: the `when` condition is a
+  zero crossing located the ordinary way, and the only new thing is the action, "stop and report"
+  instead of `reinit`. The run keeps the trajectory up to the located instant and nothing past it,
+  and records the message as the event's cause. Written as ``when cond then terminate("reason");
+  end when;``.
+- `examples/BouncingBallRest`: **a bouncing ball that comes to rest, the well-posed companion to
+  BouncingBall.** BouncingBall accumulates infinitely many bounces at a finite time (Zeno) and
+  then, past the event limit, falls through the floor. This one carries a discrete flag that
+  sticks the ball to the floor once a rebound would be smaller than `v_min`, so the whole run is
+  defined: the height stays in `[0, 1]` and the ball is provably at rest for good after the last
+  bounce, checked with `after` invariants. It shows the standard way to resolve Zeno -- a rest
+  mode -- rather than a terminal time.
 - **Array equations scalarise element by element.** An equation written between whole arrays --
   `der(x) = -x` for `Real x[2]`, `der(T) = -T` for `Real T[2, 2]` -- is now expanded into one scalar
   equation per element, the same split the declaration already does for the variables, so a vector

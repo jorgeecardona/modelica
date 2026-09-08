@@ -63,6 +63,7 @@ pub extern "C" fn md_run(
     atol: f64,
     dirs: *const f64,
     lat: *const i64,
+    term: *const i64,
     ne: usize,
     grid: *const f64,
     npts: usize,
@@ -83,12 +84,13 @@ pub extern "C" fn md_run(
     let (y0, p, w) = unsafe { (view(y0, n), view(p, np), view_mut(w, nw)) };
     let dirs = unsafe { view(dirs, ne) };
     let lat: &[i64] = if ne == 0 { &[] } else { unsafe { std::slice::from_raw_parts(lat, ne) } };
+    let term: &[i64] = if ne == 0 { &[] } else { unsafe { std::slice::from_raw_parts(term, ne) } };
     let grid = unsafe { view(grid, npts) };
     let out = unsafe { view_mut(out, npts * n) };
     let obs = unsafe { view_mut(obs, npts * nobs) };
     let events_out = unsafe { view_mut(events_out, nev_out) };
     let ev_index_out = unsafe { view_mut(ev_index_out, nev_out) };
-    let r = md_integrate(t0, t1, y0, p, w, rtol, atol, dirs, lat, grid, out, obs, events_out, ev_index_out);
+    let r = md_integrate(t0, t1, y0, p, w, rtol, atol, dirs, lat, term, grid, out, obs, events_out, ev_index_out);
     let counters = unsafe { view_mut(counters, 8) };
     counters[0] = r.0 as f64;
     counters[1] = r.1 as f64;
@@ -107,6 +109,7 @@ STATUS = {
     1: "the required step size fell below the spacing between numbers",
     2: "the Newton iteration did not converge",
     3: "the model is chattering: events stopped carrying the run forward",
+    4: "the model reached a terminate() and the run stopped there",
 }
 
 
@@ -261,6 +264,9 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
     lat = np.ascontiguousarray(
         [e.latch if e.latch is not None else -1 for e in events], dtype=np.int64
     )
+    # 1 for a crossing whose `when` holds `terminate(...)`, 0 otherwise: the driver stops the
+    # run at the first such crossing, the same as `solve.py` breaking its loop there.
+    term = np.ascontiguousarray([1 if e.terminates else 0 for e in events], dtype=np.int64)
     grid = _grid(stop, times, points)
     n, nobs = len(y0), len(kernel.code.observed)
     out = np.zeros(len(grid) * n, dtype=np.float64)
@@ -284,7 +290,7 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
         ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_double, ctypes.c_double,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
@@ -296,18 +302,32 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
         p.ctypes.data, len(p),
         w.ctypes.data, len(w),
         float(tolerance), float(tolerance if absolute is None else absolute),
-        dirs.ctypes.data, lat.ctypes.data, len(dirs),
+        dirs.ctypes.data, lat.ctypes.data, term.ctypes.data, len(dirs),
         grid.ctypes.data, len(grid),
         out.ctypes.data, obs.ctypes.data, nobs,
         ev_out.ctypes.data, ev_idx.ctypes.data, ev_cap,
         counters.ctypes.data,
     )  # fmt: skip
-    if status != 0:
+    _TERMINATED = 4  # noqa: N806 - a status code, matching rust_radau's constant
+    if status not in (0, _TERMINATED):
         reason = STATUS.get(status, f"status {status}")
         message = f"{system.name}: the Rust run stopped at t = {counters[7]:.12g}: {reason}"
         raise SimulationError(message)
+    # A terminate() is a clean early stop, not a failure: the run is defined only up to the
+    # instant it fired, and the fixed sample grid was filled only that far. Keep the grid
+    # points at or before that instant and drop the unwritten tail, so the result ends where
+    # the model does, the same truncation `solve.py` gets for free by sampling per segment.
+    kept_points = len(grid)
+    if status == _TERMINATED:
+        kept_points = int(np.count_nonzero(grid <= float(counters[7])))
+        grid = grid[:kept_points]
     names = (*system.modes[0].states, *kernel.code.observed)  # type: ignore[attr-defined]
-    values = np.vstack([out.reshape(len(grid), n).T, obs.reshape(len(grid), nobs).T])
+    values = np.vstack(
+        [
+            out.reshape(-1, n)[:kept_points].T,
+            obs.reshape(-1, nobs)[:kept_points].T if nobs else np.empty((0, kept_points)),
+        ]
+    )
     count = int(counters[6])
     kept = min(count, ev_cap)
     # The full events, as the interpreter reports them: the instant and index come back over the

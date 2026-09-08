@@ -387,6 +387,12 @@ class _Run:
             if segment.status != 1:
                 break
             when, at, before = self._fired(segment)
+            if self.kernel.code.events[when].terminates:
+                # `terminate(...)` fired: the run is defined only up to here. Record the
+                # instant and its reason, keep the samples of this segment (which ended at the
+                # crossing), and stop -- no state to settle, nothing meaningful past it.
+                events.append(Event(at, when, str(self.kernel.code.events[when])))
+                break
             # Measured from where the standstill began, not from the previous event. A
             # chattering run advances every time -- by `_REARM` over the indicator's slope,
             # which is the engine's own nudge and not the model making progress -- so a

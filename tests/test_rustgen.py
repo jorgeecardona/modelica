@@ -409,10 +409,11 @@ def test_the_rust_integrator_reproduces_the_toml_reference(model: Path) -> None:
             f"    let mut out = [0.0f64; {len(times) * n}];",
             "    let dirs: [f64; 0] = [];",
             "    let lat: [i64; 0] = [];",
+            "    let term: [i64; 0] = [];",
             "    let mut obs: [f64; 0] = [];",
             "    let mut ev: [f64; 0] = [];",
             "    let mut evi: [f64; 0] = [];",
-            f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, {rtol!r}f64, {atol!r}f64, &dirs, &lat, &grid, &mut out, &mut obs, &mut ev, &mut evi);",
+            f"    md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, {rtol!r}f64, {atol!r}f64, &dirs, &lat, &term, &grid, &mut out, &mut obs, &mut ev, &mut evi);",
             "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
             '    println!("{}", printed.join(" "));',
             "}",
@@ -438,6 +439,7 @@ def _integrate_events_in_rust(  # noqa: PLR0913, PLR0917 - the runtime's call su
     grid: list[float],
     directions: list[float],
     latches: list[int],
+    terminates: list[int],
     start: tuple[object, object, object],
     observed: int = 0,
 ) -> tuple[int, list[float], list[float]]:
@@ -469,12 +471,13 @@ def _integrate_events_in_rust(  # noqa: PLR0913, PLR0917 - the runtime's call su
             f"    let mut w: [f64; {len(numpy.asarray(workspace))}] = [{_floats(workspace)}];",
             f"    let dirs: [f64; {len(directions)}] = [{_floats(directions)}];",
             f"    let lat: [i64; {len(latches)}] = [{', '.join(f'{int(v)}i64' for v in latches)}];",
+            f"    let term: [i64; {len(terminates)}] = [{', '.join(f'{int(v)}i64' for v in terminates)}];",
             f"    let grid: [f64; {len(grid)}] = [{_floats(grid)}];",
             f"    let mut out = [0.0f64; {len(grid) * n}];",
             f"    let mut obs = [0.0f64; {len(grid) * observed}];",
             "    let mut ev = [0.0f64; 4096];",
             "    let mut evi = [0.0f64; 4096];",
-            f"    let r = md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &grid, &mut out, &mut obs, &mut ev, &mut evi);",
+            f"    let r = md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &term, &grid, &mut out, &mut obs, &mut ev, &mut evi);",
             '    println!("{}", r.6);',
             "    let printed: Vec<String> = out.iter().map(|v| v.to_string()).collect();",
             '    println!("{}", printed.join(" "));',
@@ -517,6 +520,7 @@ def test_the_rust_integrator_matches_the_interpreter_on_events(model: Path) -> N
     names = system.modes[0].states
     directions = [float(event.direction) for event in kernel.code.events]
     latches = [event.latch if event.latch is not None else -1 for event in kernel.code.events]
+    terminates = [1 if event.terminates else 0 for event in kernel.code.events]
 
     grid = numpy.linspace(0.0, stop, 41)
     reference = simulate(system, stop=stop, times=grid)
@@ -527,7 +531,7 @@ def test_the_rust_integrator_matches_the_interpreter_on_events(model: Path) -> N
 
     parameters, states, workspace = kernel.start(0.0)
     events, flat, _ = _integrate_events_in_rust(
-        system, stop, list(grid), directions, latches, (states, parameters, workspace)
+        system, stop, list(grid), directions, latches, terminates, (states, parameters, workspace)
     )
     found = numpy.array(flat).reshape(len(grid), len(names))
     assert events == len(reference.events), (
@@ -573,6 +577,7 @@ def test_the_rust_integrator_matches_the_interpreter_across_a_mode_switch(model:
     columns_of = [observed.index(name) for name in names]
     directions = [float(event.direction) for event in kernel.code.events]
     latches = [event.latch if event.latch is not None else -1 for event in kernel.code.events]
+    terminates = [1 if event.terminates else 0 for event in kernel.code.events]
 
     grid = numpy.linspace(0.0, stop, 41)
     reference = simulate(system, stop=stop, times=grid, tolerance=1e-8)
@@ -588,6 +593,7 @@ def test_the_rust_integrator_matches_the_interpreter_across_a_mode_switch(model:
         list(grid),
         directions,
         latches,
+        terminates,
         (states, parameters, workspace),
         observed=len(observed),
     )
@@ -602,11 +608,12 @@ CHATTERING = 3
 """`md_integrate`'s status for a run stopped by the chattering guard (`rust_radau.STEP`)."""
 
 
-def _status_in_rust(
+def _status_in_rust(  # noqa: PLR0913, PLR0917 - the runtime's call surface, spelled out
     system: System,
     stop: float,
     directions: list[float],
     latches: list[int],
+    terminates: list[int],
     start: tuple[object, object, object],
 ) -> tuple[int, int, float]:
     """Integrate with no grid and report ``(status, events, t_end)``: how the run ended, and where."""
@@ -629,12 +636,13 @@ def _status_in_rust(
             f"    let mut w: [f64; {len(numpy.asarray(workspace))}] = [{_floats(workspace)}];",
             f"    let dirs: [f64; {len(directions)}] = [{_floats(directions)}];",
             f"    let lat: [i64; {len(latches)}] = [{', '.join(f'{int(v)}i64' for v in latches)}];",
+            f"    let term: [i64; {len(terminates)}] = [{', '.join(f'{int(v)}i64' for v in terminates)}];",
             "    let grid: [f64; 0] = [];",
             "    let mut out: [f64; 0] = [];",
             "    let mut obs: [f64; 0] = [];",
             "    let mut ev: [f64; 0] = [];",
             "    let mut evi: [f64; 0] = [];",
-            f"    let r = md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &grid, &mut out, &mut obs, &mut ev, &mut evi);",
+            f"    let r = md_integrate(0.0, {stop!r}f64, &y0, &p, &mut w, 1e-8, 1e-8, &dirs, &lat, &term, &grid, &mut out, &mut obs, &mut ev, &mut evi);",
             '    println!("{} {} {}", r.0, r.6, r.7);',
             "}",
             "",
@@ -665,10 +673,11 @@ def test_the_rust_integrator_stops_a_chattering_model() -> None:
     kernel = build(system)
     directions = [float(event.direction) for event in kernel.code.events]
     latches = [event.latch if event.latch is not None else -1 for event in kernel.code.events]
+    terminates = [1 if event.terminates else 0 for event in kernel.code.events]
     parameters, states, workspace = kernel.start(0.0)
 
     status, events, t_end = _status_in_rust(
-        system, 5.0, directions, latches, (states, parameters, workspace)
+        system, 5.0, directions, latches, terminates, (states, parameters, workspace)
     )
     with pytest.raises(error, match="chattering") as caught:
         simulate(system, stop=5.0)
