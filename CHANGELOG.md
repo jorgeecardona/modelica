@@ -6,6 +6,34 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `modelica.ir.causalize`: **a second derivative may be written `der(der(x))`.** The pass that
+  turns `der(v)` into the variable `der_v` insisted its argument be a plain variable, so a model
+  that wrote the second derivative out was refused, even though index reduction already names
+  `der_der_x` when it differentiates an equation twice. It now recurses into the argument: the
+  inner `der(x)` becomes `der_x`, and this der is then `der(der_x)` -> `der_der_x`. So
+  `der(der(x)) = -x` is a harmonic oscillator with `x` and `der_x` as its two states, to any depth,
+  and a model need no longer introduce `v = der(x)` by hand.
+- `modelica.ir.flatten`, `modelica.build`: **structural if-equations.** An `if ... else ... end if`
+  in an equation section now selects, when the model is flattened, the branch whose condition holds
+  -- the way a conditional component's `if` already does -- and keeps only that branch's equations;
+  `elseif` chains and an `else` fall out. The condition has to be known at flatten time, a parameter
+  or a constant; a condition on a continuous variable is refused, because switching which equations
+  exist at run time is a `when`, a different machine. `build.if_equation` writes one from the Python
+  DSL, and the `Projectile` example uses it to choose the air-drag law from a Boolean parameter.
+- `modelica.ir.evaluate`, `modelica.ir.derive`: **`smooth(order, expr)` evaluates and
+  differentiates.** The operator was already transparent to the emitter but unknown to the
+  interpreter and the differentiator, so a model that wrapped a term in it ran through compiled
+  code yet was refused at the Jacobian with "no derivative rule for 'smooth'". Both tiers now see
+  through it to its expression argument, the way they do `noEvent`; the continuity order is a hint
+  to the solver and drops.
+- `examples`: **four cleanly-referenced prototypes.** `TwoTank` (interacting tank levels with
+  Torricelli coupling, the textbook process-control plant), `HeatExchanger` (two fluid streams
+  trading heat through a wall with its own inertia, the first flow-through thermal model),
+  `CoulombOscillator` (a spring-mass damped by dry friction via `tanh`, whose amplitude decays
+  linearly not exponentially), and `Projectile` (a ball thrown up with quadratic air drag, the law
+  chosen by a structural if-equation). Each carries scipy reference points at 1e-12 and bounded
+  invariants, and between them they exercise `tanh`, `atan2`, `sqrt` and the if-equation in real
+  trajectories.
 - `modelica.ir.flatten`: **causal signal connectors, so `Modelica.Blocks` flattens.** A
   connector written `connector RealInput = input Real` *is* a scalar, not a record of fields:
   it aliases a predefined type and carries a causality but holds no members. It used to hit the
