@@ -1613,7 +1613,9 @@ class _Flattener:
                     )
                 )
             case ir.IfEquation():
-                raise FlattenError("if-equations are not supported yet")
+                self._if_equation(
+                    equation, prefix, local, scope=scope, outer=outer, initial=initial
+                )
             case ir.ForEquation():
                 self._unroll(equation, prefix, local, scope=scope, outer=outer, initial=initial)
 
@@ -1661,6 +1663,34 @@ class _Flattener:
                     outer=outer,
                     initial=initial,
                 )
+
+    def _if_equation(  # noqa: PLR0913 -- everything `_equation` needs, plus the equation
+        self,
+        node: ir.IfEquation,
+        prefix: _Path,
+        local: frozenset[str],
+        *,
+        scope: Scope,
+        outer: Mapping[str, _Path] | None = None,
+        initial: bool = False,
+    ) -> None:
+        """Emit the body of the one branch whose condition holds -- a *structural* if.
+
+        The condition has to be known when the model is flattened, the same rule a conditional
+        component's ``if`` obeys: a parameter or a constant, evaluated here, chooses which equations
+        exist. A condition on a continuous variable would make that a run-time choice -- a hybrid
+        system whose active equations switch on an event -- which is a ``when``, a different machine
+        and not this one; ``_boolean`` refuses such a condition by name, saying it must be known
+        when the model is flattened.
+        """
+        body = node.otherwise
+        for branch in node.branches:
+            condition = _prefix_expr(branch.condition, prefix, local, values=self.values)
+            if _boolean(condition, self.values, "the condition of an if-equation"):
+                body = branch.body
+                break
+        for inner in body:
+            self._equation(inner, prefix, local, scope=scope, outer=outer, initial=initial)
 
     def _severed(self, end: ir.Ref | ir.Subscript, prefix: _Path, local: frozenset[str]) -> bool:
         """Whether this connect endpoint sits inside a disabled conditional component."""

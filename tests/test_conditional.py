@@ -84,3 +84,67 @@ def test_a_condition_that_is_not_a_boolean_is_refused() -> None:
     source = LIB + "model M\n  Load l if 3;\nend M;\n"
     with pytest.raises(FlattenError, match="must be a Boolean"):
         flatten(parse(source), "M")
+
+
+# Structural if-*equations* are the same idea as a conditional component: the condition is a
+# parameter or a constant, evaluated during flattening, and only the chosen branch's equations
+# survive. The coefficients below (2.0 / 7.0 / 9.0) are distinct so the active branch is
+# unambiguous in the flattened equation list.
+IF_MODEL = """\
+model M
+  parameter Boolean fast = {fast};
+  Real x(start = 1, fixed = true);
+equation
+  if fast then
+    der(x) = -2.0 * x;
+  else
+    der(x) = -7.0 * x;
+  end if;
+end M;
+"""
+
+ELSEIF_MODEL = """\
+model M
+  parameter Integer sel = {sel};
+  Real x(start = 1, fixed = true);
+equation
+  if sel == 1 then
+    der(x) = -2.0 * x;
+  elseif sel == 2 then
+    der(x) = -7.0 * x;
+  else
+    der(x) = -9.0 * x;
+  end if;
+end M;
+"""
+
+
+def _equations(source: str) -> str:
+    return " ".join(str(equation) for equation in flatten(parse(source), "M").equations)
+
+
+def test_a_structural_if_equation_keeps_only_the_active_branch() -> None:
+    on = _equations(IF_MODEL.format(fast="true"))
+    assert "2.0" in on
+    assert "7.0" not in on
+    off = _equations(IF_MODEL.format(fast="false"))
+    assert "7.0" in off
+    assert "2.0" not in off
+
+
+def test_a_structural_elseif_chain_picks_its_branch() -> None:
+    mid = _equations(ELSEIF_MODEL.format(sel="2"))
+    assert "7.0" in mid
+    assert "2.0" not in mid
+    assert "9.0" not in mid
+    assert "9.0" in _equations(ELSEIF_MODEL.format(sel="5"))
+
+
+def test_an_if_equation_on_a_continuous_variable_is_refused() -> None:
+    source = (
+        "model M\n  Real x(start = 1, fixed = true);\n  Real y;\n"
+        "equation\n  if x > 0 then\n    y = 2 * x;\n  else\n    y = -x;\n  end if;\n"
+        "  der(x) = -y;\nend M;\n"
+    )
+    with pytest.raises(FlattenError, match="condition of an if-equation must be known"):
+        flatten(parse(source), "M")
