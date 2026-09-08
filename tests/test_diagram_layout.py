@@ -73,6 +73,7 @@ FLAT = {
     "RoastingMachine",
     "Robertson",
     "Rossler",
+    "SaturatingServo",
     "ServoDrive",
     "Setback",
     "SyncGenerator",

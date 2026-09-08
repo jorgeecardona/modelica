@@ -86,6 +86,7 @@ __all__ = [
     "array",
     "assert_",
     "assign",
+    "atan2",
     "break_",
     "call",
     "connect",
@@ -106,6 +107,8 @@ __all__ = [
     "inner",
     "input_",
     "log",
+    "maximum",
+    "minimum",
     "mod",
     "no_event",
     "not_",
@@ -323,6 +326,21 @@ def log(x: Operand) -> Expression:
 
 def sign(x: Operand) -> Expression:
     return call("sign", x)
+
+
+def minimum(a: Operand, b: Operand) -> Expression:
+    """``min(a, b)`` -- the smaller of the two. Named in full so it never shadows ``min``."""
+    return call("min", a, b)
+
+
+def maximum(a: Operand, b: Operand) -> Expression:
+    """``max(a, b)`` -- the larger of the two, spelled out for the same reason as `minimum`."""
+    return call("max", a, b)
+
+
+def atan2(y: Operand, x: Operand) -> Expression:
+    """``atan2(y, x)`` -- the angle of the point ``(x, y)``, quadrant included."""
+    return call("atan2", y, x)
 
 
 def no_event(x: Operand) -> Expression:

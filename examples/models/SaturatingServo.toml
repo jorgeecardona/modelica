@@ -1,0 +1,104 @@
+summary = "A voice-coil position servo under PD control whose actuator voltage saturates. A step to 1 m asks the PD law for 50 V, four times what the amplifier can deliver, so the command clips to +12 V and the coil drives at its limit: the mass accelerates flat-out, the loop only regains control as it nears the setpoint, and it settles on 1 m with no standing error. The saturation is a max(-Vmax, min(Vmax, u)) in the control law, so the model is nonlinear where a textbook servo is not."
+teaches = ["actuator saturation, the nonlinearity every real servo has", "min/max in a model and its effect on the response", "a step larger than the actuator can serve drives it open-loop first", "PD position control settling to its setpoint"]
+requires = []
+
+[parse]
+classes = ["SaturatingServo"]
+
+[flatten]
+model = "SaturatingServo"
+states = ["x", "w", "i"]
+equations = 6
+balanced = true
+
+# The servo in three states, which is what the reference integrates:
+#   e = xref - x                            the position error
+#   u = Kp*e - Kd*w                         the PD control law's requested voltage
+#   v = max(-Vmax, min(Vmax, u))            clipped to what the amplifier can deliver
+#   dx/dt = w                               position from speed
+#   J dw/dt = km*i - b*w                    the moving mass, coil force against damping
+#   L di/dt = v - R*i - km*w                the coil, back-EMF included
+# The clip is the point: a 1 m step makes u = 50 V at t = 0, so v holds at +12 V and the mass
+# accelerates open-loop -- the PD gains do nothing while the actuator is pinned. Only once the
+# error shrinks does u fall back under 12 V and the loop close. A model without the min/max would
+# predict a violent 50 V drive that no amplifier can supply. Steady state is x = 1, w = 0, i = 0.
+[simulate]
+stop = 3.0
+tolerance = 1e-10
+
+# The saturated dash: the command is pinned at the +12 V limit, so the mass accelerates hard and
+# the current is whatever the coil draws at that voltage.
+[[simulate.point]]
+t = 0.05
+values = { x = 0.090361584786, w = 4.817920783, i = 6.8806011866 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.2
+values = { x = 0.76413586661, w = 2.8091553933, i = 1.8533616938 }
+rtol = 1e-6
+source = "reference"
+
+# The loop regains control as the error shrinks and the command comes off the limit.
+[[simulate.point]]
+t = 0.5
+values = { x = 0.98921268758, w = 0.075732437639, i = -0.26793979048 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 1.0
+values = { x = 0.99990460168, w = -0.00085126093538, i = -0.003100229417 }
+rtol = 1e-6
+source = "reference"
+
+# Settled on the setpoint. Only x is asserted here: at rest w and i are order 1e-11, which a
+# relative tolerance cannot grade, so the invariants below carry them to zero with an atol.
+[[simulate.point]]
+t = 3.0
+values = { x = 0.99999999999 }
+rtol = 1e-6
+source = "reference"
+
+# The setpoint, reached with no standing error: the integrator of position (the mass itself) holds
+# it once the error is zero.
+[[simulate.invariant]]
+expr = "x"
+value = 1.0
+rtol = 2e-3
+after = 1.5
+
+# At rest the mass has stopped and the coil carries no current: nothing is left to hold, because
+# a position servo needs no force to keep a position against no load.
+[[simulate.invariant]]
+expr = "w"
+value = 0.0
+atol = 5e-3
+after = 1.5
+
+[[simulate.invariant]]
+expr = "i"
+value = 0.0
+atol = 5e-3
+after = 1.5
+
+# The actuator voltage never leaves its band: the whole model is that the amplifier can only
+# deliver +/-12 V, and v is exactly what the max/min clip produces.
+[[simulate.invariant]]
+expr = "v"
+min = -12.001
+max = 12.001
+
+# The position rises monotonically to the setpoint and does not overshoot past 1 m -- the
+# saturated drive is heavy but the damping is enough to catch it.
+[[simulate.invariant]]
+expr = "x"
+min = -0.001
+max = 1.001
+
+# The speed peaks near 8.7 m/s during the saturated dash, then damps to zero.
+[[simulate.invariant]]
+expr = "w"
+min = -0.02
+max = 8.8
