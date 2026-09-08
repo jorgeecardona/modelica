@@ -63,6 +63,7 @@ FLAT = {
     "Genset",
     "HIRES",
     "HeatBar",
+    "HeatExchanger",
     "Lorenz",
     "LotkaVolterra",
     "MagLev",

@@ -1,0 +1,94 @@
+summary = "A heat exchanger as three lumped thermal masses: a hot fluid stream, the wall that separates it from a cold stream, and the cold stream. Each stream carries enthalpy in and out with its flow, and gives up or takes on heat by conduction across the wall. The wall has its own heat capacity, so it lags -- heat the hot stream sheds does not reach the cold stream at once but soaks into the wall first. Starting with everything at the cold inlet temperature, hot fluid flows in and the three temperatures climb toward a steady state where the heat the hot stream loses exactly equals the heat the cold stream gains. Throughout, the temperatures stay ordered hot > wall > cold, which is the direction heat flows through the exchanger."
+teaches = ["a flow-through thermal system: enthalpy carried by a stream, q*(T_in - T)", "conduction across a wall coupling two streams", "wall thermal inertia, which delays the transfer between the streams", "a temperature ordering that fixes the direction of heat flow"]
+requires = []
+
+[parse]
+classes = ["HeatExchanger"]
+
+[flatten]
+model = "HeatExchanger"
+states = ["t_hot", "t_wall", "t_cold"]
+equations = 3
+balanced = true
+
+# Three lumped masses, each an energy balance:
+#   c_hot*d(t_hot)/dt   = q_hot*(th_in - t_hot) - ua_hot*(t_hot - t_wall)
+#   c_wall*d(t_wall)/dt = ua_hot*(t_hot - t_wall) - ua_cold*(t_wall - t_cold)
+#   c_cold*d(t_cold)/dt = q_cold*(tc_in - t_cold) + ua_cold*(t_wall - t_cold)
+# The two streams are coupled only through the wall, whose capacity c_wall delays the transfer.
+# All three start at the cold inlet 300 K; with the hot inlet at 360 K the temperatures rise
+# monotonically toward the steady state (t_hot -> 340.85, t_wall -> 333.19, t_cold -> 325.53 K),
+# where the linear system A x = b balances. Because the system is linear, a stiff-accurate
+# reference resolves it cleanly. Heat flows hot -> wall -> cold, so t_hot >= t_wall >= t_cold at
+# every instant (equal only at the start).
+[simulate]
+stop = 120.0
+tolerance = 1e-10
+
+# The wall warms first as the hot stream drives it, then the cold stream follows the wall.
+[[simulate.point]]
+t = 5.0
+values = { t_hot = 310.2750081, t_wall = 301.4893729, t_cold = 300.2824803 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { t_hot = 315.5125899, t_wall = 304.1044898, t_cold = 301.3859698 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 20.0
+values = { t_hot = 321.2598652, t_wall = 309.2575193, t_cold = 304.850251 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 40.0
+values = { t_hot = 327.8809575, t_wall = 317.1068423, t_cold = 311.4465356 }
+rtol = 1e-6
+source = "reference"
+
+# The slow approach: the wall's inertia stretches the last stretch toward steady state.
+[[simulate.point]]
+t = 80.0
+values = { t_hot = 334.9966358, t_wall = 325.9257712, t_cold = 319.1644455 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 120.0
+values = { t_hot = 338.2064451, t_wall = 329.9093427, t_cold = 322.6555289 }
+rtol = 1e-6
+source = "reference"
+
+# Every temperature rises from the 300 K start and stays below the steady state it approaches from
+# below: the streams never overshoot, bounded by their inlets and the steady balance.
+[[simulate.invariant]]
+expr = "t_hot"
+min = 299.99
+max = 340.86
+
+[[simulate.invariant]]
+expr = "t_wall"
+min = 299.99
+max = 333.2
+
+[[simulate.invariant]]
+expr = "t_cold"
+min = 299.99
+max = 325.54
+
+# The temperatures stay ordered hot >= wall >= cold, which is what says heat flows one way through
+# the exchanger: from the hot stream into the wall and on into the cold stream, never backward. The
+# differences vanish only at the start, where all three sit at 300 K.
+[[simulate.invariant]]
+expr = "t_hot - t_wall"
+min = -0.001
+max = 12.5
+
+[[simulate.invariant]]
+expr = "t_wall - t_cold"
+min = -0.001
+max = 7.5
