@@ -448,11 +448,11 @@
             <div>
               <div class="helpsec">chart</div>
               <div class="hk"><b>drag</b><span>zoom the time window (or the x variable in a phase plot)</span></div>
-              <div class="hk"><b>click</b><span>drop a mark; a second click reads Δ, the average rate and ∫ between the two</span></div>
+              <div class="hk"><b>click</b><span>drop a mark to read every variable's value there; a second click reads Δ, the average rate and ∫ between the two</span></div>
               <div class="hk"><b>shift-click</b><span>drop a level line and read off where each curve crosses it</span></div>
               <div class="hk"><b>drag the ⇥ marker</b><span>move the stop time and re-run to there</span></div>
               <div class="hk"><b>double-click</b><span>reset the zoom, the marks and the level lines</span></div>
-              <div class="hk"><b>c</b><span>copy the readout (the two-mark measurement, or the cursor values) to the clipboard</span></div>
+              <div class="hk"><b>c</b><span>copy the readout (a mark's values, the two-mark measurement, or the cursor values) to the clipboard</span></div>
               <div class="hk"><b>drag · wheel (3D)</b><span>rotate the camera · zoom, in the xyz view</span></div>
             </div>
             <div>
@@ -468,7 +468,7 @@
       </div>
       <div id="errbar" hidden><span id="errtext"></span><button type="button" id="errclose" title="dismiss" aria-label="dismiss">&times;</button></div>
     </div>
-    <div class="foot" id="foot">drag to zoom · click to mark, twice for Δ · shift-click for a level line · double-click to reset</div>
+    <div class="foot" id="foot">drag to zoom · click to read a point, twice for Δ · shift-click for a level line · double-click to reset</div>
   </section>
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
@@ -592,12 +592,14 @@ let XD = [0, 1];
 // axis that gets expanded reads its domain from `aspectDom` instead of `bounds()`.
 let aspectLock = false;
 let aspectDom = null;
-// Measurement marks: up to two sample indices set by clicking. One is a readout; two give the
-// interval between them and every selected variable's change across it -- the drying phase's
-// length, turning point to first crack -- the way an oscilloscope's cursors do.
+// Measurement marks: up to two sample indices set by clicking. One reads every selected
+// variable's value at that instant; two give the interval between them and each variable's change
+// across it -- the drying phase's length, turning point to first crack -- like an oscilloscope's
+// cursors.
 let marks = [];
-// What the `c` key copies: the last two-mark measurement lines (set by drawMarks), and the
-// sample index under the cursor (set by cursor(), cleared on leave). One or the other is copied.
+// What the `c` key copies: the last mark readout lines (one-mark values or the two-mark
+// measurement, set by drawMarks), else the sample index under the cursor (set by cursor(), cleared
+// on leave). Whichever is live is copied.
 let lastMeasure = [];
 let cursorIndex = null;
 // Level guides: horizontal lines at chosen values, each {value (SI), unit, near}. Placed by a
@@ -1933,7 +1935,7 @@ function restFooter() {
     }
     if (parts.length) return parts.join("   ·   ") + "   ·   shift-click to add, double-click to clear";
   }
-  if (marks.length === 1) return "mark at t = " + fmt(toT(T[marks[0]])) + " " + tUnit() + " · click again for the interval";
+  if (marks.length === 1) return "reading at t = " + fmt(toT(T[marks[0]])) + " " + tUnit() + " · click again for the interval, or press c to copy";
   if (marks.length === 2) {
     const [a, b] = [Math.min(...marks), Math.max(...marks)];
     let s = "Δt = " + fmt(toT(T[b] - T[a])) + " " + tUnit();
@@ -1941,10 +1943,22 @@ function restFooter() {
       if (xs) s += "   ·   Δ" + xVar + " = " + fmt(disp(xs[b], u) - disp(xs[a], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""); }
     return s + "   ·   double-click to clear";
   }
-  return "drag to zoom · click to mark, twice for Δ · shift-click for a level line · double-click to reset";
+  return "drag to zoom · click to read a point, twice for Δ · shift-click for a level line · double-click to reset";
+}
+// The readout panel in the plot's top-left, shared by the one-mark and two-mark cases: a small
+// background rect and one text line per entry, each in its variable's colour when it names one.
+function drawMeasureBox(frag, lines) {
+  const lh = 14, pad = 7, w = Math.max(...lines.map((l) => l.t.length)) * 6.3 + 2 * pad;
+  const x0 = M.l + 8, y0 = M.t + 8;
+  frag.appendChild(el("rect", {class: "measurebg", x: x0, y: y0, width: w, height: lines.length * lh + 2 * pad - 3, rx: 4}));
+  lines.forEach((l, i) => {
+    const attrs = {class: "measure" + (l.dim ? " dim" : ""), x: x0 + pad, y: y0 + pad + 10 + i * lh};
+    if (l.nm) attrs.fill = colour(l.nm);
+    frag.appendChild(el("text", attrs, l.t));
+  });
 }
 function drawMarks(frag) {
-  lastMeasure = [];  // rebuilt below only when two marks are down; the `c` key copies it
+  lastMeasure = [];  // rebuilt below whenever a mark is down; the `c` key copies it
   if (!marks.length || !N) return;
   const live = RUNS.length - 1;
   marks.forEach((j, n) => {
@@ -1953,7 +1967,25 @@ function drawMarks(frag) {
     frag.appendChild(el("line", {class: "mark", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
     frag.appendChild(el("text", {class: "marklab", x: x + 3, y: box.h - M.b - 4}, String(n + 1)));
   });
-  if (marks.length < 2) return;
+  // One mark reads the exact values at that instant -- a fixed cursor you can copy with `c`. A
+  // click drops it at the nearest sample, so it lands on a real point of the trajectory, not an
+  // interpolation. Each selected variable's value at the mark, in display units.
+  if (marks.length === 1) {
+    const j = marks[0];
+    const lines = [{t: "t = " + fmt(toT(T[j])) + " " + tUnit(), dim: false}];
+    if (xVar) { const u = unitOf(xVar), xs = seriesOf(live, xVar);
+      if (xs && isFinite(xs[j])) lines.push({t: xVar + " = " + fmt(disp(xs[j], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: true, nm: xVar}); }
+    for (const nm of selected().slice(0, 6)) {
+      if (nm === xVar) continue;  // already shown as the x-axis line, above
+      const vs = D.series[nm]; if (!vs) continue;
+      const u = unitOf(nm), v = disp(vs[j], u);
+      if (v === null || !isFinite(v)) continue;
+      lines.push({t: nm + " = " + fmt(v) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: true, nm});
+    }
+    lastMeasure = lines.map((l) => l.t);
+    drawMeasureBox(frag, lines);
+    return;
+  }
   // The readout: the interval, then each selected variable's change across it (live run).
   const [a, b] = [Math.min(...marks), Math.max(...marks)];
   const lines = [{t: "Δt = " + fmt(toT(T[b] - T[a])) + " " + tUnit() + "   (" + fmt(toT(T[a])) + " → " + fmt(toT(T[b])) + ")", dim: false}];
@@ -1983,14 +2015,7 @@ function drawMarks(frag) {
     lines.push({t: nm + ": " + fmt(v1) + " → " + fmt(v2) + "   Δ " + fmt(v2 - v1) + du + rate + integral, dim: true, nm});
   }
   lastMeasure = lines.map((l) => l.t);  // the same readout the `c` key copies, as plain text
-  const lh = 14, pad = 7, w = Math.max(...lines.map((l) => l.t.length)) * 6.3 + 2 * pad;
-  const x0 = M.l + 8, y0 = M.t + 8;
-  frag.appendChild(el("rect", {class: "measurebg", x: x0, y: y0, width: w, height: lines.length * lh + 2 * pad - 3, rx: 4}));
-  lines.forEach((l, i) => {
-    const attrs = {class: "measure" + (l.dim ? " dim" : ""), x: x0 + pad, y: y0 + pad + 10 + i * lh};
-    if (l.nm) attrs.fill = colour(l.nm);
-    frag.appendChild(el("text", attrs, l.t));
-  });
+  drawMeasureBox(frag, lines);
 }
 
 // -- level guides ------------------------------------------------------------------------
