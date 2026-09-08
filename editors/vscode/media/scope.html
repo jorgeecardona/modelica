@@ -845,20 +845,62 @@ function eachRun(nm, fn) {
 function drawPath(frag, vs, a, b, yOf, nm, ri) {
   const st = runStyle(ri);
   let d = "", pen = false;
+  // A phase curve carries no clue which way time runs along it; a few arrowheads on the live
+  // run's curve show it. Collect the pixel points as the path is built (only when they are
+  // wanted) so the arrows sit exactly on the line, with a null marking each pen-lift gap.
+  const arrows = xVar && ri === RUNS.length - 1;
+  const pts = arrows ? [] : null;
   for (let k = a; k <= b; k++) {
     const v = vs[k]; const y = (v === null || v === undefined || !isFinite(v)) ? null : yOf(v);
-    if (y === null || !isFinite(y)) { pen = false; continue; }
+    if (y === null || !isFinite(y)) { pen = false; if (pts) pts.push(null); continue; }
     // In a phase plot the x is this run's phase variable at the same instant; a point outside
     // the x zoom lifts the pen so the curve is clipped rather than drawn across the frame.
     const xv = xOfRun(ri, k);
-    if (xv === null || xv === undefined || !isFinite(xv) || (xwin && (xv < xwin[0] || xv > xwin[1]))) { pen = false; continue; }
-    d += (pen ? "L" : "M") + X(xv).toFixed(2) + " " + y.toFixed(2); pen = true;
+    if (xv === null || xv === undefined || !isFinite(xv) || (xwin && (xv < xwin[0] || xv > xwin[1]))) { pen = false; if (pts) pts.push(null); continue; }
+    const px = X(xv);
+    d += (pen ? "L" : "M") + px.toFixed(2) + " " + y.toFixed(2); pen = true;
+    if (pts) pts.push({x: px, y: y});
   }
   if (!d) return;
   const attrs = {d: d, fill: "none", "stroke-width": st.w, stroke: colour(nm),
     "stroke-linejoin": "round", opacity: st.op};
   if (st.dash) attrs["stroke-dasharray"] = st.dash;
   frag.appendChild(el("path", attrs));
+  if (arrows) phaseArrows(frag, pts, colour(nm), st.op);
+}
+// A few evenly-spaced arrowheads along a curve, pointing the way time increases. Spaced by arc
+// length (not sample index, which would bunch them where the trajectory dawdles) and never laid
+// across a pen-lift gap -- a null in `pts`.
+function phaseArrows(frag, pts, color, op) {
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) { const p = pts[i - 1], q = pts[i];
+    if (p && q) total += Math.hypot(q.x - p.x, q.y - p.y); }
+  if (!(total > 30)) return;   // too short a curve to mark
+  const targets = [0.2, 0.4, 0.6, 0.8].map((f) => f * total);
+  let acc = 0, ti = 0;
+  for (let i = 1; i < pts.length && ti < targets.length; i++) {
+    const p = pts[i - 1], q = pts[i]; if (!p || !q) continue;
+    const seg = Math.hypot(q.x - p.x, q.y - p.y); if (seg < 1e-6) { continue; }
+    while (ti < targets.length && acc + seg >= targets[ti]) {
+      const t = (targets[ti] - acc) / seg;
+      const ux = (q.x - p.x) / seg, uy = (q.y - p.y) / seg;
+      arrowHead(frag, p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t, ux, uy, color, op);
+      ti++;
+    }
+    acc += seg;
+  }
+}
+// A small filled triangle: the tip on the curve at (x, y), pointing along the unit vector (ux, uy).
+// A thin halo in the page background separates it from the curve it sits on, which is the same
+// colour -- without it an arrow vanishes into a dense attractor like the Lorenz butterfly.
+function arrowHead(frag, x, y, ux, uy, color, op) {
+  const s = 7, w = 4;                         // tip-to-base length and half-width
+  const bx = x - ux * s, by = y - uy * s, nx = -uy, ny = ux;
+  const d = "M" + x.toFixed(2) + " " + y.toFixed(2)
+    + "L" + (bx + nx * w).toFixed(2) + " " + (by + ny * w).toFixed(2)
+    + "L" + (bx - nx * w).toFixed(2) + " " + (by - ny * w).toFixed(2) + "Z";
+  frag.appendChild(el("path", {d: d, fill: color, opacity: op, stroke: "var(--bg)",
+    "stroke-width": 1, "stroke-linejoin": "round"}));
 }
 function ticks(lo, hi, want) {
   if (!(hi > lo)) return [lo];
