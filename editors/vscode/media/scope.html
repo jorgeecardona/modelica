@@ -314,6 +314,8 @@
   .tick { fill: var(--dim); font-size: 10px; }
   .grid { stroke: var(--line); stroke-dasharray: 2 3; opacity: .65; }
   .event { stroke: var(--dim); stroke-dasharray: 4 3; opacity: .8; }
+  .terminated { stroke: var(--vscode-editorWarning-foreground, #cca700); stroke-width: 1.5; opacity: .9; }
+  .termlab { fill: var(--vscode-editorWarning-foreground, #cca700); font-size: 10px; font-weight: 600; }
   .cursor { stroke: var(--dim); }
   .band { fill: var(--accent); opacity: .16; }
   .refring { fill: none; stroke-width: 1.5; }
@@ -1082,6 +1084,25 @@ function eventLine(e, cls) {
   return line;
 }
 
+// A `terminate(...)` fired: the run is defined only up to here, so this is the run's END, not
+// one event among many. Recognise it by the cause the backend writes ("terminate: <reason>")
+// and draw it as a distinct end-marker with the reason spelled on the plot, so a run that
+// stopped short of its requested stop says why instead of looking like it merely ended.
+function isTerminate(e) {
+  return !!(e && e.cause && e.cause.indexOf("terminate") === 0);
+}
+function terminateMarker(e) {
+  const x = X(e.t);
+  const g = el("g", {});
+  g.appendChild(el("line", {class: "terminated", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
+  const reason = (e.cause || "").replace(/^terminate:\s*/, "");
+  const label = reason && reason !== "terminate" ? "terminated: " + reason : "terminated";
+  const t = el("text", {class: "termlab", x: x - 5, y: M.t + 10, "text-anchor": "end"}, label);
+  t.appendChild(el("title", {}, label + "   @   t = " + fmt(toT(e.t)) + " " + tUnit()));
+  g.appendChild(t);
+  return g;
+}
+
 // -- scales ----------------------------------------------------------------------------
 function bounds() {
   const [a, b] = visible();
@@ -1331,8 +1352,12 @@ function draw() {
   if (!xVar) {
     for (const e of D.events) {
       if (e.t < win[0] || e.t > win[1]) continue;
+      if (isTerminate(e)) continue; // the run's end -- drawn as a labelled end-marker below
       frag.appendChild(eventLine(e, "event"));
     }
+    // The terminate that ended the run (if any), as a distinct labelled end-marker.
+    const term = D.events.filter(isTerminate).pop();
+    if (term && term.t >= win[0] && term.t <= win[1]) frag.appendChild(terminateMarker(term));
     // A pinned run's events, fainter: where its schedule fired may differ from the live run's.
     for (let ri = 0; ri < RUNS.length - 1; ri++) {
       for (const e of ((RUNS[ri].data || {}).events || [])) {
