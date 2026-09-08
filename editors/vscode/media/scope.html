@@ -451,6 +451,7 @@
               <div class="hk"><b>shift-click</b><span>drop a level line and read off where each curve crosses it</span></div>
               <div class="hk"><b>drag the ⇥ marker</b><span>move the stop time and re-run to there</span></div>
               <div class="hk"><b>double-click</b><span>reset the zoom, the marks and the level lines</span></div>
+              <div class="hk"><b>c</b><span>copy the readout (the two-mark measurement, or the cursor values) to the clipboard</span></div>
               <div class="hk"><b>drag · wheel (3D)</b><span>rotate the camera · zoom, in the xyz view</span></div>
             </div>
             <div>
@@ -588,6 +589,10 @@ let XD = [0, 1];
 // interval between them and every selected variable's change across it -- the drying phase's
 // length, turning point to first crack -- the way an oscilloscope's cursors do.
 let marks = [];
+// What the `c` key copies: the last two-mark measurement lines (set by drawMarks), and the
+// sample index under the cursor (set by cursor(), cleared on leave). One or the other is copied.
+let lastMeasure = [];
+let cursorIndex = null;
 // Level guides: horizontal lines at chosen values, each {value (SI), unit, near}. Placed by a
 // shift-click on a strip; the crossing of each drawn variable with the level reads off "how long
 // to reach it". STRIPS is the per-strip value<->pixel mapping the current draw() built, so a
@@ -1473,6 +1478,7 @@ function cursorDotY(nm, value, dom) {
 }
 function cursor(v) {
   const j = nearestIndex(v);
+  cursorIndex = j;
   const x = X(xOfRun(RUNS.length - 1, j) ?? v);
   const frag = document.createDocumentFragment();
   frag.appendChild(el("line", {class: "cursor", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
@@ -1902,6 +1908,7 @@ function restFooter() {
   return "drag to zoom · click to mark, twice for Δ · shift-click for a level line · double-click to reset";
 }
 function drawMarks(frag) {
+  lastMeasure = [];  // rebuilt below only when two marks are down; the `c` key copies it
   if (!marks.length || !N) return;
   const live = RUNS.length - 1;
   marks.forEach((j, n) => {
@@ -1939,6 +1946,7 @@ function drawMarks(frag) {
     const integral = area !== null ? "   ∫ " + fmt(area) + iu : "";
     lines.push({t: nm + ": " + fmt(v1) + " → " + fmt(v2) + "   Δ " + fmt(v2 - v1) + du + rate + integral, dim: true, nm});
   }
+  lastMeasure = lines.map((l) => l.t);  // the same readout the `c` key copies, as plain text
   const lh = 14, pad = 7, w = Math.max(...lines.map((l) => l.t.length)) * 6.3 + 2 * pad;
   const x0 = M.l + 8, y0 = M.t + 8;
   frag.appendChild(el("rect", {class: "measurebg", x: x0, y: y0, width: w, height: lines.length * lh + 2 * pad - 3, rx: 4}));
@@ -2112,7 +2120,7 @@ svg.addEventListener("pointerup", (e) => {
   draw();
 });
 svg.addEventListener("pointerleave", () => {
-  if (drag === null && !stopDrag) { hud.replaceChildren(); foot.textContent = restFooter(); paintLegend(); }
+  if (drag === null && !stopDrag) { cursorIndex = null; hud.replaceChildren(); foot.textContent = restFooter(); paintLegend(); }
 });
 svg.addEventListener("dblclick", () => {
   // In 3D a double-click resets the camera, the convention Plotly and MATLAB share.
@@ -2622,7 +2630,34 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !helpCard.hidden) { setHelp(false); return; }
   if (e.key === "Escape" && !errBar.hidden) { clearError(); return; }
   if (e.key === "?" && !typing) { e.preventDefault(); setHelp(helpCard.hidden); }
+  if ((e.key === "c" || e.key === "C") && !typing && !e.metaKey && !e.ctrlKey) copyReadout();
 });
+// `c` copies the readout to the clipboard as plain text: the two-mark measurement if a pair is
+// down (its interval, and every drawn variable's Δ, rate and integral), otherwise the values
+// under the cursor if one is hovering -- the numbers you would otherwise retype into a report.
+// Guarded by Cmd/Ctrl so the browser's own copy is untouched, and by try/catch since a webview's
+// clipboard can refuse.
+function copyReadout() {
+  let text = "";
+  if (lastMeasure.length) {
+    text = lastMeasure.join("\n");
+  } else if (cursorIndex !== null && N) {
+    const j = cursorIndex;
+    const rows = selected().map((nm) => {
+      const u = unitOf(nm), vs = seriesOf(RUNS.length - 1, nm);
+      const val = vs ? disp(vs[j], u) : null;
+      return val === null || val === undefined || !isFinite(val)
+        ? null : nm + " = " + fmt(val) + (dispUnit(u) ? " " + dispUnit(u) : "");
+    }).filter(Boolean);
+    text = ["t = " + fmt(toT(T[j])) + " " + tUnit(), ...rows].join("\n");
+  }
+  if (!text) { foot.textContent = "hover a point, or place two marks, then press c to copy the readout"; return; }
+  const landed = () => { foot.textContent = "copied the readout to the clipboard"; };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(landed, landed);
+    else landed();
+  } catch (err) { foot.textContent = "the clipboard is not available here"; }
+}
 // A simulation error (a violated assert, a singular model, a solver that gave up) comes back
 // from the extension as a `{type:"error"}` message. Show it as a banner over the chart -- the
 // footer clips it -- and drop the leading exception-type noise so the message leads. It clears
