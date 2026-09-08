@@ -174,6 +174,10 @@
   .evrow:hover { background: var(--panel); }
   .evrow .evt { font-variant-numeric: tabular-nums; min-width: 5.5ch; text-align: right; }
   .evrow .evc { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+  /* One assert the model carries: the condition it holds to, then the message it stops with. */
+  .guardrow { display: flex; align-items: baseline; gap: 8px; padding: 2px 12px; font-size: 12px; }
+  .guardrow .gcond { font-family: var(--mono, ui-monospace, monospace); white-space: nowrap; }
+  .guardrow .gmsg { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* The stop marker: where the run ends, as a handle you drag to move the horizon. */
   .stopline { stroke: var(--accent); stroke-dasharray: 3 3; opacity: .9; }
   .stopgrip { fill: var(--accent); cursor: ew-resize; }
@@ -468,6 +472,7 @@
   <aside class="legend">
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
+    <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
     <div class="legtitle" id="statstitle" hidden>stats <span class="legcount" id="statswin"></span></div><div id="statslist"></div>
     <div class="legtitle" id="ptitle" hidden>parameters</div><div id="plist"></div>
@@ -730,6 +735,7 @@ function select(i) {
   document.getElementById("csvbtn").hidden = !vscodeApi;
   document.getElementById("svgbtn").hidden = !vscodeApi;
   paintEvents();
+  paintGuards();
   paintXAxis();
   paintParams();
   paintRuns();
@@ -2442,6 +2448,24 @@ function paintEvents() {
     frag.appendChild(row);
   }
   document.getElementById("evlist").replaceChildren(frag);
+}
+// The model's asserts, shown as the range it guards: the condition it holds to and the message it
+// stops with. Per model, so painted on a model change beside the events, not on every draw. A
+// model with no asserts (most) hides the section.
+function paintGuards() {
+  const asserts = (D && D.asserts) || [];
+  document.getElementById("guardtitle").hidden = !asserts.length;
+  const frag = document.createDocumentFragment();
+  for (const a of asserts) {
+    const row = document.createElement("div");
+    row.className = "guardrow";
+    row.title = (a.condition || "") + (a.message ? "  —  " + a.message : "");
+    const cond = document.createElement("span"); cond.className = "gcond"; cond.textContent = a.condition || "";
+    const msg = document.createElement("span"); msg.className = "gmsg"; msg.textContent = a.message || "";
+    row.append(cond, msg);
+    frag.appendChild(row);
+  }
+  document.getElementById("guardlist").replaceChildren(frag);
 }
 
 // The step-response metrics of one variable over the whole run: where it ends, how far past that

@@ -27,6 +27,7 @@ import numpy as np
 from modelica import ir
 from modelica.ir.causalize import causalize
 from modelica.lang import parse
+from modelica.lang.unparse import unparse_expr
 from modelica.sim import flatten
 from modelica.sim.emit import settings
 from modelica.sim.kernel import build
@@ -623,6 +624,19 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         "units": {nm: units.get(nm, "") for nm in series},
         "refs": [],
         "events": events,
+        # The model's runtime guards, rendered as source so the panel can show what physical
+        # range the model asserts it stays in (a buck's duty cycle in [0, 1], a machine's rotor
+        # angle below a pole slip). A false one stops the run and the panel shows the message.
+        "asserts": [
+            {
+                "condition": unparse_expr(check.condition),
+                "message": check.message.value if isinstance(check.message, ir.StringLiteral) else "",
+                "warning": isinstance(check.level, ir.Ref)
+                and bool(check.level.parts)
+                and check.level.parts[-1] == "warning",
+            }
+            for check in getattr(system, "asserts", ())
+        ],
         "nstates": len(states),
         "states": list(system.modes[0].states),
         "autoNote": note,
