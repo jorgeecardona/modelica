@@ -178,6 +178,8 @@
   .guardrow { display: flex; align-items: baseline; gap: 8px; padding: 2px 12px; font-size: 12px; }
   .guardrow .gcond { font-family: var(--mono, ui-monospace, monospace); white-space: nowrap; }
   .guardrow .gmsg { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .guardrow.tappable { cursor: pointer; border-radius: 3px; }
+  .guardrow.tappable:hover { background: var(--line); }
   /* The stop marker: where the run ends, as a handle you drag to move the horizon. */
   .stopline { stroke: var(--accent); stroke-dasharray: 3 3; opacity: .9; }
   .stopgrip { fill: var(--accent); cursor: ew-resize; }
@@ -461,6 +463,7 @@
               <div class="hk"><b>alt-click a row</b><span>solo it; alt-click the soloed one to restore the set</span></div>
               <div class="hk"><b>drag the divider</b><span>resize the legend; double-click it to collapse</span></div>
               <div class="hk"><b>filter box</b><span>narrow the list; all / none then act on the shown set</span></div>
+              <div class="hk"><b>click a guard</b><span>plot the variable its condition watches</span></div>
             </div>
           </div>
           <div class="helpfoot">press ? or Esc to close</div>
@@ -2572,6 +2575,15 @@ function paintGuards() {
     const cond = document.createElement("span"); cond.className = "gcond"; cond.textContent = a.condition || "";
     const msg = document.createElement("span"); msg.className = "gmsg"; msg.textContent = a.message || "";
     row.append(cond, msg);
+    // The variables the condition watches, so the row can plot them: click a guard to draw the
+    // signal it holds -- watch the duty cycle it keeps in [0, 1], say -- instead of hunting for it
+    // in the legend. The names are the whole-word tokens of the condition that are real series.
+    const watched = [...new Set((a.condition || "").match(/[A-Za-z_][\w.]*/g) || [])].filter((t) => names.includes(t));
+    if (watched.length) {
+      row.classList.add("tappable");
+      row.title += "  ·  click to plot " + watched.join(", ");
+      row.onclick = () => { for (const nm of watched) on.add(nm); preSolo = null; saveSelection(); draw(); };
+    }
     frag.appendChild(row);
   }
   document.getElementById("guardlist").replaceChildren(frag);

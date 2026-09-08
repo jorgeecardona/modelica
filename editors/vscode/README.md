@@ -136,7 +136,9 @@ over the chart listing them all -- so the ones below need not be memorised.
 - **Guards.** A model can carry `assert(condition, message)` checks of its own -- a buck converter
   asserting its duty cycle stays in `[0, 1]`, a machine asserting it keeps synchronism. The
   **guards** section of the legend lists each condition and its message, so a model states the
-  range it holds to. If a run drives a guard false the simulation stops and the message appears in
+  range it holds to; clicking a guard whose condition names a variable plots that variable, so you
+  can watch the duty cycle it keeps in `[0, 1]` rather than hunt for it in the legend. If a run
+  drives a guard false the simulation stops and the message appears in
   a banner over the chart; any other run failure (a singular model, a solver that gives up) shows
   there too, wrapped so the whole message is readable.
 - **Legend.** Click a variable to toggle it; **alt-click** to *solo* it -- show only that one,
