@@ -6,6 +6,15 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `examples/CoupledOscillators`: **two masses coupled by a spring, written as a state-space system
+  `der(z) = A * z`.** The first corpus model in the matrix-ODE form the array-product feature added:
+  the whole right-hand side is one matrix-vector multiply, the companion matrix `A` carrying the
+  springs. Started with one mass pulled aside, the motion is a beat -- the in-phase mode at
+  frequency 1 and the out-of-phase mode at `sqrt(2)` interfere and pass the energy back and forth,
+  `x1 = (cos(t) + cos(sqrt(2) t))/2`. Linear and undamped, so it has a closed-form solution (the
+  reference points are analytic) and a conserved energy, a benchmark with an exact reference like
+  the Hamiltonian ones. The `build` DSL's `parameter`/`constant` gained a `shape=` argument to
+  declare the array parameter its twin needs.
 - **Array products scalarise: the dot product, matrix-vector, and matrix-matrix.** A `*` between
   two arrays is a contraction, not an elementwise operation, and is now expanded into the sums it
   stands for: `der(x) = A * x` (the linear system the feature is named for) becomes

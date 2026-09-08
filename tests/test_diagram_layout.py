@@ -58,6 +58,7 @@ FLAT = {
     "CSTR",
     "Chua",
     "CoulombOscillator",
+    "CoupledOscillators",
     "DoublePendulum",
     "DrainingTank",
     "Duffing",

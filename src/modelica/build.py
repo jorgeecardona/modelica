@@ -845,28 +845,42 @@ def discrete(declaration: Declaration) -> Declaration:
 
 
 def parameter(
-    type_ref: TypeRef, value: object = None, *, doc: str = "", **attributes: object
+    type_ref: TypeRef,
+    value: object = None,
+    *,
+    doc: str = "",
+    shape: object = None,
+    **attributes: object,
 ) -> Declaration:
     """``parameter Real k(unit = "1/s") = 0.5 "Cooling coefficient";``.
 
-    Reads in the same order as the Modelica line: prefix, type, value, comment.
+    Reads in the same order as the Modelica line: prefix, type, value, comment. ``shape`` gives an
+    array parameter its dimensions, the same way it does a variable: ``parameter Real A[2, 2] =
+    {{0, -1}, {1, 0}}`` is ``parameter(Real, array(array(0, -1), array(1, 0)), shape=(2, 2))``.
     """
     return Declaration(
         type_ref,
         doc=doc,
         modification=_modification(attributes, value),
         variability="parameter",
+        dimensions=_shape(shape),
     )
 
 
 def constant(
-    type_ref: TypeRef, value: object = None, *, doc: str = "", **attributes: object
+    type_ref: TypeRef,
+    value: object = None,
+    *,
+    doc: str = "",
+    shape: object = None,
+    **attributes: object,
 ) -> Declaration:
     return Declaration(
         type_ref,
         doc=doc,
         modification=_modification(attributes, value),
         variability="constant",
+        dimensions=_shape(shape),
     )
 
 

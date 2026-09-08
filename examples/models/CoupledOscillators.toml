@@ -1,0 +1,74 @@
+summary = "Two equal masses, each held by a wall spring and coupled to the other by a third spring, written as a linear state-space system der(z) = A*z with z = [x1, x2, v1, v2]. This is the array-product form: the whole right-hand side is one matrix-vector multiply, the companion matrix A carrying the springs. Started with the first mass pulled aside and the second at rest, the motion is a beat: the two normal modes -- the in-phase mode at frequency 1 and the out-of-phase mode at sqrt(2) -- are excited equally, and their interference passes the energy back and forth between the masses, x1 = (cos(t) + cos(sqrt(2) t))/2 and x2 = (cos(t) - cos(sqrt(2) t))/2. Because the model is linear and undamped it has a closed-form solution and a conserved energy, so it is a benchmark with an exact reference like the Hamiltonian ones, and the first corpus model written as a matrix ODE."
+teaches = ["a linear system in state-space form der(z) = A*z, the array-product (matrix-vector) equation", "two coupled normal modes and the beat their interference makes", "a conserved energy for an undamped linear system, checked as the invariant", "a matrix parameter and a vector state, scalarised into the contraction sum"]
+requires = []
+
+[parse]
+classes = ["CoupledOscillators"]
+
+[flatten]
+model = "CoupledOscillators"
+states = ["z[1]", "z[2]", "z[3]", "z[4]"]
+index = 1
+balanced = true
+
+# Closed form: x1 = (cos(t) + cos(sqrt(2) t))/2, x2 = (cos(t) - cos(sqrt(2) t))/2, and the
+# velocities are their derivatives. The reference points are that exact form; Radau tracks it to
+# about 1e-10 over the twenty-second run.
+[simulate]
+stop = 20.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 3.0
+values = { "z[1]" = -0.7213271769, "z[2]" = -0.2686653197, "z[3]" = 0.5599545648, "z[4]" = -0.7010745728 }
+rtol = 1e-7
+atol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 7.0
+values = { "z[1]" = -0.0677599347, "z[2]" = 0.8216621891, "z[3]" = -0.0052841677, "z[4]" = -0.6517024311 }
+rtol = 1e-7
+atol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 11.0
+values = { "z[1]" = -0.4920514433, "z[2]" = 0.4964771413, "z[3]" = 0.3931980122, "z[4]" = 0.6067921943 }
+rtol = 1e-7
+atol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 15.0
+values = { "z[1]" = -0.7360225450, "z[2]" = -0.0236653678, "z[3]" = -0.8214035558, "z[4]" = 0.1711157157 }
+rtol = 1e-7
+atol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 19.0
+values = { "z[1]" = 0.4114764969, "z[2]" = 0.5772281213, "z[3]" = -0.7722643533, "z[4]" = 0.6223871437 }
+rtol = 1e-7
+atol = 1e-8
+source = "analytic"
+
+# The energy is conserved: kinetic 0.5*(v1^2 + v2^2) plus the three springs, wall springs
+# 0.5*(x1^2 + x2^2) and the coupling 0.5*kc*(x1 - x2)^2 with kc = 0.5. It starts at 0.75 (the first
+# mass pulled to 1) and stays there, the invariant that grades the integrator.
+[[simulate.invariant]]
+expr = "0.5 * (z[3] ^ 2 + z[4] ^ 2) + 0.5 * (z[1] ^ 2 + z[2] ^ 2) + 0.25 * (z[1] - z[2]) ^ 2"
+value = 0.75
+atol = 1e-6
+
+# Neither mass ever moves past where the first one started: the amplitude of a beat is bounded by
+# the sum of the two mode amplitudes, which is one here.
+[[simulate.invariant]]
+expr = "z[1]"
+min = -1.001
+max = 1.001
+
+[[simulate.invariant]]
+expr = "z[2]"
+min = -1.001
+max = 1.001
