@@ -103,8 +103,10 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   the integration is unchanged, only the output is read more finely where you are looking. A
   live `.mo` only, and only when the window is actually sparse. **Double-click** the chart to
   reset the zoom and clear the marks. **Hover** for a cursor readout of every drawn variable, in
-  the display units, at the nearest sample: the values appear beside each variable in the legend,
-  and, while the legend is hidden in a narrow pane, in the footer instead.
+  the display units, at the nearest sample: a line marks the instant and a dot sits on each
+  variable's curve where it crosses -- in every scale, the by-unit and split strips included,
+  each dot on its own strip -- and the values appear beside each variable in the legend, and,
+  while the legend is hidden in a narrow pane, in the footer instead.
 - **Measurement marks.** Click the chart to place a mark at the nearest sample; click again
   for a second, and a readout shows Δt, and for every drawn variable its two values, their
   change, and the **average rate** across the interval -- the secant slope, `Δvar/Δt`, in the

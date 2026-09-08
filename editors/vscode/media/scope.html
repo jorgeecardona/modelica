@@ -1348,23 +1348,32 @@ function nearestIndex(v) {
   }
   return best;
 }
+// The pixel y of one variable's value in the current scale: the shared projection in an overlay
+// scale, or the variable's own strip in the by-unit and split modes, read from the STRIPS registry
+// the last draw() built. Null when the value is off the scale or the strip is not drawn.
+function cursorDotY(nm, value, dom) {
+  if (scale !== "split" && scale !== "units") {
+    const u = project(nm, dom)(value); return isFinite(u) ? Y(u) : null;
+  }
+  const s = STRIPS.find((x) => x.members.includes(nm));
+  return s ? s.yFor(value) : null;
+}
 function cursor(v) {
   const j = nearestIndex(v);
   const x = X(xOfRun(RUNS.length - 1, j) ?? v);
   const frag = document.createDocumentFragment();
   frag.appendChild(el("line", {class: "cursor", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
-  // Dots on the shared scale; the strip modes have a scale per strip, so their readout is the legend.
-  if (scale !== "split" && scale !== "units") {
-    const dom = bounds();
-    for (const nm of selected()) {
-      const to = project(nm, dom);
-      eachRun(nm, (vs, ri) => {
-        const v = vs[j]; if (v === null || v === undefined || !isFinite(v)) return;
-        const u = to(v); if (!isFinite(u)) return;
-        const cx = X(xOfRun(ri, j) ?? v); if (!isFinite(cx)) return;
-        frag.appendChild(el("circle", {cx: cx, cy: Y(u), r: 2.6, fill: colour(nm), opacity: runStyle(ri).op}));
-      });
-    }
+  // A dot where each drawn variable crosses the cursor, in every scale: the strip modes place it
+  // on the variable's own strip through the STRIPS registry, so the by-unit and split views get a
+  // dot per curve too, not only the shared-scale ones.
+  const dom = (scale !== "split" && scale !== "units") ? bounds() : null;
+  for (const nm of selected()) {
+    eachRun(nm, (vs, ri) => {
+      const val = vs[j]; if (val === null || val === undefined || !isFinite(val)) return;
+      const cy = cursorDotY(nm, val, dom); if (cy === null || !isFinite(cy)) return;
+      const cx = X(xOfRun(ri, j) ?? val); if (!isFinite(cx)) return;
+      frag.appendChild(el("circle", {cx: cx, cy: cy, r: 2.6, fill: colour(nm), opacity: runStyle(ri).op}));
+    });
   }
   hud.replaceChildren(frag);
   // Against time the footer names any event under the cursor; in a phase plot it reads the
