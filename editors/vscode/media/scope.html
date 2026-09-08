@@ -1232,7 +1232,8 @@ function draw() {
     const x = X(tv);
     if (x < M.l - 0.5 || x > box.w - M.r + 0.5) continue;
     frag.appendChild(el("line", {class: "grid", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
-    frag.appendChild(el("text", {class: "tick", x: x, y: box.h - 9, "text-anchor": "middle"}, fmt(shown(tv))));
+    frag.appendChild(el("text", {class: "tick", x: x, y: box.h - 9, "text-anchor": "middle"},
+      logTime() ? fmt(shown(tv)) : tickLabel(shown(tv), shown(XD[1]) - shown(XD[0]))));
   }
   if (xVar) {
     frag.appendChild(el("text", {class: "tick", x: box.w - M.r, y: box.h - M.b - 5, "text-anchor": "end",
@@ -1305,6 +1306,13 @@ function draw() {
 }
 
 // One shared y-scale, every selected variable on it. `linear`, `log |y|`, `normalised`.
+// A tick's label, showing a value that rounds to zero as "0" instead of the floating-point crumb
+// (-2.776e-16) that even spacing leaves at the origin of a domain straddling it. `span` is the
+// axis range; only for a linear axis, where the ticks are evenly spaced -- a log axis crosses
+// orders of magnitude and its small decades must not be snapped away.
+function tickLabel(value, span) {
+  return Math.abs(value) < Math.abs(span) * 1e-9 ? "0" : fmt(value);
+}
 function drawOverlay(frag) {
   const dom = aspectDom || bounds();
   // A level guide reads a value off a linear axis; register the shared strip so a shift-click
@@ -1326,7 +1334,7 @@ function drawOverlay(frag) {
       if (y < M.t - 0.5 || y > box.h - M.b + 0.5) continue;
       frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r, y1: y, y2: y}));
       frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y + 3, "text-anchor": "end"},
-        scale === "log" ? "1e" + fmt(dv) : fmt(dv)));
+        scale === "log" ? "1e" + fmt(dv) : tickLabel(dv, hi - lo)));
     }
   }
   const [a, b] = visible();
@@ -1459,7 +1467,21 @@ function drawUnits(frag) {
         frag.appendChild(el("circle", {cx: cx, cy: cy, r: 1.7, fill: colour(nm)}));
       }
     }
-    stripLabels(frag, disp(dataLo, u), disp(dataHi, u), y0, y1);
+    if (xVar) {
+      // A phase plot's y is a spatial axis like its x, so give it round ticks and gridlines
+      // rather than only the data's min and max -- the same treatment paintXAxis gives the x axis,
+      // so an orbit or a trajectory reads off both coordinates. Time-mode strips keep the compact
+      // edge labels, since several stacked strips have no room for a full axis each.
+      for (const dv of ticks(disp(lo, u), disp(hi, u), Math.max(2, Math.round((y1 - y0) / 42)))) {
+        const yy = yFor(undisp(dv, u));
+        if (yy < y0 - 0.5 || yy > y1 + 0.5) continue;
+        frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r, y1: yy, y2: yy}));
+        frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: yy + 3, "text-anchor": "end"},
+          tickLabel(dv, disp(hi, u) - disp(lo, u))));
+      }
+    } else {
+      stripLabels(frag, disp(dataLo, u), disp(dataHi, u), y0, y1);
+    }
     const unitLabel = dispUnit(u) || "(dimensionless)";
     let lx = M.l + 5;
     frag.appendChild(el("text", {class: "tick", x: lx, y: y0 + 10, "font-weight": 600}, unitLabel));
