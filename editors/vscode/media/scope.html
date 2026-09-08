@@ -87,7 +87,7 @@
   .stopwrap input::-webkit-inner-spin-button,
   .stopwrap input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   .stopwrap .unitlab { color: var(--dim); }
-  .plotwrap { flex: 1; min-height: 0; display: flex; }
+  .plotwrap { flex: 1; min-height: 0; display: flex; position: relative; }
   svg { flex: 1; min-width: 0; display: block; touch-action: none; }
   select, button {
     font: inherit; font-size: 12px; color: inherit; background: var(--panel);
@@ -126,6 +126,27 @@
   #stepbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   #statsbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   #steptitle, #statstitle { margin-top: 12px; }
+  #helpbtn { font-weight: 700; }
+  #helpbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  /* The shortcuts overlay: a centred card over the chart with a dimming backdrop. The chart's
+     mouse and keyboard gestures are otherwise invisible, so this is where they are written down. */
+  #helpcard { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center;
+    justify-content: center; background: color-mix(in srgb, var(--bg) 55%, transparent); }
+  .helppanel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 13px 16px 12px; max-width: 560px; max-height: 92%; overflow: auto; font-size: 12px;
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.34); }
+  .helphead { display: flex; justify-content: space-between; align-items: center; font-weight: 700;
+    margin-bottom: 9px; color: var(--ink); }
+  .helphead button { border: none; background: none; color: var(--dim); font-size: 19px; line-height: 1;
+    cursor: pointer; padding: 0 2px; }
+  .helpcols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; }
+  @media (max-width: 640px) { .helpcols { grid-template-columns: 1fr; } }
+  .helpsec { font-weight: 700; color: var(--dim); text-transform: uppercase; font-size: 10px;
+    letter-spacing: 0.05em; margin-top: 2px; }
+  .hk { display: grid; grid-template-columns: max-content 1fr; gap: 9px; margin-top: 5px; }
+  .hk b { color: var(--accent); font-weight: 600; white-space: nowrap; }
+  .hk span { color: var(--dim); }
+  .helpfoot { margin-top: 11px; color: var(--dim); font-size: 11px; text-align: right; }
   /* One step-response row: the variable, then its final value and metrics in tabular figures. */
   .steprow { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; white-space: nowrap;
     font-variant-numeric: tabular-nums; }
@@ -396,13 +417,39 @@
           <button id="none">none</button>
           <button id="reset" title="or double-click the chart">reset</button>
           <button type="button" id="legendbtn" aria-pressed="false" title="show or hide the legend -- variables, events, parameters, sweep, sensitivity -- which a narrow pane hides by default">legend</button>
+          <button type="button" id="helpbtn" aria-pressed="false" title="mouse and keyboard shortcuts for the chart (or press ?)">?</button>
         </span>
       </div>
       <div class="desc" id="mdesc"></div>
       <div class="chips" id="mchips"></div>
       <div class="runs" id="runs" hidden></div>
     </div>
-    <div class="plotwrap"><svg id="chart"><g id="plot"></g><g id="hud"></g></svg></div>
+    <div class="plotwrap"><svg id="chart"><g id="plot"></g><g id="hud"></g></svg>
+      <div id="helpcard" hidden>
+        <div class="helppanel" role="dialog" aria-label="chart shortcuts">
+          <div class="helphead"><span>shortcuts</span><button type="button" id="helpclose" title="close (Esc)" aria-label="close">&times;</button></div>
+          <div class="helpcols">
+            <div>
+              <div class="helpsec">chart</div>
+              <div class="hk"><b>drag</b><span>zoom the time window (or the x variable in a phase plot)</span></div>
+              <div class="hk"><b>click</b><span>drop a mark; a second click reads Δ, the average rate and ∫ between the two</span></div>
+              <div class="hk"><b>shift-click</b><span>drop a level line and read off where each curve crosses it</span></div>
+              <div class="hk"><b>drag the ⇥ marker</b><span>move the stop time and re-run to there</span></div>
+              <div class="hk"><b>double-click</b><span>reset the zoom, the marks and the level lines</span></div>
+              <div class="hk"><b>drag · wheel (3D)</b><span>rotate the camera · zoom, in the xyz view</span></div>
+            </div>
+            <div>
+              <div class="helpsec">legend</div>
+              <div class="hk"><b>click a row</b><span>show or hide that variable</span></div>
+              <div class="hk"><b>alt-click a row</b><span>solo it; alt-click the soloed one to restore the set</span></div>
+              <div class="hk"><b>drag the divider</b><span>resize the legend; double-click it to collapse</span></div>
+              <div class="hk"><b>filter box</b><span>narrow the list; all / none then act on the shown set</span></div>
+            </div>
+          </div>
+          <div class="helpfoot">press ? or Esc to close</div>
+        </div>
+      </div>
+    </div>
     <div class="foot" id="foot">drag to zoom · click to mark, twice for Δ · shift-click for a level line · double-click to reset</div>
   </section>
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
@@ -2477,6 +2524,22 @@ legendBtn.addEventListener("click", () => {
   const open = document.body.classList.toggle("legend-open");
   legendBtn.setAttribute("aria-pressed", open ? "true" : "false");
   draw();
+});
+// The shortcuts overlay: the chart's gestures are otherwise undiscoverable, so a `?` button and
+// the `?` key open a card that lists them. Escape, the card's ×, a click on the backdrop, or `?`
+// again close it. No redraw is involved -- it is a plain DOM element over the plot.
+const helpBtn = document.getElementById("helpbtn");
+const helpCard = document.getElementById("helpcard");
+function setHelp(open) { helpCard.hidden = !open; helpBtn.setAttribute("aria-pressed", open ? "true" : "false"); }
+helpBtn.addEventListener("click", () => setHelp(helpCard.hidden));
+document.getElementById("helpclose").addEventListener("click", () => setHelp(false));
+// A click on the backdrop (but not on the panel itself) closes it.
+helpCard.addEventListener("click", (e) => { if (e.target === helpCard) setHelp(false); });
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
+  if (e.key === "Escape" && !helpCard.hidden) { setHelp(false); return; }
+  if (e.key === "?" && !typing) { e.preventDefault(); setHelp(helpCard.hidden); }
 });
 window.addEventListener("message", (e) => {
   const m = e.data || {};
