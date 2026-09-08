@@ -1241,6 +1241,15 @@ function range3(nm) {
 // The colour of the trajectory at fraction `f` of the run: a ramp from blue to orange, so the
 // direction of travel and where the run spends its time can be read off the line.
 function ramp(f) { return "hsl(" + Math.round(220 - 200 * Math.max(0, Math.min(1, f))) + " 70% 50%)"; }
+// One point of a 3D coordinate system mapped to Cartesian (x, y, z). Cylindrical reads the slots
+// as (radius, angle, height), spherical as (radius, polar angle from +z, azimuth) -- the physics
+// convention. Cartesian passes through, so the caller can always compose it.
+function coord3(sys, v) {
+  const a = v[0], b = v[1], c = v[2];
+  if (sys === "cylindrical") return [a * Math.cos(b), a * Math.sin(b), c];
+  if (sys === "spherical") { const st = Math.sin(b); return [a * st * Math.cos(c), a * st * Math.sin(c), a * Math.cos(b)]; }
+  return v;
+}
 function draw3d(frag) {
   // Centred on the whole plot, so it does not drift into a corner as the 2D margins change.
   const cx = box.w / 2, cy = box.h / 2;
@@ -1248,19 +1257,40 @@ function draw3d(frag) {
   // The axes are the three slots; anything the model lacks falls back to the default triple.
   const dflt = defaultAxes();
   const names3 = ax3.map((nm, i) => (names.includes(nm) ? nm : dflt[i]));
-  const rngs = names3.map((nm) => (nm ? range3(nm) : [0, 1]));
-  const norm = (val, i) => {
-    const [lo, hi] = rngs[i];
-    return (2 * (val - lo)) / (hi - lo) - 1;
-  };
+  // A cylindrical or spherical view is a real spatial shape, so its three Cartesian axes share one
+  // scale (a unit is the same length on each), centred on the origin the radius is measured from.
+  // The plain Cartesian phase cube keeps its independent-per-axis normalisation, which is right for
+  // an abstract phase plot where the axes carry different quantities in different units.
+  const spatial = coords === "cylindrical" || coords === "spherical";
+  let norm, axisLabel;
+  if (spatial) {
+    let ext = 1e-9;
+    for (let ri = 0; ri < RUNS.length; ri++) {
+      const cs = names3.map((nm) => (nm ? seriesOf(ri, nm) : null));
+      if (cs.some((c) => !c)) continue;
+      for (let k = 0; k < cs[0].length; k++) {
+        const v = [cs[0][k], cs[1][k], cs[2][k]];
+        if (v.some((x) => x === null || x === undefined || !isFinite(x))) continue;
+        const p = coord3(coords, v);
+        ext = Math.max(ext, Math.abs(p[0]), Math.abs(p[1]), Math.abs(p[2]));
+      }
+    }
+    norm = (val) => val / ext;         // one shared scale, [-ext, ext] -> [-1, 1]
+    axisLabel = (i) => "xyz"[i];        // the axes are Cartesian x/y/z, not the r/theta slots
+  } else {
+    const rngs = names3.map((nm) => (nm ? range3(nm) : [0, 1]));
+    norm = (val, i) => (2 * (val - rngs[i][0])) / (rngs[i][1] - rngs[i][0]) - 1;
+    axisLabel = (i) => names3[i] || "-";
+  }
   // The three axes from the centre, each to its +1 end, labelled.
   const AX = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
   for (let i = 0; i < 3; i++) {
     const o = project3([0, 0, 0], cx, cy, r), e = project3(AX[i], cx, cy, r);
     frag.appendChild(el("line", {class: "grid", x1: o[0], y1: o[1], x2: e[0], y2: e[1]}));
-    const u = names3[i] ? dispUnit(unitOf(names3[i])) : "";
+    const u = spatial ? "" : (names3[i] ? dispUnit(unitOf(names3[i])) : "");
+    const col = spatial ? "var(--dim)" : (names3[i] ? colour(names3[i]) : "var(--dim)");
     frag.appendChild(el("text", {class: "tick", x: e[0], y: e[1] - 3, "text-anchor": "middle", "font-weight": 600,
-      fill: names3[i] ? colour(names3[i]) : "var(--dim)"}, (names3[i] || "-") + (u ? "  " + u : "")));
+      fill: col}, axisLabel(i) + (u ? "  " + u : "")));
   }
   // The trajectory of each run, projected. The live run is coloured by time -- drawn as a few
   // dozen pieces, each in the ramp's colour for its stretch, which reads as a gradient without a
@@ -1279,7 +1309,8 @@ function draw3d(frag) {
       for (let k = from; k <= to; k++) {
         const v = [cols[0][k], cols[1][k], cols[2][k]];
         if (v.some((x) => x === null || x === undefined || !isFinite(x))) { pen = false; continue; }
-        const s = project3([norm(v[0], 0), norm(v[1], 1), norm(v[2], 2)], cx, cy, r);
+        const p = spatial ? coord3(coords, v) : v;
+        const s = project3([norm(p[0], 0), norm(p[1], 1), norm(p[2], 2)], cx, cy, r);
         d += (pen ? "L" : "M") + s[0].toFixed(1) + " " + s[1].toFixed(1) + " ";
         pen = true;
       }
@@ -1300,7 +1331,9 @@ function draw3d(frag) {
     frag.appendChild(el("text", {class: "tick", x: bx, y: by - 3, "text-anchor": "start"}, "t = " + fmt(toT(T[0]))));
     frag.appendChild(el("text", {class: "tick", x: bx + bw, y: by - 3, "text-anchor": "end"}, fmt(toT(T[N - 1])) + " " + tUnit()));
   }
-  foot.textContent = names3.map((nm, i) => "xyz"[i] + " = " + (nm || "-")).join("  ·  ")
+  const slotNames = spatial ? (coords === "spherical" ? ["r", "θ", "φ"] : ["r", "θ", "z"]) : ["x", "y", "z"];
+  foot.textContent = (spatial ? coords + "   ·   " : "")
+    + names3.map((nm, i) => slotNames[i] + " = " + (nm || "-")).join("  ·  ")
     + "   ·   drag to rotate · wheel to zoom · double-click to reset";
 }
 
@@ -2565,19 +2598,30 @@ function paintXAxis() {
   const logt = document.getElementById("logt");
   logt.hidden = mode !== "t"; logt.setAttribute("aria-pressed", String(LOGT));
   const polar = mode === "xy" && coords === "polar";
-  // Equal aspect belongs to the Cartesian phase plot; a polar plot is always equal-aspect, so its
-  // button is hidden. The coordinate selector shows in xy, where the two slots can be read either way.
+  // Equal aspect belongs to the Cartesian phase plot; polar (and the 3D cylindrical/spherical views)
+  // are inherently equal-aspect -- a spatial shape -- so the 1:1 button hides there.
   const aspect = document.getElementById("aspectbtn");
   aspect.hidden = mode !== "xy" || polar; aspect.setAttribute("aria-pressed", String(aspectLock));
+  // The coordinate selector shows in every phase mode, its choices set by the dimension: a plane in
+  // xy (Cartesian or polar), a volume in xyz (Cartesian, cylindrical or spherical).
   const coordsSel = document.getElementById("coords");
-  coordsSel.hidden = mode !== "xy"; coordsSel.value = coords;
+  const options = mode === "xy" ? [["cartesian", "Cartesian"], ["polar", "polar"]]
+    : mode === "xyz" ? [["cartesian", "Cartesian"], ["cylindrical", "cylindrical"], ["spherical", "spherical"]]
+    : [];
+  if (!options.some(([v]) => v === coords)) coords = "cartesian";
+  coordsSel.replaceChildren(...options.map(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; return o; }));
+  coordsSel.hidden = mode === "t"; coordsSel.value = coords;
   document.getElementById("axes").hidden = mode === "t";
   document.getElementById("axylab").hidden = !(mode === "xyz" || polar);
   document.getElementById("axzlab").hidden = mode !== "xyz";
   document.getElementById("view3").hidden = mode !== "xyz";
-  // The two xy slots read as r and theta in polar, x and y otherwise.
-  document.getElementById("axx").parentNode.firstChild.textContent = polar ? "r " : "x";
-  document.getElementById("axylab").firstChild.textContent = polar ? "θ " : "y";
+  // The slot labels track the coordinate system: x/y/z Cartesian, r/theta(/z or /phi) otherwise.
+  const labs = mode === "xyz"
+    ? (coords === "cylindrical" ? ["r ", "θ ", "z "] : coords === "spherical" ? ["r ", "θ ", "φ "] : ["x", "y", "z"])
+    : (polar ? ["r ", "θ "] : ["x", "y"]);
+  document.getElementById("axx").parentNode.firstChild.textContent = labs[0];
+  document.getElementById("axylab").firstChild.textContent = labs[1];
+  if (labs[2]) document.getElementById("axzlab").firstChild.textContent = labs[2];
   const fill = (id, value) => {
     const s = document.getElementById(id);
     s.replaceChildren(...names.map((nm) => { const o = document.createElement("option"); o.value = nm;
@@ -2600,8 +2644,9 @@ document.getElementById("coords").onchange = (e) => {
   coords = e.target.value;
   if (mode === "xy" && coords === "polar") defaultPolar();
   paintXAxis(); draw();
-  // The Cartesian phase plot leaves the footer to the cursor, so reset it off the polar text.
-  if (!(mode === "xy" && coords === "polar")) foot.textContent = settledFooter();
+  // drawPolar and draw3d set their own footer; only the Cartesian 2D phase plot leaves it to the
+  // cursor, so reset it there off whatever a self-drawing view last wrote.
+  if (mode === "xy" && coords === "cartesian") foot.textContent = settledFooter();
 };
 document.getElementById("axx").onchange = (e) => {
   if (mode === "xyz") ax3[0] = e.target.value;
