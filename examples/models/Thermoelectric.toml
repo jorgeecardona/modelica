@@ -1,0 +1,84 @@
+summary = "A thermoelectric generator warming up: heat from a 500 K source raises the hot junction, the Seebeck effect drives a current into a matched load, and the current carries heat back (the Peltier effect), so the junction settles at 433 K delivering 11 W."
+teaches = ["thermal and electrical coupled both ways", "the Seebeck effect makes a current from a temperature difference", "the Peltier effect makes the current carry heat", "a solid-state heat engine"]
+requires = []
+
+[parse]
+classes = ["Thermoelectric"]
+
+[flatten]
+model = "Thermoelectric"
+states = ["T_h"]
+equations = 5
+balanced = true
+
+# The generator in one state, which is what the reference integrates:
+#   V_oc = S*(T_h - T_c)             the Seebeck voltage the temperature difference makes
+#   i = V_oc / (R_int + R_load)      the current it drives through the load
+#   Q_peltier = S*T_h*i             the heat that current carries off the hot junction
+#   C dT_h/dt = G_h*(T_src - T_h) - K*(T_h - T_c) - Q_peltier + R_int*i^2/2
+# Heat in from the source, heat leaking to the sink, heat carried away by the current, and half
+# the Joule heat put back. The current cools the junction the more it flows, which is the Peltier
+# effect running backwards through the Seebeck one: the two directions of the same coupling, and
+# the reason a thermoelectric module is a heat engine with no moving parts.
+[simulate]
+stop = 60.0
+tolerance = 1e-10
+
+# The warm-up: the junction climbs from the sink temperature and the current climbs with it.
+[[simulate.point]]
+t = 1.0
+values = { "T_h" = 334.72599608, "i" = 0.868149901988 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 5.0
+values = { "T_h" = 404.472703864, "i" = 2.6118175966 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 15.0
+values = { "T_h" = 432.054701546, "i" = 3.30136753866 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 30.0
+values = { "T_h" = 433.321553065, "i" = 3.33303882661 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 60.0
+values = { "T_h" = 433.333332334, "i" = 3.33333330835 }
+rtol = 1e-6
+source = "reference"
+
+# The junction settles where the heat in balances the heat out: 433.3 K.
+[[simulate.invariant]]
+expr = "T_h"
+value = 433.333332334
+rtol = 1e-4
+after = 50.0
+
+# And the load runs at its steady 11.1 W, the most a 1 ohm load draws from this module (it matches
+# the internal resistance, which is where a thermoelectric generator delivers the most power).
+[[simulate.invariant]]
+expr = "P_load"
+value = 11.111111
+rtol = 1e-4
+after = 50.0
+
+# The hot junction never falls below the cold sink, so the Seebeck voltage and the current never
+# reverse: the module only ever generates.
+[[simulate.invariant]]
+expr = "i"
+min = -1e-9
+max = 3.34
+
+# The junction warms monotonically from the sink to its steady value and no further.
+[[simulate.invariant]]
+expr = "T_h"
+min = 299.99
+max = 433.34
