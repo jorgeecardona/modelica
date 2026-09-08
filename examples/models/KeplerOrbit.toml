@@ -1,0 +1,87 @@
+summary = "The Kepler two-body problem: a light body orbiting a fixed mass under inverse-square gravity, the benchmark every book on Hamiltonian simulation opens with. Started at perihelion with the velocity for eccentricity 0.6, it traces an ellipse of semi-major axis 1 and period 2*pi, swinging fast and close past the centre (perihelion r = 0.4) and slow and far at aphelion (r = 1.6). It is a conservative Hamiltonian system with two constants of motion: the energy 0.5*(vx^2 + vy^2) - mu/r and the angular momentum x*vy - y*vx. Neither is a state the solver integrates -- they are quantities that must stay fixed if the integration is faithful -- so holding them constant over three orbits is the real test. A non-symplectic method like Radau conserves them to a tolerance that grows with the horizon; over these three orbits at 1e-11 the drift is below 1e-12."
+teaches = ["the Kepler two-body orbit, the canonical Hamiltonian benchmark", "conserved quantities as invariants: energy and angular momentum, not integrated but held", "an eccentric ellipse: fast perihelion, slow aphelion, closed after one period", "why a conservative system stresses an integrator differently -- the invariant, not the trajectory, is what drifts"]
+requires = []
+
+[parse]
+classes = ["KeplerOrbit"]
+
+[flatten]
+model = "KeplerOrbit"
+states = ["x", "y", "vx", "vy"]
+equations = 4
+balanced = true
+
+# Position and velocity in the plane, under gravity toward the origin:
+#   d(x)/dt = vx,  d(y)/dt = vy
+#   d(vx)/dt = -mu*x / (x^2 + y^2)^1.5,  d(vy)/dt = -mu*y / (x^2 + y^2)^1.5
+# Started at perihelion (x, y) = (1 - e, 0) with (vx, vy) = (0, sqrt((1+e)/(1-e))) for e = 0.6,
+# the orbit is an ellipse of semi-major axis 1, period 2*pi, perihelion 0.4 and aphelion 1.6.
+# r = sqrt(x^2 + y^2) never reaches zero -- the angular momentum keeps the orbit off the centre --
+# so there is no singularity, only a fast, tightly-curved perihelion passage that wants a small
+# step. The energy and the angular momentum are constants of the motion, checked as invariants.
+[simulate]
+stop = 18.85
+tolerance = 1e-11
+
+# One point per stretch of the first orbit and one on each of the next two, so the ellipse is
+# pinned all the way round and after it has closed and reopened twice.
+[[simulate.point]]
+t = 1.0
+values = { x = -0.6289481768, y = 0.799664731, vx = -0.9825156909, vy = -0.0227631701 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 2.0
+values = { x = -1.339859047, y = 0.5382095297, vx = -0.4659288895, vy = -0.4099182169 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 4.0
+values = { x = -1.454318731, y = -0.415799572, vx = 0.343615282, vy = -0.4518438076 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 8.0
+values = { x = -1.189643006, y = 0.6461311942, vx = -0.596596589, vy = -0.3484409452 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 12.0
+values = { x = -0.1477444617, y = -0.7135107245, vx = 1.224034136, vy = 0.4965430325 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 18.0
+values = { x = -0.4743364497, y = -0.7936583334, vx = 1.072973081, vy = 0.1087287875 }
+rtol = 1e-6
+source = "reference"
+
+# The energy is a constant of the motion: 0.5*(vx^2 + vy^2) - mu/r = -mu/(2a) = -0.5 for this
+# orbit, and it stays there. Held to 1e-6, far above the 1e-12 the integrator actually drifts over
+# three orbits -- the margin is the room a longer run would eat into.
+[[simulate.invariant]]
+expr = "0.5 * (vx^2 + vy^2) - mu / sqrt(x^2 + y^2)"
+value = -0.5
+atol = 1e-6
+
+# The angular momentum is the other constant: x*vy - y*vx = 0.8, fixed for all time.
+[[simulate.invariant]]
+expr = "x*vy - y*vx"
+value = 0.8
+atol = 1e-6
+
+# The ellipse: perihelion at x = 0.4, aphelion at x = -1.6, and the semi-minor axis bounds y.
+[[simulate.invariant]]
+expr = "x"
+min = -1.61
+max = 0.41
+
+[[simulate.invariant]]
+expr = "y"
+min = -0.81
+max = 0.81

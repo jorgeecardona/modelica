@@ -6,6 +6,12 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `examples/KeplerOrbit`: **the Kepler two-body problem, the canonical Hamiltonian benchmark.**
+  An eccentric orbit (e = 0.6, period 2*pi) under inverse-square gravity, run for three orbits.
+  Its point is its two constants of motion, held as invariants rather than integrated: the energy
+  `0.5*(vx^2 + vy^2) - mu/r = -0.5` and the angular momentum `x*vy - y*vx = 0.8`. Radau holds both
+  to below 1e-12 over the three orbits; the invariants pin them at 1e-6, the margin a longer,
+  drift-accumulating run would spend. Six scipy reference points at 1e-12.
 - `modelica.ir.causalize`: **a second derivative may be written `der(der(x))`.** The pass that
   turns `der(v)` into the variable `der_v` insisted its argument be a plain variable, so a model
   that wrote the second derivative out was refused, even though index reduction already names

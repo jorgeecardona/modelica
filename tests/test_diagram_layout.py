@@ -65,6 +65,7 @@ FLAT = {
     "HIRES",
     "HeatBar",
     "HeatExchanger",
+    "KeplerOrbit",
     "Lorenz",
     "LotkaVolterra",
     "MagLev",
