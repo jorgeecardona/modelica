@@ -124,7 +124,8 @@
   #legendbtn { display: none; }
   #legendbtn[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   #stepbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-  #steptitle { margin-top: 12px; }
+  #statsbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  #steptitle, #statstitle { margin-top: 12px; }
   /* One step-response row: the variable, then its final value and metrics in tabular figures. */
   .steprow { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; white-space: nowrap;
     font-variant-numeric: tabular-nums; }
@@ -386,6 +387,7 @@
             <option value="us">US units</option>
           </select>
           <button type="button" id="stepbtn" aria-pressed="false" title="step-response metrics for each drawn variable: its final value, overshoot, 10-90% rise time and 2% settling time -- for a model driven from one state to another, like a controller reaching a setpoint">step</button>
+          <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs) and mean of each drawn variable over the window on screen -- the peak current, the mean power, the lowest temperature in the region you are looking at; zoom to narrow it">stats</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
           <button type="button" id="csvbtn" title="save the drawn run as a CSV: a time column and one column per variable, in SI units -- re-importable as a measured log" hidden>csv</button>
@@ -408,6 +410,7 @@
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
+    <div class="legtitle" id="statstitle" hidden>stats <span class="legcount" id="statswin"></span></div><div id="statslist"></div>
     <div class="legtitle" id="ptitle" hidden>parameters</div><div id="plist"></div>
     <div class="legtitle" id="stitle" hidden>sweep</div>
     <div id="sweepctl" class="frm" hidden>
@@ -460,6 +463,7 @@ let legendFilter = "";
 // time are listed, and the latest settling instant is marked. For a model driven from one state
 // to another -- a controller reaching a setpoint, a motor running up.
 let stepOn = false;
+let statsOn = false;
 // The selection an alt-click "solo" replaced, to restore when the same variable is soloed again.
 // Alt-click a legend row to show only that variable; alt-click it again to bring the rest back.
 let preSolo = null;
@@ -1027,6 +1031,7 @@ function draw() {
     hud.replaceChildren();
     paintLegend();
     paintStep();
+    paintStats();
     return;
   }
   // A narrow pane cannot spare 60px of gutter; tighten it so the plot keeps its width.
@@ -1111,6 +1116,7 @@ function draw() {
   hud.replaceChildren();
   paintLegend();
   paintStep();
+  paintStats();
 }
 
 // One shared y-scale, every selected variable on it. `linear`, `log |y|`, `normalised`.
@@ -2005,6 +2011,10 @@ const stepBtn = document.getElementById("stepbtn");
 if (stepBtn) stepBtn.onclick = () => {
   stepOn = !stepOn; stepBtn.setAttribute("aria-pressed", String(stepOn)); draw();
 };
+const statsBtn = document.getElementById("statsbtn");
+if (statsBtn) statsBtn.onclick = () => {
+  statsOn = !statsOn; statsBtn.setAttribute("aria-pressed", String(statsOn)); draw();
+};
 document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
 // Speed: the relative tolerance the run is drawn at. A change is a fresh run (a checkpoint holds
 // only at its own tolerance), on the live run; the control is only live for an open .mo.
@@ -2384,6 +2394,47 @@ function paintStep() {
       if (m.rise !== null) bits.push("tr " + fmt(toT(m.rise)) + " " + tUnit());
       if (m.settle !== null) bits.push("ts " + fmt(toT(m.settle)) + " " + tUnit());
     }
+    const sm = document.createElement("span"); sm.className = "sm"; sm.textContent = bits.join("  ·  ");
+    row.append(sn, sm);
+    frag.appendChild(row);
+  }
+  list.replaceChildren(frag);
+}
+// Min, peak and mean of one variable over the window on screen (the same visible range the axes
+// draw). Zooming in narrows it, so the peak reported is the peak of the region being looked at,
+// not of the whole run. Returns the peak's instant too, and null when nothing finite is in view.
+function windowStats(nm) {
+  const vs = D.series[nm];
+  if (!vs || N < 1) return null;
+  const [i0, i1] = visible();
+  let lo = Infinity, hi = -Infinity, sum = 0, cnt = 0, tmax = null;
+  for (let k = i0; k <= i1; k++) {
+    const v = vs[k]; if (v === null || v === undefined || !isFinite(v)) continue;
+    if (v < lo) lo = v;
+    if (v > hi) { hi = v; tmax = T[k]; }
+    sum += v; cnt++;
+  }
+  return cnt ? {min: lo, max: hi, mean: sum / cnt, tmax} : null;
+}
+function paintStats() {
+  const show = statsOn && !xVar && !view3d && N > 0;
+  document.getElementById("statstitle").hidden = !show;
+  const list = document.getElementById("statslist");
+  const winlab = document.getElementById("statswin");
+  if (!show) { list.replaceChildren(); if (winlab) winlab.textContent = ""; return; }
+  // Name the span the numbers cover, so a zoomed-in peak is not mistaken for the whole run's.
+  if (winlab) winlab.textContent = fmt(toT(win[0])) + "–" + fmt(toT(win[1])) + " " + tUnit();
+  const frag = document.createDocumentFragment();
+  for (const nm of selected()) {
+    const s = windowStats(nm); if (!s) continue;
+    const u = unitOf(nm), du = dispUnit(u) ? " " + dispUnit(u) : "";
+    const row = document.createElement("div"); row.className = "steprow"; row.title = nm;
+    const sn = document.createElement("span"); sn.className = "sn"; sn.style.color = colour(nm); sn.textContent = nm;
+    const bits = [
+      "min " + fmt(disp(s.min, u)),
+      "peak " + fmt(disp(s.max, u)) + (s.tmax !== null ? " @ " + fmt(toT(s.tmax)) + " " + tUnit() : ""),
+      "mean " + fmt(disp(s.mean, u)) + du,
+    ];
     const sm = document.createElement("span"); sm.className = "sm"; sm.textContent = bits.join("  ·  ");
     row.append(sn, sm);
     frag.appendChild(row);
