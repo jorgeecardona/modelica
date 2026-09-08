@@ -710,6 +710,10 @@ function select(i) {
       scale = "units";
       document.getElementById("scale").value = "units";
     }
+    // A view remembered for this model wins over the default -- the variables only; the scale
+    // above is still the model's own choice, since it is not what was saved.
+    const remembered = loadSelection(D.model, names);
+    if (remembered) on = remembered;
   }
   document.querySelectorAll(".item").forEach((el) => el.classList.toggle("on", +el.dataset.i === i));
   document.getElementById("mname").textContent = D.model;
@@ -1444,6 +1448,7 @@ function paintLegend(at) {
         on.has(nm) ? on.delete(nm) : on.add(nm);
         preSolo = null;  // a plain toggle ends the solo, so its undo no longer applies
       }
+      saveSelection();
       draw();
     };
     frag.appendChild(row);
@@ -2131,8 +2136,8 @@ svg.addEventListener("dblclick", () => {
   win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; guides = []; draw(); foot.textContent = restFooter();
 });
 document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; guides = []; draw(); foot.textContent = restFooter(); };
-document.getElementById("all").onclick = () => { for (const nm of filteredNames()) on.add(nm); preSolo = null; draw(); };
-document.getElementById("none").onclick = () => { for (const nm of filteredNames()) on.delete(nm); preSolo = null; draw(); };
+document.getElementById("all").onclick = () => { for (const nm of filteredNames()) on.add(nm); preSolo = null; saveSelection(); draw(); };
+document.getElementById("none").onclick = () => { for (const nm of filteredNames()) on.delete(nm); preSolo = null; saveSelection(); draw(); };
 const legFilter = document.getElementById("legfilter");
 if (legFilter) legFilter.addEventListener("input", (e) => {
   legendFilter = e.target.value.trim().toLowerCase(); paintLegend();
@@ -2765,6 +2770,31 @@ function loadPrefs() {
     document.documentElement.style.setProperty("--legend-w", legendWidth + "px");
     document.body.classList.toggle("legend-collapsed", legendWidth < 40);
   }
+}
+// Which variables are drawn, remembered per model, so a view you set up survives a reload or a
+// return to the same model in the gallery. Keyed by model name; select() restores a saved set that
+// is still valid (its variables still exist) over the model's own default, and falls back to the
+// default -- open on the states -- when there is none, so a model you never touched opens sensibly.
+const SELECTION_KEY = "pymodelica.scope.selection";
+function saveSelection() {
+  if (!D || !D.model) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(SELECTION_KEY) || "{}") || {};
+    all[D.model] = [...on];
+    localStorage.setItem(SELECTION_KEY, JSON.stringify(all));
+  } catch (e) { /* storage unavailable; skip */ }
+}
+function loadSelection(model, names) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SELECTION_KEY) || "{}") || {};
+    const saved = all[model];
+    if (Array.isArray(saved) && saved.length) {
+      const present = new Set(names);
+      const valid = saved.filter((nm) => present.has(nm));
+      if (valid.length) return new Set(valid);
+    }
+  } catch (e) { /* storage unavailable */ }
+  return null;
 }
 loadPrefs();
 load();
