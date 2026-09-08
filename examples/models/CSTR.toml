@@ -1,0 +1,102 @@
+summary = "An irreversible exothermic reaction A to B in a cooled continuous stirred-tank reactor. The reaction rate follows Arrhenius, so it climbs with temperature, and the heat it releases climbs the temperature: warm feed ignites the tank to 542 K within seconds, burning off almost all the reactant, and then, its fuel spent and the jacket cooling, the tank falls back and settles on the low-conversion steady state at 324 K."
+teaches = ["reaction kinetics coupled to a heat balance", "Arrhenius feedback: rate and temperature drive each other", "thermal runaway then recovery", "one stable operating point reached through an ignition transient"]
+requires = []
+
+[parse]
+classes = ["CSTR"]
+
+[flatten]
+model = "CSTR"
+states = ["Ca", "T"]
+equations = 3
+balanced = true
+
+# The reactor in two states, which is what the reference integrates:
+#   r = k0*exp(-EoR/T)*Ca                              the Arrhenius reaction rate
+#   dCa/dt = q/V*(Caf - Ca) - r                        the mole balance on A
+#   rho*Cp*dT/dt = rho*Cp*q/V*(Tf - T) - H_rxn*r + UA/V*(Tc - T)   the energy balance
+# Two domains meet in the rate: it consumes reactant (the mole balance) and releases heat (the
+# energy balance, H_rxn < 0), and it depends on both the reactant left and, exponentially, on
+# the temperature. That exponential is the whole character of the model: a small rise in T
+# multiplies the rate, which releases more heat, which raises T -- the runaway -- until the
+# reactant runs out and the jacket carries the heat away. Steady state is Ca = 0.877 mol/L,
+# T = 324.5 K: the low-conversion branch, where only 12 percent of the feed reacts.
+[simulate]
+stop = 20.0
+tolerance = 1e-10
+
+# The ignition: warm feed lights the tank and the temperature spikes while the reactant is
+# consumed almost completely at the peak.
+[[simulate.point]]
+t = 0.2
+values = { Ca = 0.00039420176246, T = 509.70325848 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 0.5
+values = { Ca = 0.0080162316454, T = 432.2627566 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 1.0
+values = { Ca = 0.080593784596, T = 382.78818912 }
+rtol = 1e-6
+source = "reference"
+
+# The fall-back: with the reactant burned off the rate collapses, the jacket cools the tank,
+# and fresh feed refills the reactant as the temperature comes down.
+[[simulate.point]]
+t = 2.0
+values = { Ca = 0.43732433802, T = 337.43354456 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 5.0
+values = { Ca = 0.87016538517, T = 323.6609737 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 20.0
+values = { Ca = 0.87725294855, T = 324.47544338 }
+rtol = 1e-6
+source = "reference"
+
+# The low-conversion steady state, reached after the ignition transient dies: the tank holds
+# 0.877 mol/L and 324.5 K, a stable operating point the reaction settles onto.
+[[simulate.invariant]]
+expr = "Ca"
+value = 0.87725294855
+rtol = 2e-3
+after = 8.0
+
+[[simulate.invariant]]
+expr = "T"
+value = 324.47544338
+rtol = 2e-3
+after = 8.0
+
+# The mole balance closes at steady state: what the reaction consumes equals what the feed
+# delivers, so der(Ca) is zero. This is the reactor's own conservation law, read off the flows.
+[[simulate.invariant]]
+expr = "q / V * (Caf - Ca) - r"
+value = 0.0
+atol = 1e-3
+after = 8.0
+
+# The ignition peak reaches 542 K and no further: a bounded runaway, because the reactant it
+# feeds on is finite. An unbounded model would have no ceiling here.
+[[simulate.invariant]]
+expr = "T"
+min = 322.0
+max = 542.2
+
+# The reactant is nearly all consumed at the peak and never leaves the physical range: it starts
+# full at the feed concentration and is bounded below by zero.
+[[simulate.invariant]]
+expr = "Ca"
+min = -0.001
+max = 1.001
