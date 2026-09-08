@@ -296,6 +296,11 @@
     letter-spacing: 0; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px;
     background: var(--bg); color: var(--ink); }
   #legfilter::placeholder { color: var(--dim); }
+  #derive { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 11px; text-transform: none;
+    letter-spacing: 0; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--bg); color: var(--ink); font-family: var(--mono, ui-monospace, monospace); }
+  #derive::placeholder { color: var(--dim); font-family: var(--font); }
+  #derive.bad { border-color: var(--vscode-inputValidation-errorBorder, #e51400); }
   .legcount { color: var(--dim); font-weight: 500; letter-spacing: 0; text-transform: none; }
   .row { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; cursor: pointer;
     white-space: nowrap; }
@@ -477,6 +482,7 @@
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
+    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi)" title="plot an expression in the drawn variables (and pi, e, t); Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
@@ -685,10 +691,88 @@ function paintSolver() {
     : "a display tolerance for speed (the * ); pick 'exact' to reproduce the model's reference run";
 }
 
+// Derived variables: an expression the user types, in the drawn variables (and `pi`, `e`, `t`),
+// plotted as a first-class series -- energy 0.5*(vx^2+vy^2)-1/sqrt(x^2+y^2) a model does not carry,
+// or the Cartesian r*cos(phi) of a polar orbit. The CSP forbids eval, so the expression is compiled
+// by a small recursive-descent parser into a function of the sample index; injecting the result
+// into `D.series` lets the legend, scales, phase axes, cursor and export treat it like any variable.
+const DFUNCS = {
+  sqrt: Math.sqrt, sin: Math.sin, cos: Math.cos, tan: Math.tan, asin: Math.asin, acos: Math.acos,
+  atan: Math.atan, atan2: Math.atan2, sinh: Math.sinh, cosh: Math.cosh, tanh: Math.tanh,
+  exp: Math.exp, log: Math.log, log10: Math.log10, abs: Math.abs, sign: Math.sign,
+  floor: Math.floor, ceil: Math.ceil, min: Math.min, max: Math.max,
+  mod: (a, b) => a - Math.floor(a / b) * b,
+};
+const DCONST = {pi: Math.PI, e: Math.E};
+let derived = [];  // [{src}] -- the expressions, recompiled per model in applyDerived()
+// Compile `src` to a function `(j) => number` over the sample index, reading `series` and `time`.
+function compileExpr(src, series, time) {
+  const toks = src.trim().match(/[A-Za-z_]\w*|\d*\.?\d+(?:[eE][+-]?\d+)?|\*\*|[-+*/^(),]/g) || [];
+  let p = 0;
+  const peek = () => toks[p];
+  const eat = () => toks[p++];
+  const expr = () => {
+    let a = term();
+    while (peek() === "+" || peek() === "-") { const o = eat(), b = term();
+      a = o === "+" ? ((f, g) => (j) => f(j) + g(j))(a, b) : ((f, g) => (j) => f(j) - g(j))(a, b); }
+    return a;
+  };
+  const term = () => {
+    let a = factor();
+    while (peek() === "*" || peek() === "/") { const o = eat(), b = factor();
+      a = o === "*" ? ((f, g) => (j) => f(j) * g(j))(a, b) : ((f, g) => (j) => f(j) / g(j))(a, b); }
+    return a;
+  };
+  const factor = () => {
+    if (peek() === "-") { eat(); const a = factor(); return (j) => -a(j); }
+    if (peek() === "+") { eat(); return factor(); }
+    const a = base();
+    if (peek() === "^" || peek() === "**") { eat(); const b = factor(); return (j) => Math.pow(a(j), b(j)); }
+    return a;
+  };
+  const base = () => {
+    const t = eat();
+    if (t === undefined) throw new Error("unexpected end of expression");
+    if (t === "(") { const a = expr(); if (eat() !== ")") throw new Error("missing )"); return a; }
+    if (/^[A-Za-z_]/.test(t)) {
+      if (peek() === "(") { eat(); const args = [];
+        if (peek() !== ")") { args.push(expr()); while (peek() === ",") { eat(); args.push(expr()); } }
+        if (eat() !== ")") throw new Error("missing )");
+        const fn = DFUNCS[t]; if (!fn) throw new Error("unknown function " + t);
+        return (j) => fn(...args.map((g) => g(j))); }
+      if (t in DCONST) { const c = DCONST[t]; return () => c; }
+      if (t === "t" || t === "time") return (j) => time[j];
+      const s = series[t]; if (!s) throw new Error("unknown variable " + t);
+      return (j) => s[j];
+    }
+    if (/^[.\d]/.test(t)) { const v = parseFloat(t); return () => v; }
+    throw new Error("unexpected " + t);
+  };
+  const fn = expr();
+  if (p < toks.length) throw new Error("unexpected " + peek());
+  return fn;
+}
+// Recompute every derived series against the current model, dropping any whose expression names a
+// variable this model does not have. Called from select() after `names` is (re)read, so a derived
+// variable survives a re-simulation and a model switch.
+function applyDerived() {
+  for (const d of derived.slice()) {
+    let fn;
+    try { fn = compileExpr(d.src, D.series, T); }
+    catch { derived.splice(derived.indexOf(d), 1); on.delete(d.src); continue; }
+    const arr = new Array(N);
+    for (let j = 0; j < N; j++) { const v = fn(j); arr[j] = isFinite(v) ? v : null; }
+    D.series[d.src] = arr;
+    if (!names.includes(d.src)) names.push(d.src);
+    if (D.units) D.units[d.src] = "";
+    if (D.descriptions) D.descriptions[d.src] = "derived: " + d.src;
+  }
+}
 function select(i) {
   D = MODELS[i];
   paintSolver();
   names = Object.keys(D.series);
+  applyDerived();
   T = D.t; N = T.length;
   // The runs. In the corpus the one run simply follows the model shown; live, the last run is
   // this data (its overrides are the panel's) and earlier ones are pinned comparisons, brought
@@ -2255,6 +2339,30 @@ document.getElementById("none").onclick = () => { for (const nm of filteredNames
 const legFilter = document.getElementById("legfilter");
 if (legFilter) legFilter.addEventListener("input", (e) => {
   legendFilter = e.target.value.trim().toLowerCase(); paintLegend();
+});
+// Enter on the derive box adds the expression as a drawn series; Enter on one already added removes
+// it (so no per-row delete is needed). A parse error leaves the box red with the reason in its tip.
+const deriveBox = document.getElementById("derive");
+if (deriveBox) deriveBox.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const src = deriveBox.value.trim();
+  if (!src) return;
+  const already = derived.find((d) => d.src === src);
+  if (already) {
+    derived.splice(derived.indexOf(already), 1);
+    delete D.series[src]; names = names.filter((n) => n !== src); on.delete(src);
+    deriveBox.value = ""; deriveBox.title = ""; deriveBox.classList.remove("bad");
+    saveSelection(); draw(); paintLegend(); return;
+  }
+  try { compileExpr(src, D.series, T); }
+  catch (err) { deriveBox.classList.add("bad"); deriveBox.title = "cannot plot: " + err.message; return; }
+  deriveBox.classList.remove("bad"); deriveBox.title = "";
+  derived.push({src});
+  applyDerived();
+  on.add(src); preSolo = null;
+  deriveBox.value = "";
+  saveSelection(); draw();
 });
 const stepBtn = document.getElementById("stepbtn");
 if (stepBtn) stepBtn.onclick = () => {
