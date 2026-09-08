@@ -130,15 +130,32 @@ class _Work:
     differentiated: dict[int, int] = field(default_factory=dict[int, int])
     depth: dict[int, int] = field(default_factory=dict[int, int])
     counter: int = 0
+    # The constant names, maintained as they are declared and forgotten rather than rescanned.
+    # `_differentiate` asks for them once per differentiated equation, and index reduction runs
+    # thousands of those on a stiff singular model; rebuilding the set from every variable each
+    # time was more than half of causalizing one -- 1495 rescans of the whole variable table. All
+    # of `variables` moves through `declare`/`forget`, so keeping the set here cannot fall behind.
+    _constants: set[str] = field(default_factory=set[str])
+    _constants_frozen: frozenset[str] | None = field(default=None)
 
     def declare(self, variable: FlatVariable) -> None:
         self.variables[variable.name] = variable
         self.order[variable.name] = self.counter
         self.counter += 1
+        # Symmetric so a redeclare that flips is_constant cannot leave a stale name behind.
+        if variable.is_constant:
+            self._constants.add(variable.name)
+            self._constants_frozen = None
+        elif variable.name in self._constants:
+            self._constants.discard(variable.name)
+            self._constants_frozen = None
 
     def forget(self, name: str) -> None:
         self.variables.pop(name, None)
         self.order.pop(name, None)
+        if name in self._constants:
+            self._constants.discard(name)
+            self._constants_frozen = None
 
     def is_unknown(self, name: str) -> bool:
         """A continuous variable this stage has to solve for.
@@ -154,7 +171,9 @@ class _Work:
         )
 
     def constants(self) -> frozenset[str]:
-        return frozenset(name for name, v in self.variables.items() if v.is_constant)
+        if self._constants_frozen is None:
+            self._constants_frozen = frozenset(self._constants)
+        return self._constants_frozen
 
     def incidence(self, index: int) -> list[str]:
         equation = self.equations[index]
