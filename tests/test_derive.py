@@ -131,6 +131,38 @@ def test_an_unknown_function_has_no_derivative() -> None:
         d_dt(ir.Call("mystery", (X,)))
 
 
+def _at(expr: ir.Expr, **point: float) -> float:
+    """The partial evaluated at a point -- a number, so a piecewise rule can be checked."""
+    return float(evaluate(expr, point))
+
+
+def test_min_and_max_differentiate_to_the_active_argument() -> None:
+    lo = ir.Call("min", (X, num(0.5)))
+    assert _at(d_dx(lo, "x"), x=0.3) == pytest.approx(1.0)  # x is smaller: d = dx
+    assert _at(d_dx(lo, "x"), x=0.7) == pytest.approx(0.0)  # the constant is smaller: d = 0
+    hi = ir.Call("max", (X, num(0.5)))
+    assert _at(d_dx(hi, "x"), x=0.7) == pytest.approx(1.0)
+    assert _at(d_dx(hi, "x"), x=0.3) == pytest.approx(0.0)
+
+
+def test_atan2_uses_the_quotient_rule() -> None:
+    # atan2(y, x): d/dy = x/(x^2+y^2), d/dx = -y/(x^2+y^2). Here the first arg is X, second Y.
+    a = ir.Call("atan2", (X, Y))
+    assert _at(d_dx(a, "x"), x=1.0, y=2.0) == pytest.approx(2.0 / 5.0)
+    assert _at(d_dx(a, "y"), x=1.0, y=2.0) == pytest.approx(-1.0 / 5.0)
+
+
+def test_floor_and_ceil_have_zero_derivative() -> None:
+    assert _at(d_dx(ir.Call("floor", (X,)), "x"), x=2.3) == pytest.approx(0.0)
+    assert _at(d_dx(ir.Call("ceil", (X,)), "x"), x=2.3) == pytest.approx(0.0)
+
+
+def test_mod_differentiates_by_its_numerator() -> None:
+    m = ir.Call("mod", (X, Y))
+    assert _at(d_dx(m, "x"), x=1.3, y=2.0) == pytest.approx(1.0)  # d/dx mod = 1
+    assert _at(d_dx(m, "y"), x=3.0, y=2.0) == pytest.approx(-1.0)  # -floor(3/2) = -1
+
+
 # --------------------------------------------------------------------------------------
 # Jacobian entries
 # --------------------------------------------------------------------------------------

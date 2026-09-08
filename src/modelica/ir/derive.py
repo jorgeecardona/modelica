@@ -214,6 +214,35 @@ _CHAIN: dict[str, Callable[[ir.Expr], ir.Expr]] = {
 }
 
 
+def _multiary(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr | None:
+    """Derivative rules for the functions that are not a single-argument chain.
+
+    ``floor``/``ceil`` (piecewise constant), ``min``/``max`` (the active argument), ``atan2`` and
+    ``mod``. Returns ``None`` when the call is none of these, so the single-argument table gets
+    its turn.
+    """
+    if node.name in ("floor", "ceil"):
+        # Piecewise constant: zero derivative between its steps, which is where it is smooth.
+        return ZERO
+    if len(node.args) != 2:  # noqa: PLR2004 - the rules below are all the two-argument forms
+        return None
+    a, b = node.args
+    if node.name in ("min", "max"):
+        # The derivative of whichever argument is active -- `min` the smaller, `max` the larger.
+        # At the crossing the two meet, the kink the solver steps over the way it does `abs`.
+        picks_first = ir.Binary("<", a, b) if node.name == "min" else ir.Binary(">", a, b)
+        return ir.IfExpr(picks_first, _derive(a, leaf), _derive(b, leaf))
+    if node.name == "atan2":
+        # d atan2(y, x) = (x dy - y dx) / (x^2 + y^2).
+        return div(
+            sub(mul(b, _derive(a, leaf)), mul(a, _derive(b, leaf))), add(mul(b, b), mul(a, a))
+        )
+    if node.name == "mod":
+        # mod(a, b) = a - floor(a/b)*b; the integer factor is constant between its steps.
+        return sub(_derive(a, leaf), mul(ir.Call("floor", (div(a, b),)), _derive(b, leaf)))
+    return None
+
+
 def _call(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:
     if node.name in ("der", "pre"):
         # `der(x)` differentiates to the derivative of the *variable* `der_x`, so that
@@ -232,6 +261,9 @@ def _call(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:
         if node.name == "sign":
             return ZERO
         return mul(ir.Call("sign", (arg,)), _derive(arg, leaf))
+    special = _multiary(node, leaf)
+    if special is not None:
+        return special
     rule = _CHAIN.get(node.name)
     if rule is None:
         raise DerivativeError(f"no derivative rule for {node.name!r}")
