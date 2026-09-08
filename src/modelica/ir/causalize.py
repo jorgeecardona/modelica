@@ -1054,4 +1054,16 @@ def causalize(flat: FlatModel) -> System:
         initial_equations=tuple(
             _apply_to(_named(equation, work), work.aliases) for equation in flat.initial_equations
         ),
+        # An assert's condition is resolved the way a `when`'s is -- derivatives named and
+        # aliases substituted -- so it reads the same variables the run reports, and the
+        # simulator can evaluate it against the trajectory.
+        asserts=tuple(
+            ir.Assert(
+                simplify(substitute(_name_derivatives(check.condition, work), work.aliases)),
+                check.message,
+                check.level,
+                check.span,
+            )
+            for check in flat.asserts
+        ),
     )

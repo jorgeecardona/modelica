@@ -510,9 +510,9 @@ class Assert:
     """``assert(condition, message);`` -- a runtime check, not a binding.
 
     It constrains no unknown, so matching and causalization never see it: flattening
-    carries it into ``FlatModel.asserts`` instead of the equation list. The simulator does
-    not evaluate asserts yet -- the node is kept so a model's diagnostics stay part of its
-    value instead of being dropped on the floor.
+    carries it into ``FlatModel.asserts`` instead of the equation list, causalization onto
+    the ``System``, and the simulator evaluates it along the trajectory -- a false
+    error-level assert stops the run with its message, a warning-level one reports once.
     """
 
     condition: Expr

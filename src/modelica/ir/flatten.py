@@ -1588,15 +1588,10 @@ class _Flattener:
                 sink.append(ir.Equal(carry(lhs), carry(rhs), span))
             case ir.Assert(condition=condition, message=message, level=level, span=span):
                 # No unknown is bound here, so it goes beside the equations, not among
-                # them: causalization must never count an assert.
-                self.asserts.append(
-                    ir.Assert(
-                        carry(condition),
-                        carry(message),
-                        None if level is None else carry(level),
-                        span,
-                    )
-                )
+                # them: causalization must never count an assert. The level is left as it
+                # was written: it is an `AssertionLevel` enumeration literal, not a name in
+                # this scope, so carrying it would try to resolve it as a variable and fail.
+                self.asserts.append(ir.Assert(carry(condition), carry(message), level, span))
             case ir.Connect(a=a, b=b):
                 # A connect whose endpoint sits inside a disabled conditional component
                 # is removed together with the component, silently: that is the one

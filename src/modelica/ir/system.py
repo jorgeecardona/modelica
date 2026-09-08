@@ -249,6 +249,9 @@ class System:
     aliases: Mapping[str, ir.Expr] = field(default_factory=_no_aliases)
     whens: tuple[ir.When, ...] = ()
     initial_equations: tuple[ir.Equal, ...] = ()
+    asserts: tuple[ir.Assert, ...] = ()
+    """Runtime checks carried through from the flat model. They bind no unknown, so
+    causalization never sees them; the simulator evaluates them along the trajectory."""
 
     def __post_init__(self) -> None:
         """See `Mode.__post_init__`: the one dict left between `FlatModel` and `Code`."""

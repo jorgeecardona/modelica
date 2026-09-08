@@ -18,6 +18,7 @@ until someone actually calls :func:`simulate`.
 
 from __future__ import annotations
 
+import warnings
 from collections import Counter
 from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
@@ -26,6 +27,8 @@ from scipy.integrate import (  # pyright: ignore[reportMissingTypeStubs]
     solve_ivp,  # pyright: ignore[reportUnknownVariableType]
 )
 
+from modelica import ir
+from modelica.ir.evaluate import EvaluationError, evaluate
 from modelica.sim.emit import HELD
 from modelica.sim.kernel import Kernel, build
 from modelica.sim.result import Event, Result
@@ -175,7 +178,68 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     grid = _grid(start, stop, times, points)
     p, y, w = kernel.start(start, parameters)
     plan = _Run(kernel, p, w, tolerance, absolute if absolute is not None else tolerance, method)
-    return plan.run(start, stop, y, grid)
+    result = plan.run(start, stop, y, grid)
+    # A `System` carries the model's asserts; a pre-built `Code`/`Kernel` does not expose them,
+    # so `getattr` leaves those callers unchecked rather than reaching for a field they lack.
+    _check_asserts(result, getattr(model, "asserts", ()))
+    return result
+
+
+def _check_asserts(result: Result, asserts: tuple[ir.Assert, ...]) -> None:
+    """Evaluate each carried assert along the reported trajectory.
+
+    An error-level assert (the default) that goes false stops the run at the first instant it
+    does, with its message; a warning-level one is reported once and the run goes on. The
+    condition is read from what the run reports at each output point -- states, parameters and
+    derivatives are all there -- so an assert that names only those is checked, and one that
+    names something the run does not expose is skipped rather than guessed at. The check sees
+    the output grid, not every internal step, so a violation that opens and closes between two
+    reported points can slip through; that is the honest limit of a post-hoc check.
+    """
+    if not asserts or result.values.size == 0:
+        return
+    names = result.names
+    warned: set[int] = set()
+    skip: set[int] = set()
+    for column in range(len(result.time)):
+        env: dict[str, float] | None = None
+        for index, check in enumerate(asserts):
+            if index in skip or index in warned:
+                continue
+            if env is None:
+                env = {name: float(result.values[row, column]) for row, name in enumerate(names)}
+                env["time"] = float(result.time[column])
+            try:
+                holds = evaluate(check.condition, env)
+            except EvaluationError:
+                skip.add(index)  # names a variable the run does not report; cannot be checked
+                continue
+            if holds:
+                continue
+            text = (
+                f"{result.name}: assertion failed at t = {env['time']:.6g}: "
+                f"{_assert_message(check.message, env)}"
+            )
+            if _is_warning(check.level):
+                warnings.warn(text, stacklevel=2)
+                warned.add(index)
+            else:
+                raise SimulationError(text)
+
+
+def _assert_message(message: ir.Expr, env: dict[str, float]) -> str:
+    """The assert's message. A string literal is the common case; anything else is evaluated."""
+    if isinstance(message, ir.StringLiteral):
+        return message.value
+    try:
+        return str(evaluate(message, env))
+    except EvaluationError:
+        return "assertion failed"
+
+
+def _is_warning(level: ir.Expr | None) -> bool:
+    """``AssertionLevel.warning`` downgrades the assert to a warning; the default is an error."""
+    return isinstance(level, ir.Ref) and bool(level.parts) and level.parts[-1] == "warning"
 
 
 _SPARSE_STATES: Final = 16
