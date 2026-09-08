@@ -77,7 +77,8 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   and finishes its kinetics by 1e3, which a linear axis puts in one pixel column; the ticks
   become the decades). `xy` is a **phase plot**: the `x` slot picks the variable on the x axis
   and the selected variables draw against it, such as the rate of rise against bean temperature
-  or Lorenz's z against x; `⇄` swaps x with the first drawn variable. `xyz` (offered with three
+  or Lorenz's z against x; `⇄` swaps x with the first drawn variable. A few arrowheads along the
+  live run's curve point the way time runs, so a phase loop shows which way it travels. `xyz` (offered with three
   or more variables) is the **3D phase view**: three slots pick the axes, defaulting to the
   first three states -- Lorenz's x, y, z, the butterfly -- with each option showing its unit
   and `⇄` swapping x and y. The trajectory is coloured by time (blue to orange, with a small
@@ -94,8 +95,14 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   keeps the offset out -- `K/s` becomes `°F/s`, scaled but not shifted -- and follows the time
   axis, so with minutes a roaster's rate of rise reads in °C/min or °F/min. Adding a system is
   one entry in the display table.
+- **Remembered.** The display units, the time unit, the solver speed and the legend width are kept
+  across reopens, so a panel you work in °F and minutes stays that way. The vertical scale is not:
+  a freshly opened model picks its own (a single `.mo` opens split by unit).
 
 ### Reading the chart
+
+The chart carries about ten mouse gestures. The **`?`** button, or the **`?`** key, opens a card
+over the chart listing them all -- so the ones below need not be memorised.
 
 - **Drag** to zoom in time (or in x, in a phase plot). Zooming into a window the run only
   samples sparsely re-reads it at full density over just that span, so the sub-second spike of
@@ -109,9 +116,10 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   while the legend is hidden in a narrow pane, in the footer instead.
 - **Measurement marks.** Click the chart to place a mark at the nearest sample; click again
   for a second, and a readout shows Δt, and for every drawn variable its two values, their
-  change, and the **average rate** across the interval -- the secant slope, `Δvar/Δt`, in the
-  variable's unit over the time unit, which is a roast's rate of rise in °C/min. Marks are sample
-  indices, so they work in phase plots too.
+  change, the **average rate** across the interval -- the secant slope, `Δvar/Δt`, in the
+  variable's unit over the time unit, which is a roast's rate of rise in °C/min -- and the
+  **integral** `∫var dt`, the complement of the rate: the charge under a current, the volume
+  under a flow, the energy under a power. Marks are sample indices, so they work in phase plots too.
 - **Level lines.** Shift-click to drop a horizontal line at the value under the pointer, on the
   strip it lands in: the level a variable is asked to reach. A dot marks where each drawn
   variable of that strip first crosses the level (both the fall and the rise, so a signal that
@@ -123,6 +131,12 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
 - **Events** are vertical lines, listed in the legend with their instant and the condition in
   Modelica that fired, as the model states it (`when probe >= T_drop`). Hovering a line shows the
   same, so an event says what it is without a trip to the legend.
+- **Guards.** A model can carry `assert(condition, message)` checks of its own -- a buck converter
+  asserting its duty cycle stays in `[0, 1]`, a machine asserting it keeps synchronism. The
+  **guards** section of the legend lists each condition and its message, so a model states the
+  range it holds to. If a run drives a guard false the simulation stops and the message appears in
+  a banner over the chart; any other run failure (a singular model, a solver that gives up) shows
+  there too, wrapped so the whole message is readable.
 - **Legend.** Click a variable to toggle it; **alt-click** to *solo* it -- show only that one,
   which on a component model of dozens of variables beats clicking the rest off; alt-click it
   again to bring back the set that was on before. `all`, `none` and `reset` act on the set. The
@@ -161,6 +175,10 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   near where it started (an armature current that spikes then decays) shows its final value alone,
   since its overshoot against a near-zero move would be a meaningless thousands of percent. Time
   view only.
+- **Stats.** The **`stats`** toggle reads, for each drawn variable over the window on screen, its
+  **min**, its **peak** (with the time the peak occurs) and its **mean** -- the peak current, the
+  mean power, the lowest temperature in the region you are looking at. Zooming the time axis
+  narrows the window and the numbers follow it; the heading names the span they cover. Time view only.
 - **Sweep.** Pick a parameter, a range and a number of runs; **run sweep** simulates the model
   once per value, each as a pinned run, and plots a **response** against the parameter: a
   variable's final value or the time an event first fires. The response defaults to a model
