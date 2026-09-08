@@ -1,0 +1,82 @@
+summary = "The heat equation on a flat torus: diffusion over an 8-by-8 grid whose edges wrap around, so every cell has four neighbours and there is no boundary. It is the method of lines in two dimensions -- the space discretised into cells by hand, the time left continuous -- exactly the recipe HeatBar uses in one dimension, now on a periodic domain, the simplest manifold a PDE can live on. The initial temperature is a single grid Fourier mode, cos(2*pi*(i-1)/n)*cos(2*pi*(j-1)/n), which is an exact eigenvector of the discrete periodic Laplacian. So the whole field keeps its shape and decays uniformly at the eigenvalue's rate, and the solution is known in closed form: T(t) = T(0) * exp(lambda*t) at every cell, with lambda = 4*a*(cos(2*pi/n) - 1). That makes it a PDE benchmark with an exact reference, not another integration, and a first concrete rung toward fields on curved manifolds."
+teaches = ["the heat equation in two dimensions by the method of lines, arrays and a nested `for`", "periodic boundaries by index wrap-around (mod), the torus as a manifold with no edge", "an initial condition set by an `initial equation` over the grid indices", "a diffusion eigenmode: an exact closed-form decay to check the discretisation against"]
+requires = []
+
+[parse]
+classes = ["TorusHeat"]
+
+[flatten]
+model = "TorusHeat"
+index = 1
+balanced = true
+# An 8-by-8 grid is 64 states; `n` is the structural parameter that says so, evaluated when the
+# model flattens. The periodic stencil wraps with `mod`, so a corner cell's neighbours are the far
+# edges -- there is no boundary row to write, unlike the insulated ends of HeatBar.
+states = [
+  "T[1, 1]", "T[1, 2]", "T[1, 3]", "T[1, 4]", "T[1, 5]", "T[1, 6]", "T[1, 7]", "T[1, 8]",
+  "T[2, 1]", "T[2, 2]", "T[2, 3]", "T[2, 4]", "T[2, 5]", "T[2, 6]", "T[2, 7]", "T[2, 8]",
+  "T[3, 1]", "T[3, 2]", "T[3, 3]", "T[3, 4]", "T[3, 5]", "T[3, 6]", "T[3, 7]", "T[3, 8]",
+  "T[4, 1]", "T[4, 2]", "T[4, 3]", "T[4, 4]", "T[4, 5]", "T[4, 6]", "T[4, 7]", "T[4, 8]",
+  "T[5, 1]", "T[5, 2]", "T[5, 3]", "T[5, 4]", "T[5, 5]", "T[5, 6]", "T[5, 7]", "T[5, 8]",
+  "T[6, 1]", "T[6, 2]", "T[6, 3]", "T[6, 4]", "T[6, 5]", "T[6, 6]", "T[6, 7]", "T[6, 8]",
+  "T[7, 1]", "T[7, 2]", "T[7, 3]", "T[7, 4]", "T[7, 5]", "T[7, 6]", "T[7, 7]", "T[7, 8]",
+  "T[8, 1]", "T[8, 2]", "T[8, 3]", "T[8, 4]", "T[8, 5]", "T[8, 6]", "T[8, 7]", "T[8, 8]",
+]
+
+# The reference is the closed form, not a second integration: for the eigenmode initial condition
+# every cell obeys T(t) = T(0)*exp(lambda*t), lambda = 4*(cos(2*pi/8) - 1) = -1.1715728753. A few
+# cells are checked -- T[1,1] the antinode (starts at 1), T[2,2] a quarter of it, T[2,1] the
+# cos(pi/4) cell -- against that exact decay. Radau tracks it to about 1e-5 over the run.
+[simulate]
+stop = 2.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 0.4
+values = { "T[1, 1]" = 0.6258596401, "T[2, 2]" = 0.3129298201, "T[2, 1]" = 0.4425495956 }
+rtol = 1e-4
+atol = 2e-5
+source = "reference"
+
+[[simulate.point]]
+t = 0.8
+values = { "T[1, 1]" = 0.3917002891, "T[2, 2]" = 0.1958501446, "T[2, 1]" = 0.2769739306 }
+rtol = 1e-4
+atol = 2e-5
+source = "reference"
+
+[[simulate.point]]
+t = 1.2
+values = { "T[1, 1]" = 0.245149402, "T[2, 2]" = 0.122574701, "T[2, 1]" = 0.1733468045 }
+rtol = 1e-4
+atol = 2e-5
+source = "reference"
+
+[[simulate.point]]
+t = 1.6
+values = { "T[1, 1]" = 0.1534291165, "T[2, 2]" = 0.07671455825, "T[2, 1]" = 0.1084907687 }
+rtol = 1e-4
+atol = 2e-5
+source = "reference"
+
+[[simulate.point]]
+t = 2.0
+values = { "T[1, 1]" = 0.09602509163, "T[2, 2]" = 0.04801254582, "T[2, 1]" = 0.06789999346 }
+rtol = 1e-4
+atol = 2e-5
+source = "reference"
+
+# The antinode cell decays monotonically from 1 toward 0 and never overshoots: the mode only ever
+# shrinks.
+[[simulate.invariant]]
+expr = "T[1, 1]"
+min = -0.001
+max = 1.001
+
+# A node of the mode stays a node. Cell (3, 1) sits where cos(2*pi*2/8) = cos(pi/2) = 0, so it
+# starts at exactly zero, and because the field keeps its shape it stays there for all time --
+# the sharpest statement that the discretisation preserves the eigenmode rather than blurring it.
+[[simulate.invariant]]
+expr = "T[3, 1]"
+min = -1e-9
+max = 1e-9

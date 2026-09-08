@@ -119,11 +119,15 @@ def test_a_stencil_is_tridiagonal_and_the_pattern_says_so() -> None:
     assert all(set(row) <= {index - 1, index, index + 1} for index, row in enumerate(pattern))
 
 
-def test_the_corpus_stays_on_the_dense_path() -> None:
-    """The threshold is 16 states and the widest model here has 10, so nothing changed.
+def test_only_the_grid_model_takes_the_sparse_path() -> None:
+    """Exactly one model crosses the 16-state threshold onto the sparse path.
 
-    Asserted rather than assumed: a sparse path that quietly switched on for the corpus would
-    change which linear algebra every existing reference point came through.
+    Every hand-sized model is under it and stays dense, so its reference points come through the
+    same linear algebra they always did; ``TorusHeat``, the 64-state 2-D stencil, is the one that
+    crosses over. Asserted in both directions: a small model quietly switching to sparse would
+    change the numerics under an existing reference point, and the grid model failing to switch
+    would mean the corpus is not exercising the sparse path at all -- its references were taken
+    on it.
     """
     pytest.importorskip("numpy")
     build = pytest.importorskip("modelica.sim.kernel").build
@@ -133,4 +137,7 @@ def test_the_corpus_stays_on_the_dense_path() -> None:
         kernel = build(system)
         parameters, _, workspace = kernel.start(0.0)
         plan = run._Run(kernel, parameters, workspace, 1e-6, 1e-6, "Radau")  # noqa: SLF001
-        assert not plan.sparse, f"{model.stem} switched to the sparse path"
+        expected = model.stem == "TorusHeat"
+        assert plan.sparse == expected, (
+            f"{model.stem}: sparse path is {plan.sparse}, expected {expected}"
+        )

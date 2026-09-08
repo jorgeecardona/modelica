@@ -86,6 +86,7 @@ FLAT = {
     "SyncGenerator",
     "Thermoelectric",
     "Thermostat",
+    "TorusHeat",
     "TwoTank",
     "VanDerPol",
 }

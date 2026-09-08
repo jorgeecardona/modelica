@@ -6,6 +6,14 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `examples/TorusHeat`: **the heat equation on a flat torus, a 2-D method-of-lines PDE.** Diffusion
+  over an 8x8 periodic grid (64 states), the space discretised by hand and the edges wrapped with
+  `mod` so there is no boundary -- HeatBar's one-dimensional recipe on the simplest manifold. The
+  initial condition is a single grid Fourier mode, an exact eigenvector of the discrete periodic
+  Laplacian, so the field keeps its shape and decays in closed form, `T(t) = T(0)*exp(lambda*t)`
+  with `lambda = 4*a*(cos(2*pi/n) - 1)`. The reference is that exact decay, checked at three cells,
+  and a node of the mode is pinned at zero to show the discretisation preserves the eigenmode. It
+  exercises 2-D arrays, an `initial equation` over the grid indices, and the sparse Jacobian.
 - `examples/SchwarzschildOrbit`: **a relativistic orbit, the reachable general-relativity rung.**
   A test mass on an equatorial timelike geodesic of the Schwarzschild metric -- the Kepler problem
   with the relativistic `-3*M*ell^2/r^4` term that makes a bound orbit precess into a rosette rather
