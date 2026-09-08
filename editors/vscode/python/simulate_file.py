@@ -586,14 +586,21 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
             kernel, stop, params, resume, list(system.modes[0].states), solver, max_dt, window
         )
     time = np.asarray(result.time, dtype=float)
-    # A parameter is one flat value; keep the ones that move, plus the states so a constant
-    # state (a body at rest) still shows. Decided on the full column, then every kept series
-    # has a say in which instants are sent, so each is drawn to its true shape.
+    # Keep every state (so a body at rest still shows), everything that moves, and a variable the
+    # model *declares* that happens to be constant -- a rigid pendulum's radius `r = rod`, which a
+    # coordinate view reads as the sphere's radius even though it never changes. A parameter is a
+    # flat value too, but it is the model's input rather than an output, so it stays out of the plot
+    # (the panel edits it); and the synthetic `der_*` helpers are dropped when constant, since a
+    # constant derivative is noise. Decided on the full column, so each kept series then has a say in
+    # which instants are sent and is drawn to its true shape.
+    parameters_named = {variable.name for variable in system.parameters}
     full: dict[str, NDArray[np.float64]] = {}
     for variable in result.names:
         column = np.asarray(result[variable], dtype=float)
         finite = column[np.isfinite(column)]
-        if variable in states or (finite.size and float(finite.max() - finite.min()) > 0.0):
+        moves = bool(finite.size and float(finite.max() - finite.min()) > 0.0)
+        declared = not variable.startswith("der_") and variable not in parameters_named
+        if variable in states or moves or declared:
             full[variable] = column
     keep = _sample(time, list(full.values()), max_dt=max_dt, window=window)
     series: dict[str, list[float | None]] = {
@@ -638,7 +645,9 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         "asserts": [
             {
                 "condition": unparse_expr(check.condition),
-                "message": check.message.value if isinstance(check.message, ir.StringLiteral) else "",
+                "message": check.message.value
+                if isinstance(check.message, ir.StringLiteral)
+                else "",
                 "warning": isinstance(check.level, ir.Ref)
                 and bool(check.level.parts)
                 and check.level.parts[-1] == "warning",
