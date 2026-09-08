@@ -406,6 +406,10 @@
             <button type="button" data-mode="xy" aria-pressed="false">xy</button>
             <button type="button" data-mode="xyz" aria-pressed="false">xyz</button>
           </span>
+          <select id="coords" hidden title="the coordinate system the phase axes are read in: Cartesian (the plain phase plot), or Polar -- the two slots are a radius and an angle, drawn as the plane the trajectory lives in (a precessing orbit becomes its rosette)">
+            <option value="cartesian">Cartesian</option>
+            <option value="polar">polar</option>
+          </select>
           <button type="button" id="logt" aria-pressed="false" title="time on a log axis, for a stiff run over a long horizon whose motion a linear axis crushes into the first pixels">log t</button>
           <button type="button" id="aspectbtn" aria-pressed="false" title="equal aspect: a unit is the same number of pixels on both axes, so a spatial x-y curve (a trajectory in the plane) keeps its true shape instead of being stretched to fill the frame">1:1</button>
           <span class="axes" id="axes" hidden>
@@ -577,6 +581,9 @@ let speed = "1e-6";
 // `xwin` is a zoom in that variable's units, `XD` the domain X() maps from, set once per draw.
 let xVar = null;
 let xwin = null;
+// The angle variable in a polar phase plot: `xVar` is then the radius and this is the angle, and
+// the trajectory is (radius*cos(angle), radius*sin(angle)). Only read while `coords === "polar"`.
+let thVar = null;
 // Time on a log axis ("x: log time"): a stiff model over a long horizon -- E5 runs to 1e13 s
 // and finishes its kinetics by 1e3 -- has all its motion in the first decades, which a linear
 // axis puts in one pixel column. Only the mapping changes; the data, the window and the
@@ -594,6 +601,12 @@ let rot3 = {az: -0.7, el: 0.45};
 let rot3drag = null;
 let activeRun = -1;         // which run the parameters panel edits; -1 or out of range means the live one
 let mode = "t";             // the plot mode: "t" against time, "xy" a phase plot, "xyz" three axes
+// The coordinate system the phase axes are read in. "cartesian" is the plain phase plot; "polar"
+// reads the two xy slots as a radius and an angle and draws the plane the orbit really lives in --
+// SchwarzschildOrbit's r and phi become the precessing rosette instead of an r-against-phi zigzag.
+// Cylindrical and spherical (the 3D counterparts) are the next step; a 3D spatial view first needs
+// one shared scale across its axes, which the current independent-per-axis normalisation is not.
+let coords = "cartesian";
 let ax3 = [null, null, null]; // the three axis variables in xyz, set from the slots
 let zoom3 = 1;              // the camera's zoom, by wheel; double-click or "reset view" restores 1
 let spin3 = null;           // the auto-rotate interval while turning, null otherwise
@@ -790,9 +803,11 @@ function select(i) {
   lastModel = D.model; prevEnd = N ? T[N - 1] : 0;
   if (!same) {
     // A different model: its variable names are different, so a filter from the last one would
-    // hide everything. Clear it, and any solo it left.
+    // hide everything. Clear it, and any solo it left. Polar is a per-model reading (it needs an
+    // angle variable), so a new model starts back in Cartesian rather than mapping arbitrary vars.
     legendFilter = "";
     preSolo = null;
+    coords = "cartesian";
     const lf = document.getElementById("legfilter");
     if (lf) lf.value = "";
     // open on the moving variables
@@ -1289,6 +1304,74 @@ function draw3d(frag) {
     + "   ·   drag to rotate · wheel to zoom · double-click to reset";
 }
 
+// The plane a polar model really lives in: the two xy slots are a radius (`xVar`) and an angle
+// (`thVar`), and the trajectory is drawn as (r*cos, r*sin) with equal aspect -- so
+// SchwarzschildOrbit's r and phi become the precessing rosette rather than an r-against-phi zigzag.
+// A dot marks the origin (the centre the radius is measured from), and the live run keeps the time
+// arrows and the start/end rings the Cartesian phase plot has. The cursor readout and the marks are
+// deliberately left off for this first, self-contained version -- switch to Cartesian for those.
+function drawPolar(frag) {
+  const rName = xVar, thName = thVar;
+  const M = {l: 48, r: 16, t: 18, b: 26};
+  const wpx = box.w - M.l - M.r, hpx = box.h - M.t - M.b;
+  let xlo = Infinity, xhi = -Infinity, ylo = Infinity, yhi = -Infinity;
+  const runs = [];
+  for (let ri = 0; ri < RUNS.length; ri++) {
+    const rs = seriesOf(ri, rName), ts = seriesOf(ri, thName);
+    if (!rs || !ts) continue;
+    const n = Math.min(rs.length, ts.length), pts = [];
+    for (let k = 0; k < n; k++) {
+      const rv = rs[k], tv = ts[k];
+      if (rv === null || tv === null || !isFinite(rv) || !isFinite(tv)) { pts.push(null); continue; }
+      const x = rv * Math.cos(tv), y = rv * Math.sin(tv);
+      pts.push({x: x, y: y});
+      if (x < xlo) xlo = x; if (x > xhi) xhi = x; if (y < ylo) ylo = y; if (y > yhi) yhi = y;
+    }
+    runs.push({ri: ri, pts: pts});
+  }
+  if (!isFinite(xlo) || !isFinite(ylo)) { foot.textContent = "polar needs a radius and an angle that both have data"; return; }
+  // Keep the origin in frame -- it is what the radius is measured from (the central body).
+  xlo = Math.min(xlo, 0); xhi = Math.max(xhi, 0); ylo = Math.min(ylo, 0); yhi = Math.max(yhi, 0);
+  const cx = (xlo + xhi) / 2, cy = (ylo + yhi) / 2;
+  const half = Math.max((xhi - xlo) / 2, (yhi - ylo) / 2, 1e-9) * 1.08; // equal aspect, 8% pad
+  const s = Math.min(wpx, hpx) / (2 * half);                            // same pixels-per-unit both ways
+  const ox = M.l + wpx / 2, oy = M.t + hpx / 2;
+  const PX = (x) => ox + (x - cx) * s, PY = (y) => oy - (y - cy) * s;
+  frag.appendChild(el("rect", {x: M.l, y: M.t, width: wpx, height: hpx, fill: "none", stroke: "var(--line)", "stroke-width": 1}));
+  const u = unitOf(rName);
+  for (const gx of ticks(cx - half, cx + half, 6)) {
+    const px = PX(gx); if (px < M.l - 0.5 || px > box.w - M.r + 0.5) continue;
+    frag.appendChild(el("line", {class: "grid", x1: px, x2: px, y1: M.t, y2: box.h - M.b}));
+    frag.appendChild(el("text", {class: "tick", x: px, y: box.h - M.b + 12, "text-anchor": "middle"}, tickLabel(disp(gx, u), 2 * half)));
+  }
+  for (const gy of ticks(cy - half, cy + half, 6)) {
+    const py = PY(gy); if (py < M.t - 0.5 || py > box.h - M.b + 0.5) continue;
+    frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r, y1: py, y2: py}));
+    frag.appendChild(el("text", {class: "tick", x: M.l - 4, y: py + 3, "text-anchor": "end"}, tickLabel(disp(gy, u), 2 * half)));
+  }
+  frag.appendChild(el("circle", {cx: PX(0), cy: PY(0), r: 3.2, fill: "var(--dim)"}));
+  const live = RUNS.length - 1;
+  for (const run of runs) {
+    const st = runStyle(run.ri);
+    let d = "", pen = false; const px = [];
+    for (const p of run.pts) {
+      if (!p) { pen = false; px.push(null); continue; }
+      const sx = PX(p.x), sy = PY(p.y);
+      d += (pen ? "L" : "M") + sx.toFixed(2) + " " + sy.toFixed(2) + " "; pen = true;
+      px.push({x: sx, y: sy});
+    }
+    if (!d) continue;
+    const path = el("path", {d: d, fill: "none", "stroke-width": st.w, stroke: colour(rName), opacity: st.op, "stroke-linejoin": "round"});
+    if (st.dash) path.setAttribute("stroke-dasharray", st.dash);
+    frag.appendChild(path);
+    if (run.ri === live) { phaseArrows(frag, px, colour(rName), st.op); phaseEndpoints(frag, px, colour(rName), st.op); }
+  }
+  const du = dispUnit(u);
+  frag.appendChild(el("text", {class: "tick", x: M.l, y: M.t - 5, "text-anchor": "start", "font-weight": 600},
+    rName + "·cos / ·sin(" + thName + ")" + (du ? "   " + du : "")));
+  foot.textContent = "polar   ·   x = " + rName + "·cos(" + thName + "),  y = " + rName + "·sin(" + thName + ")   ·   switch to Cartesian for the cursor and marks";
+}
+
 // -- drawing ---------------------------------------------------------------------------
 function draw() {
   if (!D) return;
@@ -1304,6 +1387,17 @@ function draw() {
     paintLegend();
     paintStep();
     paintStats();
+    return;
+  }
+  // The polar phase view likewise owns the plot: the two slots are a radius and an angle, drawn as
+  // the plane they sweep out, with its own equal-aspect frame and no time axis.
+  if (mode === "xy" && coords === "polar" && xVar && thVar && names.includes(xVar) && names.includes(thVar)) {
+    svg.setAttribute("viewBox", "0 0 " + box.w + " " + box.h);
+    const frag = document.createDocumentFragment();
+    drawPolar(frag);
+    plot.replaceChildren(frag);
+    hud.replaceChildren();
+    paintLegend();
     return;
   }
   // A narrow pane cannot spare 60px of gutter; tighten it so the plot keeps its width.
@@ -2441,10 +2535,23 @@ function defaultAxes() {
   while (out.length < 3 && names.length) out.push(names[out.length % names.length]);
   return out;
 }
+// Which variables to read as the radius and angle of a polar plot: the angle is a variable declared
+// in radians (SchwarzschildOrbit's phi, now that it carries unit "rad"), the radius the first state
+// that is not that angle. A valid choice already made is kept, so the slots stay put once set.
+function defaultPolar() {
+  const angles = names.filter((nm) => unitOf(nm) === "rad");
+  const th = (thVar && names.includes(thVar)) ? thVar : (angles[0] || defaultAxes()[1] || names[1] || names[0]);
+  let r = (xVar && names.includes(xVar) && xVar !== th) ? xVar : null;
+  if (!r) {
+    const pool = (D && D.states && D.states.length) ? D.states : names;
+    r = pool.find((nm) => nm !== th && unitOf(nm) !== "rad") || names.find((nm) => nm !== th) || names[0];
+  }
+  xVar = r; thVar = th;
+}
 function setMode(m) {
   mode = m; view3d = m === "xyz"; xwin = null;
   if (m === "t") xVar = null;
-  else if (m === "xy") { LOGT = false; if (!xVar || !names.includes(xVar)) xVar = defaultAxes()[0]; }
+  else if (m === "xy") { LOGT = false; if (coords === "polar") defaultPolar(); else if (!xVar || !names.includes(xVar)) xVar = defaultAxes()[0]; }
   else { LOGT = false; xVar = null; if (ax3.some((nm) => !names.includes(nm))) ax3 = defaultAxes(); }
   if (spin3 && m !== "xyz") stopSpin();
   paintXAxis(); draw();
@@ -2457,13 +2564,20 @@ function paintXAxis() {
   document.querySelector('#mode button[data-mode="xyz"]').disabled = names.length < 3;
   const logt = document.getElementById("logt");
   logt.hidden = mode !== "t"; logt.setAttribute("aria-pressed", String(LOGT));
-  // Equal aspect belongs to the phase plot, where both axes carry a value; hidden against time.
+  const polar = mode === "xy" && coords === "polar";
+  // Equal aspect belongs to the Cartesian phase plot; a polar plot is always equal-aspect, so its
+  // button is hidden. The coordinate selector shows in xy, where the two slots can be read either way.
   const aspect = document.getElementById("aspectbtn");
-  aspect.hidden = mode !== "xy"; aspect.setAttribute("aria-pressed", String(aspectLock));
+  aspect.hidden = mode !== "xy" || polar; aspect.setAttribute("aria-pressed", String(aspectLock));
+  const coordsSel = document.getElementById("coords");
+  coordsSel.hidden = mode !== "xy"; coordsSel.value = coords;
   document.getElementById("axes").hidden = mode === "t";
-  document.getElementById("axylab").hidden = mode !== "xyz";
+  document.getElementById("axylab").hidden = !(mode === "xyz" || polar);
   document.getElementById("axzlab").hidden = mode !== "xyz";
   document.getElementById("view3").hidden = mode !== "xyz";
+  // The two xy slots read as r and theta in polar, x and y otherwise.
+  document.getElementById("axx").parentNode.firstChild.textContent = polar ? "r " : "x";
+  document.getElementById("axylab").firstChild.textContent = polar ? "θ " : "y";
   const fill = (id, value) => {
     const s = document.getElementById(id);
     s.replaceChildren(...names.map((nm) => { const o = document.createElement("option"); o.value = nm;
@@ -2471,7 +2585,8 @@ function paintXAxis() {
     s.value = value || "";
   };
   if (xVar && !names.includes(xVar)) { xVar = null; xwin = null; }
-  if (mode === "xy") fill("axx", xVar);
+  if (polar) { defaultPolar(); fill("axx", xVar); fill("axy", thVar); }
+  else if (mode === "xy") fill("axx", xVar);
   if (mode === "xyz") {
     const dflt = defaultAxes();
     ax3 = ax3.map((nm, i) => (names.includes(nm) ? nm : dflt[i]));
@@ -2481,8 +2596,24 @@ function paintXAxis() {
 for (const b of document.querySelectorAll("#mode button")) b.onclick = () => setMode(b.dataset.mode);
 document.getElementById("logt").onclick = () => { LOGT = !LOGT; paintXAxis(); draw(); };
 document.getElementById("aspectbtn").onclick = () => { aspectLock = !aspectLock; paintXAxis(); draw(); };
-document.getElementById("axx").onchange = (e) => { if (mode === "xy") { xVar = e.target.value; xwin = null; } else ax3[0] = e.target.value; draw(); };
-document.getElementById("axy").onchange = (e) => { ax3[1] = e.target.value; draw(); };
+document.getElementById("coords").onchange = (e) => {
+  coords = e.target.value;
+  if (mode === "xy" && coords === "polar") defaultPolar();
+  paintXAxis(); draw();
+  // The Cartesian phase plot leaves the footer to the cursor, so reset it off the polar text.
+  if (!(mode === "xy" && coords === "polar")) foot.textContent = settledFooter();
+};
+document.getElementById("axx").onchange = (e) => {
+  if (mode === "xyz") ax3[0] = e.target.value;
+  else if (mode === "xy" && coords === "polar") xVar = e.target.value; // the radius
+  else { xVar = e.target.value; xwin = null; }
+  draw();
+};
+document.getElementById("axy").onchange = (e) => {
+  if (mode === "xy" && coords === "polar") thVar = e.target.value; // the angle
+  else ax3[1] = e.target.value;
+  draw();
+};
 document.getElementById("axz").onchange = (e) => { ax3[2] = e.target.value; draw(); };
 // Swap, as Simulink's XY dialog has: x with y in xyz; in xy, x with the first variable drawn.
 document.getElementById("axswap").onclick = () => {
