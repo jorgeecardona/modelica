@@ -147,6 +147,17 @@
   .hk b { color: var(--accent); font-weight: 600; white-space: nowrap; }
   .hk span { color: var(--dim); }
   .helpfoot { margin-top: 11px; color: var(--dim); font-size: 11px; text-align: right; }
+  /* A simulation error (a failed assert, a singular model) is shown as a banner over the chart,
+     not squeezed into the one-line footer that clips it -- the message is the point. */
+  #errbar { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 15; display: flex;
+    gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 6px; font-size: 12px;
+    max-height: 42%; overflow: auto; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    color: var(--vscode-inputValidation-errorForeground, var(--vscode-errorForeground, #b21f16));
+    background: var(--vscode-inputValidation-errorBackground, #fdecea);
+    border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground, #c8372d)); }
+  #errtext { flex: 1; white-space: pre-wrap; line-height: 1.35; word-break: break-word; }
+  #errbar button { border: none; background: none; color: inherit; font-size: 17px; line-height: 1;
+    cursor: pointer; padding: 0 2px; }
   /* One step-response row: the variable, then its final value and metrics in tabular figures. */
   .steprow { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; white-space: nowrap;
     font-variant-numeric: tabular-nums; }
@@ -449,6 +460,7 @@
           <div class="helpfoot">press ? or Esc to close</div>
         </div>
       </div>
+      <div id="errbar" hidden><span id="errtext"></span><button type="button" id="errclose" title="dismiss" aria-label="dismiss">&times;</button></div>
     </div>
     <div class="foot" id="foot">drag to zoom · click to mark, twice for Δ · shift-click for a level line · double-click to reset</div>
   </section>
@@ -2581,11 +2593,25 @@ document.addEventListener("keydown", (e) => {
   const t = e.target;
   const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
   if (e.key === "Escape" && !helpCard.hidden) { setHelp(false); return; }
+  if (e.key === "Escape" && !errBar.hidden) { clearError(); return; }
   if (e.key === "?" && !typing) { e.preventDefault(); setHelp(helpCard.hidden); }
 });
+// A simulation error (a violated assert, a singular model, a solver that gave up) comes back
+// from the extension as a `{type:"error"}` message. Show it as a banner over the chart -- the
+// footer clips it -- and drop the leading exception-type noise so the message leads. It clears
+// itself when the next run lands, or on the × / Escape.
+const errBar = document.getElementById("errbar");
+const errText = document.getElementById("errtext");
+function showError(text) {
+  errText.textContent = String(text || "simulation failed").replace(/^[A-Za-z]*Error:\s*/, "");
+  errBar.hidden = false;
+}
+function clearError() { errBar.hidden = true; }
+document.getElementById("errclose").addEventListener("click", clearError);
 window.addEventListener("message", (e) => {
   const m = e.data || {};
   if (m.type === "data" && m.models) {
+    clearError();
     const rec = m.models[0];
     const liveIdx = RUNS.length - 1;
     const ri = (typeof m.runId === "number" && m.runId >= 0 && m.runId < RUNS.length) ? m.runId : liveIdx;
@@ -2633,7 +2659,7 @@ window.addEventListener("message", (e) => {
     foot.textContent = "overlaid " + (m.name || "log") + ": " + Object.keys(m.series).length + " columns, "
       + matched + " matched to the model";
   }
-  else if (m.type === "error") { foot.textContent = "error: " + m.error; }
+  else if (m.type === "error") { showError(m.error); foot.textContent = "simulation failed — see the message above"; }
 });
 
 document.getElementById("srcnote").textContent =
