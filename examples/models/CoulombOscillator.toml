@@ -1,0 +1,82 @@
+summary = "A mass on a spring, damped not by a viscous dashpot but by dry (Coulomb) friction: a force of constant magnitude that always opposes the motion. Ideal Coulomb friction is fc*sign(v), which has no derivative where the velocity crosses zero -- awkward for a solver that wants a Jacobian -- so the sign is smoothed to tanh(v/v_eps), the same force away from zero and differentiable through it. Released from rest at x = 1.5 m, the mass swings back and forth, and its amplitude falls by 2*fc/k on every half-swing: a straight-line envelope, the signature of Coulomb damping, where a viscous damper would decay exponentially. The oscillation dies within a few periods and the mass comes to rest at the origin, its energy dropping monotonically to zero."
+teaches = ["dry (Coulomb) friction, a constant force opposing the motion", "tanh as a smooth, differentiable stand-in for sign, so the Jacobian exists at v = 0", "the linear amplitude decay that tells Coulomb damping from viscous", "monotone energy dissipation to rest"]
+requires = []
+
+[parse]
+classes = ["CoulombOscillator"]
+
+[flatten]
+model = "CoulombOscillator"
+states = ["x", "v"]
+equations = 2
+balanced = true
+
+# A spring-mass with a dry-friction force:
+#   d(x)/dt = v
+#   m*d(v)/dt = -k*x - fc*tanh(v/v_eps)
+# The friction term fc*tanh(v/v_eps) is a smooth Coulomb force: magnitude fc opposing the motion,
+# rounded off within |v| < v_eps so it is differentiable at the turning points (a plain sign would
+# not be, and the Jacobian is the derivative of tanh here -- fc/v_eps * sech^2). From (x, v) =
+# (1.5, 0) the amplitude falls by 2*fc/k = 0.2 m each half-swing (turning points 1.5, 1.30, 1.10,
+# 0.90, 0.70 m ...), a straight envelope rather than the exponential one viscous damping gives, and
+# the motion settles at the origin -- near rest the system is critically damped, so it stops fast.
+[simulate]
+stop = 40.0
+tolerance = 1e-10
+
+# The decaying swing: the amplitude steps down by a fixed amount each half-period.
+[[simulate.point]]
+t = 2.0
+values = { x = -0.4847917942, v = -1.272070124 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 5.0
+values = { x = 0.242928954, v = 1.150138799 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { x = -0.7698851293, v = 0.4384398287 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 15.0
+values = { x = -0.3594486983, v = -0.3875148501 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 20.0
+values = { x = 0.172815648, v = -0.1915880384 }
+rtol = 1e-6
+source = "reference"
+
+# The mass never swings wider than where it started, and the velocity stays bounded by the first
+# swing: the envelope only shrinks.
+[[simulate.invariant]]
+expr = "x"
+min = -1.31
+max = 1.5
+
+[[simulate.invariant]]
+expr = "v"
+min = -1.41
+max = 1.21
+
+# The mechanical energy 0.5*m*v^2 + 0.5*k*x^2 never rises above its initial 1.125 J: dry friction
+# only takes energy out, never puts it in. This invariant is a Modelica expression over the
+# parameters and the states, evaluated along the trajectory.
+[[simulate.invariant]]
+expr = "0.5 * m * v^2 + 0.5 * k * x^2"
+min = -0.001
+max = 1.126
+
+# It comes to rest: once the swing has died, the energy has essentially all been dissipated.
+[[simulate.invariant]]
+expr = "0.5 * m * v^2 + 0.5 * k * x^2"
+max = 0.001
+after = 35.0

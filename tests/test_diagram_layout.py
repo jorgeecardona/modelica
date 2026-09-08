@@ -56,6 +56,7 @@ FLAT = {
     "BuckConverter",
     "CSTR",
     "Chua",
+    "CoulombOscillator",
     "DoublePendulum",
     "DrainingTank",
     "Duffing",
