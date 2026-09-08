@@ -92,6 +92,26 @@ def test_the_simplest_ode_there_is_integrates_to_the_answer(
     assert float(result["x"][-1]) == pytest.approx(closed_form, rel=1e-7)
 
 
+def test_a_second_derivative_can_be_written_directly() -> None:
+    """``der(der(x)) = -x`` is a harmonic oscillator, and the model may say so directly.
+
+    Index reduction already names ``der_x`` and ``der_der_x`` when it differentiates an equation
+    twice, so a modeller may write the second derivative out instead of introducing ``v = der(x)``
+    by hand. The naming recurses: the inner ``der(x)`` becomes ``der_x`` and this der is then
+    ``der(der_x)`` -> ``der_der_x``. Two states, and the trajectory is the cosine that pins it.
+    """
+    simulate = pytest.importorskip("modelica.sim").simulate
+    source = (
+        "model M\n  Real x(start = 1.0, fixed = true);\n  Real v(start = 0.0, fixed = true);\n"
+        "equation\n  der(der(x)) = -x;\n  v = der(x);\nend M;\n"
+    )
+    system = _system(source)
+    assert len(system.states) == 2
+    result = simulate(system, stop=2.0, tolerance=1e-11)
+    assert float(result["x"][-1]) == pytest.approx(math.cos(2.0), abs=1e-7)
+    assert float(result["v"][-1]) == pytest.approx(-math.sin(2.0), abs=1e-7)
+
+
 def test_pinning_a_start_value_does_not_change_what_gets_integrated() -> None:
     """``fixed`` is an initialization attribute and must not reach the structural decisions.
 

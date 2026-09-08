@@ -242,9 +242,14 @@ def _name_derivatives(node: ir.Expr, work: _Work) -> ir.Expr:
     match node:
         case ir.Call(name="der", args=args):
             (argument,) = args
-            if not isinstance(argument, ir.Ref):
+            # der() may wrap another der(): a second derivative written directly, der(der(x)). Name
+            # the inner one first so it becomes the variable der_x, then this der is der(der_x) ->
+            # der_der_x -- the same chain index reduction builds when it differentiates an equation
+            # twice, so the modeller may write it out instead of introducing v = der(x) by hand.
+            inner = _name_derivatives(argument, work)
+            if not isinstance(inner, ir.Ref):
                 raise CausalizationError(f"{work.name}: der() needs a variable, got {argument!r}")
-            return _ref(_ensure_derivative(work, argument.name))
+            return _ref(_ensure_derivative(work, inner.name))
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             return ir.Binary(op, _name_derivatives(lhs, work), _name_derivatives(rhs, work))
         case ir.Unary(op=op, operand=operand):
