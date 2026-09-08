@@ -6,6 +6,14 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `examples/SchwarzschildOrbit`: **a relativistic orbit, the reachable general-relativity rung.**
+  A test mass on an equatorial timelike geodesic of the Schwarzschild metric -- the Kepler problem
+  with the relativistic `-3*M*ell^2/r^4` term that makes a bound orbit precess into a rosette rather
+  than close. Started at `r = 20M` with `ell = 4M`, it swings between perihelion `8.2M` and aphelion
+  `20M`, advancing about 2.78 rad of precession per radial cycle (Mercury's 43"/century, in the
+  strong field). The specific energy `E^2 = vr^2 + (1 - 2M/r)(1 + ell^2/r^2) = 0.936` is conserved,
+  held to 1e-6 (Radau drifts it by 1e-14), the same conserved-quantity check as Kepler and
+  Henon-Heiles, now in GR. Six scipy reference points at 1e-12 over nearly four orbits.
 - `examples/HenonHeiles`: **the Henon-Heiles system, a second Hamiltonian benchmark.** A star in a
   galactic potential `0.5*(x^2 + y^2) + x^2*y - y^3/3`, two degrees of freedom, run at energy 0.1125
   (below the escape energy 1/6, a bounded regular orbit). Where Kepler is integrable and closed-form,

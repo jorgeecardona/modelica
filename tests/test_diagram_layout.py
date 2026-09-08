@@ -80,6 +80,7 @@ FLAT = {
     "Robertson",
     "Rossler",
     "SaturatingServo",
+    "SchwarzschildOrbit",
     "ServoDrive",
     "Setback",
     "SyncGenerator",

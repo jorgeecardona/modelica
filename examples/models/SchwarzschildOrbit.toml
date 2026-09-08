@@ -1,0 +1,90 @@
+summary = "A test mass on a timelike geodesic of the Schwarzschild metric: an orbit around a non-rotating black hole, the general-relativistic version of the Kepler two-body problem. In geometrized units (G = c = 1) with the black-hole mass as the length scale, the equatorial radial motion is governed by an effective potential (1 - 2M/r)(1 + L^2/r^2) whose Newtonian pieces (gravity and the centrifugal barrier) are joined by a purely relativistic -3*M*L^2/r^4 term. That extra term is what makes a bound orbit fail to close: instead of a fixed ellipse it precesses, tracing a rosette. Started at r = 20M with angular momentum L = 4M, the orbit swings between perihelion 8.2M and aphelion 20M, advancing about 2.78 radians of precession on every radial cycle -- Mercury's 43 arcseconds a century, but in the strong field where the effect is enormous. The specific energy is conserved for all time, held here as the invariant that grades the integrator, exactly as in the Newtonian benchmarks."
+teaches = ["a timelike geodesic of Schwarzschild, the relativistic two-body orbit", "orbital precession from the relativistic -3*M*L^2/r^4 term, a rosette not an ellipse", "energy conservation as the invariant, extending the Kepler/Henon-Heiles line into GR", "geometrized units G = c = 1 with the mass as the length scale"]
+requires = []
+
+[parse]
+classes = ["SchwarzschildOrbit"]
+
+[flatten]
+model = "SchwarzschildOrbit"
+states = ["r", "phi", "vr"]
+equations = 3
+balanced = true
+
+# Equatorial timelike geodesic in proper time tau, with ell = r^2*dphi/dtau the conserved angular
+# momentum (imposed by the phi equation) and the radial acceleration -0.5 dV/dr of the effective
+# potential V = (1 - 2M/r)(1 + ell^2/r^2):
+#   d(r)/dtau = vr
+#   d(phi)/dtau = ell / r^2
+#   d(vr)/dtau = -M/r^2 + ell^2/r^3 - 3*M*ell^2/r^4
+# From r = 20M, vr = 0 (aphelion) with ell = 4M the orbit is bound between r = 8.2M and 20M, well
+# outside the horizon 2M, and precesses ~2.78 rad per radial period, so over the run phi winds
+# through 3.68 full turns. The specific energy E, with E^2 = vr^2 + V(r) = 0.936, is conserved.
+[simulate]
+stop = 1000.0
+tolerance = 1e-11
+
+# Points around the rosette: perihelion passages and aphelion swings, the trajectory a
+# stiff-accurate reference (DOP853 at 1e-12) draws. The absolute tolerance covers the phase gap two
+# integrators of different families open over nearly four orbits; the tight check is the energy.
+[[simulate.point]]
+t = 100.0
+values = { r = 15.9940188, phi = 1.16347123, vr = -0.0795063481 }
+rtol = 1e-5
+atol = 1.5e-4
+source = "reference"
+
+[[simulate.point]]
+t = 250.0
+values = { r = 11.6391743, phi = 6.9098001, vr = 0.100106112 }
+rtol = 1e-5
+atol = 1.5e-4
+source = "reference"
+
+[[simulate.point]]
+t = 450.0
+values = { r = 18.8662477, phi = 9.62012498, vr = -0.0426938655 }
+rtol = 1e-5
+atol = 1.5e-4
+source = "reference"
+
+[[simulate.point]]
+t = 650.0
+values = { r = 11.9588176, phi = 16.0684873, vr = 0.100366409 }
+rtol = 1e-5
+atol = 1.5e-4
+source = "reference"
+
+[[simulate.point]]
+t = 850.0
+values = { r = 18.7260561, phi = 18.7232922, vr = -0.0452620003 }
+rtol = 1e-5
+atol = 1.5e-4
+source = "reference"
+
+[[simulate.point]]
+t = 1000.0
+values = { r = 8.31286901, phi = 23.1373201, vr = 0.0275758861 }
+rtol = 1e-5
+atol = 1.5e-4
+source = "reference"
+
+# The specific energy is the constant of the motion: E^2 = vr^2 + (1 - 2M/r)(1 + ell^2/r^2) stays
+# at 0.936. A Modelica expression over the parameters and the states; Radau holds it to about
+# 1e-14 over nearly four orbits, and 1e-6 is the honest bound.
+[[simulate.invariant]]
+expr = "vr^2 + (1 - 2*bigm/r) * (1 + ell^2/r^2)"
+value = 0.936
+atol = 1e-6
+
+# The orbit stays bound between perihelion and aphelion, always well outside the horizon 2M = 2.
+[[simulate.invariant]]
+expr = "r"
+min = 8.19
+max = 20.01
+
+# Angular momentum is positive, so the angle only ever advances -- it never runs backward.
+[[simulate.invariant]]
+expr = "phi"
+min = -0.001
+max = 23.2
