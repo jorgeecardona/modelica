@@ -1429,7 +1429,10 @@ function paintLegend(at) {
       value.textContent = text;
     }
     row.append(dot, name, value);
-    row.title = nm + "  ·  alt-click to show only this";
+    // The variable's declared description, when the model gave one, so hovering a name says what
+    // it means (`u` is "Unsaturated voltage the PD law asks for"); then the name and the hint.
+    const desc = D.descriptions && D.descriptions[nm];
+    row.title = (desc ? desc + "\n" : "") + nm + "  ·  alt-click to show only this";
     row.onclick = (e) => {
       if (e.altKey) {
         // Solo: show only this variable. Alt-clicking the one already soloed restores the set

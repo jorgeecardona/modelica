@@ -622,6 +622,14 @@ def _run(  # noqa: PLR0913, PLR0917 - the CLI's knobs, passed straight through
         "t": [_r7(v) for v in time[keep]],
         "series": series,
         "units": {nm: units.get(nm, "") for nm in series},
+        # The description each variable was declared with, so the legend can say what a name means
+        # on hover -- "Unsaturated voltage the PD law asks for" beside `u`. Only the ones that
+        # have one, keyed by the flat name the series uses.
+        "descriptions": {
+            variable.name: variable.comment
+            for variable in system.variables
+            if variable.comment and variable.name in series
+        },
         "refs": [],
         "events": events,
         # The model's runtime guards, rendered as source so the panel can show what physical
