@@ -97,3 +97,36 @@ def test_a_literal_that_was_never_declared_stays_a_reference_and_fails_later() -
     source = "model M\n  type E = enumeration(a);\n  Real x;\nequation\n  x = E.z;\nend M;\n"
     with pytest.raises(FlattenError):
         flatten(parse(source), "M")
+
+
+def test_a_qualified_package_constant_resolves_to_its_value() -> None:
+    """``P.Constants.pi`` is a constant declared in a package, so it becomes its evaluated value.
+
+    Its binding may be an expression over the library's own maths -- ``2 * P.Math.asin(1.0)`` -- and
+    the qualified call to a builtin is read as the builtin so the value can be evaluated here.
+    """
+    source = (
+        "package P\n"
+        "  package Math\n"
+        "    function asin\n      input Real x;\n      output Real y;\n"
+        '    external "builtin";\n    end asin;\n'
+        "  end Math;\n"
+        "  package Constants\n"
+        "    constant Real pi = 2 * P.Math.asin(1.0);\n"
+        "    constant Real eps = 1e-15;\n"
+        "  end Constants;\n"
+        "end P;\n"
+        "model M\n  Real x;\nequation\n  x = P.Constants.pi + P.Constants.eps;\nend M;\n"
+    )
+    equation = unparse_equation(flatten(parse(source), "M").equations[0])[0]
+    assert equation == "x = 3.141592653589793 + 1e-15;"
+
+
+def test_an_unknown_package_constant_still_fails() -> None:
+    """A constant that is not there is a typo, not a silent zero: it has to be an error."""
+    source = (
+        "package P\n  package Constants\n    constant Real pi = 3.14;\n  end Constants;\nend P;\n"
+        "model M\n  Real x;\nequation\n  x = P.Constants.nope;\nend M;\n"
+    )
+    with pytest.raises(FlattenError, match="unknown name"):
+        flatten(parse(source), "M")

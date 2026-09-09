@@ -132,19 +132,19 @@ def test_redeclaring_a_name_the_class_does_not_declare_is_refused() -> None:
         _flat(extra, "One")
 
 
-def test_a_package_constant_is_still_out_of_reach() -> None:
-    """Recorded, because a medium package is mostly constants and this is what stops it.
+def test_a_package_constant_resolves_to_its_value() -> None:
+    """`Media.Water.rho` -- a constant declared in a package -- is read as its value.
 
-    `Media.Water.rho` in an equation does not resolve, redeclaration or not: a dotted
-    reference to a constant declared inside a package is a lookup this flattener does not do.
-    It is not a gap in redeclaration -- the same reference fails with no redeclaration
-    anywhere in the model -- and it is why the tests above parameterise a *component's type*
-    rather than a medium's properties.
+    A medium is mostly constants, so this is the reference such a model reaches for. A dotted
+    reference whose head is not a local name is looked up, and a constant with a value that
+    evaluates to a number here is substituted, so nothing below the flattener sees the dotted name.
+    (A value that names another constant, or a function that is not a builtin, is still left alone.)
     """
     source = (
         "package Media\n  package Water\n    constant Real rho = 1000.0;\n"
         "  end Water;\nend Media;\n\n"
         "model Tank\n  Real mass;\nequation\n  mass = Media.Water.rho * 2.0;\nend Tank;\n"
     )
-    with pytest.raises(FlattenError, match=re.escape("unknown name 'Media.Water.rho'")):
-        flatten(parse(source), "Tank")
+    assert (
+        unparse_equation(flatten(parse(source), "Tank").equations[0])[0] == "mass = 1000.0 * 2.0;"
+    )

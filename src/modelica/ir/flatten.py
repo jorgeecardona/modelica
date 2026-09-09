@@ -886,7 +886,75 @@ def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir
             )
 
 
-def _literals(  # noqa: C901, PLR0911 -- one case per node type, as its neighbours have
+#: The one-argument and two-argument functions the interpreter knows, so a qualified call to one --
+#: MSL writes ``Modelica.Math.asin`` -- can be read as the builtin when a constant's value is
+#: evaluated here.
+_BUILTIN_FUNCTIONS = frozenset(
+    {
+        "sqrt", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh",
+        "exp", "log", "log10", "abs", "sign", "ceil", "floor", "integer",
+        "atan2", "mod", "div", "rem", "min", "max",
+    }
+)  # fmt: skip
+
+
+def _debuiltin(node: ir.Expr) -> ir.Expr:
+    """Read a qualified call to a builtin -- ``Modelica.Math.asin(x)`` -- as the builtin itself.
+
+    A package constant's value is often an expression over the library's own maths, ``pi = 2 *
+    Modelica.Math.asin(1.0)``; the interpreter knows ``asin``, not the qualified name, so the prefix
+    is dropped where the last part is a function it knows. Anything else is left whole, so the
+    evaluation that follows fails cleanly on a name that is not a builtin, and the constant is left
+    unresolved rather than resolved wrong.
+    """
+    match node:
+        case ir.Call(name=name, args=args, named=named):
+            tail = name.rsplit(".", 1)[-1]
+            resolved = tail if "." in name and tail in _BUILTIN_FUNCTIONS else name
+            args = tuple(_debuiltin(a) for a in args)
+            named = tuple((key, _debuiltin(value)) for key, value in named)
+            return ir.Call(resolved, args, named)
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, _debuiltin(lhs), _debuiltin(rhs))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _debuiltin(operand))
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(_debuiltin(condition), _debuiltin(then), _debuiltin(otherwise))
+        case _:
+            return node
+
+
+def _constant_literal(cls: ir.Class, name: str) -> ir.Expr | None:  # noqa: PLR0911 -- one per kind
+    """A package constant as its value, or ``None`` when it does not reduce to one here.
+
+    ``Modelica.Constants.pi`` is a ``constant`` declared in a package, not a component of the model,
+    so it cannot be prefixed into a variable; its value is read off the declaration, its qualified
+    builtin calls stripped, and evaluated to a number, then substituted in place -- pi as 3.14159...,
+    eps as 1e-15. A value that will not reduce to a number here -- it names another constant, or a
+    function that is not a builtin -- is left alone, so the reference stays whatever it was and the
+    ordinary "unknown name" report still catches a genuine typo.
+    """
+    for component in cls.components:
+        if component.name != name or component.variability != "constant":
+            continue
+        value = component.modification.value
+        if value is None:
+            return None
+        try:
+            result = evaluate(_debuiltin(value), {})
+        except EvaluationError:
+            return None
+        if isinstance(result, bool):
+            return ir.BoolLiteral(result)
+        if isinstance(result, int):
+            return ir.IntLiteral(result)
+        if isinstance(result, float):
+            return ir.RealLiteral(result)
+        return None
+    return None
+
+
+def _literals(  # noqa: C901, PLR0911, PLR0912 -- one case per node type, as its neighbours have
     node: ir.Expr, scope: Scope, local: frozenset[str]
 ) -> ir.Expr:
     """``Mode.day`` becomes ``1`` -- an enumeration literal is its position, counted from one.
@@ -906,8 +974,12 @@ def _literals(  # noqa: C901, PLR0911 -- one case per node type, as its neighbou
                 found = scope.resolve(".".join(parts[:-1]))
             except FlattenError:
                 return node
-            if isinstance(found, Found) and parts[-1] in found.cls.literals:
-                return ir.IntLiteral(found.cls.literals.index(parts[-1]) + 1)
+            if isinstance(found, Found):
+                if parts[-1] in found.cls.literals:
+                    return ir.IntLiteral(found.cls.literals.index(parts[-1]) + 1)
+                constant = _constant_literal(found.cls, parts[-1])
+                if constant is not None:
+                    return constant
             return node
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             return ir.Binary(op, go(lhs), go(rhs))
