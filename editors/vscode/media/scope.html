@@ -488,7 +488,7 @@
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
-    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi)" title="plot an expression in the drawn variables (and pi, e, t); Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
+    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi) or sum(T)" title="plot an expression in the drawn variables (and pi, e, t); a reduction over an array field is sum/product/min/max/mean of its base name, e.g. sum(T); Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
@@ -725,6 +725,23 @@ const DFUNCS = {
   mod: (a, b) => a - Math.floor(a / b) * b,
 };
 const DCONST = {pi: Math.PI, e: Math.E};
+// Reductions over a whole array field: `sum(T)`, `max(u)`, `mean(x)` fold every element of an
+// array group into one scalar per sample -- a field's total (conserved by a periodic diffusion),
+// its peak, its average. `min`/`max` double as the pairwise DFUNCS above; a single array-base
+// argument here makes the reduction, two scalar arguments stay the pairwise operator.
+const DREDUCE = {
+  sum: (vs) => vs.reduce((s, v) => s + (isFinite(v) ? v : 0), 0),
+  product: (vs) => vs.reduce((s, v) => s * (isFinite(v) ? v : 1), 1),
+  min: (vs) => { const f = vs.filter((v) => isFinite(v)); return f.length ? Math.min(...f) : NaN; },
+  max: (vs) => { const f = vs.filter((v) => isFinite(v)); return f.length ? Math.max(...f) : NaN; },
+  mean: (vs) => { const f = vs.filter((v) => isFinite(v)); return f.length ? f.reduce((s, v) => s + v, 0) / f.length : NaN; },
+};
+// The element series of an array group: `T` gives `T[1, 1]`, `T[1, 2]`, ... but not `Th[...]`
+// (the `[` after the base name is required) nor `der_T[...]` (a different base).
+function groupMembers(series, base) {
+  const pre = base + "[";
+  return Object.keys(series).filter((nm) => nm.startsWith(pre));
+}
 let derived = [];  // [{src}] -- the expressions, recompiled per model in applyDerived()
 // Compile `src` to a function `(j) => number` over the sample index, reading `series` and `time`.
 function compileExpr(src, series, time) {
@@ -756,7 +773,16 @@ function compileExpr(src, series, time) {
     if (t === undefined) throw new Error("unexpected end of expression");
     if (t === "(") { const a = expr(); if (eat() !== ")") throw new Error("missing )"); return a; }
     if (/^[A-Za-z_]/.test(t)) {
-      if (peek() === "(") { eat(); const args = [];
+      if (peek() === "(") {
+        // A reduction over a whole array field: `sum(T)` folds every `T[...]` element. Only a
+        // single bare array-base argument reduces; anything else (including a pairwise `min(a, b)`)
+        // falls through to the elementwise call below.
+        const red = DREDUCE[t];
+        if (red && /^[A-Za-z_]\w*$/.test(toks[p + 1] || "") && toks[p + 2] === ")") {
+          const members = groupMembers(series, toks[p + 1]);
+          if (members.length) { p += 3; return (j) => red(members.map((nm) => series[nm][j])); }
+        }
+        eat(); const args = [];
         if (peek() !== ")") { args.push(expr()); while (peek() === ",") { eat(); args.push(expr()); } }
         if (eat() !== ")") throw new Error("missing )");
         const fn = DFUNCS[t]; if (!fn) throw new Error("unknown function " + t);
