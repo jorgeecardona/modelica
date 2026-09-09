@@ -87,7 +87,9 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   and aphelion read straight off the circles. `xyz` (offered with three
   or more variables) is the **3D phase view**: three slots pick the axes, defaulting to the
   first three states -- Lorenz's x, y, z, the butterfly -- with each option showing its unit
-  and `⇄` swapping x and y. A faint reference frame -- the bounding cube with a grid on its floor,
+  and `⇄` swapping x and y. Any of the three axes can be **time** instead of a variable, which
+  extrudes a phase curve into a tube over time: put x and y on two axes and t on the third and
+  Lorenz's butterfly climbs as the run goes, the two lobes stacked in time. A faint reference frame -- the bounding cube with a grid on its floor,
   and the trajectory's shadow cast straight down onto it -- gives depth, so the curve reads as
   sitting in a space, its footprint says where it is in the plane at each height, and the camera's
   rotation shows in the near and far edges. The trajectory is coloured by time (blue to orange, with a small

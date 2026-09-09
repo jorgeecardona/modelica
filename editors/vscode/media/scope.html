@@ -1007,7 +1007,7 @@ function dispUnit(unit) {
   if (angleScale(unit) !== 1) return "°";
   return unit === "degC" ? "°C" : unit;
 }
-function unitOf(nm) { return (D && D.units && D.units[nm] !== undefined) ? D.units[nm] : ""; }
+function unitOf(nm) { return nm === T_AXIS ? tUnit() : ((D && D.units && D.units[nm] !== undefined) ? D.units[nm] : ""); }
 // The one unit every selected variable shares, else "": an overlay axis can only be labelled
 // in display units when everything on it converts the same way.
 function sharedUnit() {
@@ -1049,9 +1049,16 @@ function runStyle(ri) {
   const op = nPinned > 1 ? 0.45 + 0.4 * (ri / (nPinned - 1)) : 0.85;
   return {dash: DASHES[Math.min(back - 1, DASHES.length - 1)], w: 1.4, op};
 }
+// The sentinel for time as a coordinate axis. A phase or 3D plot is between variables, and time is
+// not one of them -- it is the independent axis the `t` mode owns -- but a 3D trajectory drawn
+// against time (x, y, t: a tube unrolling the loop) is a real view, so the axis slots offer it. It
+// reads as the sample times in the shown time unit, and prints as `t`.
+const T_AXIS = "__t__";
 function seriesOf(ri, nm) {
+  if (nm === T_AXIS) return N ? T.map(toT) : null;
   return ri === RUNS.length - 1 ? (D.series[nm] || null) : ((RUNS[ri].onBase || {})[nm] || null);
 }
+function varLabel(nm) { return nm === T_AXIS ? "t" : nm; }
 function eachRun(nm, fn) {
   for (let ri = 0; ri < RUNS.length; ri++) { const vs = seriesOf(ri, nm); if (vs) fn(vs, ri); }
 }
@@ -1152,7 +1159,7 @@ function index(t) {
 }
 function visible() { return [Math.max(0, index(win[0]) - 1), Math.min(N - 1, index(win[1]) + 1)]; }
 function selected() { return names.filter((nm) => on.has(nm)); }
-function colour(nm) { return PALETTE[names.indexOf(nm) % PALETTE.length]; }
+function colour(nm) { const i = names.indexOf(nm); return i < 0 ? "var(--ink)" : PALETTE[i % PALETTE.length]; }
 function el(tag, attrs, text) {
   const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
   for (const k in attrs) node.setAttribute(k, attrs[k]);
@@ -1300,7 +1307,7 @@ function project3(p, cx, cy, r) {
 // The [min,max] of a variable over the visible instants of the live run, for normalising to
 // [-1,1]; a flat variable gets a unit span so it maps to the middle.
 function range3(nm) {
-  const vs = D.series[nm] || [];
+  const vs = seriesOf(RUNS.length - 1, nm) || [];
   let lo = Infinity, hi = -Infinity;
   for (const v of vs) { if (v === null || v === undefined || !isFinite(v)) continue; if (v < lo) lo = v; if (v > hi) hi = v; }
   if (!isFinite(lo)) return [0, 1];
@@ -1322,9 +1329,11 @@ function draw3d(frag) {
   // Centred on the whole plot, so it does not drift into a corner as the 2D margins change.
   const cx = box.w / 2, cy = box.h / 2;
   const r = 0.4 * Math.min(box.w, box.h) * zoom3;
-  // The axes are the three slots; anything the model lacks falls back to the default triple.
+  // The axes are the three slots; anything the model lacks falls back to the default triple. Time
+  // (T_AXIS) is a valid slot in the Cartesian cube only -- a trajectory tube over time -- not in a
+  // cylindrical or spherical view, where the slots are a radius and angles.
   const dflt = defaultAxes();
-  const names3 = ax3.map((nm, i) => (names.includes(nm) ? nm : dflt[i]));
+  const names3 = ax3.map((nm, i) => ((nm === T_AXIS ? coords === "cartesian" : names.includes(nm)) ? nm : dflt[i]));
   // A cylindrical or spherical view is a real spatial shape, so its three Cartesian axes share one
   // scale (a unit is the same length on each), centred on the origin the radius is measured from.
   // The plain Cartesian phase cube keeps its independent-per-axis normalisation, which is right for
@@ -1348,7 +1357,7 @@ function draw3d(frag) {
   } else {
     const rngs = names3.map((nm) => (nm ? range3(nm) : [0, 1]));
     norm = (val, i) => (2 * (val - rngs[i][0])) / (rngs[i][1] - rngs[i][0]) - 1;
-    axisLabel = (i) => names3[i] || "-";
+    axisLabel = (i) => (names3[i] ? varLabel(names3[i]) : "-");
   }
   // A faint reference frame for depth: the bounding cube [-1, 1]^3 with a grid on its floor, so the
   // trajectory reads as sitting in a space rather than floating, and the camera's rotation shows in
@@ -1444,7 +1453,7 @@ function draw3d(frag) {
   }
   const slotNames = spatial ? (coords === "spherical" ? ["r", "θ", "φ"] : ["r", "θ", "z"]) : ["x", "y", "z"];
   foot.textContent = (spatial ? coords + "   ·   " : "")
-    + names3.map((nm, i) => slotNames[i] + " = " + (nm || "-")).join("  ·  ")
+    + names3.map((nm, i) => slotNames[i] + " = " + (nm ? varLabel(nm) : "-")).join("  ·  ")
     + "   ·   drag to rotate · wheel to zoom · double-click to reset";
 }
 
@@ -1566,7 +1575,7 @@ function cursor3d(event) {
   for (let i = 0; i < 3; i++) {
     const nm = live3d.names3[i]; if (!nm) continue;
     const un = unitOf(nm);
-    parts.push(nm + " = " + fmt(disp(live3d.cols[i][best], un)) + (dispUnit(un) ? " " + dispUnit(un) : ""));
+    parts.push(varLabel(nm) + " = " + fmt(disp(live3d.cols[i][best], un)) + (dispUnit(un) ? " " + dispUnit(un) : ""));
   }
   foot.textContent = parts.join("   ·   ");
 }
@@ -1635,7 +1644,7 @@ function draw() {
   }
   if (xVar) {
     frag.appendChild(el("text", {class: "tick", x: box.w - M.r, y: box.h - M.b - 5, "text-anchor": "end",
-      "font-weight": 600}, xVar + (dispUnit(xu) ? "  " + dispUnit(xu) : "")));
+      "font-weight": 600}, varLabel(xVar) + (dispUnit(xu) ? "  " + dispUnit(xu) : "")));
   }
   frag.appendChild(el("line", {class: "axis", x1: M.l, x2: M.l, y1: M.t, y2: box.h - M.b}));
   frag.appendChild(el("line", {class: "axis", x1: M.l, x2: box.w - M.r, y1: box.h - M.b, y2: box.h - M.b}));
@@ -2094,7 +2103,7 @@ function cursor(v) {
   // phase variable first, then the instant that point belongs to.
   const near = xVar ? [] : D.events.filter((e) => Math.abs(X(e.t) - x) < 4);
   const xu = xVar ? unitOf(xVar) : "";
-  const phase = xVar ? xVar + " = " + fmt(disp(xOfRun(RUNS.length - 1, j), xu)) + (dispUnit(xu) ? " " + dispUnit(xu) : "") + "   ·   " : "";
+  const phase = xVar ? varLabel(xVar) + " = " + fmt(disp(xOfRun(RUNS.length - 1, j), xu)) + (dispUnit(xu) ? " " + dispUnit(xu) : "") + "   ·   " : "";
   // The values under the cursor live in the legend. With the legend out of sight -- a narrow
   // pane that has not opened it -- they have nowhere to show but here: the first few selected
   // variables of the live run, in display units.
@@ -2205,11 +2214,14 @@ function drawLogPoints(frag, nm, yOf) {
   if (!LOGS.length) return;
   for (const log of LOGS) {
     const col = logColumn(log, nm); if (!col) continue;
-    const xcol = xVar ? logColumn(log, xVar) : null;
-    if (xVar && !xcol) continue;
+    const phaseX = xVar && xVar !== T_AXIS;
+    const xcol = phaseX ? logColumn(log, xVar) : null;
+    if (phaseX && !xcol) continue;
     for (let k = 0; k < col.length; k++) {
       const v = col[k]; if (v === null || v === undefined || !isFinite(v)) continue;
-      const xv = xVar ? xcol[k] : log.t[k] * log.tscale;
+      // Time mode maps raw seconds; the t-as-x phase plot maps display-time (its x domain is toT(T)).
+      const secs = log.t[k] * log.tscale;
+      const xv = phaseX ? xcol[k] : (xVar === T_AXIS ? toT(secs) : secs);
       if (xv === null || xv === undefined || !isFinite(xv) || xv < XD[0] || xv > XD[1]) continue;
       const y = yOf(v); if (!isFinite(y) || y < M.t - 1 || y > box.h - M.b + 1) continue;
       frag.appendChild(el("circle", {class: "logpt", cx: X(xv), cy: y, r: 2.4, stroke: colour(nm)}));
@@ -2497,7 +2509,7 @@ function restFooter() {
     const [a, b] = [Math.min(...marks), Math.max(...marks)];
     let s = "Δt = " + fmt(toT(T[b] - T[a])) + " " + tUnit();
     if (xVar) { const u = unitOf(xVar), xs = seriesOf(RUNS.length - 1, xVar);
-      if (xs) s += "   ·   Δ" + xVar + " = " + fmt(disp(xs[b], u) - disp(xs[a], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""); }
+      if (xs) s += "   ·   Δ" + varLabel(xVar) + " = " + fmt(disp(xs[b], u) - disp(xs[a], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""); }
     return s + "   ·   double-click to clear";
   }
   return "drag to zoom · click to read a point, twice for Δ · shift-click for a level line · double-click to reset";
@@ -2531,7 +2543,7 @@ function drawMarks(frag) {
     const j = marks[0];
     const lines = [{t: "t = " + fmt(toT(T[j])) + " " + tUnit(), dim: false}];
     if (xVar) { const u = unitOf(xVar), xs = seriesOf(live, xVar);
-      if (xs && isFinite(xs[j])) lines.push({t: xVar + " = " + fmt(disp(xs[j], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: true, nm: xVar}); }
+      if (xs && isFinite(xs[j])) lines.push({t: varLabel(xVar) + " = " + fmt(disp(xs[j], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: true, nm: xVar}); }
     for (const nm of selected().slice(0, 6)) {
       if (nm === xVar) continue;  // already shown as the x-axis line, above
       const vs = D.series[nm]; if (!vs) continue;
@@ -2547,7 +2559,7 @@ function drawMarks(frag) {
   const [a, b] = [Math.min(...marks), Math.max(...marks)];
   const lines = [{t: "Δt = " + fmt(toT(T[b] - T[a])) + " " + tUnit() + "   (" + fmt(toT(T[a])) + " → " + fmt(toT(T[b])) + ")", dim: false}];
   if (xVar) { const u = unitOf(xVar), xs = seriesOf(live, xVar);
-    if (xs) lines.push({t: "Δ" + xVar + " = " + fmt(disp(xs[b], u) - disp(xs[a], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: false}); }
+    if (xs) lines.push({t: "Δ" + varLabel(xVar) + " = " + fmt(disp(xs[b], u) - disp(xs[a], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: false}); }
   // The interval in the shown time unit, for the average rate across it: the secant slope, which
   // is what "how fast did it rise between these two points" asks -- a roast's rate of rise, say.
   const dt = toT(T[b] - T[a]);
@@ -2932,18 +2944,25 @@ function paintXAxis() {
   document.getElementById("axx").parentNode.firstChild.textContent = labs[0];
   document.getElementById("axylab").firstChild.textContent = labs[1];
   if (labs[2]) document.getElementById("axzlab").firstChild.textContent = labs[2];
+  // Time is a coordinate only in the Cartesian 3D view, on any of the three axes: a trajectory
+  // tube over time (two variables and t). A tube is a Cartesian idea, so t stays out of the
+  // cylindrical/spherical slots (r/theta) and out of the flat xy plot, where a variable against
+  // t is just the time view its own mode owns.
+  const tOK = mode === "xyz" && coords === "cartesian";
   const fill = (id, value) => {
     const s = document.getElementById(id);
-    s.replaceChildren(...names.map((nm) => { const o = document.createElement("option"); o.value = nm;
-      const u = dispUnit(unitOf(nm)); o.textContent = nm + (u ? " (" + u + ")" : ""); return o; }));
+    const choices = tOK ? [T_AXIS, ...names] : names;
+    s.replaceChildren(...choices.map((nm) => { const o = document.createElement("option"); o.value = nm;
+      const u = dispUnit(unitOf(nm)); o.textContent = varLabel(nm) + (u ? " (" + u + ")" : ""); return o; }));
     s.value = value || "";
   };
-  if (xVar && !names.includes(xVar)) { xVar = null; xwin = null; }
+  const valid = (nm) => (tOK && nm === T_AXIS) || names.includes(nm);
+  if (xVar && !valid(xVar)) { xVar = null; xwin = null; }
   if (polar) { defaultPolar(); fill("axx", xVar); fill("axy", thVar); }
   else if (mode === "xy") fill("axx", xVar);
   if (mode === "xyz") {
     const dflt = defaultAxes();
-    ax3 = ax3.map((nm, i) => (names.includes(nm) ? nm : dflt[i]));
+    ax3 = ax3.map((nm, i) => (valid(nm) ? nm : dflt[i]));
     fill("axx", ax3[0]); fill("axy", ax3[1]); fill("axz", ax3[2]);
   }
 }
