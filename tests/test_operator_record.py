@@ -76,3 +76,37 @@ def test_operator_still_needs_a_kind_after_it() -> None:
     """A bare `operator` that is not a class start is still refused, not silently accepted."""
     with pytest.raises(ModelicaSyntaxError):
         parse("model M\n  Real x = operator;\nequation\n  x = 1;\nend M;\n", "<test>")
+
+
+BARE_OPERATOR = """\
+operator record Complex
+  Real re;
+  Real im;
+  encapsulated operator '+'
+    function add
+      input Complex a;
+      input Complex b;
+      output Complex c;
+    algorithm
+      c := a;
+    end add;
+  end '+';
+end Complex;
+"""
+
+
+def test_a_quoted_identifier_is_a_name() -> None:
+    """`'a b'`: a name spelled with an operator or a space; the quotes are kept, so it round-trips."""
+    program = parse("model M\n  Real 'a b'(start = 1);\nequation\n  der('a b') = -'a b';\nend M;\n")
+    m = program.find("M")
+    assert m is not None
+    assert m.components[0].name == "'a b'"
+    assert parse(unparse(program)) == program  # the quotes survive the printer
+
+
+def test_a_bare_operator_class_reads_as_a_container() -> None:
+    """`operator '+'`, an overload group, reads as a package (never instantiated) so Complex loads."""
+    complex_record = parse(BARE_OPERATOR, "<test>").classes[0]
+    plus = next(member for member in complex_record.classes if member.name == "'+'")
+    assert plus.restriction == "package"
+    assert parse(unparse(parse(BARE_OPERATOR, "<test>"))) == parse(BARE_OPERATOR, "<test>")

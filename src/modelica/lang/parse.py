@@ -1083,12 +1083,13 @@ class _Parser:
         offset = 0
         while (token := self._ahead(offset)).kind is Kind.KEYWORD and token.text in _ELEMENT_PREFIX:
             offset += 1
-        # `pure`/`impure` and `operator` sit in front of the kind (`pure function`, `operator
-        # record`), so the class keyword is one or two tokens further on.
+        # `pure`/`impure` sit in front of the kind (`pure function`), so the class keyword is a
+        # token further on. `operator` is a class start in its own right -- `operator record`,
+        # `operator function`, or a bare `operator '+'` overload group -- so seeing it is enough.
         if self._ahead(offset).text in ("pure", "impure"):
             offset += 1
         if self._ahead(offset).text == "operator":
-            offset += 1
+            return True
         token = self._ahead(offset)
         return token.kind is Kind.KEYWORD and token.text in _RESTRICTIONS
 
@@ -1111,19 +1112,22 @@ class _Parser:
         # and those files are imported widely, so refusing it blocked a slice of the library.
         if self._accept(Kind.KEYWORD, "pure") is None:
             self._accept(Kind.KEYWORD, "impure")
-        # `operator record` / `operator function`: the class parses as its plain kind so the
-        # file it sits in loads (`Modelica.Units` defines dozens of `operator record` aliases,
-        # and every model that imports `Modelica.Units.SI` needs that file to parse). The
-        # overloading itself -- the `operator function '+'` bodies, in `Complex.mo` -- is a
-        # separate matter, refused where such an operator would be applied.
-        self._accept(Kind.KEYWORD, "operator")
+        # The `operator` classes so a file that defines them loads: `operator record`/`operator
+        # function` parse as their plain kind, and a bare `operator '+'` -- an overload group named
+        # by the operator it overloads -- reads as a package, a namespace it is never instantiated
+        # from. `Modelica.Units` defines dozens of `operator record` aliases behind `SI`, and
+        # `Complex.mo` the bare form; the overloading itself is refused where an operator is applied.
+        operator = self._accept(Kind.KEYWORD, "operator") is not None
         keyword = self.token
         if expandable and not (keyword.kind is Kind.KEYWORD and keyword.text == "connector"):
             raise self._error("`expandable` qualifies only a connector")
-        if keyword.kind is not Kind.KEYWORD or keyword.text not in _RESTRICTIONS:
+        if keyword.kind is Kind.KEYWORD and keyword.text in _RESTRICTIONS:
+            self.at += 1
+            restriction = _RESTRICTIONS[keyword.text]
+        elif operator:
+            restriction = "package"  # a bare operator class: the name follows, no kind keyword
+        else:
             raise self._error(f"expected a class definition, found {keyword.describe()}")
-        self.at += 1
-        restriction = _RESTRICTIONS[keyword.text]
         name = self._expect(Kind.NAME).text
         if self._accept(Kind.OP, "="):
             if self._check(Kind.KEYWORD, "enumeration"):

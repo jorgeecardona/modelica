@@ -42,6 +42,32 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-09, after quoted identifiers and the bare operator class
+
+Two constructs the operator-overloading half of the library needs, both on `Complex.mo` and the
+files that import it. A **quoted identifier**, `'+'` or `'a b'`, is a name spelled with an operator
+or a space; the lexer reads it now, keeping the quotes so it is its own name and round-trips. A
+**bare operator class**, `operator '+' ... end '+'`, is an overload group named by the operator it
+overloads; it reads as a package, a namespace it is never instantiated from, so the file loads. The
+overloading itself is still refused where an operator is applied.
+
+The `unexpected character '` refusal is gone from the work list, and one more example model parses
+end to end (parsed 414 -> 415). The `Complex.mo` chain does not clear yet: it meets its third
+construct, a subscript on an inner component (`c1[i].re`), which the 18 `ComplexBlocks` models now
+share as their blocker.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     12 |  2.8 % |
+| causalized |     10 |  2.3 % |
+| simulated  |      8 |  1.9 % |
+
+`a subscript on an inner component` (30) has become the largest parse blocker, ahead of a type
+alias to an array type (`type QuaternionBase = Real[4]`, part of the 32 `[` refusals). The flatten
+walls are unchanged: a composite component with a value (66), an array shape not known at flatten
+(52), unqualified constants (50). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-09, after an array dimension on the type
 
 `FixedHeatFlow[n] heat` puts the array dimension on the type rather than the name, which is the

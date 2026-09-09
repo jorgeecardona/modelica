@@ -88,6 +88,11 @@ _ESCAPES: Final[dict[str, str]] = {
 
 _STRING = re.compile(r'"(?:[^"\\]|\\.)*"', re.DOTALL)
 
+# A quoted identifier, `'+'` or `'a b'`: any name, including one spelled with an operator or a
+# keyword. The standard library uses it for overloaded operators (`operator function '+'`). The
+# quotes are kept in the token, so it is a distinct name from the bare form and round-trips.
+_QIDENT = re.compile(r"'(?:[^'\\]|\\.)*'")
+
 # Order matters: a real literal must be tried before an integer, and the two-character
 # operators before the one-character ones.
 _TOKEN = re.compile(
@@ -137,7 +142,9 @@ def _advance(chunk: str, line: int, line_start: int, position: int) -> tuple[int
     return line + newlines, position - trailing
 
 
-def tokenize(source: str, filename: str = "<modelica>") -> list[Token]:
+def tokenize(source: str, filename: str = "<modelica>") -> list[Token]:  # noqa: C901 -- one branch
+    # per lexeme kind (block comment, string, quoted identifier, the rest); the branches are the
+    # grammar of a token, not tangled control flow.
     """Split Modelica source into tokens, dropping whitespace and comments."""
     tokens: list[Token] = []
     position, line, line_start = 0, 1, 0
@@ -159,6 +166,15 @@ def tokenize(source: str, filename: str = "<modelica>") -> list[Token]:
                 raise error(source, filename, line, column, "unterminated string")
             chunk, position = quoted.group(), quoted.end()
             tokens.append(Token(Kind.STRING, _unescape(chunk[1:-1]), line, column))
+            line, line_start = _advance(chunk, line, line_start, position)
+            continue
+
+        if source[position] == "'":
+            named = _QIDENT.match(source, position)
+            if named is None:
+                raise error(source, filename, line, column, "unterminated quoted identifier")
+            chunk, position = named.group(), named.end()
+            tokens.append(Token(Kind.NAME, chunk, line, column))  # quotes kept: `'+'` is a name
             line, line_start = _advance(chunk, line, line_start, position)
             continue
 
