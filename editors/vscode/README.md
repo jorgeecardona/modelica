@@ -80,7 +80,11 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   or Lorenz's z against x; `⇄` swaps x with the first drawn variable. A few arrowheads along the
   live run's curve point the way time runs, and a hollow ring marks where the trajectory begins and
   a filled dot where it ends, so a decaying spiral shows its start at the rim and its rest at the
-  centre. `xyz` (offered with three
+  centre. A `coords` menu reads the two slots as **polar** -- a radius and an angle -- and draws the
+  plane the trajectory lives in, on a real polar grid: concentric circles at round radii and spokes
+  every 30 degrees (labelled in degrees or as fractions of pi, following the angle toggle), the
+  origin at the centre. SchwarzschildOrbit's r and phi become its precessing rosette, the perihelion
+  and aphelion read straight off the circles. `xyz` (offered with three
   or more variables) is the **3D phase view**: three slots pick the axes, defaulting to the
   first three states -- Lorenz's x, y, z, the butterfly -- with each option showing its unit
   and `⇄` swapping x and y. The trajectory is coloured by time (blue to orange, with a small

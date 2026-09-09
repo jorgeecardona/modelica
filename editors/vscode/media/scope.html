@@ -976,6 +976,14 @@ function rateScale(unit) { return timeMode === "min" && isRate(unit) ? 60 : 1; }
 // on both the value and its rate. `rad/s` becomes `°/s`.
 const RAD2DEG = 180 / Math.PI;
 function angleScale(unit) { return angleMode === "deg" && baseOf(unit) === "rad" ? RAD2DEG : 1; }
+// A polar spoke's label at a whole number of degrees: "30°" in degree mode, else the same angle in
+// radians as a tidy fraction of pi ("π/6", "2π/3", "π"), since a multiple of 30° is a sixth of pi.
+function angleLabel(deg) {
+  if (angleMode === "deg") return deg + "°";
+  if (deg === 0) return "0";
+  const g = (a, b) => (b ? g(b, a % b) : a), d = g(deg, 180), num = deg / d, den = 180 / d;
+  return (num === 1 ? "" : num) + "π" + (den === 1 ? "" : "/" + den);
+}
 function disp(v, unit) {
   if (v === null || v === undefined || !isFinite(v)) return v;
   if (isRate(unit)) { const c = affineOf(baseOf(unit)); return v * (c ? c.a : 1) * rateScale(unit) * angleScale(unit); }
@@ -1423,7 +1431,7 @@ function drawPolar(frag) {
   const rName = xVar, thName = thVar;
   const M = {l: 48, r: 16, t: 18, b: 26};
   const wpx = box.w - M.l - M.r, hpx = box.h - M.t - M.b;
-  let xlo = Infinity, xhi = -Infinity, ylo = Infinity, yhi = -Infinity;
+  let maxR = 0;
   const runs = [];
   for (let ri = 0; ri < RUNS.length; ri++) {
     const rs = seriesOf(ri, rName), ts = seriesOf(ri, thName);
@@ -1432,33 +1440,34 @@ function drawPolar(frag) {
     for (let k = 0; k < n; k++) {
       const rv = rs[k], tv = ts[k];
       if (rv === null || tv === null || !isFinite(rv) || !isFinite(tv)) { pts.push(null); continue; }
-      const x = rv * Math.cos(tv), y = rv * Math.sin(tv);
-      pts.push({x: x, y: y});
-      if (x < xlo) xlo = x; if (x > xhi) xhi = x; if (y < ylo) ylo = y; if (y > yhi) yhi = y;
+      pts.push({x: rv * Math.cos(tv), y: rv * Math.sin(tv)});
+      if (Math.abs(rv) > maxR) maxR = Math.abs(rv);  // radius from the origin, = hypot(x, y)
     }
     runs.push({ri: ri, pts: pts});
   }
-  if (!isFinite(xlo) || !isFinite(ylo)) { foot.textContent = "polar needs a radius and an angle that both have data"; return; }
-  // Keep the origin in frame -- it is what the radius is measured from (the central body).
-  xlo = Math.min(xlo, 0); xhi = Math.max(xhi, 0); ylo = Math.min(ylo, 0); yhi = Math.max(yhi, 0);
-  const cx = (xlo + xhi) / 2, cy = (ylo + yhi) / 2;
-  const half = Math.max((xhi - xlo) / 2, (yhi - ylo) / 2, 1e-9) * 1.08; // equal aspect, 8% pad
-  const s = Math.min(wpx, hpx) / (2 * half);                            // same pixels-per-unit both ways
-  const ox = M.l + wpx / 2, oy = M.t + hpx / 2;
-  const PX = (x) => ox + (x - cx) * s, PY = (y) => oy - (y - cy) * s;
+  if (!(maxR > 0)) { foot.textContent = "polar needs a radius and an angle that both have data"; return; }
+  // A real polar frame: the origin (the centre the radius is measured from) is the centre of the
+  // plot, and the extent is the largest radius reached, so distance from the centre reads as the
+  // radius and the angle reads off the spokes.
+  const half = maxR * 1.08;                          // 8% pad past the farthest point
+  const s = Math.min(wpx, hpx) / (2 * half);         // pixels per unit, equal both ways
+  const ox = M.l + wpx / 2, oy = M.t + hpx / 2;      // the origin sits at the frame centre
+  const PX = (x) => ox + x * s, PY = (y) => oy - y * s;
   frag.appendChild(el("rect", {x: M.l, y: M.t, width: wpx, height: hpx, fill: "none", stroke: "var(--line)", "stroke-width": 1}));
-  const u = unitOf(rName);
-  for (const gx of ticks(cx - half, cx + half, 6)) {
-    const px = PX(gx); if (px < M.l - 0.5 || px > box.w - M.r + 0.5) continue;
-    frag.appendChild(el("line", {class: "grid", x1: px, x2: px, y1: M.t, y2: box.h - M.b}));
-    frag.appendChild(el("text", {class: "tick", x: px, y: box.h - M.b + 12, "text-anchor": "middle"}, tickLabel(disp(gx, u), 2 * half)));
+  const u = unitOf(rName), outer = maxR * s;
+  const radii = ticks(0, maxR, 5).filter((r) => r > 0);
+  // Concentric circles at round radii, the radius labelled once along the eastward spoke.
+  for (const gr of radii) {
+    frag.appendChild(el("circle", {class: "grid", cx: ox, cy: oy, r: gr * s, fill: "none"}));
+    frag.appendChild(el("text", {class: "tick", x: ox + gr * s + 2, y: oy - 2, "text-anchor": "start"}, tickLabel(disp(gr, u), 2 * maxR)));
   }
-  for (const gy of ticks(cy - half, cy + half, 6)) {
-    const py = PY(gy); if (py < M.t - 0.5 || py > box.h - M.b + 0.5) continue;
-    frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r, y1: py, y2: py}));
-    frag.appendChild(el("text", {class: "tick", x: M.l - 4, y: py + 3, "text-anchor": "end"}, tickLabel(disp(gy, u), 2 * half)));
+  // Angular spokes every 30 degrees, from the origin to the rim, labelled in the angle unit.
+  for (let deg = 0; deg < 360; deg += 30) {
+    const a = deg * Math.PI / 180, ex = ox + Math.cos(a) * outer, ey = oy - Math.sin(a) * outer;
+    frag.appendChild(el("line", {class: "grid", x1: ox, y1: oy, x2: ex, y2: ey}));
+    frag.appendChild(el("text", {class: "tick", x: ox + Math.cos(a) * (outer + 11), y: oy - Math.sin(a) * (outer + 11) + 3, "text-anchor": "middle"}, angleLabel(deg)));
   }
-  frag.appendChild(el("circle", {cx: PX(0), cy: PY(0), r: 3.2, fill: "var(--dim)"}));
+  frag.appendChild(el("circle", {cx: ox, cy: oy, r: 3.2, fill: "var(--dim)"}));
   const live = RUNS.length - 1;
   for (const run of runs) {
     const st = runStyle(run.ri);
