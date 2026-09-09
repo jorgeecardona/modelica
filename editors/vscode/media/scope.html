@@ -474,6 +474,7 @@
               <div class="hk"><b>double-click</b><span>reset the zoom, the marks and the level lines</span></div>
               <div class="hk"><b>c</b><span>copy the readout (a mark's values, the two-mark measurement, or the cursor values) to the clipboard</span></div>
               <div class="hk"><b>space</b><span>play the cursor through time so a field's profile inset animates; press again to pause</span></div>
+              <div class="hk"><b>1 / 2 / 3</b><span>switch the plot: against time, a phase plot, three axes</span></div>
               <div class="hk"><b>drag · wheel (3D)</b><span>rotate the camera · zoom, in the xyz view</span></div>
             </div>
             <div>
@@ -3488,6 +3489,13 @@ document.addEventListener("keydown", (e) => {
   if (e.key === " " && !typing) { e.preventDefault(); togglePlay(); }
   if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing && panWindow(e.key === "ArrowLeft" ? -1 : 1)) {
     e.preventDefault();
+  }
+  // 1 / 2 / 3 switch the plot mode, in the order the buttons sit: against time, a phase plot,
+  // three axes. `3` needs three variables to fill the axes, the same gate the button has, so it
+  // does nothing on a smaller model rather than snapping to a degenerate view.
+  if (!typing && (e.key === "1" || e.key === "2" || e.key === "3")) {
+    const target = { "1": "t", "2": "xy", "3": "xyz" }[e.key];
+    if (target !== "xyz" || names.length >= 3) { e.preventDefault(); setMode(target); }
   }
 });
 // `c` copies the readout to the clipboard as plain text: the two-mark measurement if a pair is

@@ -72,7 +72,7 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   physical unit share a strip and a scale, so the temperatures sit together and mass on its
   own), or `split` (one strip per variable). A single open `.mo` opens on its states grouped by
   unit, so nothing is crushed.
-- **Plot mode, `t · xy · xyz`.** `t` draws the variables against time; **log t** (shown in
+- **Plot mode, `t · xy · xyz`** (or press **1 · 2 · 3**). `t` draws the variables against time; **log t** (shown in
   that mode) puts time on a log axis for a stiff run over a long horizon (E5 runs to 1e13 s
   and finishes its kinetics by 1e3, which a linear axis puts in one pixel column; the ticks
   become the decades). `xy` is a **phase plot**: the `x` slot picks the variable on the x axis
