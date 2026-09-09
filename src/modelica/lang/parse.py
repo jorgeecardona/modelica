@@ -1035,12 +1035,16 @@ class _Parser:
         self._refuse_unsupported()
 
         type_name = self._type_name()
+        # An array dimension may sit on the type, shared by every name in the clause:
+        # `FixedHeatFlow[n] heat` is `FixedHeatFlow heat[n]`. The specification puts a name's own
+        # dimensions before the type's (`Real[3] x[2]` is `x[2, 3]`), so they concatenate that way.
+        type_dimensions = self._bracketed()
         declared: list[ir.Component] = []
         constraining = ""
         while True:
             named = self._expect(Kind.NAME)
             name = named.text
-            dimensions = self._bracketed()
+            dimensions = self._bracketed() + type_dimensions
             modification = self._modification()
             # `Sensor s if useSensor;` -- in a declaration the keyword can only start the
             # condition-attribute, so there is nothing to disambiguate.

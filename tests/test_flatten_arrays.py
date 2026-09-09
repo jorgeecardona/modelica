@@ -150,6 +150,33 @@ def test_a_component_array_expands_into_instances() -> None:
     assert [v.name for v in model.variables] == ["c[1].v", "c[2].v"]
 
 
+def test_an_array_dimension_may_sit_on_the_type() -> None:
+    """`Cell[2] c` is `Cell c[2]`: the dimension on the type is shared by every name in the clause.
+
+    The MSL writes `FixedHeatFlow[n] heat` this way. The specification puts a name's own
+    dimensions before the type's, so `Real[3] x[2]` is `x[2, 3]`.
+    """
+    source = (
+        "package P\n"
+        "  model Cell\n"
+        "    Real v;\n"
+        "  equation\n"
+        "    der(v) = -v;\n"
+        "  end Cell;\n"
+        "  model M\n"
+        "    Cell[2] c;\n"
+        "  end M;\n"
+        "end P;\n"
+    )
+    model = flatten([parse(source)], "P.M")
+    assert [v.name for v in model.variables] == ["c[1].v", "c[2].v"]
+    # A name's own dimensions come first, then the type's: `Real[3] x[2]` is `x[2, 3]`.
+    two_by_three = flat("Real[3] x[2](each start = 0);\nequation\n  der(x) = -x;\n")
+    assert [v.name for v in two_by_three.variables] == [
+        f"x[{i}, {j}]" for i in (1, 2) for j in (1, 2, 3)
+    ]
+
+
 # --------------------------------------------------------------------------------------
 # What stays refused, and why each one has to be
 # --------------------------------------------------------------------------------------

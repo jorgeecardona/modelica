@@ -42,6 +42,30 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-09, after an array dimension on the type
+
+`FixedHeatFlow[n] heat` puts the array dimension on the type rather than the name, which is the
+same declaration as `FixedHeatFlow heat[n]` and the Fluid examples write it that way. The clause
+reads a dimension after the type name now, shared by every name in it; a name's own dimensions
+come first, so `Real[3] x[2]` is `x[2, 3]`, per the specification. The flattener already expands an
+array of components, so nothing below the parser changed.
+
+`Modelica.Fluid.Examples.BranchingDynamicPipes` and its neighbours parse now (parsed 412 -> 414).
+Reachability holds at eight. Two of the three `[` refusals remain and are separate constructs: a
+type alias to an array type (`type QuaternionBase = Real[4]`) and a subscripted assignment target
+in an algorithm (`a[1] := 1`).
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    414 | 96.3 % |
+| flattened  |     12 |  2.8 % |
+| causalized |     10 |  2.3 % |
+| simulated  |      8 |  1.9 % |
+
+The flatten walls that lead the work list are unchanged: a composite component that carries a value
+(66), an array shape not known at flatten time (52), and unqualified constants in an equation
+(`pi`, `eps`, 50). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-09, after `pure`/`impure` and external functions parse
 
 Two function-declaration constructs, both on the utility libraries, both cleared from the work
