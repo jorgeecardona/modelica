@@ -6,6 +6,16 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `examples/MixingRing`: **a closed ring of stirred tanks, a conservation law written with array
+  reductions.** N tanks are pumped one way around a loop, each fed from its predecessor and draining
+  to its successor at the same rate, `der(c[i]) = k * (c[i-1] - c[i])` with the predecessor wrapping
+  around. Every row of the transport matrix sums to zero, so the total `sum(c)` is conserved for all
+  time; the model holds that total as an algebraic variable and it stays at its starting value. A
+  tracer injected in one tank circulates around the loop as it disperses (the transport matrix has a
+  complex-conjugate eigenvalue pair) and settles to the common mean. It is the first corpus model to
+  put the array reductions on a physical law: `sum(c)` for the conserved total, and `min(c)` in an
+  assert that guards the model's positivity. Linear, so its reference points are exact (scipy DOP853
+  at 1e-12), and both backends hold the total to 1e-9.
 - **Array reductions work in a `when` condition and an assert, not only an equation.** A
   reduction is folded as an equation is scalarised, but a `when` condition and an assert never
   pass through that split, so `when sum(x) < 1` reached the emitter as an untranslated `sum` and

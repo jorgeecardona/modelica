@@ -1,0 +1,75 @@
+summary = "A closed ring of N stirred tanks pumped one way around the loop: each tank is fed from its predecessor and drains to its successor at the same rate, so der(c[i]) = k * (c[i-1] - c[i]) with the predecessor wrapping around periodically. Every row of the transport matrix sums to zero, so the total tracer sum(c) is conserved exactly for all time; the model states that total as an algebraic variable and it stays at its starting value. A tracer injected in one tank (c = {4, 0, 0, 0}) advects around the loop while it disperses -- the transport matrix has a conjugate pair of complex eigenvalues, so the pulse circulates as it decays -- and every tank settles to the common mean, one. It exercises the array reductions on a physical conservation law: sum(c) for the conserved total, and min(c) in an assert that guards the model's positivity (a well-posed mixing model never makes a concentration negative)."
+teaches = ["a closed conservation law written as an array equation: a directed transport ring der(c[i]) = k * (c[i-1] - c[i]) whose rows sum to zero", "sum() over an array as a conserved total, held as an algebraic variable and constant for all time", "min() over an array in an assert, guarding the positivity of a well-posed mixing model", "advection around a loop with dispersion: complex eigenvalues carry the pulse around while it relaxes to the uniform mean"]
+requires = []
+
+[parse]
+classes = ["MixingRing"]
+
+[flatten]
+model = "MixingRing"
+index = 1
+balanced = true
+# Four states, the tracer concentration in each of the four tanks. `total` is algebraic, solved
+# from the states by total = sum(c), so it is not a state.
+states = ["c[1]", "c[2]", "c[3]", "c[4]"]
+
+# Reference points from scipy's DOP853 at rtol = atol = 1e-12. The pulse starts in tank 1 and
+# travels around the loop as it spreads: at t = 0.5 it is mostly still in tanks 1 and 2, by t = 2
+# the peak has moved to tank 2, and by t = 6 every tank is within a percent of the mean, one.
+[simulate]
+stop = 6.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 0.5
+values = { "c[1]" = 2.4324409016, "c[2]" = 1.2136931353, "c[3]" = 0.3033179807, "c[4]" = 0.0505479824 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 1.0
+values = { "c[1]" = 1.5328675039, "c[2]" = 1.4837844681, "c[3]" = 0.7378030625, "c[4]" = 0.2455449655 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 2.0
+values = { "c[1]" = 0.9056769389, "c[2]" = 1.2278044107, "c[3]" = 1.1309543389, "c[4]" = 0.7355643115 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 3.0
+values = { "c[1]" = 0.9039011040, "c[2]" = 1.0115731508, "c[3]" = 1.1010564004, "c[4]" = 0.9834693448 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+[[simulate.point]]
+t = 6.0
+values = { "c[1]" = 1.0047661926, "c[2]" = 0.9986086522, "c[3]" = 0.9952460958, "c[4]" = 1.0013790593 }
+rtol = 1e-7
+atol = 1e-9
+source = "reference"
+
+# The total tracer is conserved: the ring is closed and every row of the transport matrix sums to
+# zero, so sum(c) never leaves its starting value of four. This is the model's `total` variable.
+[[simulate.invariant]]
+expr = "total"
+value = 4.0
+atol = 1e-9
+
+# No tank ever goes negative and none exceeds the four it started with: the system is positive, so
+# each concentration stays inside [0, 4] the whole run. (Tank 1 starts full and only ever loses.)
+[[simulate.invariant]]
+expr = "c[1]"
+min = -1e-6
+max = 4.000001
+
+[[simulate.invariant]]
+expr = "c[2]"
+min = -1e-6
+max = 4.000001

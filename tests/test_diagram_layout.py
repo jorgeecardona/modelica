@@ -72,6 +72,7 @@ FLAT = {
     "Lorenz",
     "LotkaVolterra",
     "MagLev",
+    "MixingRing",
     "NewtonCooling",
     "Pendulum",
     "PhaseChange",
