@@ -471,6 +471,7 @@
               <div class="hk"><b>wheel</b><span>zoom the x window in and out around the pointer (the camera, in 3D)</span></div>
               <div class="hk"><b>+ / −</b><span>zoom the window in and out about its middle, from the keyboard</span></div>
               <div class="hk"><b>← / →</b><span>pan the zoomed time window left or right</span></div>
+              <div class="hk"><b>, / .</b><span>step the reading cursor one sample back or forward (shift for a coarse jump); then c copies its values</span></div>
               <div class="hk"><b>click</b><span>drop a mark to read every variable's value there; a second click reads Δ, the average rate and ∫ between the two</span></div>
               <div class="hk"><b>shift-click</b><span>drop a level line and read off where each curve crosses it</span></div>
               <div class="hk"><b>drag the ⇥ marker</b><span>move the stop time and re-run to there</span></div>
@@ -2145,9 +2146,18 @@ function heatGrid(frag, j, g, topY) {
   return iy + ih;
 }
 function cursor(v) {
-  const j = nearestIndex(v);
+  cursorAt(nearestIndex(v));
+}
+// Render the reading cursor at a specific sample index: the vertical line, a dot on every drawn
+// curve, the footer (the phase variable, the instant, any event under it) and the legend values at
+// `j`. Split out of `cursor(v)` -- which finds the index nearest a pointer x -- so the keyboard can
+// step the cursor by index, where going through a value would not round-trip on a phase plot that
+// revisits an x. `T[j]` is the x fallback for a phase sample with no x of its own (a pen-lift);
+// against time `xOfRun` always has one, so it is never reached there.
+function cursorAt(j) {
   cursorIndex = j;
-  const x = X(xOfRun(RUNS.length - 1, j) ?? v);
+  const xv = xOfRun(RUNS.length - 1, j);
+  const x = X(xv === null || xv === undefined || !isFinite(xv) ? T[j] : xv);
   const frag = document.createDocumentFragment();
   frag.appendChild(el("line", {class: "cursor", x1: x, x2: x, y1: M.t, y2: box.h - M.b}));
   // A dot where each drawn variable crosses the cursor, in every scale: the strip modes place it
@@ -3586,6 +3596,16 @@ document.addEventListener("keydown", (e) => {
     } else if (zoomWindow(zoomIn ? 1 / 1.15 : 1.15, windowCentre())) {
       e.preventDefault();
     }
+  }
+  // , and . step the reading cursor one sample back and forward, the keyboard partner to hovering:
+  // land it on a point, read the values in the legend, press c to copy -- all without the mouse.
+  // Shift steps in a coarser stride so a long run is crossed in a few presses. From no cursor, .
+  // starts at the first sample and , at the last. Not in 3D, which has its own cursor.
+  if (!typing && (e.key === "," || e.key === ".") && N > 0 && !view3d) {
+    const stride = e.shiftKey ? Math.max(1, Math.round(N / 50)) : 1;
+    const from = cursorIndex === null ? (e.key === "." ? -1 : N) : cursorIndex;
+    e.preventDefault();
+    cursorAt(Math.max(0, Math.min(N - 1, from + (e.key === "." ? stride : -stride))));
   }
 });
 // `c` copies the readout to the clipboard as plain text: the two-mark measurement if a pair is

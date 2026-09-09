@@ -141,7 +141,9 @@ over the chart listing them all -- so the ones below need not be memorised.
   the display units, at the nearest sample: a line marks the instant and a dot sits on each
   variable's curve where it crosses -- in every scale, the by-unit and split strips included,
   each dot on its own strip -- and the values appear beside each variable in the legend, and,
-  while the legend is hidden in a narrow pane, in the footer instead.
+  while the legend is hidden in a narrow pane, in the footer instead. The **`,` / `.` keys** step
+  that cursor one sample back or forward without the mouse (**shift** for a coarser stride), so you
+  can land on a point, read its values in the legend, and press **c** to copy them.
 - **Measurement marks.** Click the chart to place a mark at the nearest sample; click again
   for a second, and a readout shows Δt, and for every drawn variable its two values, their
   change, the **average rate** across the interval -- the secant slope, `Δvar/Δt`, in the
