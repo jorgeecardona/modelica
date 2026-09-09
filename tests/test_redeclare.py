@@ -278,3 +278,37 @@ def test_the_python_front_end_writes_an_element_redeclaration() -> None:
     declaration = build.redeclared(build.Real(start=1))
     assert declaration.redeclaring
     assert not build.Real(start=1).redeclaring
+
+
+# --------------------------------------------------------------------------------------
+# An identical re-statement of an inherited component is the same element, not a clash
+# --------------------------------------------------------------------------------------
+
+
+def test_a_derived_class_may_restate_an_inherited_component_identically() -> None:
+    """MSL's ``TwoPin`` declares ``omega`` that its base ``TwoPinElementary`` already has.
+
+    A component re-declared identically in a derived class is the same variable, not a name clash,
+    so flattening keeps it once rather than refusing the model. A description or a diagram placement
+    is cosmetic and does not make the two differ.
+    """
+    source = (
+        'model Base\n  Real omega "ang vel";\nequation\n  omega = 1;\nend Base;\n'
+        'model M\n  extends Base;\n  Real omega "ang vel";\nend M;\n'
+    )
+    assert [v.name for v in flatten(parse(source), "M").variables] == ["omega"]
+    cosmetic = (
+        'model Base\n  Real omega "one";\nequation\n  omega = 1;\nend Base;\n'
+        'model M\n  extends Base;\n  Real omega "another";\nend M;\n'
+    )
+    assert [v.name for v in flatten(parse(cosmetic), "M").variables] == ["omega"]
+
+
+def test_a_restatement_that_differs_is_still_a_clash() -> None:
+    """Only an identical re-statement is merged: a different type is a genuine conflict."""
+    source = (
+        "model Base\n  Real x;\nequation\n  x = 1;\nend Base;\n"
+        "model M\n  extends Base;\n  Integer x;\nend M;\n"
+    )
+    with pytest.raises(FlattenError, match="declares 'x' twice"):
+        flatten(parse(source), "M")

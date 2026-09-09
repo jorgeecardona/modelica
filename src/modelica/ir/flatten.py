@@ -253,6 +253,19 @@ class Effective:
     initial_equations: list[ir.Equation] = field(default_factory=list[ir.Equation])
 
 
+def _same_declaration(a: ir.Component, b: ir.Component) -> bool:
+    """Whether two component declarations are the same element written twice, not a name clash.
+
+    A derived class may re-state a component its base already declares, identically -- MSL's
+    ``TwoPin`` declares ``SI.AngularVelocity omega`` that its base ``TwoPinElementary`` already has.
+    That is the same variable, not a conflict, so flattening accepts it. A description or a diagram
+    placement is cosmetic and left out of the comparison; everything semantic (the type, the
+    modification, the prefixes) is kept, so a re-statement that actually differs is still a clash.
+    """
+    blank: dict[str, object] = {"comment": "", "annotation": ir.EMPTY}
+    return replace(a, **blank) == replace(b, **blank)
+
+
 def effective(found: Found, scope: Scope) -> Effective:
     inner = scope.inside(found)
     result = Effective()
@@ -287,7 +300,13 @@ def effective(found: Found, scope: Scope) -> Effective:
             member, ir.Modification(redeclare=replacement), inner, (replacement.name,)
         )
     for component in found.cls.components:
-        if component.name in result.members:
+        existing = result.members.get(component.name)
+        if existing is not None:
+            # An identical re-statement of an inherited component is the same element, not a clash,
+            # so it is kept once (the inherited member, whose extends-chain modifications survive).
+            # A declaration that differs is a genuine conflict and still refused.
+            if _same_declaration(existing.component, component):
+                continue
             raise FlattenError(f"{found.cls.name} declares {component.name!r} twice")
         result.members[component.name] = Member(component, inner)
     result.equations += found.cls.equations

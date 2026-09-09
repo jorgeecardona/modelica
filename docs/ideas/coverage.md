@@ -42,6 +42,35 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after an identical re-statement of an inherited component is accepted
+
+A derived class may declare a component its base already declares, identically: MSL's
+`Electrical.QuasiStatic...Interfaces.TwoPin` declares `SI.AngularVelocity omega`, which its base
+`TwoPinElementary` already has, and the power-converter `HBridge` does the same with `fire_p`. That is
+the same variable written twice, not a name clash, and the tools accept it. Flattening refused it,
+"declares 'omega' twice", because a component whose name matched an inherited member was rejected
+outright. It now compares the two declarations: identical but for a description or a diagram placement
+is the same element, kept once; a declaration that actually differs (a different type) is still a
+clash.
+
+The "declares twice" refusals fall from 12 to 3 -- the 3 that remain are the diamond case, a name
+inherited through two `extends` paths (`inherits 'CellType' twice`), which is a separate merge. The
+stage counts hold at 47 flattened and 14 simulated: the models that clear this wall (the quasi-static
+resonance examples, the H-bridge drives) meet the next one right after -- a `connect` to a signal with
+two sources, a subscript on an inner component in `Complex`, a condition not known at flatten -- so the
+frontier moves without the tally moving.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     47 | 10.9 % |
+| causalized |     19 |  4.4 % |
+| simulated  |     14 |  3.3 % |
+
+The leaders are unchanged: a composite component with a value (70), the `Clock` builtin (62), an array
+shape not known at flatten (52), a subscript on an inner component and a type alias to an array type in
+parse (32 each), and a condition not known at flatten (31). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-09, after an enumeration literal in an if-equation condition resolves
 
 The condition of a structural `if`-equation was prefixed but not put through the rewrite that turns an
