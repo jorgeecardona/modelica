@@ -6,6 +6,16 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `examples/WaveString`: **the wave equation on a string with fixed ends, the second PDE in the
+  corpus.** A string of length 1 held at both ends, discretised in space by the method of lines --
+  eight interior points, each obeying `u'' = c^2 * (second difference of its neighbours)`, the same
+  recipe `HeatBar` and `TorusHeat` use but for a hyperbolic equation, so the string oscillates
+  instead of decaying. The initial shape is the fundamental mode `sin(pi*x)`, an exact eigenvector
+  of the discrete Laplacian, so the string swings at one frequency: a standing wave with the exact
+  solution `u_i(t) = sin(pi*i/9) cos(omega t)`, `omega = 18 sin(pi/18)`. Linear and undamped, it has
+  that closed form (the reference points are analytic) and a conserved energy, the wave analogue of
+  the Hamiltonian benchmarks. At sixteen states with a tridiagonal Jacobian it is the second model
+  on the sparse-Jacobian path, alongside the 2-D `TorusHeat`.
 - `examples/CoupledOscillators`: **two masses coupled by a spring, written as a state-space system
   `der(z) = A * z`.** The first corpus model in the matrix-ODE form the array-product feature added:
   the whole right-hand side is one matrix-vector multiply, the companion matrix `A` carrying the

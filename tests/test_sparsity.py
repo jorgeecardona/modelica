@@ -119,15 +119,21 @@ def test_a_stencil_is_tridiagonal_and_the_pattern_says_so() -> None:
     assert all(set(row) <= {index - 1, index, index + 1} for index, row in enumerate(pattern))
 
 
-def test_only_the_grid_model_takes_the_sparse_path() -> None:
-    """Exactly one model crosses the 16-state threshold onto the sparse path.
+#: The corpus models big and sparse enough to cross the 16-state threshold onto the sparse path:
+#: ``TorusHeat``, the 64-state 2-D grid stencil, and ``WaveString``, the 16-state 1-D tridiagonal
+#: string. Both are method-of-lines discretisations, one a 2-D heat equation and the other a 1-D
+#: wave equation, so the sparse path is exercised on both shapes of stencil.
+SPARSE_MODELS: frozenset[str] = frozenset({"TorusHeat", "WaveString"})
+
+
+def test_only_the_grid_models_take_the_sparse_path() -> None:
+    """Exactly the method-of-lines models cross the 16-state threshold onto the sparse path.
 
     Every hand-sized model is under it and stays dense, so its reference points come through the
-    same linear algebra they always did; ``TorusHeat``, the 64-state 2-D stencil, is the one that
-    crosses over. Asserted in both directions: a small model quietly switching to sparse would
-    change the numerics under an existing reference point, and the grid model failing to switch
-    would mean the corpus is not exercising the sparse path at all -- its references were taken
-    on it.
+    same linear algebra they always did; the two discretised PDEs cross over. Asserted in both
+    directions: a small model quietly switching to sparse would change the numerics under an
+    existing reference point, and a grid model failing to switch would mean the corpus is not
+    exercising the sparse path at all -- its references were taken on it.
     """
     pytest.importorskip("numpy")
     build = pytest.importorskip("modelica.sim.kernel").build
@@ -137,7 +143,7 @@ def test_only_the_grid_model_takes_the_sparse_path() -> None:
         kernel = build(system)
         parameters, _, workspace = kernel.start(0.0)
         plan = run._Run(kernel, parameters, workspace, 1e-6, 1e-6, "Radau")  # noqa: SLF001
-        expected = model.stem == "TorusHeat"
+        expected = model.stem in SPARSE_MODELS
         assert plan.sparse == expected, (
             f"{model.stem}: sparse path is {plan.sparse}, expected {expected}"
         )

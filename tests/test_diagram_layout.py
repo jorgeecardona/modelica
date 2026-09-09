@@ -92,6 +92,7 @@ FLAT = {
     "TorusHeat",
     "TwoTank",
     "VanDerPol",
+    "WaveString",
 }
 
 DRAWN = [m for m in MODELS if m.stem not in FLAT]

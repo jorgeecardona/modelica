@@ -1,0 +1,68 @@
+summary = "The wave equation on a string of length 1 with both ends held fixed, discretised in space by the method of lines: n interior points, each obeying u'' = c^2 * (the second difference of its neighbours), the same recipe HeatBar and TorusHeat use but for a hyperbolic equation rather than a parabolic one, so the string oscillates instead of decaying. The initial shape is the fundamental mode sin(pi*x), an exact eigenvector of the discrete Laplacian with fixed ends, so the string keeps its shape and swings at a single frequency -- a standing wave. On the grid that frequency is omega = (2c/h) sin(pi/(2(n+1))), a hair below the continuum pi*c, and the solution is known in closed form, u_i(t) = sin(pi*i/(n+1)) cos(omega t), which makes it a PDE benchmark with an exact reference. The energy, kinetic plus the spring energy of the grid, is conserved: the wave counterpart of the Hamiltonian benchmarks, and the second PDE in the corpus after the heat equation."
+teaches = ["the wave equation in one dimension by the method of lines, a hyperbolic PDE as a first-order system der(u) = v, der(v) = c^2 * Laplacian(u)", "fixed (Dirichlet) ends by dropping the missing neighbour in the boundary rows", "a standing wave: a discrete Laplacian eigenmode oscillating at an exact closed-form frequency", "a conserved energy for the discretised string, the wave analogue of the Hamiltonian invariant"]
+requires = []
+
+[parse]
+classes = ["WaveString"]
+
+[flatten]
+model = "WaveString"
+index = 1
+balanced = true
+# Sixteen states: the displacement u[1..8] and the velocity v[1..8] of the eight interior points.
+# The ends u[0] and u[9] are held at zero, so they are not states -- the boundary rows der(v[1])
+# and der(v[8]) simply drop the neighbour that would have been there.
+states = [
+  "u[1]", "u[2]", "u[3]", "u[4]", "u[5]", "u[6]", "u[7]", "u[8]",
+  "v[1]", "v[2]", "v[3]", "v[4]", "v[5]", "v[6]", "v[7]", "v[8]",
+]
+
+# Closed form: u_i(t) = sin(pi*i/9) cos(omega t) with omega = 18 sin(pi/18) = 3.1256671980, and the
+# velocities are its derivative. The reference points are that exact form at a few points; Radau
+# tracks them to about 1e-10 over two periods.
+[simulate]
+stop = 4.0
+tolerance = 1e-10
+
+[[simulate.point]]
+t = 0.5
+values = { "u[2]" = 0.0051182887, "u[4]" = 0.0078416732, "u[6]" = 0.0068958517, "v[4]" = -3.0780837044 }
+rtol = 1e-6
+atol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 1.5
+values = { "u[2]" = -0.0153535680, "u[4]" = -0.0235230308, "u[6]" = -0.0206858061, "v[4]" = 3.0773030568 }
+rtol = 1e-6
+atol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 2.5
+values = { "u[2]" = 0.0255849533, "u[4]" = 0.0391984227, "u[6]" = 0.0344705144, "v[4]" = -3.0757419598 }
+rtol = 1e-6
+atol = 1e-8
+source = "analytic"
+
+[[simulate.point]]
+t = 3.5
+values = { "u[2]" = -0.0358098500, "u[4]" = -0.0548638732, "u[6]" = -0.0482464804, "v[4]" = 3.0734008092 }
+rtol = 1e-6
+atol = 1e-8
+source = "analytic"
+
+# The energy is conserved for all time: kinetic 0.5*sum(v[i]^2) plus the spring energy of the grid,
+# 0.5*k*(the squared stretch of every edge, including the two to the fixed ends), with k = c^2/h^2 =
+# 81. It starts at about 21.982 (the fundamental mode's energy, 0.5*omega^2*sum(sin^2)) and stays.
+[[simulate.invariant]]
+expr = "0.5 * (v[1] ^ 2 + v[2] ^ 2 + v[3] ^ 2 + v[4] ^ 2 + v[5] ^ 2 + v[6] ^ 2 + v[7] ^ 2 + v[8] ^ 2) + 0.5 * 81 * (u[1] ^ 2 + (u[2] - u[1]) ^ 2 + (u[3] - u[2]) ^ 2 + (u[4] - u[3]) ^ 2 + (u[5] - u[4]) ^ 2 + (u[6] - u[5]) ^ 2 + (u[7] - u[6]) ^ 2 + (u[8] - u[7]) ^ 2 + u[8] ^ 2)"
+value = 21.9820397
+atol = 1e-5
+
+# No point ever swings past its starting amplitude: the mode only ever oscillates in place, so each
+# displacement stays within the sine that set it.
+[[simulate.invariant]]
+expr = "u[4]"
+min = -1.001
+max = 1.001
