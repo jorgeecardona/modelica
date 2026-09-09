@@ -130,3 +130,32 @@ def test_an_unknown_package_constant_still_fails() -> None:
     )
     with pytest.raises(FlattenError, match="unknown name"):
         flatten(parse(source), "M")
+
+
+def test_a_package_constant_defined_by_another_resolves() -> None:
+    """`D2R = pi / 180` names another constant of the same package, so pi is put in first."""
+    source = (
+        "package P\n"
+        "  package Math\n    function asin\n      input Real x;\n      output Real y;\n"
+        '    external "builtin";\n    end asin;\n  end Math;\n'
+        "  package Constants\n"
+        "    constant Real pi = 2 * P.Math.asin(1.0);\n"
+        "    constant Real deg = pi / 180;\n"
+        "  end Constants;\n"
+        "end P;\n"
+        "model M\n  Real x;\nequation\n  x = P.Constants.deg;\nend M;\n"
+    )
+    equation = unparse_equation(flatten(parse(source), "M").equations[0])[0]
+    assert equation == "x = 0.017453292519943295;"
+
+
+def test_a_cyclic_package_constant_is_not_resolved_and_does_not_loop() -> None:
+    """`a = b + 1; b = a - 1` cannot reduce; the `seen` guard stops the recursion, so it fails."""
+    source = (
+        "package P\n  package Constants\n"
+        "    constant Real a = b + 1;\n    constant Real b = a - 1;\n"
+        "  end Constants;\nend P;\n"
+        "model M\n  Real x;\nequation\n  x = P.Constants.a;\nend M;\n"
+    )
+    with pytest.raises(FlattenError, match="unknown name"):
+        flatten(parse(source), "M")

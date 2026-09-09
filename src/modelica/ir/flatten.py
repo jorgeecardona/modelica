@@ -924,15 +924,51 @@ def _debuiltin(node: ir.Expr) -> ir.Expr:
             return node
 
 
-def _constant_literal(cls: ir.Class, name: str) -> ir.Expr | None:  # noqa: PLR0911 -- one per kind
+def _resolve_local_constants(node: ir.Expr, cls: ir.Class, seen: frozenset[str]) -> ir.Expr:
+    """Substitute a bare reference to a constant of the same package with its value.
+
+    ``D2R = pi / 180`` names ``pi``, another constant beside it, so the value cannot be evaluated
+    until ``pi`` is put in. ``seen`` bounds the recursion: a constant that refers to itself, directly
+    or in a ring, is left unresolved rather than chased forever, and evaluation then fails cleanly.
+    """
+    match node:
+        case ir.Ref(parts=(single,)) if single not in seen:
+            literal = _constant_literal(cls, single, seen)
+            return literal if literal is not None else node
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(
+                op,
+                _resolve_local_constants(lhs, cls, seen),
+                _resolve_local_constants(rhs, cls, seen),
+            )
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _resolve_local_constants(operand, cls, seen))
+        case ir.Call(name=fname, args=args, named=named):
+            args = tuple(_resolve_local_constants(a, cls, seen) for a in args)
+            named = tuple((key, _resolve_local_constants(v, cls, seen)) for key, v in named)
+            return ir.Call(fname, args, named)
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(
+                _resolve_local_constants(condition, cls, seen),
+                _resolve_local_constants(then, cls, seen),
+                _resolve_local_constants(otherwise, cls, seen),
+            )
+        case _:
+            return node
+
+
+def _constant_literal(  # noqa: PLR0911 -- one per kind
+    cls: ir.Class, name: str, seen: frozenset[str] = frozenset()
+) -> ir.Expr | None:
     """A package constant as its value, or ``None`` when it does not reduce to one here.
 
     ``Modelica.Constants.pi`` is a ``constant`` declared in a package, not a component of the model,
     so it cannot be prefixed into a variable; its value is read off the declaration, its qualified
-    builtin calls stripped, and evaluated to a number, then substituted in place -- pi as 3.14159...,
-    eps as 1e-15. A value that will not reduce to a number here -- it names another constant, or a
-    function that is not a builtin -- is left alone, so the reference stays whatever it was and the
-    ordinary "unknown name" report still catches a genuine typo.
+    builtin calls stripped (``Modelica.Math.asin`` as ``asin``), any constant of the same package it
+    names substituted (``D2R = pi / 180``), and evaluated to a number, then put in place -- pi as
+    3.14159..., eps as 1e-15. A value that will not reduce to a number here -- one that names a
+    constant of *another* package, or a function that is not a builtin -- is left alone, so the
+    reference stays whatever it was and the ordinary "unknown name" report still catches a typo.
     """
     for component in cls.components:
         if component.name != name or component.variability != "constant":
@@ -940,8 +976,9 @@ def _constant_literal(cls: ir.Class, name: str) -> ir.Expr | None:  # noqa: PLR0
         value = component.modification.value
         if value is None:
             return None
+        resolved = _resolve_local_constants(_debuiltin(value), cls, seen | {name})
         try:
-            result = evaluate(_debuiltin(value), {})
+            result = evaluate(resolved, {})
         except EvaluationError:
             return None
         if isinstance(result, bool):
