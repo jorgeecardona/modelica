@@ -42,6 +42,41 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-09, after `StateSelect` -- the first models reach simulation
+
+**Reachability moved off zero.** Four example models parse, flatten, causalize and simulate
+end to end, the first that have:
+
+* `Modelica.Mechanics.Rotational.Examples.RollingWheel`
+* `Modelica.Mechanics.Translational.Examples.Damper`
+* `Modelica.Mechanics.Translational.Examples.ElastoGap`
+* `Modelica.Mechanics.Translational.Examples.InitialConditions`
+
+`StateSelect` is a predefined enumeration the language provides but no file declares, a hint on
+which variables a tool should prefer as states. The standard library carries it two ways, and
+both blocked models: as an attribute, `Real x(stateSelect = StateSelect.prefer)`, and as a
+parameter type, `parameter StateSelect ss = StateSelect.default`. The attribute joins the
+accepted set (the hint has no effect here, state selection is not implemented), and the
+enumeration is injected into the flattener as a prelude, so its name resolves and its members
+map to 1..5 like any other enumeration's. That was the last thing between these four Mechanics
+models and a trajectory: they set `stateSelect` on their flange states.
+
+| models | stage | refusal |
+| -----: | ----- | ------- |
+|    139 | parse | `:=` versus `=` inside a `when` statement (the Clocked library) |
+|     59 | flatten | a composite component cannot carry a value |
+|     50 | flatten | an array shape not known at flatten time |
+|     32 | parse | `expected ';', found '['` (an array-valued modification) |
+|     19 | parse | `impure` on a function |
+|     17 | parse | a single-quoted identifier (`'+'`, operator function names) |
+|    ~110 | parse/flatten | the rest; `coverage.json` has every one |
+
+Agreement is still unmeasured (no `omc` on this machine), so what these four produce has not yet
+been checked against a reference. Reaching a trajectory is the first claim; agreeing with a tool
+people trust is the second, and it is the one worth measuring next. The parse frontier is now
+the Clocked library's `:=`/`=`, and the flatten frontier is genuine work: composite-component
+bindings and array equations.
+
 ### 2026-09-09, after the `quantity` attribute is accepted
 
 `quantity` is a descriptive type attribute, like `unit`: `type Voltage = Real(quantity=

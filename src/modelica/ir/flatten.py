@@ -54,6 +54,20 @@ __all__ = [
 
 _PREDEFINED: frozenset[BaseType] = frozenset(("Real", "Integer", "Boolean", "String"))
 
+# Enumerations the language predefines but no file declares. `StateSelect` is the one the
+# standard library leans on: a hint, set as `stateSelect = StateSelect.prefer` or declared
+# `parameter StateSelect`, on which variables a tool should prefer as states. The hint has no
+# effect here -- state selection is not implemented -- but the name has to resolve like any
+# other enumeration, and every electrical and mechanical model carries it. Its members map to
+# 1..5 the way every enumeration's literals do.
+_PRELUDE: tuple[ir.Class, ...] = (
+    ir.Class(
+        name="StateSelect",
+        restriction="type",
+        literals=("never", "avoid", "default", "prefer", "always"),
+    ),
+)
+
 type _Path = tuple[str, ...]
 type _Role = Literal["inside", "outside"]
 
@@ -1547,7 +1561,7 @@ class _ConnectorLeaf:
 # unit="V")` -- the whole `Modelica.Units.SI` type set carries it, so refusing it blocked the
 # electrical and machine libraries wholesale). An attribute outside this set is refused by name.
 _ATTRIBUTES = frozenset(
-    {"start", "fixed", "unit", "min", "max", "nominal", "displayUnit", "quantity"}
+    {"start", "fixed", "unit", "min", "max", "nominal", "displayUnit", "quantity", "stateSelect"}
 )
 
 _FLOOR: dict[ir.Variability, int] = {
@@ -2272,8 +2286,16 @@ class _Flattener:
 # --------------------------------------------------------------------------------------
 
 
+def _with_prelude(program: ir.Program) -> ir.Program:
+    """The program with the predefined enumerations added, where it does not define them itself."""
+    defined = {cls.name for cls in program.classes}
+    missing = tuple(cls for cls in _PRELUDE if cls.name not in defined)
+    return ir.Program(missing + program.classes) if missing else program
+
+
 def flatten(program: ir.Program, model: str) -> FlatModel:
     """Flatten class ``model`` (a dotted name) as found in ``program``."""
+    program = _with_prelude(program)
     scope = Scope(program)
     found = scope.resolve(model)
     if not isinstance(found, Found):
