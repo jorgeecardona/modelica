@@ -766,6 +766,17 @@ function groupMembers(series, base) {
   const pre = base + "[";
   return Object.keys(series).filter((nm) => nm.startsWith(pre));
 }
+// The unit a derived expression carries. A whole-field reduction that preserves the unit -- sum,
+// mean, min or max of one array base (the sum of kelvins is a temperature, so are their mean and
+// extremes) -- takes the field's own unit, so `mean(T)` sits on the temperature strip rather than
+// alone in the dimensionless one. `product` is an n-th power, a different unit, so it and every
+// other expression stay unitless: an arbitrary combination has no single unit to claim.
+function derivedUnit(src) {
+  const m = src.trim().match(/^(sum|mean|min|max)\(\s*([A-Za-z_]\w*)\s*\)$/);
+  if (!m) return "";
+  const members = groupMembers((D && D.series) || {}, m[2]);
+  return members.length ? unitOf(members[0]) : "";
+}
 let derived = [];  // [{src}] -- the expressions, recompiled per model in applyDerived()
 // Compile `src` to a function `(j) => number` over the sample index, reading `series` and `time`.
 // The value a parameter name resolves to inside a derive-box expression: the live run's parameter,
@@ -857,7 +868,7 @@ function applyDerived() {
     for (let j = 0; j < N; j++) { const v = fn(j); arr[j] = isFinite(v) ? v : null; }
     D.series[d.src] = arr;
     if (!names.includes(d.src)) names.push(d.src);
-    if (D.units) D.units[d.src] = "";
+    if (D.units) D.units[d.src] = derivedUnit(d.src);
     if (D.descriptions) D.descriptions[d.src] = "derived: " + d.src;
   }
 }
@@ -1527,8 +1538,8 @@ function draw3d(frag) {
 // (`thVar`), and the trajectory is drawn as (r*cos, r*sin) with equal aspect -- so
 // SchwarzschildOrbit's r and phi become the precessing rosette rather than an r-against-phi zigzag.
 // A dot marks the origin (the centre the radius is measured from), and the live run keeps the time
-// arrows and the start/end rings the Cartesian phase plot has. The cursor readout and the marks are
-// deliberately left off for this first, self-contained version -- switch to Cartesian for those.
+// arrows and the start/end rings the Cartesian phase plot has. Hovering reads a point (polarCursor);
+// the measurement marks are left off this view -- switch to Cartesian for those.
 function drawPolar(frag) {
   const rName = xVar, thName = thVar;
   const M = {l: 48, r: 16, t: 18, b: 26};

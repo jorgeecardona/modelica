@@ -152,7 +152,9 @@ over the chart listing them all -- so the ones below need not be memorised.
   under a flow, the energy under a power. Marks are sample indices, so they work in phase plots too.
 - **Derive.** The `derive` box plots an arithmetic expression in the drawn variables, the model's
   **parameters**, and `pi`, `e`, `t` -- with the usual operators, powers, the elementary functions,
-  an array element by its index (`u[4]`), and a whole-field reduction (`sum(T)`, `mean(u)`). It joins
+  an array element by its index (`u[4]`), and a whole-field reduction (`sum(T)`, `mean(u)`) -- which
+  carries the field's own unit, so `mean(T)` sits on the temperature strip, not off in the
+  dimensionless one. It joins
   the plot as a first-class series: legend, scales, phase axes, cursor and export all treat it as a
   variable. Because parameters resolve, a conservation law can be written in the model's own terms and
   watched holding flat -- RigidBodyFlip's energy `0.5*(inertia1*w1^2 + inertia2*w2^2 + inertia3*w3^2)`,
