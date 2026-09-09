@@ -1,0 +1,83 @@
+summary = "The Kermack-McKendrick SIR model, the equation every account of an epidemic starts from: a population split into susceptible, infected and recovered fractions, with s' = -beta*s*i, i' = beta*s*i - gamma*i, r' = gamma*i. Susceptibles meet infectives and are infected at rate beta*s*i; infectives recover (or are removed) at rate gamma*i. Nobody is created or destroyed, so s + i + r stays at 1 for all time -- the conservation law that makes this a compartmental model, the first invariant, and exactly the sort of quantity the derive box can now plot and watch hold flat. With the basic reproduction number R0 = beta/gamma = 4, the infected fraction climbs to a peak near 0.41 and falls. The peak is not where the susceptibles run out: it is exactly where the susceptible fraction crosses gamma/beta = 1/R0 = 0.25, the level at which each case stops replacing itself, and it happens with three quarters of the population still susceptible. The epidemic then burns out with a fraction s_inf = 0.0196 never infected at all -- it ends because infectives recover faster than they are replaced, not because there is no one left to infect. It is a plain smooth ODE, three states, and it earns its place as the corpus's first compartmental / epidemiological model, distinct from the predator-prey and reaction-kinetics oscillators by being a strictly monotone burn-through with a single conserved total."
+teaches = ["the SIR compartmental model: three coupled rates for susceptible, infected and recovered fractions", "conservation as an invariant: s + i + r = 1 for all time, a linear constant of the motion", "the epidemic threshold: the infected fraction peaks when s crosses gamma/beta = 1/R0, not when susceptibles run out", "the final size: an epidemic ends with a fraction never infected, because recovery outpaces new infection"]
+requires = []
+
+[parse]
+classes = ["SIR"]
+
+[flatten]
+model = "SIR"
+states = ["s", "i", "r"]
+equations = 3
+balanced = true
+
+# The Kermack-McKendrick equations in population fractions:
+#   s' = -beta*s*i,  i' = beta*s*i - gamma*i,  r' = gamma*i.
+# Started at s = 0.99, i = 0.01, the infected fraction rises to a peak near t = 19 (where s crosses
+# gamma/beta = 0.25) and then decays; s falls monotonically to s_inf = 0.0196 and r rises to fill
+# the rest. s + i + r is conserved at 1, checked as an invariant.
+[simulate]
+stop = 80.0
+tolerance = 1e-10
+
+# One point on the way up (t = 10), one at the peak (t = 20), and four down the tail, so the whole
+# epidemic curve is pinned from take-off through burn-out.
+[[simulate.point]]
+t = 10.0
+values = { s = 0.7940742145, i = 0.1507937812, r = 0.05513200429 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 20.0
+values = { s = 0.2260052879, i = 0.4047080755, r = 0.3692866365 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 30.0
+values = { s = 0.05994417935, i = 0.2389830311, r = 0.7010727895 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 40.0
+values = { s = 0.03113522495, i = 0.1040234926, r = 0.8648412824 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 55.0
+values = { s = 0.02206694236, i = 0.0270269888, r = 0.9509060688 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 70.0
+values = { s = 0.0202037317, i = 0.00683686372, r = 0.9729594046 }
+rtol = 1e-6
+source = "reference"
+
+# The conservation law: nobody is created or destroyed, so the three fractions sum to 1 at every
+# instant. Held to 1e-6, far above the drift a non-symplectic step leaves in a linear invariant.
+[[simulate.invariant]]
+expr = "s + i + r"
+value = 1.0
+atol = 1e-6
+
+# Every fraction stays a fraction: in [0, 1] for all time, the sign no rate is allowed to break.
+[[simulate.invariant]]
+expr = "s"
+min = -0.001
+max = 1.001
+
+[[simulate.invariant]]
+expr = "r"
+min = -0.001
+max = 1.001
+
+# The infected fraction peaks near 0.41 and never runs away.
+[[simulate.invariant]]
+expr = "i"
+min = -0.001
+max = 0.41

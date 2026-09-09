@@ -89,6 +89,7 @@ FLAT = {
     "SchwarzschildOrbit",
     "ServoDrive",
     "Setback",
+    "SIR",
     "SphericalPendulum",
     "SyncGenerator",
     "Thermoelectric",
