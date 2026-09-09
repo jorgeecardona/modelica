@@ -42,6 +42,35 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-09, after the `quantity` attribute is accepted
+
+`quantity` is a descriptive type attribute, like `unit`: `type Voltage = Real(quantity=
+"ElectricPotential", unit="V")`. The whole `Modelica.Units.SI` type set carries it, so the
+flattener refusing it as unknown blocked the electrical and machine libraries wholesale. It is
+accepted and ignored now, the way `unit` and `displayUnit` already were: one name added to the
+attribute set.
+
+This was the dominant flatten wall the operator-record change had just exposed (~230 models on
+one attribute). It is gone from the work list, and the models behind it advanced deep into
+flattening, so the frontier is no longer one wall but many smaller ones, spread across the
+libraries that now load:
+
+| models | stage | refusal |
+| -----: | ----- | ------- |
+|    119 | parse | `:=` versus `=` inside a `when` statement (the Clocked library) |
+|     52 | flatten | a composite component cannot carry a value |
+|     48 | flatten | an array shape that is not known at flatten time |
+|     31 | parse | `expected ';', found '['` (an array-valued modification) |
+|     29 | flatten | the `StateSelect` enumeration (`nothing named 'StateSelect'`) |
+|     19 | parse | `impure` on a function |
+|     14 | flatten | the `stateSelect` attribute (the sibling of `quantity`, next) |
+|   ~100 | parse/flatten | the rest; `coverage.json` has every one |
+
+Reachability is still 0 %, because the models now reach real semantic gaps rather than a single
+descriptive attribute. The next cheap win is the pair the electrical library keeps hitting:
+`stateSelect`, another accept-and-ignore attribute, and the `StateSelect` enumeration behind its
+value. After that the walls are genuine work: array equations and composite-component bindings.
+
 ### 2026-09-09, after the `operator` class prefix parses
 
 `operator record` and `operator function` parse now, each as its plain kind (a record, a

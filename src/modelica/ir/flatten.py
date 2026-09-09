@@ -1541,7 +1541,14 @@ class _ConnectorLeaf:
 # The flattener
 # --------------------------------------------------------------------------------------
 
-_ATTRIBUTES = frozenset({"start", "fixed", "unit", "min", "max", "nominal", "displayUnit"})
+# The type attributes a declaration may set. `start`, `fixed`, `min`, `max` and `nominal` reach
+# the numeric model; `unit`, `displayUnit` and `quantity` are descriptive and accepted but not
+# used here (`quantity` names the physical quantity, e.g. `Real(quantity="ElectricPotential",
+# unit="V")` -- the whole `Modelica.Units.SI` type set carries it, so refusing it blocked the
+# electrical and machine libraries wholesale). An attribute outside this set is refused by name.
+_ATTRIBUTES = frozenset(
+    {"start", "fixed", "unit", "min", "max", "nominal", "displayUnit", "quantity"}
+)
 
 _FLOOR: dict[ir.Variability, int] = {
     "continuous": 0,
