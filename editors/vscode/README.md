@@ -216,6 +216,12 @@ over the chart listing them all -- so the ones below need not be memorised.
   **min**, its **peak** (with the time the peak occurs) and its **mean** -- the peak current, the
   mean power, the lowest temperature in the region you are looking at. Zooming the time axis
   narrows the window and the numbers follow it; the heading names the span they cover. Time view only.
+- **Space-time map.** When the drawn set is a 1-D field -- three or more elements of one array,
+  `u[1] … u[16]` -- a heat map of its whole history appears top-right: the spatial index across, time
+  down, the value in colour. A travelling front reads as a diagonal band and a standing wave as a set
+  of stripes, so the shape of the solution is one glance rather than sixteen overlaid lines. The
+  cursor draws a row across it at the instant it is reading, and the hover profile stacks below it.
+  Time view only.
 - **Play.** The **`▶`** button (or the **space** bar) sweeps the cursor through time on its own, so
   a model whose state is an array field animates: the 1-D spatial-profile line and the 2-D heatmap
   that a hover draws now breathe without a hand on the mouse -- a standing wave swinging, a heat

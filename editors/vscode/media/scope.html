@@ -652,6 +652,11 @@ let marks = [];
 // on leave). Whichever is live is copied.
 let lastMeasure = [];
 let cursorIndex = null;
+// The space-time inset's geometry, set by `spaceTime` each frame (null when it does not draw). It
+// carries where the field's history is on screen so the hover profile inset can stack below it
+// (`kymoBottom`) and the cursor can draw a "you are here" row across it (`kymoGeom`).
+let kymoBottom = 0;
+let kymoGeom = null;
 // Level guides: horizontal lines at chosen values, each {value (SI), unit, near}. Placed by a
 // shift-click on a strip; the crossing of each drawn variable with the level reads off "how long
 // to reach it". STRIPS is the per-strip value<->pixel mapping the current draw() built, so a
@@ -1755,6 +1760,9 @@ function draw() {
         "settled " + fmt(toT(s.t)) + " " + tUnit()));
     }
   }
+  // The space-time heat map of a 1-D field, once a frame, on top of the traces (top-right). It sets
+  // where the hover profile inset stacks and where the cursor draws its "you are here" row.
+  spaceTime(frag);
   plot.replaceChildren(frag);
   hud.replaceChildren();
   paintLegend();
@@ -2079,7 +2087,8 @@ function profileInset(frag, j) {
   for (const base in bases) if (bases[base].length >= 3) { bases[base].sort((a, b) => a.i - b.i); lines.push({base: base, els: bases[base]}); }
   const fields = [];
   for (const base in grids) if (grids[base].length >= 4) fields.push({base: base, cells: grids[base]});
-  let y = M.t + 4;
+  // Below the persistent space-time inset when it is showing (a 1-D field draws both), else at the top.
+  let y = kymoBottom || M.t + 4;
   if (lines.length) y = lineProfile(frag, j, lines, y) + 8;
   for (const g of fields) y = heatGrid(frag, j, g, y) + 8;
 }
@@ -2145,6 +2154,54 @@ function heatGrid(frag, j, g, topY) {
   frag.appendChild(el("text", {class: "tick", x: gx + gw, y: by + barH + 9, "font-size": "9px", "text-anchor": "end"}, fmt(hi)));
   return iy + ih;
 }
+// A space-time heat map of a 1-D field: the spatial index runs across, time runs down, the value is
+// the colour -- the standard way to read a 1-D PDE, where a travelling front is a diagonal band and
+// a standing wave a set of vertical stripes. Unlike the profile inset, which is one instant on the
+// cursor, this is the whole run at once, so it is drawn once a frame (not per cursor move) as a
+// persistent inset top-right; the hover profile inset then stacks below it (`kymoBottom`) and the
+// cursor draws a row across it (`kymoGeom`). Only in time view, when a base has three or more indexed
+// elements drawn, and there is room. Reuses `heatColor` and the field's own min/max over all of
+// space and time. The time is sampled to about one row per pixel so a long run does not draw
+// thousands of cells.
+function spaceTime(frag) {
+  kymoBottom = M.t + 4;
+  kymoGeom = null;
+  if (xVar || box.w < 340 || N < 2) return;
+  const bases = {};
+  for (const nm of selected()) {
+    const m = nm.match(/^([A-Za-z_]\w*)\[(\d+)\]$/);
+    if (m) (bases[m[1]] = bases[m[1]] || []).push({nm: nm, i: +m[2]});
+  }
+  let group = null;
+  for (const b in bases) if (bases[b].length >= 3) { bases[b].sort((a, c) => a.i - c.i); group = {base: b, els: bases[b]}; break; }
+  if (!group) return;
+  const els = group.els, n = els.length;
+  let lo = Infinity, hi = -Infinity;
+  for (const e of els) for (const val of D.series[e.nm]) if (val !== null && isFinite(val)) { if (val < lo) lo = val; if (val > hi) hi = val; }
+  if (!(hi > lo)) return;
+  const diverging = lo < 0 && hi > 0, mag = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
+  const pad = 7, iw = 158, titleH = 16, headH = 12, ih = 132;
+  const ix = box.w - M.r - iw, iy = M.t + 4;
+  const gx = ix + pad, gy = iy + titleH, gw = iw - 2 * pad, gh = ih - titleH - pad - headH;
+  frag.appendChild(el("rect", {x: ix, y: iy, width: iw, height: ih, rx: 3, fill: cssbg, stroke: "var(--line)", "stroke-width": 1, opacity: 0.92}));
+  frag.appendChild(el("text", {class: "tick", x: gx, y: iy + 11, "font-weight": 600}, group.base + " space-time"));
+  const rows = Math.min(N, Math.max(2, Math.round(gh)));
+  const cw = gw / n, rh = gh / rows;
+  for (let r = 0; r < rows; r++) {
+    const k = Math.round((r * (N - 1)) / (rows - 1));
+    for (let c = 0; c < n; c++) {
+      const val = D.series[els[c].nm][k];
+      if (val === null || !isFinite(val)) continue;
+      frag.appendChild(el("rect", {x: gx + c * cw, y: gy + r * rh, width: cw + 0.6, height: rh + 0.6, fill: heatColor(val, lo, hi, diverging, mag)}));
+    }
+  }
+  frag.appendChild(el("rect", {x: gx, y: gy, width: gw, height: gh, fill: "none", stroke: "var(--line)", "stroke-width": 0.6, opacity: 0.5}));
+  frag.appendChild(el("text", {class: "tick", x: gx - 2, y: gy + 7, "text-anchor": "end", "font-size": "9px"}, fmt(toT(T[0]))));
+  frag.appendChild(el("text", {class: "tick", x: gx - 2, y: gy + gh, "text-anchor": "end", "font-size": "9px"}, fmt(toT(T[N - 1]))));
+  frag.appendChild(el("text", {class: "tick", x: gx + gw / 2, y: iy + ih - 3, "text-anchor": "middle", "font-size": "9px"}, group.base + "[i] →, t ↓"));
+  kymoGeom = {gx: gx, gy: gy, gw: gw, gh: gh};
+  kymoBottom = iy + ih + 8;
+}
 function cursor(v) {
   cursorAt(nearestIndex(v));
 }
@@ -2175,6 +2232,12 @@ function cursorAt(j) {
   // A field's spatial shape at this instant, when the drawn set is a 1-D array. Time view only: a
   // phase plot's x is already a variable, not the instant a profile belongs to.
   if (!xVar) profileInset(frag, j);
+  // The cursor's instant as a row across the space-time inset -- "the slice you are reading is here".
+  if (!xVar && kymoGeom && N > 1) {
+    const ry = kymoGeom.gy + (j / (N - 1)) * kymoGeom.gh;
+    frag.appendChild(el("line", {x1: kymoGeom.gx, x2: kymoGeom.gx + kymoGeom.gw, y1: ry, y2: ry, stroke: cssbg, "stroke-width": 3, opacity: 0.5}));
+    frag.appendChild(el("line", {x1: kymoGeom.gx, x2: kymoGeom.gx + kymoGeom.gw, y1: ry, y2: ry, stroke: "var(--dim)", "stroke-width": 1}));
+  }
   hud.replaceChildren(frag);
   // Against time the footer names any event under the cursor; in a phase plot it reads the
   // phase variable first, then the instant that point belongs to.
