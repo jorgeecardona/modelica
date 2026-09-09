@@ -1,0 +1,82 @@
+summary = "A torque-free rigid body tumbling about its principal axes, governed by Euler's equations: I1*w1' = (I2 - I3)*w2*w3 and its two cyclic permutations. The three principal moments of inertia are distinct (1, 2, 3), and the body is set spinning almost exactly about the intermediate axis (axis 2, whose inertia lies between the other two). That spin is unstable: w2 holds nearly steady for a while, then flips sign in a quick tumble, settles, and flips back, over and over. This is the tennis-racket theorem (flip a racket about its intermediate axis and it rotates half a turn about the handle) and the Dzhanibekov effect, which a cosmonaut famously filmed a wing-nut doing in orbit. Unlike the chaotic tumblers, the torque-free rigid body is integrable -- the motion is exactly periodic, expressible in Jacobi elliptic functions -- so the flips recur on a fixed period (about 15.2 here). It is a conservative system with two constants of the motion: the rotational kinetic energy 0.5*(I1*w1^2 + I2*w2^2 + I3*w3^2) and the squared magnitude of the angular momentum (I1*w1)^2 + (I2*w2)^2 + (I3*w3)^2. Neither is integrated; holding both fixed across several flips is the test."
+teaches = ["Euler's equations for a torque-free rigid body: three coupled quadratic rates about the principal axes", "the intermediate-axis (tennis-racket) instability: a spin about the middle axis flips, one about the largest or smallest is stable", "two constants of the motion as invariants: rotational kinetic energy and the magnitude of the angular momentum", "an integrable nonlinear system whose flips recur on a fixed period, distinct from a chaotic tumble"]
+requires = []
+
+[parse]
+classes = ["RigidBodyFlip"]
+
+[flatten]
+model = "RigidBodyFlip"
+states = ["w1", "w2", "w3"]
+equations = 3
+balanced = true
+
+# Euler's equations, one per principal axis, torque-free:
+#   I1 w1' = (I2 - I3) w2 w3,  I2 w2' = (I3 - I1) w3 w1,  I3 w3' = (I1 - I2) w1 w2.
+# Started spinning about the intermediate axis (w2 = 1) with a small nudge on axis 1 (w1 = 0.05),
+# the body tumbles: w2 flips sign near t = 7.6, 22.8, 37.9. The energy and the angular-momentum
+# magnitude are constants of the motion, checked as invariants across the flips.
+[simulate]
+stop = 40.0
+tolerance = 1e-10
+
+# Two points on each side of the first two flips (near t = 7.6 and t = 22.8), so the tumble is
+# pinned before, during and after each: w2 near +1, then near -1, then back near +1.
+[[simulate.point]]
+t = 5.0
+values = { w1 = 0.4291007899, w2 = 0.9046394376, w3 = -0.2460538477 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { w1 = 0.4688364054, w2 = -0.884699059, w3 = -0.2691391059 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 15.0
+values = { w1 = 0.05024809401, w2 = -0.9999875644, w3 = -0.002879291122 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+[[simulate.point]]
+t = 20.0
+values = { w1 = 0.3920679005, w2 = -0.9212940689, w3 = 0.2245122406 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 25.0
+values = { w1 = 0.5111918614, w2 = 0.8609197877, w3 = 0.2937215911 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 30.0
+values = { w1 = 0.05099481309, w2 = 0.9999497633, w3 = 0.00578708224 }
+rtol = 1e-6
+atol = 1e-8
+source = "reference"
+
+# The rotational kinetic energy is a constant of the motion: 0.5*(I1 w1^2 + I2 w2^2 + I3 w3^2) =
+# 1.00125, and it stays there across every flip. Held to 1e-6, far above the drift at 1e-10.
+[[simulate.invariant]]
+expr = "0.5 * (inertia1*w1^2 + inertia2*w2^2 + inertia3*w3^2)"
+value = 1.00125
+atol = 1e-6
+
+# The squared angular momentum is the other constant: (I1 w1)^2 + (I2 w2)^2 + (I3 w3)^2 = 4.0025,
+# fixed for all time. Together the two confine the tip of the angular-velocity vector to a curve
+# (a polhode), which is why the flip is a clean recurrence rather than a drift.
+[[simulate.invariant]]
+expr = "(inertia1*w1)^2 + (inertia2*w2)^2 + (inertia3*w3)^2"
+value = 4.0025
+atol = 1e-6
+
+# The intermediate-axis spin never runs away: |w2| stays within its starting magnitude.
+[[simulate.invariant]]
+expr = "w2"
+min = -1.01
+max = 1.01

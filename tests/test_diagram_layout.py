@@ -81,6 +81,7 @@ FLAT = {
     "Projectile",
     "PumpTank",
     "PurePursuit",
+    "RigidBodyFlip",
     "RoastingMachine",
     "Robertson",
     "Rossler",
