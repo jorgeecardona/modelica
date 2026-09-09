@@ -437,6 +437,10 @@
             <option value="f">&deg;F</option>
             <option value="us">US units</option>
           </select>
+          <select id="angle" hidden title="angle units: radians as the model states them, or degrees -- the data stays in radians, only what is printed converts. Shown when a variable is an angle.">
+            <option value="rad">rad</option>
+            <option value="deg">deg</option>
+          </select>
           <button type="button" id="stepbtn" aria-pressed="false" title="step-response metrics for each drawn variable: its final value, overshoot, 10-90% rise time and 2% settling time -- for a model driven from one state to another, like a controller reaching a setpoint">step</button>
           <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs) and mean of each drawn variable over the window on screen -- the peak current, the mean power, the lowest temperature in the region you are looking at; zoom to narrow it">stats</button>
           <button type="button" id="playbtn" aria-pressed="false" title="play the cursor through time so a field's spatial profile animates -- the 1-D line or 2-D heatmap inset breathing, the standing wave swinging; Space to play or pause">&#9654;</button>
@@ -563,6 +567,7 @@ let cssbg = "#ffffff";
 let RUNS = [];           // [{overrides, data, onBase}]
 let overrides = {};      // the live run's parameter overrides, name -> SI value
 let dispMode = "si";     // display units: si, c (°C), f (°F), us (imperial) -- see DISPLAY
+let angleMode = "rad";   // angle units: rad (as the model states them) or deg -- orthogonal to dispMode
 let timeMode = "s";      // time axis: "s" seconds, or "min" minutes -- the data stays in seconds
 // The largest gap between drawn points, in seconds, or null to let the panel choose the
 // density. A cap on Δt is a resolution the user sets outright: the run outputs a grid at this
@@ -832,6 +837,12 @@ function select(i) {
   names = Object.keys(D.series);
   applyDerived();
   T = D.t; N = T.length;
+  // The angle toggle earns its place only on a model that has an angle; otherwise it is clutter.
+  const angleSel = document.getElementById("angle");
+  if (angleSel) {
+    angleSel.hidden = !Object.values(D.units || {}).some((u) => baseOf(u) === "rad");
+    angleSel.value = angleMode;
+  }
   // The runs. In the corpus the one run simply follows the model shown; live, the last run is
   // this data (its overrides are the panel's) and earlier ones are pinned comparisons, brought
   // onto the new time grid.
@@ -960,26 +971,32 @@ function baseOf(unit) { return unit.replace(/\/s\d*$/, ""); }
 // A rate per second also follows the time axis: with the axis in minutes, K/s is shown per
 // minute (x60) -- the roaster's rate of rise, °C/min or °F/min depending on the mode.
 function rateScale(unit) { return timeMode === "min" && isRate(unit) ? 60 : 1; }
+// Radians to degrees, applied to an angle unit when the mode says so. Orthogonal to the affine
+// display table (rad has no entry there): a plain scale with no offset, so it composes as a factor
+// on both the value and its rate. `rad/s` becomes `°/s`.
+const RAD2DEG = 180 / Math.PI;
+function angleScale(unit) { return angleMode === "deg" && baseOf(unit) === "rad" ? RAD2DEG : 1; }
 function disp(v, unit) {
   if (v === null || v === undefined || !isFinite(v)) return v;
-  if (isRate(unit)) { const c = affineOf(baseOf(unit)); return v * (c ? c.a : 1) * rateScale(unit); }
-  const c = affineOf(unit); return c ? c.a * v + c.b : v;
+  if (isRate(unit)) { const c = affineOf(baseOf(unit)); return v * (c ? c.a : 1) * rateScale(unit) * angleScale(unit); }
+  const c = affineOf(unit); return (c ? c.a * v + c.b : v) * angleScale(unit);
 }
 function undisp(v, unit) {
-  if (isRate(unit)) { const c = affineOf(baseOf(unit)); return v / ((c ? c.a : 1) * rateScale(unit)); }
-  const c = affineOf(unit); return c ? (v - c.b) / c.a : v;
+  if (isRate(unit)) { const c = affineOf(baseOf(unit)); return v / ((c ? c.a : 1) * rateScale(unit) * angleScale(unit)); }
+  const c = affineOf(unit); return (c ? (v - c.b) / c.a : v) / angleScale(unit);
 }
 // The unit as printed: converted when the mode says so, rates in the axis's time unit, and
-// Modelica's "degC" spelled °C.
+// Modelica's "degC" spelled °C, "rad" spelled ° in degree mode.
 function dispUnit(unit) {
   if (isRate(unit)) {
     const base = baseOf(unit), tail = unit.slice(base.length); // "/s" or "/s2"
     const c = affineOf(base);
-    let u = (c ? c.unit : base === "degC" ? "°C" : base) + tail;
+    let u = (c ? c.unit : base === "degC" ? "°C" : angleScale(base) !== 1 ? "°" : base) + tail;
     if (timeMode === "min") u = u.replace(/\/s(\d*)$/, "/min$1");
     return u;
   }
   const c = affineOf(unit); if (c) return c.unit;
+  if (angleScale(unit) !== 1) return "°";
   return unit === "degC" ? "°C" : unit;
 }
 function unitOf(nm) { return (D && D.units && D.units[nm] !== undefined) ? D.units[nm] : ""; }
@@ -3002,6 +3019,7 @@ if (stopInput) {
 document.getElementById("nextev").onclick = () => reRun("event");
 document.getElementById("settle").onclick = () => reRun("settle");
 document.getElementById("disp").onchange = (e) => { dispMode = e.target.value; savePrefs(); paintParams(); paintRuns(); paintSweep(); draw(); };
+document.getElementById("angle").onchange = (e) => { angleMode = e.target.value; savePrefs(); paintParams(); paintRuns(); paintSweep(); draw(); };
 // Pin: freeze the live run as a comparison. A copy with its overrides and data is inserted
 // before the live one, so the live run stays last (solid, editable) and the pinned copy draws
 // dashed behind it -- change a parameter and the two diverge on the same axes.
@@ -3465,7 +3483,7 @@ function load() {
 const PREFS_KEY = "pymodelica.scope.prefs";
 function savePrefs() {
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ dispMode, timeMode, speed, legendWidth }));
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ dispMode, angleMode, timeMode, speed, legendWidth }));
   } catch (e) { /* storage unavailable; skip */ }
 }
 function loadPrefs() {
@@ -3480,6 +3498,7 @@ function loadPrefs() {
     return false;
   };
   if (useSel("disp", p.dispMode)) dispMode = p.dispMode;
+  if (useSel("angle", p.angleMode)) angleMode = p.angleMode;
   if (useSel("timeunit", p.timeMode)) timeMode = p.timeMode;
   if (useSel("speed", p.speed)) speed = p.speed;
   if (typeof p.legendWidth === "number" && p.legendWidth >= 0 && p.legendWidth <= 480) {

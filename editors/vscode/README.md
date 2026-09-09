@@ -97,8 +97,13 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   keeps the offset out -- `K/s` becomes `°F/s`, scaled but not shifted -- and follows the time
   axis, so with minutes a roaster's rate of rise reads in °C/min or °F/min. Adding a system is
   one entry in the display table.
-- **Remembered.** The display units, the time unit, the solver speed and the legend width are kept
-  across reopens, so a panel you work in °F and minutes stays that way. The vertical scale is not:
+- **Angle units.** A second toggle, shown only when a variable is an angle, prints angles in `rad`
+  or `deg` -- a heading, a pendulum's swing, an orbit's phase read in degrees when that is how you
+  think, `rad/s` becoming `°/s`. Orthogonal to the unit system above (you can have °C and degrees at
+  once), and the data stays in radians: only what is printed converts, and a polar phase plot is
+  still drawn from the radians.
+- **Remembered.** The display units, the angle units, the time unit, the solver speed and the legend
+  width are kept across reopens, so a panel you work in °F and minutes stays that way. The vertical scale is not:
   a freshly opened model picks its own (a single `.mo` opens split by unit).
 
 ### Reading the chart
