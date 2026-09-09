@@ -6,6 +6,16 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **The array-constructor functions in a declaration: `zeros`, `ones`, `fill`, `identity`,
+  `linspace`.** `Real x[n](start = zeros(n))`, `parameter Real A[n, n] = identity(n)`,
+  `parameter Real g[n] = linspace(0, 1, n)` -- the ordinary way to give an array declaration its
+  start or its value. Each is array-valued and structural, and is now expanded at flatten into the
+  literal array of the declared shape, exactly as a written `{...}` would be; before, the whole call
+  reached the emitter as an untranslated function and the model would not build. `zeros`/`ones`/
+  `fill` cover any shape (a vector or a matrix); `identity(n)` is the square unit matrix (a
+  non-square shape is refused); `linspace(a, b, n)` steps evenly with the endpoints kept exact. The
+  fold happens where an array declaration already scalarises, so causalization, the Jacobian and
+  every emitter (the Rust backend included) see the plain per-element values.
 - `examples/MixingRing`: **a closed ring of stirred tanks, a conservation law written with array
   reductions.** N tanks are pumped one way around a loop, each fed from its predecessor and draining
   to its successor at the same rate, `der(c[i]) = k * (c[i-1] - c[i])` with the predecessor wrapping

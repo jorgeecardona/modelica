@@ -1062,6 +1062,78 @@ def _index_value(value: ir.Expr | None, indices: tuple[int, ...], path: _Path) -
     return value
 
 
+def _filled(sizes: tuple[int, ...], element: ir.Expr) -> ir.Expr:
+    """An array of ``sizes`` every entry of which is ``element`` (nested for a matrix)."""
+    if not sizes:
+        return element
+    inner = _filled(sizes[1:], element)
+    return ir.Array(tuple(inner for _ in range(sizes[0])))
+
+
+def _shape_constructor(  # noqa: PLR0911 -- one case per constructor, as its neighbours have
+    value: ir.Expr | None, sizes: tuple[int, ...], path: _Path
+) -> ir.Expr | None:
+    """Expand an array-constructor call into the literal array of the declared shape.
+
+    ``zeros(n)``, ``ones(n)`` and ``fill(v, n)`` fill the shape; ``identity(n)`` is the square
+    unit matrix; ``linspace(a, b, n)`` steps evenly from ``a`` to ``b``. They are the ordinary
+    way to give an array declaration its start or its value, and without expanding them here the
+    whole call reached the emitter as an untranslated ``zeros``. The declared ``sizes`` are the
+    shape (the constructor's own size argument only has to agree with it), so this needs no
+    structural evaluation of its own. Anything else is left untouched.
+    """
+    where = ".".join(path)
+    match value:
+        case ir.Call(name="zeros"):
+            return _filled(sizes, ir.RealLiteral(0.0))
+        case ir.Call(name="ones"):
+            return _filled(sizes, ir.RealLiteral(1.0))
+        case ir.Call(name="fill", args=(entry, *_)):
+            return _filled(sizes, entry)
+        case ir.Call(name="identity"):
+            if len(sizes) != 2 or sizes[0] != sizes[1]:  # noqa: PLR2004 -- a matrix is 2-D
+                raise FlattenError(f"{where}: identity() is a square matrix, not shape {sizes}")
+            n = sizes[0]
+            return ir.Array(
+                tuple(
+                    ir.Array(tuple(ir.RealLiteral(1.0 if i == j else 0.0) for j in range(n)))
+                    for i in range(n)
+                )
+            )
+        case ir.Call(name="linspace", args=(lo, hi, _)):
+            if len(sizes) != 1:
+                raise FlattenError(f"{where}: linspace() makes a vector, not shape {sizes}")
+            n = sizes[0]
+            if n < 2:  # noqa: PLR2004 -- with fewer than two points there is nothing to space
+                return ir.Array((lo,) * n)
+            # a + (b - a) * i / (n - 1), one entry per point, keeping a and b as written so the
+            # endpoints are exact.
+            span = ir.Binary("-", hi, lo)
+            middle = [
+                ir.Binary("+", lo, ir.Binary("*", span, ir.RealLiteral(i / (n - 1))))
+                for i in range(1, n - 1)
+            ]
+            return ir.Array((lo, *middle, hi))
+        case _:
+            return value
+
+
+def _shape_modification(
+    mod: ir.Modification, sizes: tuple[int, ...], path: _Path
+) -> ir.Modification:
+    """Expand an array constructor in a modification's value and each of its attributes.
+
+    The binding (``A = identity(n)``) and the array-valued attributes (``x[n](start = zeros(n))``)
+    share the component's shape, so the same ``sizes`` expand both, and everything below then sees
+    the literal array it already knows how to read out element by element.
+    """
+    value = _shape_constructor(mod.value, sizes, path)
+    entries = {key: _shape_modification(entry, sizes, path) for key, entry in mod.entries.items()}
+    if value is mod.value and all(entries[key] is entry for key, entry in mod.entries.items()):
+        return mod
+    return replace(mod, value=value, entries=entries)
+
+
 def _bind(name: str, inputs: Sequence[ir.Component], call: ir.Call) -> dict[str, ir.Expr]:
     """Arguments to inputs -- positional first, then by name, then declared defaults."""
     if len(call.args) > len(inputs):
@@ -1688,7 +1760,11 @@ class _Flattener:
         # can be scalarised the way this declaration is. Keyed by the same tuple a reference
         # to the array prefixes to, which is what lets `_element` recognise it later.
         self.shapes[tuple(path)] = tuple(sizes)
-        scalar = replace(component, dimensions=())
+        # An array constructor -- `start = zeros(n)`, `A = identity(n)` -- becomes the literal array
+        # of this shape before the element loop reads it, so each element gets its own entry the way
+        # it would from a written `{...}` (the whole call reached the emitter untranslated otherwise).
+        shaped = _shape_modification(component.modification, tuple(sizes), path)
+        scalar = replace(component, dimensions=(), modification=shaped)
         for indices in product(*(range(1, size + 1) for size in sizes)):
             self._component(
                 replace(member, component=_element_of(scalar, indices, path)),
