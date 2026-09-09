@@ -454,7 +454,7 @@
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
           <button type="button" id="csvbtn" title="save the drawn variables as a CSV: a time column and one column per drawn variable, in the model's own units with each column's unit named in its header (draw all for the whole set) -- re-importable as a measured log" hidden>csv</button>
-          <button type="button" id="svgbtn" title="save the chart as an SVG image, self-contained (colours inlined) for a report or slide" hidden>svg</button>
+          <button type="button" id="svgbtn" title="save the chart as an SVG image, self-contained (colours inlined, a key naming each drawn curve) for a report or slide" hidden>svg</button>
           <button id="all">all</button>
           <button id="none">none</button>
           <button id="reset" title="or double-click the chart">reset</button>
@@ -2571,6 +2571,44 @@ if (csvBtn) csvBtn.onclick = () => {
 // it. The legend is HTML and not part of the picture; what is saved is the plot as drawn.
 const SVG_PROPS = ["fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-linejoin",
   "opacity", "stroke-opacity", "fill-opacity", "font-family", "font-size", "font-weight", "text-anchor"];
+// A key inside the exported image: each drawn variable as a short line in its colour with its name,
+// so the saved figure says which curve is which. The on-screen legend is a separate HTML panel the
+// chart SVG does not carry, so a plain export leaves the reader guessing. Placed in the top-right of
+// the plot over a faint panel; sized to the longest name so nothing clips. Skipped when nothing is
+// drawn. Colours are the concrete palette hexes and the ink is a resolved rgb, so the group needs no
+// stylesheet to render on its own.
+function svgLegend(clone) {
+  const cols = selected();
+  if (!cols.length || !box.w) return;
+  const NS = "http://www.w3.org/2000/svg";
+  const ink = getComputedStyle(document.body).color || "#000";
+  const bg = getComputedStyle(document.body).backgroundColor || "#fff";
+  const rows = cols.map((nm) => {
+    const u = dispUnit(unitOf(nm));
+    return { label: u ? nm + " [" + u + "]" : nm, colour: colour(nm) };
+  });
+  const fs = 11, rh = 15, pad = 6, sw = 16; // font size, row height, padding, swatch width
+  const w = Math.ceil(Math.max(...rows.map((r) => sw + 5 + r.label.length * fs * 0.6)) + pad * 2);
+  const h = rows.length * rh + pad * 2;
+  const x = Math.max(M.l, box.w - M.r - w - 4), y = M.t + 4;
+  const mk = (tag, attrs, text) => {
+    const el = document.createElementNS(NS, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    return el;
+  };
+  const g = mk("g", {});
+  g.appendChild(mk("rect", {x, y, width: w, height: h, rx: 3, fill: bg,
+    "fill-opacity": "0.82", stroke: ink, "stroke-opacity": "0.15"}));
+  rows.forEach((r, i) => {
+    const ry = y + pad + i * rh + rh * 0.5;
+    g.appendChild(mk("line", {x1: x + pad, x2: x + pad + sw, y1: ry, y2: ry,
+      stroke: r.colour, "stroke-width": "2"}));
+    g.appendChild(mk("text", {x: x + pad + sw + 5, y: ry + fs * 0.35, "font-size": fs,
+      "font-family": "system-ui, -apple-system, sans-serif", fill: ink}, r.label));
+  });
+  clone.appendChild(g);
+}
 function buildSvg() {
   const clone = svg.cloneNode(true);
   const srcEls = svg.querySelectorAll("*"), cloneEls = clone.querySelectorAll("*");
@@ -2589,6 +2627,8 @@ function buildSvg() {
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   clone.setAttribute("width", String(box.w)); clone.setAttribute("height", String(box.h));
   clone.setAttribute("viewBox", "0 0 " + box.w + " " + box.h);
+  // The key goes on last, so it sits over the curves rather than under them.
+  svgLegend(clone);
   return '<?xml version="1.0" encoding="UTF-8"?>\n' + clone.outerHTML + "\n";
 }
 const svgBtn = document.getElementById("svgbtn");
