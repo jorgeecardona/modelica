@@ -145,3 +145,21 @@ def test_a_function_the_dialect_lacks_says_which_dialect() -> None:
     node = ir.Call("wobble", (ir.RealLiteral(1.0),))
     with pytest.raises(EmitError, match="'wobble' in c"):
         emit_expr(node, {}, dialect=C)
+
+
+def test_a_qualified_builtin_call_reads_as_the_builtin() -> None:
+    """`Modelica.Math.sin(x)` is the builtin sin under its library path.
+
+    The standard library writes the maths functions this way where a `when` or an equation reaches
+    them un-inlined, so the emitter reads a qualified call as the builtin the dialect knows by its
+    simple name -- the same value as if it had been written bare.
+    """
+    qualified = parse_expression("Modelica.Math.sin(x)")
+    assert emit_expr(qualified, {"x": "x"}) == "np.sin(x)"
+    assert emit_expr(qualified, {"x": "x"}) == emit_expr(parse_expression("sin(x)"), {"x": "x"})
+
+
+def test_a_qualified_name_the_dialect_still_lacks_is_refused() -> None:
+    """Only a known builtin is de-qualified: an unknown qualified call still fails, by its full name."""
+    with pytest.raises(EmitError, match=r"'Foo\.bar' in python"):
+        emit_expr(parse_expression("Foo.bar(x)"), {"x": "x"})

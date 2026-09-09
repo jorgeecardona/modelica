@@ -281,7 +281,13 @@ def _call(node: ir.Call, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:  # noqa:
     special = _multiary(node, leaf)
     if special is not None:
         return special
-    rule = _CHAIN.get(node.name)
+    name = node.name
+    # `Modelica.Math.sin` is the builtin sin under its library path; the chain rule is keyed by the
+    # simple name. Only the last segment is dropped, and only when it is a rule the chain has, the
+    # same reading the emitter gives a qualified builtin call.
+    if name not in _CHAIN and "." in name and name.rsplit(".", 1)[-1] in _CHAIN:
+        name = name.rsplit(".", 1)[-1]
+    rule = _CHAIN.get(name)
     if rule is None:
         raise DerivativeError(f"no derivative rule for {node.name!r}")
     (arg,) = node.args

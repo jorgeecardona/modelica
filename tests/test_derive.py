@@ -147,6 +147,21 @@ def test_an_unknown_function_has_no_derivative() -> None:
         d_dt(ir.Call("mystery", (X,)))
 
 
+def test_a_qualified_builtin_differentiates_like_the_builtin() -> None:
+    """`Modelica.Math.sin` is the builtin sin under its library path, differentiated by the same rule.
+
+    The standard library reaches the maths functions qualified where a call is not inlined; the chain
+    rule reads the last segment when it is a rule it has, so the derivative is the bare one's.
+    """
+    assert d_dt(ir.Call("Modelica.Math.sin", (X,))) == d_dt(ir.Call("sin", (X,)))
+
+
+def test_a_qualified_name_with_no_rule_still_has_no_derivative() -> None:
+    """Only a known builtin is de-qualified; an unknown qualified call still has no rule."""
+    with pytest.raises(DerivativeError, match=r"no derivative rule for 'Foo\.mystery'"):
+        d_dt(ir.Call("Foo.mystery", (X,)))
+
+
 def _at(expr: ir.Expr, **point: float) -> float:
     """The partial evaluated at a point -- a number, so a piecewise rule can be checked."""
     return float(evaluate(expr, point))

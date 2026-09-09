@@ -281,15 +281,25 @@ def emit_expr(
 
 
 def _call(node: ir.Call, symbols: Mapping[str, str], dialect: Dialect) -> str:
-    if node.name == "div":
+    name = node.name
+    if name == "div":
         left, right = (emit_expr(a, symbols, dialect=dialect) for a in node.args)
         return f"{dialect.truncate}(({left}) / ({right}))"
-    if node.name in ("initial", "terminal"):
+    if name in ("initial", "terminal"):
         return dialect.false
-    if node.name not in dialect.functions:
+    # A qualified call to a function that is itself a builtin -- `Modelica.Math.sin` -- names the
+    # builtin under its library path; the dialect knows it by the simple name. Only the last segment
+    # is dropped, and only when it is a function the dialect has, so an unknown name still fails.
+    if (
+        name not in dialect.functions
+        and "." in name
+        and name.rsplit(".", 1)[-1] in dialect.functions
+    ):
+        name = name.rsplit(".", 1)[-1]
+    if name not in dialect.functions:
         raise EmitError(f"no translation for the function {node.name!r} in {dialect.name}")
     arguments = ", ".join(emit_expr(a, symbols, dialect=dialect) for a in node.args)
-    return f"{dialect.functions[node.name]}({arguments})"
+    return f"{dialect.functions[name]}({arguments})"
 
 
 def _render(  # noqa: C901, PLR0911, PLR0912 - one case per node type, two of them dialect-split

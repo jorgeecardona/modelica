@@ -42,6 +42,31 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a qualified call to a builtin reads as the builtin
+
+`Modelica.Math.sin(x)` is the builtin sin under its library path, and the standard library reaches the
+maths functions this way where a call is not inlined. Both the ends of the toolchain that consume a
+call knew `sin` but not the qualified name: the emitter refused it, "no translation for the function
+'Modelica.Math.sin'", and the differentiator had "no derivative rule" for it. Each now reads a
+qualified call as the builtin -- the last segment, and only when it is a name that stage already has,
+so an unknown call still fails by its full name.
+
+Reachable simulation climbs from 14 to 19 of 430 example models: the rotational and other examples
+that call a maths function qualified were causalizing and then failing at emit, so this closes the gap
+between causalize and simulate -- both now stand at 19, every model that causalizes also simulates.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     47 | 10.9 % |
+| causalized |     19 |  4.4 % |
+| simulated  |     19 |  4.4 % |
+
+The leaders are unchanged, all before causalize: a composite component with a value (70), the `Clock`
+builtin (62), an array shape not known at flatten (52), a subscript on an inner component and a type
+alias to an array type in parse (32 each), and a condition not known at flatten (31). Agreement is
+still unmeasured (no `omc`).
+
 ### 2026-09-10, after the same element inherited through two paths is merged
 
 The other half of the "twice" refusal: a name that reaches a class through two `extends` paths.
