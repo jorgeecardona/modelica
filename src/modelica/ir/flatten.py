@@ -924,51 +924,75 @@ def _debuiltin(node: ir.Expr) -> ir.Expr:
             return node
 
 
-def _resolve_local_constants(node: ir.Expr, cls: ir.Class, seen: frozenset[str]) -> ir.Expr:
-    """Substitute a bare reference to a constant of the same package with its value.
+_CONSTANT_DEPTH: Final = 32
+"""How many package hops a constant's value may take before resolution gives up.
+
+A same-package chain is bounded by ``seen`` (a name resolved once is not chased again). A chain that
+crosses into another package resets that name set -- ``Constants.eps`` and ``Machine.eps`` are two
+constants with the same simple name, and one names the other -- so a separate hop count bounds the
+crossing instead, against a pathological library whose packages name each other in a ring.
+"""
+
+
+def _resolve_local_constants(  # noqa: C901, PLR0911 -- one case per node type and lookup source
+    node: ir.Expr, cls: ir.Class, seen: frozenset[str], program: ir.Program, depth: int
+) -> ir.Expr:
+    """Substitute a reference to a constant, in this package or another, with its value.
 
     ``D2R = pi / 180`` names ``pi``, another constant beside it, so the value cannot be evaluated
-    until ``pi`` is put in. ``seen`` bounds the recursion: a constant that refers to itself, directly
-    or in a ring, is left unresolved rather than chased forever, and evaluation then fails cleanly.
+    until ``pi`` is put in. ``eps = ModelicaServices.Machine.eps`` names a constant of another
+    package, reached by its qualified name from the top of the program. ``seen`` bounds a same-package
+    chain (a constant that names itself, directly or in a ring, is left unresolved); ``depth`` bounds
+    a chain that crosses packages, where the simple names may repeat and ``seen`` cannot.
     """
+
+    def go(inner: ir.Expr) -> ir.Expr:
+        return _resolve_local_constants(inner, cls, seen, program, depth)
+
     match node:
         case ir.Ref(parts=(single,)) if single not in seen:
-            literal = _constant_literal(cls, single, seen)
+            literal = _constant_literal(cls, single, program, seen, depth)
+            return literal if literal is not None else node
+        case ir.Ref(parts=parts) if len(parts) > 1 and depth > 0:
+            try:
+                found = Scope(program).resolve(".".join(parts[:-1]))
+            except FlattenError:
+                return node
+            if not isinstance(found, Found):
+                return node
+            if parts[-1] in found.cls.literals:
+                return ir.IntLiteral(found.cls.literals.index(parts[-1]) + 1)
+            literal = _constant_literal(found.cls, parts[-1], program, frozenset(), depth - 1)
             return literal if literal is not None else node
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
-            return ir.Binary(
-                op,
-                _resolve_local_constants(lhs, cls, seen),
-                _resolve_local_constants(rhs, cls, seen),
-            )
+            return ir.Binary(op, go(lhs), go(rhs))
         case ir.Unary(op=op, operand=operand):
-            return ir.Unary(op, _resolve_local_constants(operand, cls, seen))
+            return ir.Unary(op, go(operand))
         case ir.Call(name=fname, args=args, named=named):
-            args = tuple(_resolve_local_constants(a, cls, seen) for a in args)
-            named = tuple((key, _resolve_local_constants(v, cls, seen)) for key, v in named)
-            return ir.Call(fname, args, named)
+            return ir.Call(fname, tuple(go(a) for a in args), tuple((k, go(v)) for k, v in named))
         case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
-            return ir.IfExpr(
-                _resolve_local_constants(condition, cls, seen),
-                _resolve_local_constants(then, cls, seen),
-                _resolve_local_constants(otherwise, cls, seen),
-            )
+            return ir.IfExpr(go(condition), go(then), go(otherwise))
         case _:
             return node
 
 
 def _constant_literal(  # noqa: PLR0911 -- one per kind
-    cls: ir.Class, name: str, seen: frozenset[str] = frozenset()
+    cls: ir.Class,
+    name: str,
+    program: ir.Program,
+    seen: frozenset[str] = frozenset(),
+    depth: int = _CONSTANT_DEPTH,
 ) -> ir.Expr | None:
     """A package constant as its value, or ``None`` when it does not reduce to one here.
 
     ``Modelica.Constants.pi`` is a ``constant`` declared in a package, not a component of the model,
     so it cannot be prefixed into a variable; its value is read off the declaration, its qualified
-    builtin calls stripped (``Modelica.Math.asin`` as ``asin``), any constant of the same package it
-    names substituted (``D2R = pi / 180``), and evaluated to a number, then put in place -- pi as
-    3.14159..., eps as 1e-15. A value that will not reduce to a number here -- one that names a
-    constant of *another* package, or a function that is not a builtin -- is left alone, so the
-    reference stays whatever it was and the ordinary "unknown name" report still catches a typo.
+    builtin calls stripped (``Modelica.Math.asin`` as ``asin``), any constant it names substituted
+    -- one beside it (``D2R = pi / 180``) or one in another package (``eps =
+    ModelicaServices.Machine.eps``) -- and evaluated to a number, then put in place. A value that
+    will not reduce to a number here -- one that names a function that is not a builtin, or a
+    constant that itself does not reduce -- is left alone, so the reference stays whatever it was and
+    the ordinary "unknown name" report still catches a typo.
     """
     for component in cls.components:
         if component.name != name or component.variability != "constant":
@@ -976,7 +1000,7 @@ def _constant_literal(  # noqa: PLR0911 -- one per kind
         value = component.modification.value
         if value is None:
             return None
-        resolved = _resolve_local_constants(_debuiltin(value), cls, seen | {name})
+        resolved = _resolve_local_constants(_debuiltin(value), cls, seen | {name}, program, depth)
         try:
             result = evaluate(resolved, {})
         except EvaluationError:
@@ -1016,7 +1040,7 @@ def _imported_constant(scope: Scope, head: str) -> ir.Expr | None:  # noqa: C901
             return None
         if member in found.cls.literals:
             return ir.IntLiteral(found.cls.literals.index(member) + 1)
-        return _constant_literal(found.cls, member)
+        return _constant_literal(found.cls, member, scope.program)
 
     for cls in scope.chain:
         for entry in cls.imports:
@@ -1033,7 +1057,7 @@ def _imported_constant(scope: Scope, head: str) -> ir.Expr | None:  # noqa: C901
     # whose own constants are components of the instance and are left for prefixing (they are in
     # `local`). `chain[0]` is that class, so start one out.
     for cls in scope.chain[1:]:
-        resolved = _constant_literal(cls, head)
+        resolved = _constant_literal(cls, head, scope.program)
         if resolved is not None:
             return resolved
     return None
@@ -1062,7 +1086,7 @@ def _literals(  # noqa: C901, PLR0911, PLR0912 -- one case per node type, as its
             if isinstance(found, Found):
                 if parts[-1] in found.cls.literals:
                     return ir.IntLiteral(found.cls.literals.index(parts[-1]) + 1)
-                constant = _constant_literal(found.cls, parts[-1])
+                constant = _constant_literal(found.cls, parts[-1], scope.program)
                 if constant is not None:
                     return constant
             return node

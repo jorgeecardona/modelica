@@ -42,6 +42,38 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-09, after a package constant resolves unqualified and across packages
+
+The `Modelica.Constants` values the library leans on stopped a run at flatten. Two forms were
+missing. A **bare** constant, brought into a model by `import Modelica.Constants.pi;` or
+`import Modelica.Constants.*;` or declared in the enclosing package, was read as a component that did
+not exist and refused with "unknown name" (commit for 0.0.176). A **cross-package** constant, one
+whose own value names a constant in another package -- `Modelica.Constants.eps =
+ModelicaServices.Machine.eps` is the case that mattered, and it accounted for 36 of the models on the
+"unknown name" line -- resolved its qualified reference no further than the package it named, so eps
+never became its number (this change, 0.0.177). The evaluation now follows a qualified constant
+reference into the package it names, bounded by a hop count so a library whose packages name each
+other in a ring fails cleanly instead of looping; a same-package chain is still bounded by name.
+
+Flattening climbs from 12 to 31 across the two fixes (17 after the bare form, 31 after the
+cross-package one); reachable simulation moves from eight to eleven. Most of the fourteen models the
+cross-package fix newly flattens stop a stage later -- an electrical example that reads `eps` also
+carries a `connect` to a component with an unknown array shape -- so causalize and simulate move by
+one each while flatten moves by fourteen. The "unknown name" line falls from 55 to 24; what remains
+there is led by an enumeration literal of a library type used as a default (`LimiterHomotopy`,
+sixteen models), which is a separate lookup.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     31 |  7.2 % |
+| causalized |     16 |  3.7 % |
+| simulated  |     11 |  2.6 % |
+
+The work list's leaders are now all flatten walls that are not about names: a composite component
+with a value (70), the `Clock` builtin (62), an array shape not known at flatten (52), and a
+condition not known at flatten (31). Agreement is still unmeasured (no `omc` on this machine).
+
 ### 2026-09-09, after an `if` inside a `when` body parses
 
 A `when` body is a run of statements and may hold an `if` or a `for`; `Blocks.Math`'s extremum

@@ -221,3 +221,37 @@ def test_a_bare_name_no_import_introduces_still_fails() -> None:
     )
     with pytest.raises(FlattenError, match="unknown name"):
         flatten(parse(source), "M")
+
+
+def test_a_package_constant_defined_by_one_in_another_package_resolves() -> None:
+    """A constant whose value names one in another package still becomes its number.
+
+    ``Modelica.Constants.eps = ModelicaServices.Machine.eps`` reaches across packages, resolved by the
+    qualified name from the top of the program. The two share the simple name ``eps``, which the
+    same-package guard would read as a cycle; a hop count bounds the crossing instead.
+    """
+    source = (
+        "package Services\n  package Machine\n"
+        "    constant Real eps = 2.220446049250313e-16;\n  end Machine;\nend Services;\n"
+        "package P\n  package Constants\n"
+        "    constant Real eps = Services.Machine.eps;\n"
+        "  end Constants;\nend P;\n"
+        "model M\n  Real x;\nequation\n  x = P.Constants.eps;\nend M;\n"
+    )
+    equation = unparse_equation(flatten(parse(source), "M").equations[0])[0]
+    assert equation == "x = 2.220446049250313e-16;"
+
+
+def test_a_cross_package_constant_ring_is_not_resolved_and_does_not_loop() -> None:
+    """A cross-package ring is stopped by the hop count, so it fails cleanly, not forever.
+
+    ``A.a = B.b; B.b = A.a`` names back and forth across two packages; the hop count bounds the
+    crossing, so it fails with the ordinary report rather than chasing the ring.
+    """
+    source = (
+        "package A\n  constant Real a = B.b;\nend A;\n"
+        "package B\n  constant Real b = A.a;\nend B;\n"
+        "model M\n  Real x;\nequation\n  x = A.a;\nend M;\n"
+    )
+    with pytest.raises(FlattenError, match="unknown name"):
+        flatten(parse(source), "M")
