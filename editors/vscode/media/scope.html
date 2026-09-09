@@ -488,7 +488,7 @@
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
-    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi) or sum(T)" title="plot an expression in the drawn variables (and pi, e, t); a reduction over an array field is sum/product/min/max/mean of its base name, e.g. sum(T); Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
+    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), T[1,1]-T[8,8]" title="plot an expression in the drawn variables (and pi, e, t); an array element is written with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
@@ -745,7 +745,14 @@ function groupMembers(series, base) {
 let derived = [];  // [{src}] -- the expressions, recompiled per model in applyDerived()
 // Compile `src` to a function `(j) => number` over the sample index, reading `series` and `time`.
 function compileExpr(src, series, time) {
-  const toks = src.trim().match(/[A-Za-z_]\w*|\d*\.?\d+(?:[eE][+-]?\d+)?|\*\*|[-+*/^(),]/g) || [];
+  // An array-element name (`T[1, 1]`, `u[4]`) is one token, matched before a bare identifier so
+  // its brackets are not left over; then the ordinary tokens. The series is keyed with a space
+  // after the comma (`T[1, 1]`), so a whitespace-stripped index into it lets a user write the
+  // element without the space (`T[1,1]`) and still resolve.
+  const toks = src.trim().match(/[A-Za-z_]\w*\[[^\]]*\]|[A-Za-z_]\w*|\d*\.?\d+(?:[eE][+-]?\d+)?|\*\*|[-+*/^(),]/g) || [];
+  const canon = {};
+  for (const k in series) canon[k.replace(/\s+/g, "")] = k;
+  const seriesOf = (name) => series[name] || series[canon[name.replace(/\s+/g, "")]];
   let p = 0;
   const peek = () => toks[p];
   const eat = () => toks[p++];
@@ -789,7 +796,7 @@ function compileExpr(src, series, time) {
         return (j) => fn(...args.map((g) => g(j))); }
       if (t in DCONST) { const c = DCONST[t]; return () => c; }
       if (t === "t" || t === "time") return (j) => time[j];
-      const s = series[t]; if (!s) throw new Error("unknown variable " + t);
+      const s = seriesOf(t); if (!s) throw new Error("unknown variable " + t);
       return (j) => s[j];
     }
     if (/^[.\d]/.test(t)) { const v = parseFloat(t); return () => v; }
