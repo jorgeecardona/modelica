@@ -472,6 +472,7 @@
               <div class="hk"><b>+ / −</b><span>zoom the window in and out about its middle, from the keyboard</span></div>
               <div class="hk"><b>← / →</b><span>pan the zoomed time window left or right</span></div>
               <div class="hk"><b>, / .</b><span>step the reading cursor one sample back or forward (shift for a coarse jump); then c copies its values</span></div>
+              <div class="hk"><b>[ / ]</b><span>jump the reading cursor to the previous or next event instant (a bounce, a load step); panning to it if it is off-screen</span></div>
               <div class="hk"><b>click</b><span>drop a mark to read every variable's value there; a second click reads Δ, the average rate and ∫ between the two</span></div>
               <div class="hk"><b>shift-click</b><span>drop a level line and read off where each curve crosses it</span></div>
               <div class="hk"><b>drag the ⇥ marker</b><span>move the stop time and re-run to there</span></div>
@@ -2332,6 +2333,35 @@ function cursorAt(j) {
   foot.textContent = phase + "t = " + fmt(toT(T[j])) + " " + tUnit() + (near.length ? "   ⟨ " + (near[0].cause || "event") + " ⟩" : "") + (vals ? "   ·   " + vals : "");
   paintLegend(j);
 }
+// Jump the reading cursor to the next (`dir > 0`) or previous event instant. The `,`/`.` keys step
+// one sample; on a hybrid model the moments worth reading are the events -- a bounce, a load step,
+// a phase change -- which are already drawn as lines (time) and rings (phase). This lands the cursor
+// on the event's sample so its values read out in the legend and its cause names itself in the
+// footer, in either view. Strictly past the cursor's instant so repeated presses walk the events;
+// from no cursor, forward starts before the first sample and back after the last. If the event lies
+// outside the current zoom, the window pans to it, keeping the span. Not in 3D, which has its own
+// cursor, matching the sample-step keys.
+function jumpToEvent(dir) {
+  if (!N || view3d) return false;
+  const times = ((D && D.events) || []).map((e) => e.t).filter((t) => isFinite(t)).sort((a, b) => a - b);
+  if (!times.length) return false;
+  const refT = cursorIndex !== null ? T[cursorIndex] : dir > 0 ? T[0] - 1 : T[N - 1] + 1;
+  const eps = 1e-9 * Math.max(1, Math.abs(refT));
+  let target = null;
+  if (dir > 0) { for (const t of times) if (t > refT + eps) { target = t; break; } }
+  else { for (let i = times.length - 1; i >= 0; i--) if (times[i] < refT - eps) { target = times[i]; break; } }
+  if (target === null) return false;
+  if (target < win[0] || target > win[1]) {
+    const span = win[1] - win[0];
+    let a = target - span / 2, b = target + span / 2;
+    if (a < T[0]) { a = T[0]; b = a + span; }
+    if (b > T[N - 1]) { b = T[N - 1]; a = b - span; }
+    win = [Math.max(T[0], a), Math.min(T[N - 1], b)];
+    draw();
+  }
+  cursorAt(index(target));
+  return true;
+}
 
 // -- sensitivity ---------------------------------------------------------------------------
 // Which parameter moves the response most. The simulator runs every editable parameter a step
@@ -3788,6 +3818,11 @@ document.addEventListener("keydown", (e) => {
     const from = cursorIndex === null ? (e.key === "." ? -1 : N) : cursorIndex;
     e.preventDefault();
     cursorAt(Math.max(0, Math.min(N - 1, from + (e.key === "." ? stride : -stride))));
+  }
+  // [ and ] jump the cursor to the previous and next event instant -- the bigger sibling of , and .,
+  // for a hybrid model where the events are the points worth reading.
+  if (!typing && (e.key === "[" || e.key === "]") && jumpToEvent(e.key === "]" ? 1 : -1)) {
+    e.preventDefault();
   }
 });
 // `c` copies the readout to the clipboard as plain text: the two-mark measurement if a pair is
