@@ -1804,9 +1804,13 @@ function fmtEdge(v) {
   return String(Number(v.toPrecision(4)));
 }
 function stripLabels(frag, lo, hi, y0, y1) {
+  // An edge that is negligible against the strip's own span is floating-point zero, not a real
+  // small value -- the ball's height floor reads 2.2e-16 -- so it prints as 0, the same snap the
+  // axis tick labels use. fmtEdge alone cannot tell the two apart; it sees only the one number.
+  const edge = (v) => (Math.abs(v) < Math.abs(hi - lo) * 1e-9 ? "0" : fmtEdge(v));
   if (hi - lo > (Math.abs(hi) || 1) * 1e-9) {
-    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y0 + 8, "text-anchor": "end"}, fmtEdge(hi)));
-    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y1, "text-anchor": "end"}, fmtEdge(lo)));
+    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y0 + 8, "text-anchor": "end"}, edge(hi)));
+    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y1, "text-anchor": "end"}, edge(lo)));
   } else {
     frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: (y0 + y1) / 2 + 3,
       "text-anchor": "end"}, fmtEdge(lo)));
