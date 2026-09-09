@@ -135,22 +135,56 @@ function importLog() {
     });
 }
 
+// Split one delimited line into fields, honouring double-quoted fields so a name that carries the
+// delimiter (`T[1, 1]`, a derived `a-b` with a comma) stays one field. A doubled quote `""` inside
+// a quoted field is a literal quote. This is what the scope's own CSV export writes, so its files
+// round-trip: export, re-open, overlay.
+function splitFields(line, delim) {
+  const out = [];
+  let field = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"') {
+        if (line[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else quoted = false;
+      } else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === delim) {
+      out.push(field);
+      field = "";
+    } else field += c;
+  }
+  out.push(field);
+  return out;
+}
+
 // Comma, semicolon or tab separated, one header row. A semicolon file usually carries comma
-// decimals, so those are accepted when the delimiter is not a comma.
+// decimals, so those are accepted when the delimiter is not a comma. A header may name its unit in
+// a trailing `[unit]` (as the scope's export does); the unit is stripped so `T [K]` overlays on the
+// model's `T`, and a `time [s]` / `time [min]` clock column is recognised.
 function parseCsv(text) {
   const lines = text.split(/\r?\n/).filter((line) => line.trim().length);
   if (lines.length < 2) return null;
   const delim = [",", ";", "\t"].sort((a, b) => lines[0].split(b).length - lines[0].split(a).length)[0];
-  const header = lines[0].split(delim).map((h) => h.trim().replace(/^"|"$/g, ""));
-  const num = (s) => {
-    const cleaned = String(s).trim().replace(/^"|"$/g, "");
-    return Number(delim === "," ? cleaned : cleaned.replace(",", "."));
-  };
-  const rows = lines.slice(1).map((line) => line.split(delim).map(num)).filter((r) => r.length === header.length);
+  // A unit annotation is a bracketed suffix set off by a space (`T [K]`, `time [s]`), which the
+  // export writes. An array subscript (`T[1, 1]`) also ends in a bracket but has no space before it,
+  // so requiring the space keeps the subscript as part of the name rather than eating it.
+  const unitless = (h) => h.replace(/\s+\[[^\]]*\]\s*$/, "").trim();
+  const raw = splitFields(lines[0], delim).map((h) => h.trim());
+  const header = raw.map(unitless);
+  const num = (s) => Number(delim === "," ? s.trim() : s.trim().replace(",", "."));
+  const rows = lines
+    .slice(1)
+    .map((line) => splitFields(line, delim).map(num))
+    .filter((r) => r.length === header.length);
   if (!rows.length) return null;
   let tcol = header.findIndex((h) => /^(t|time|seconds?|sec|s|min|minutes?)$/i.test(h));
   if (tcol < 0) tcol = 0;
-  const minutes = /^min/i.test(header[tcol]);
+  const minutes = /\[\s*min/i.test(raw[tcol]) || /^min/i.test(header[tcol]);
   const t = rows.map((r) => (minutes ? r[tcol] * 60 : r[tcol]));
   const series = {};
   header.forEach((h, i) => {

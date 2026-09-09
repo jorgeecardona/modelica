@@ -447,7 +447,7 @@
           <button type="button" id="playbtn" aria-pressed="false" title="play the cursor through time so a field's spatial profile animates -- the 1-D line or 2-D heatmap inset breathing, the standing wave swinging; Space to play or pause">&#9654;</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
-          <button type="button" id="csvbtn" title="save the drawn variables as a CSV: a time column and one column per drawn variable, in SI units (draw all for the whole set) -- re-importable as a measured log" hidden>csv</button>
+          <button type="button" id="csvbtn" title="save the drawn variables as a CSV: a time column and one column per drawn variable, in the model's own units with each column's unit named in its header (draw all for the whole set) -- re-importable as a measured log" hidden>csv</button>
           <button type="button" id="svgbtn" title="save the chart as an SVG image, self-contained (colours inlined) for a report or slide" hidden>svg</button>
           <button id="all">all</button>
           <button id="none">none</button>
@@ -2475,14 +2475,22 @@ function paintLogs() {
 }
 document.getElementById("logbtn").onclick = () => { if (vscodeApi) vscodeApi.postMessage({ type: "importLog" }); };
 // The drawn run as CSV text: time first, then every variable, in SI (the honest data, not the
-// display units). Named as the model names them and with a `time` column, so it re-imports as a
-// measured log. A gap (a null) is an empty cell. Variable names carry no commas, so no escaping.
+// display units). Named as the model names them, each column's unit in its header, and a `time`
+// column, so it re-imports as a measured log. A gap (a null) is an empty cell. A name that carries
+// a comma (an array element, a derived difference) is double-quoted so the row stays aligned.
 function buildCsv() {
   // The variables that are drawn, so the file is the data behind the plot rather than every
   // connector-internal and `der_` column a component model flattens to. Nothing drawn falls back
   // to all of them, so the button is never empty. Derived expressions are in `selected()` too.
   const cols = selected().length ? selected() : names;
-  const lines = [["time", ...cols].join(",")];
+  // A header field is comma-escaped so a name that carries a comma -- an array element `T[1, 1]`,
+  // a derived `T[1,1]-T[8,8]` -- stays one column instead of splitting the row, and each column
+  // names its unit so the file documents itself. The numbers are the model's own values in the
+  // model's units (not the display units), so re-importing the file overlays it on the simulation
+  // exactly: the import strips the `[unit]` back off the name to match the variable.
+  const field = (s) => (/[",\n]/.test(s) ? '"' + String(s).replace(/"/g, '""') + '"' : String(s));
+  const header = (nm) => { const u = unitOf(nm); return field(u ? nm + " [" + u + "]" : nm); };
+  const lines = [[field("time [s]"), ...cols.map(header)].join(",")];
   for (let k = 0; k < N; k++) {
     const cells = [T[k]];
     for (const nm of cols) {
