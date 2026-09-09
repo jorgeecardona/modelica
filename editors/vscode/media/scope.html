@@ -1887,6 +1887,44 @@ function cursorDotY(nm, value, dom) {
   const s = STRIPS.find((x) => x.members.includes(nm));
   return s ? s.yFor(value) : null;
 }
+// A spatial-profile inset for a 1-D array field (`u[1], u[2], ...`): the value of each drawn array
+// element against its index at the cursor's instant, in a corner of the plot, so scrubbing the time
+// cursor plays the field's shape -- a wave travelling, a temperature front moving -- which a stack
+// of per-cell time series cannot show. Only 1-D arrays (a single index) qualify; a 2-D grid like
+// `T[i, j]` has no line profile and is left out. The value scale is the field's range over the whole
+// run, so the shape grows and shrinks against a fixed frame as time runs rather than being
+// re-normalised each instant into noise when the field passes through flat.
+function profileInset(frag, j) {
+  if (box.w < 340) return; // no room in a narrow pane
+  const bases = {};
+  for (const nm of selected()) {
+    const m = nm.match(/^([A-Za-z_]\w*)\[(\d+)\]$/);
+    if (m) (bases[m[1]] = bases[m[1]] || []).push({nm: nm, i: +m[2]});
+  }
+  const groups = [];
+  for (const base in bases) if (bases[base].length >= 3) { bases[base].sort((a, b) => a.i - b.i); groups.push({base: base, els: bases[base]}); }
+  if (!groups.length) return;
+  let lo = Infinity, hi = -Infinity, maxI = 1;
+  for (const g of groups) {
+    maxI = Math.max(maxI, g.els[g.els.length - 1].i);
+    for (const e of g.els) { const s = D.series[e.nm]; for (const val of s) if (val !== null && isFinite(val)) { if (val < lo) lo = val; if (val > hi) hi = val; } }
+  }
+  if (!(hi > lo)) { hi = lo + 1; lo -= 1; }
+  const iw = 158, ih = 100, pad = 7;
+  const ix = box.w - M.r - iw, iy = M.t + 4;
+  const plotTop = iy + 16, plotBot = iy + ih - pad;
+  const plotX = (i) => ix + pad + (maxI > 1 ? (i - 1) / (maxI - 1) : 0.5) * (iw - 2 * pad);
+  const plotY = (val) => plotTop + (1 - (val - lo) / (hi - lo)) * (plotBot - plotTop);
+  frag.appendChild(el("rect", {x: ix, y: iy, width: iw, height: ih, rx: 3, fill: cssbg, stroke: "var(--line)", "stroke-width": 1, opacity: 0.92}));
+  if (lo < 0 && hi > 0) frag.appendChild(el("line", {x1: ix + pad, x2: ix + iw - pad, y1: plotY(0), y2: plotY(0), stroke: "var(--line)", "stroke-dasharray": "2 3", opacity: 0.6}));
+  for (const g of groups) {
+    let d = "";
+    for (const e of g.els) { const val = D.series[e.nm][j]; if (val === null || !isFinite(val)) continue; d += (d ? "L" : "M") + plotX(e.i).toFixed(1) + " " + plotY(val).toFixed(1) + " "; }
+    if (d) frag.appendChild(el("path", {d: d, fill: "none", stroke: colour(g.els[0].nm), "stroke-width": 1.5, "stroke-linejoin": "round"}));
+    for (const e of g.els) { const val = D.series[e.nm][j]; if (val === null || !isFinite(val)) continue; frag.appendChild(el("circle", {cx: plotX(e.i), cy: plotY(val), r: 1.8, fill: colour(e.nm)})); }
+  }
+  frag.appendChild(el("text", {class: "tick", x: ix + pad, y: iy + 11, "font-weight": 600}, groups.map((g) => g.base).join(", ") + " vs index"));
+}
 function cursor(v) {
   const j = nearestIndex(v);
   cursorIndex = j;
@@ -1905,6 +1943,9 @@ function cursor(v) {
       frag.appendChild(el("circle", {cx: cx, cy: cy, r: 2.6, fill: colour(nm), opacity: runStyle(ri).op}));
     });
   }
+  // A field's spatial shape at this instant, when the drawn set is a 1-D array. Time view only: a
+  // phase plot's x is already a variable, not the instant a profile belongs to.
+  if (!xVar) profileInset(frag, j);
   hud.replaceChildren(frag);
   // Against time the footer names any event under the cursor; in a phase plot it reads the
   // phase variable first, then the instant that point belongs to.
