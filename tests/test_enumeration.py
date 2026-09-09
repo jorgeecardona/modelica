@@ -159,3 +159,65 @@ def test_a_cyclic_package_constant_is_not_resolved_and_does_not_loop() -> None:
     )
     with pytest.raises(FlattenError, match="unknown name"):
         flatten(parse(source), "M")
+
+
+_CONSTANTS = (
+    "package P\n"
+    "  package Constants\n"
+    "    constant Real pi = 3.141592653589793;\n"
+    "    constant Real eps = 1e-15;\n"
+    "  end Constants;\n"
+    "end P;\n"
+)
+
+
+def test_a_named_import_makes_a_package_constant_a_bare_name() -> None:
+    """``import P.Constants.pi;`` then a bare ``pi`` is the constant's value, as the qualified form is.
+
+    The multi-part reference `P.Constants.pi` already reduced; this is the same constant reached by
+    the simple name the import brought into scope, which is how most of the library writes it.
+    """
+    source = (
+        _CONSTANTS + "model M\n  import P.Constants.pi;\n  Real x;\nequation\n  x = pi;\nend M;\n"
+    )
+    equation = unparse_equation(flatten(parse(source), "M").equations[0])[0]
+    assert equation == "x = 3.141592653589793;"
+
+
+def test_a_wildcard_import_makes_every_package_constant_a_bare_name() -> None:
+    """``import P.Constants.*;`` puts both ``pi`` and ``eps`` in scope by their own names."""
+    source = (
+        _CONSTANTS
+        + "model M\n  import P.Constants.*;\n  Real x;\nequation\n  x = pi + eps;\nend M;\n"
+    )
+    equation = unparse_equation(flatten(parse(source), "M").equations[0])[0]
+    assert equation == "x = 3.141592653589793 + 1e-15;"
+
+
+def test_a_local_component_wins_over_an_imported_constant() -> None:
+    """A component named ``pi`` is a component, whatever an import says: the bare name stays a ref."""
+    source = (
+        _CONSTANTS + "model M\n  import P.Constants.*;\n"
+        "  parameter Real pi = 7;\n  Real x;\nequation\n  x = pi;\nend M;\n"
+    )
+    equation = unparse_equation(flatten(parse(source), "M").equations[0])[0]
+    assert equation == "x = pi;"
+
+
+def test_a_constant_in_an_enclosing_package_resolves_by_its_simple_name() -> None:
+    """A model reads a ``constant`` its enclosing package declares by the simple name, no import."""
+    source = (
+        "package P\n  constant Real g = 9.81;\n"
+        "  model M\n    Real x;\n  equation\n    x = g;\n  end M;\nend P;\n"
+    )
+    equation = unparse_equation(flatten(parse(source), "P.M").equations[0])[0]
+    assert equation == "x = 9.81;"
+
+
+def test_a_bare_name_no_import_introduces_still_fails() -> None:
+    """A bare name nothing brings into scope is a typo, not a silent zero."""
+    source = (
+        _CONSTANTS + "model M\n  import P.Constants.*;\n  Real x;\nequation\n  x = nope;\nend M;\n"
+    )
+    with pytest.raises(FlattenError, match="unknown name"):
+        flatten(parse(source), "M")

@@ -991,6 +991,54 @@ def _constant_literal(  # noqa: PLR0911 -- one per kind
     return None
 
 
+def _imported_constant(scope: Scope, head: str) -> ir.Expr | None:  # noqa: C901 -- named, wildcard, enclosing
+    """A bare name an ``import`` (or an enclosing package) makes a package constant, as its value.
+
+    ``import Modelica.Constants.pi;`` then ``pi`` in an equation, or ``import Modelica.Constants.*;``
+    then ``pi``, names a ``constant`` declared in a package. The qualified case above reads it off a
+    multi-part reference; this reads it off the simple name the import brought into scope. The
+    package it lives in is resolved from the top of the program, the way an imported class is, and the
+    constant is then read off it -- ``None`` when nothing in scope introduces the name or its value
+    will not reduce to a number here, so the ordinary "unknown name" report still catches a typo.
+
+    An enumeration literal brought in the same way (``import P.Colors.*;`` then ``red``) is its
+    position, matching what the qualified case does. Imports are consulted innermost class first, so
+    an inner import shadows an outer one, and a class's own constant only after its imports.
+    """
+    root = Scope(scope.program)
+
+    def read(package: str, member: str) -> ir.Expr | None:
+        try:
+            found = root.resolve(package)
+        except FlattenError:
+            return None
+        if not isinstance(found, Found):
+            return None
+        if member in found.cls.literals:
+            return ir.IntLiteral(found.cls.literals.index(member) + 1)
+        return _constant_literal(found.cls, member)
+
+    for cls in scope.chain:
+        for entry in cls.imports:
+            if entry.wildcard:
+                package, member = entry.path, head
+            elif entry.name == head:
+                package, _, member = entry.path.rpartition(".")
+            else:
+                continue
+            resolved = read(package, member)
+            if resolved is not None:
+                return resolved
+    # An enclosing class's own constant, reachable by its simple name -- but not the innermost class,
+    # whose own constants are components of the instance and are left for prefixing (they are in
+    # `local`). `chain[0]` is that class, so start one out.
+    for cls in scope.chain[1:]:
+        resolved = _constant_literal(cls, head)
+        if resolved is not None:
+            return resolved
+    return None
+
+
 def _literals(  # noqa: C901, PLR0911, PLR0912 -- one case per node type, as its neighbours have
     node: ir.Expr, scope: Scope, local: frozenset[str]
 ) -> ir.Expr:
@@ -1018,6 +1066,9 @@ def _literals(  # noqa: C901, PLR0911, PLR0912 -- one case per node type, as its
                 if constant is not None:
                     return constant
             return node
+        case ir.Ref(parts=[head]) if head not in local:
+            imported = _imported_constant(scope, head)
+            return imported if imported is not None else node
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             return ir.Binary(op, go(lhs), go(rhs))
         case ir.Unary(op=op, operand=operand):
