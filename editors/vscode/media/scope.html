@@ -1772,6 +1772,7 @@ function draw() {
   else if (scale === "units") drawUnits(frag);
   else drawOverlay(frag);
 
+  phaseEventDots(frag);
   drawMarks(frag);
   drawGuides(frag);
   // The step-response settling instants: one vertical marker per drawn step-like variable at the
@@ -2107,6 +2108,35 @@ function cursorDotY(nm, value, dom) {
   }
   const s = STRIPS.find((x) => x.members.includes(nm));
   return s ? s.yFor(value) : null;
+}
+// In a phase plot an event is a point on each drawn curve, not a column of the plane, so where the
+// time view draws a vertical line this draws a small ring on the trajectory at the instant it fired
+// -- a bouncing ball's rebound sitting on the phase portrait, a thermostat's switch on the loop. The
+// live run only (a pinned run's schedule may differ); a terminate is the run's end, not a point on
+// it. Called after the strips are drawn, so `STRIPS` and the shared bounds are ready to place the y.
+function phaseEventDots(frag) {
+  if (!xVar || !D.events.length) return;
+  const ri = RUNS.length - 1;
+  const dom = scale !== "split" && scale !== "units" ? bounds() : null;
+  for (const e of D.events) {
+    if (isTerminate(e)) continue;
+    const j = index(e.t);
+    const xv = xOfRun(ri, j);
+    if (xv === null || xv === undefined || !isFinite(xv)) continue;
+    if (xwin && (xv < xwin[0] || xv > xwin[1])) continue;
+    const cx = X(xv);
+    for (const nm of selected()) {
+      if (nm === xVar) continue;
+      const vs = seriesOf(ri, nm);
+      const val = vs ? vs[j] : null;
+      if (val === null || val === undefined || !isFinite(val)) continue;
+      const cy = cursorDotY(nm, val, dom);
+      if (cy === null || !isFinite(cy)) continue;
+      const dot = el("circle", {cx: cx, cy: cy, r: 3.6, fill: cssbg, stroke: "var(--dim)", "stroke-width": 1.4, opacity: 0.9});
+      dot.appendChild(el("title", {}, (e.cause || "event") + "   @   t = " + fmt(toT(e.t)) + " " + tUnit()));
+      frag.appendChild(dot);
+    }
+  }
 }
 // A spatial-profile inset for a 1-D array field (`u[1], u[2], ...`): the value of each drawn array
 // element against its index at the cursor's instant, in a corner of the plot, so scrubbing the time

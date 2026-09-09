@@ -172,7 +172,10 @@ over the chart listing them all -- so the ones below need not be memorised.
   Modelica that fired, as the model states it (`when probe >= T_drop`). Hovering a line shows the
   same, so an event says what it is without a trip to the legend. Clicking an event in the list
   zooms the time window onto it -- tight when its neighbours are close (a bouncing ball's last few
-  contacts), wider for a lone event -- without touching the run; double-click restores the view.
+  contacts), wider for a lone event -- without touching the run; double-click restores the view. In
+  a phase plot, where a vertical line has no meaning, each event is instead a small ring on the
+  trajectory at the instant it fired -- a bouncing ball's rebounds sitting on its phase portrait, a
+  thermostat's switches on its loop -- with the same cause and time on hover.
 - **Guards.** A model can carry `assert(condition, message)` checks of its own -- a buck converter
   asserting its duty cycle stays in `[0, 1]`, a machine asserting it keeps synchronism. The
   **guards** section of the legend lists each condition and its message, so a model states the
