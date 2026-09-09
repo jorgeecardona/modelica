@@ -1894,16 +1894,29 @@ function cursorDotY(nm, value, dom) {
 // `T[i, j]` has no line profile and is left out. The value scale is the field's range over the whole
 // run, so the shape grows and shrinks against a fixed frame as time runs rather than being
 // re-normalised each instant into noise when the field passes through flat.
+// The spatial shape of a drawn array field at the cursor's instant, in a corner inset. A 1-D
+// array (WaveString u[1..8]) draws as a value-vs-index line; a 2-D array (TorusHeat T[i,j])
+// draws as a heatmap, one cell per element coloured by its value. Both use a value scale taken
+// over the WHOLE run, so scrubbing plays the field's evolution against a fixed frame instead of
+// re-normalising to noise when it passes flat. Time view only (caller gates on !xVar).
 function profileInset(frag, j) {
   if (box.w < 340) return; // no room in a narrow pane
-  const bases = {};
+  const bases = {}, grids = {};
   for (const nm of selected()) {
-    const m = nm.match(/^([A-Za-z_]\w*)\[(\d+)\]$/);
-    if (m) (bases[m[1]] = bases[m[1]] || []).push({nm: nm, i: +m[2]});
+    const m2 = nm.match(/^([A-Za-z_]\w*)\[(\d+),\s*(\d+)\]$/);
+    if (m2) { (grids[m2[1]] = grids[m2[1]] || []).push({nm: nm, i: +m2[2], k: +m2[3]}); continue; }
+    const m1 = nm.match(/^([A-Za-z_]\w*)\[(\d+)\]$/);
+    if (m1) (bases[m1[1]] = bases[m1[1]] || []).push({nm: nm, i: +m1[2]});
   }
-  const groups = [];
-  for (const base in bases) if (bases[base].length >= 3) { bases[base].sort((a, b) => a.i - b.i); groups.push({base: base, els: bases[base]}); }
-  if (!groups.length) return;
+  const lines = [];
+  for (const base in bases) if (bases[base].length >= 3) { bases[base].sort((a, b) => a.i - b.i); lines.push({base: base, els: bases[base]}); }
+  const fields = [];
+  for (const base in grids) if (grids[base].length >= 4) fields.push({base: base, cells: grids[base]});
+  let y = M.t + 4;
+  if (lines.length) y = lineProfile(frag, j, lines, y) + 8;
+  for (const g of fields) y = heatGrid(frag, j, g, y) + 8;
+}
+function lineProfile(frag, j, groups, topY) {
   let lo = Infinity, hi = -Infinity, maxI = 1;
   for (const g of groups) {
     maxI = Math.max(maxI, g.els[g.els.length - 1].i);
@@ -1911,7 +1924,7 @@ function profileInset(frag, j) {
   }
   if (!(hi > lo)) { hi = lo + 1; lo -= 1; }
   const iw = 158, ih = 100, pad = 7;
-  const ix = box.w - M.r - iw, iy = M.t + 4;
+  const ix = box.w - M.r - iw, iy = topY;
   const plotTop = iy + 16, plotBot = iy + ih - pad;
   const plotX = (i) => ix + pad + (maxI > 1 ? (i - 1) / (maxI - 1) : 0.5) * (iw - 2 * pad);
   const plotY = (val) => plotTop + (1 - (val - lo) / (hi - lo)) * (plotBot - plotTop);
@@ -1924,6 +1937,46 @@ function profileInset(frag, j) {
     for (const e of g.els) { const val = D.series[e.nm][j]; if (val === null || !isFinite(val)) continue; frag.appendChild(el("circle", {cx: plotX(e.i), cy: plotY(val), r: 1.8, fill: colour(e.nm)})); }
   }
   frag.appendChild(el("text", {class: "tick", x: ix + pad, y: iy + 11, "font-weight": 600}, groups.map((g) => g.base).join(", ") + " vs index"));
+  return iy + ih;
+}
+// A value's colour on the field scale: a diverging blue-white-red about zero when the range
+// straddles zero (a wave, a signed potential), otherwise a sequential pale-to-deep-red heat scale.
+function heatColor(val, lo, hi, diverging, mag) {
+  if (diverging) {
+    const m = Math.max(-1, Math.min(1, val / mag)), a = Math.abs(m);
+    return "hsl(" + (m < 0 ? 220 : 12) + " " + Math.round(15 + 70 * a) + "% " + Math.round(96 - 52 * a) + "%)";
+  }
+  const t = Math.max(0, Math.min(1, (val - lo) / (hi - lo)));
+  return "hsl(" + Math.round(60 - 60 * t) + " " + Math.round(30 + 55 * t) + "% " + Math.round(94 - 52 * t) + "%)";
+}
+function heatGrid(frag, j, g, topY) {
+  let ni = 1, nk = 1, lo = Infinity, hi = -Infinity;
+  for (const c of g.cells) {
+    ni = Math.max(ni, c.i); nk = Math.max(nk, c.k);
+    for (const val of D.series[c.nm]) if (val !== null && isFinite(val)) { if (val < lo) lo = val; if (val > hi) hi = val; }
+  }
+  if (!(hi > lo)) { hi = lo + 1; lo -= 1; }
+  const pad = 7, iw = 158, titleH = 16, barH = 8;
+  const ix = box.w - M.r - iw, iy = topY;
+  const cell = Math.max(3, Math.min((iw - 2 * pad) / nk, 18));
+  const gw = cell * nk, gh = cell * ni;
+  const ih = titleH + gh + 6 + barH + 13;
+  const gx = ix + pad, gy = iy + titleH;
+  const diverging = lo < 0 && hi > 0, mag = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
+  frag.appendChild(el("rect", {x: ix, y: iy, width: iw, height: ih, rx: 3, fill: cssbg, stroke: "var(--line)", "stroke-width": 1, opacity: 0.92}));
+  frag.appendChild(el("text", {class: "tick", x: gx, y: iy + 11, "font-weight": 600}, g.base + "[i,j] field"));
+  for (const c of g.cells) {
+    const val = D.series[c.nm][j];
+    const cx = gx + (c.k - 1) * cell, cy = gy + (c.i - 1) * cell;
+    if (val === null || !isFinite(val)) continue;
+    frag.appendChild(el("rect", {x: cx + 0.5, y: cy + 0.5, width: cell - 1, height: cell - 1, fill: heatColor(val, lo, hi, diverging, mag)}));
+  }
+  frag.appendChild(el("rect", {x: gx, y: gy, width: gw, height: gh, fill: "none", stroke: "var(--line)", "stroke-width": 0.6, opacity: 0.5}));
+  const by = gy + gh + 6, STOPS = 24;
+  for (let s = 0; s < STOPS; s++) frag.appendChild(el("rect", {x: gx + s / STOPS * gw, y: by, width: gw / STOPS + 0.6, height: barH, fill: heatColor(lo + (s + 0.5) / STOPS * (hi - lo), lo, hi, diverging, mag)}));
+  frag.appendChild(el("text", {class: "tick", x: gx, y: by + barH + 9, "font-size": "9px"}, fmt(lo)));
+  frag.appendChild(el("text", {class: "tick", x: gx + gw, y: by + barH + 9, "font-size": "9px", "text-anchor": "end"}, fmt(hi)));
+  return iy + ih;
 }
 function cursor(v) {
   const j = nearestIndex(v);
