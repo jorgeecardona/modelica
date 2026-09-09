@@ -243,10 +243,12 @@ unit.
 ### Saving the run
 
 **`csv`** saves the drawn run to a CSV file (a save dialog opens, defaulting beside the `.mo`):
-a `time` column and one column per variable, in SI units -- the honest data behind the chart,
-not the display units. The header names the variables as the model does and the clock column is
-`time`, so the file re-imports through `log…` as a measured log; a gap in a series is an empty
-cell.
+a `time` column and one column per **drawn** variable, in SI units -- the honest data behind the
+chart, not the display units, and not the dozens of `der_` and connector-internal columns a
+component model flattens to. Draw the whole set (the `all` button) to export everything; nothing
+drawn falls back to all of them. The header names the variables as the model does and the clock
+column is `time`, so the file re-imports through `log…` as a measured log; a gap in a series is
+an empty cell.
 
 **`svg`** saves the chart itself as an SVG image, for a report or a slide. It is self-contained:
 every colour is inlined and an opaque background is laid behind it, so it renders the same

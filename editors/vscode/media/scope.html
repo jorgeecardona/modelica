@@ -446,7 +446,7 @@
           <button type="button" id="playbtn" aria-pressed="false" title="play the cursor through time so a field's spatial profile animates -- the 1-D line or 2-D heatmap inset breathing, the standing wave swinging; Space to play or pause">&#9654;</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
-          <button type="button" id="csvbtn" title="save the drawn run as a CSV: a time column and one column per variable, in SI units -- re-importable as a measured log" hidden>csv</button>
+          <button type="button" id="csvbtn" title="save the drawn variables as a CSV: a time column and one column per drawn variable, in SI units (draw all for the whole set) -- re-importable as a measured log" hidden>csv</button>
           <button type="button" id="svgbtn" title="save the chart as an SVG image, self-contained (colours inlined) for a report or slide" hidden>svg</button>
           <button id="all">all</button>
           <button id="none">none</button>
@@ -2298,10 +2298,14 @@ document.getElementById("logbtn").onclick = () => { if (vscodeApi) vscodeApi.pos
 // display units). Named as the model names them and with a `time` column, so it re-imports as a
 // measured log. A gap (a null) is an empty cell. Variable names carry no commas, so no escaping.
 function buildCsv() {
-  const lines = [["time", ...names].join(",")];
+  // The variables that are drawn, so the file is the data behind the plot rather than every
+  // connector-internal and `der_` column a component model flattens to. Nothing drawn falls back
+  // to all of them, so the button is never empty. Derived expressions are in `selected()` too.
+  const cols = selected().length ? selected() : names;
+  const lines = [["time", ...cols].join(",")];
   for (let k = 0; k < N; k++) {
     const cells = [T[k]];
-    for (const nm of names) {
+    for (const nm of cols) {
       const vs = D.series[nm], v = vs ? vs[k] : null;
       cells.push(v === null || v === undefined || !isFinite(v) ? "" : v);
     }
