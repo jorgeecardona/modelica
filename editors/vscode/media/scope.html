@@ -443,7 +443,7 @@
             <option value="deg">deg</option>
           </select>
           <button type="button" id="stepbtn" aria-pressed="false" title="step-response metrics for each drawn variable: its final value, overshoot, 10-90% rise time and 2% settling time -- for a model driven from one state to another, like a controller reaching a setpoint">step</button>
-          <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs) and mean of each drawn variable over the window on screen -- the peak current, the mean power, the lowest temperature in the region you are looking at; zoom to narrow it">stats</button>
+          <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs), mean and final value of each drawn variable over the window on screen -- the peak current, the mean power, the settled temperature in the region you are looking at; zoom to narrow it">stats</button>
           <button type="button" id="playbtn" aria-pressed="false" title="play the cursor through time so a field's spatial profile animates -- the 1-D line or 2-D heatmap inset breathing, the standing wave swinging; Space to play or pause">&#9654;</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
@@ -3600,14 +3600,14 @@ function windowStats(nm) {
   const vs = D.series[nm];
   if (!vs || N < 1) return null;
   const [i0, i1] = visible();
-  let lo = Infinity, hi = -Infinity, sum = 0, cnt = 0, tmax = null;
+  let lo = Infinity, hi = -Infinity, sum = 0, cnt = 0, tmax = null, last = null;
   for (let k = i0; k <= i1; k++) {
     const v = vs[k]; if (v === null || v === undefined || !isFinite(v)) continue;
     if (v < lo) lo = v;
     if (v > hi) { hi = v; tmax = T[k]; }
-    sum += v; cnt++;
+    sum += v; cnt++; last = v;
   }
-  return cnt ? {min: lo, max: hi, mean: sum / cnt, tmax} : null;
+  return cnt ? {min: lo, max: hi, mean: sum / cnt, tmax, final: last} : null;
 }
 function paintStats() {
   const show = statsOn && !xVar && !view3d && N > 0;
@@ -3621,14 +3621,18 @@ function paintStats() {
   for (const nm of selected()) {
     const s = windowStats(nm); if (!s) continue;
     const u = unitOf(nm), du = dispUnit(u) ? " " + dispUnit(u) : "";
-    const row = document.createElement("div"); row.className = "steprow"; row.title = nm;
+    const row = document.createElement("div"); row.className = "steprow";
     const sn = document.createElement("span"); sn.className = "sn"; sn.style.color = colour(nm); sn.textContent = nm;
     const bits = [
       "min " + fmt(disp(s.min, u)),
       "peak " + fmt(disp(s.max, u)) + (s.tmax !== null ? " @ " + fmt(toT(s.tmax)) + " " + tUnit() : ""),
-      "mean " + fmt(disp(s.mean, u)) + du,
+      "mean " + fmt(disp(s.mean, u)),
+      "final " + fmt(disp(s.final, u)) + du,
     ];
     const sm = document.createElement("span"); sm.className = "sm"; sm.textContent = bits.join("  ·  ");
+    // The row clips in a narrow pane, so the whole reading is the tooltip -- every column reachable
+    // without widening the legend.
+    row.title = nm + ":  " + bits.join("  ·  ");
     row.append(sn, sm);
     frag.appendChild(row);
   }

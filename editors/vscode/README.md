@@ -223,9 +223,11 @@ over the chart listing them all -- so the ones below need not be memorised.
   since its overshoot against a near-zero move would be a meaningless thousands of percent. Time
   view only.
 - **Stats.** The **`stats`** toggle reads, for each drawn variable over the window on screen, its
-  **min**, its **peak** (with the time the peak occurs) and its **mean** -- the peak current, the
-  mean power, the lowest temperature in the region you are looking at. Zooming the time axis
-  narrows the window and the numbers follow it; the heading names the span they cover. Time view only.
+  **min**, its **peak** (with the time the peak occurs), its **mean** and its **final** value -- the
+  peak current, the mean power, the settled temperature in the region you are looking at. Zooming the
+  time axis narrows the window and the numbers follow it, so the final value is the value at the right
+  edge; the heading names the span they cover, and a row too long for a narrow pane is the tooltip in
+  full. Time view only.
 - **Space-time map.** When the drawn set is a 1-D field -- three or more elements of one array,
   `u[1] … u[16]` -- a heat map of its whole history appears top-right: the spatial index across, time
   down, the value in colour. A travelling front reads as a diagonal band and a standing wave as a set
