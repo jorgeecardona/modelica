@@ -1371,10 +1371,26 @@ function draw3d(frag) {
     frag.appendChild(el("text", {class: "tick", x: e[0], y: e[1] - 3, "text-anchor": "middle", "font-weight": 600,
       fill: col}, axisLabel(i) + (u ? "  " + u : "")));
   }
+  const live = RUNS.length - 1;
+  // The live run's shadow on the floor: the trajectory dropped straight down to z = -1, a faint grey
+  // footprint that says where in the x-y plane the curve is at each instant whatever its height --
+  // the second depth cue beside the bounding box, so the shape reads even flattened against a face.
+  const shadowCols = names3.map((nm) => (nm ? seriesOf(live, nm) : null));
+  if (!shadowCols.some((c) => !c)) {
+    let d = "", pen = false;
+    for (let k = 0; k < shadowCols[0].length; k++) {
+      const v = [shadowCols[0][k], shadowCols[1][k], shadowCols[2][k]];
+      if (v.some((x) => x === null || x === undefined || !isFinite(x))) { pen = false; continue; }
+      const p = spatial ? coord3(coords, v) : v;
+      const s = project3([norm(p[0], 0), norm(p[1], 1), -1], cx, cy, r);
+      d += (pen ? "L" : "M") + s[0].toFixed(1) + " " + s[1].toFixed(1) + " "; pen = true;
+    }
+    if (d) frag.appendChild(el("path", {d: d, fill: "none", stroke: "var(--ink)",
+      "stroke-width": 0.8, opacity: 0.12, "stroke-linejoin": "round"}));
+  }
   // The trajectory of each run, projected. The live run is coloured by time -- drawn as a few
   // dozen pieces, each in the ramp's colour for its stretch, which reads as a gradient without a
   // path per point -- and pins are one dashed line in the first axis's colour, as elsewhere.
-  const live = RUNS.length - 1;
   for (let ri = 0; ri < RUNS.length; ri++) {
     const cols = names3.map((nm) => (nm ? seriesOf(ri, nm) : null));
     if (cols.some((c) => !c)) continue;
