@@ -150,6 +150,14 @@ over the chart listing them all -- so the ones below need not be memorised.
   variable's unit over the time unit, which is a roast's rate of rise in °C/min -- and the
   **integral** `∫var dt`, the complement of the rate: the charge under a current, the volume
   under a flow, the energy under a power. Marks are sample indices, so they work in phase plots too.
+- **Derive.** The `derive` box plots an arithmetic expression in the drawn variables, the model's
+  **parameters**, and `pi`, `e`, `t` -- with the usual operators, powers, the elementary functions,
+  an array element by its index (`u[4]`), and a whole-field reduction (`sum(T)`, `mean(u)`). It joins
+  the plot as a first-class series: legend, scales, phase axes, cursor and export all treat it as a
+  variable. Because parameters resolve, a conservation law can be written in the model's own terms and
+  watched holding flat -- RigidBodyFlip's energy `0.5*(inertia1*w1^2 + inertia2*w2^2 + inertia3*w3^2)`,
+  Kepler's `0.5*(vx^2 + vy^2) - mu/sqrt(x^2 + y^2)` -- and it follows a parameter you edit. Enter adds
+  it, Enter on the same expression removes it, and each model keeps its own.
 - **Level lines.** Shift-click to drop a horizontal line at the value under the pointer, on the
   strip it lands in: the level a variable is asked to reach. A dot marks where each drawn
   variable of that strip first crosses the level (both the fall and the rise, so a signal that

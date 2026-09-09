@@ -501,7 +501,7 @@
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
-    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), T[1,1]-T[8,8]" title="plot an expression in the drawn variables (and pi, e, t); an array element is written with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
+    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), T[1,1]-T[8,8]" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; an array element is written with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
@@ -768,6 +768,15 @@ function groupMembers(series, base) {
 }
 let derived = [];  // [{src}] -- the expressions, recompiled per model in applyDerived()
 // Compile `src` to a function `(j) => number` over the sample index, reading `series` and `time`.
+// The value a parameter name resolves to inside a derive-box expression: the live run's parameter,
+// with an override applied, in SI (the units the series are in), so an expression written in the
+// model's own parameter names reads the same numbers the simulator used. Undefined for a name that
+// is not a parameter, so the caller can fall through to "unknown variable".
+function deriveParam(name) {
+  const p = ((D && D.parameters) || []).find((q) => q.name === name);
+  if (!p) return undefined;
+  return name in overrides ? overrides[name] : p.value;
+}
 function compileExpr(src, series, time) {
   // An array-element name (`T[1, 1]`, `u[4]`) is one token, matched before a bare identifier so
   // its brackets are not left over; then the ordinary tokens. The series is keyed with a space
@@ -820,8 +829,14 @@ function compileExpr(src, series, time) {
         return (j) => fn(...args.map((g) => g(j))); }
       if (t in DCONST) { const c = DCONST[t]; return () => c; }
       if (t === "t" || t === "time") return (j) => time[j];
-      const s = seriesOf(t); if (!s) throw new Error("unknown variable " + t);
-      return (j) => s[j];
+      const s = seriesOf(t);
+      if (s) return (j) => s[j];
+      // A parameter is a constant scalar, resolved after the series so a variable never shadows one.
+      // This is what lets an invariant be written in the model's own terms -- RigidBodyFlip's energy
+      // 0.5*(inertia1*w1^2 + inertia2*w2^2 + inertia3*w3^2), Kepler's -mu/r -- and watched holding flat.
+      const pv = deriveParam(t);
+      if (pv !== undefined && isFinite(pv)) return () => pv;
+      throw new Error("unknown variable " + t);
     }
     if (/^[.\d]/.test(t)) { const v = parseFloat(t); return () => v; }
     throw new Error("unexpected " + t);
