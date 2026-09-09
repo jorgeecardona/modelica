@@ -42,6 +42,35 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-09, after `pure`/`impure` and external functions parse
+
+Two function-declaration constructs, both on the utility libraries, both cleared from the work
+list. `pure function` and `impure function` carry a purity hint the tool does not act on, so the
+prefix is accepted and dropped. An `external "C" [ref =] call [annotation];` body is the whole of
+a function implemented in another language; it cannot run here, so it is read and dropped, and a
+function that reaches the simulator this way is refused where a call would inline it (it has no
+algorithm), not at parse.
+
+`Modelica.Utilities` (Streams, System, Internal), `Modelica.Blocks.Tables` and
+`Modelica.Math.Random` are written this way and imported widely, so refusing them blocked a slice
+of the library. Six more files parse (2526 files, 105 → 99 refused), and one more example model
+parses end to end (parsed 411 → 412). The models behind the two constructs advance to the same
+flatten walls the electrical and machine libraries already lead with, so reachability holds at
+eight:
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    412 | 95.8 % |
+| flattened  |     12 |  2.8 % |
+| causalized |     10 |  2.3 % |
+| simulated  |      8 |  1.9 % |
+
+The work list is now flatten work almost top to bottom: a composite component that carries a value
+(66), an array shape not known at flatten time (52), an unqualified name in an equation (`pi`,
+`eps`, from the Constants the utility files pull in, 50 + rarer), and the `Clock` builtin (49).
+`Strings.mo`, `Random.mo` and `Files.mo` still trip on a `[` construct (an array-valued
+modification) and so did not clear. Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-09, after a `when` tuple equation reads `=`
 
 **Eight models simulate now, up from four.** A `when` in an equation section takes equations,

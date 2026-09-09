@@ -169,10 +169,14 @@ def test_initial_algorithm_parses_now() -> None:
     assert len(m.initial_algorithms) == 1
 
 
-def test_an_external_body_is_still_refused() -> None:
-    """The one refusal kept: an external function is an FFI question, not a language one."""
-    with pytest.raises(ModelicaSyntaxError, match="external"):
-        parse("function f\nexternal;\nend f;\n")
+def test_an_external_body_parses_as_a_bodyless_function() -> None:
+    """An external body reads now (dropped), rather than being refused at parse."""
+    program = parse(
+        'function f\n  input Real x;\n  output Real y;\nexternal "C" y = c(x);\nend f;\n'
+    )
+    f = program.find("f")
+    assert f is not None
+    assert f.algorithms == ()
 
 
 def test_an_unterminated_loop_names_the_construct() -> None:

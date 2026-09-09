@@ -303,19 +303,11 @@ def test_extends_and_connect() -> None:
 # Refusals: unsupported constructs are named, not misread
 # --------------------------------------------------------------------------------------
 
-UNSUPPORTED = [
-    ("external", "function f\nexternal;\nend f;\n"),
-]
-# `algorithm`, `while`, `break` and `return` used to be on this list, and so did
-# `replaceable`, `redeclare`, `import`, `enumeration` and `inner`/`outer`. They are read
-# now, and `tests/test_algorithm.py`, `tests/test_redeclare.py`, `tests/test_import.py`,
-# `tests/test_enumeration.py` and `tests/test_scoping.py` hold them to what they mean.
-
-
-@pytest.mark.parametrize(("keyword", "source"), UNSUPPORTED, ids=[k for k, _ in UNSUPPORTED])
-def test_unsupported_constructs_are_refused_by_name(keyword: str, source: str) -> None:
-    with pytest.raises(ModelicaSyntaxError, match=keyword):
-        parse(source)
+# `algorithm`, `while`, `break` and `return` used to be refused by name at parse, and so did
+# `replaceable`, `redeclare`, `import`, `enumeration`, `inner`/`outer`, `operator` and `external`.
+# Every one is read now -- the last two in `tests/test_operator_record.py` and
+# `tests/test_function_declarations.py` -- and each is held to what it means where it is refused
+# instead: at the point of use, with a message that names the construct rather than the token.
 
 
 def test_an_array_literal_is_read() -> None:

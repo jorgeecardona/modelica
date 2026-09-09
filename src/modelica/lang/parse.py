@@ -1079,14 +1079,18 @@ class _Parser:
         offset = 0
         while (token := self._ahead(offset)).kind is Kind.KEYWORD and token.text in _ELEMENT_PREFIX:
             offset += 1
+        # `pure`/`impure` and `operator` sit in front of the kind (`pure function`, `operator
+        # record`), so the class keyword is one or two tokens further on.
+        if self._ahead(offset).text in ("pure", "impure"):
+            offset += 1
+        if self._ahead(offset).text == "operator":
+            offset += 1
         token = self._ahead(offset)
-        # `operator record` / `operator function`: the `operator` prefix sits in front of the
-        # kind, so the class keyword is one token further on.
-        if token.kind is Kind.KEYWORD and token.text == "operator":
-            token = self._ahead(offset + 1)
         return token.kind is Kind.KEYWORD and token.text in _RESTRICTIONS
 
-    def class_definition(self, *, terminated: bool = True) -> ir.Class:
+    def class_definition(self, *, terminated: bool = True) -> ir.Class:  # noqa: C901 -- one flat
+        # run of optional prefixes (encapsulated, partial, pure/impure, operator, ...) then a
+        # short or long body; the branches are the grammar, not tangled logic.
         """Parse one class, short form or long form.
 
         ``terminated`` is false inside a class-modification, where a redeclaration is an
@@ -1097,6 +1101,12 @@ class _Parser:
         self._accept(Kind.KEYWORD, "final")
         partial = self._accept(Kind.KEYWORD, "partial") is not None
         expandable = self._accept(Kind.KEYWORD, "expandable") is not None
+        # `pure function` / `impure function`: purity is an optimisation hint (a function with
+        # side effects may not be lifted out of a loop), so it is accepted and dropped -- the
+        # standard library's `Modelica.Utilities` and `Modelica.Math.Random` are written with it,
+        # and those files are imported widely, so refusing it blocked a slice of the library.
+        if self._accept(Kind.KEYWORD, "pure") is None:
+            self._accept(Kind.KEYWORD, "impure")
         # `operator record` / `operator function`: the class parses as its plain kind so the
         # file it sits in loads (`Modelica.Units` defines dozens of `operator record` aliases,
         # and every model that imports `Modelica.Units.SI` needs that file to parse). The
@@ -1144,6 +1154,22 @@ class _Parser:
                 extends=(base,),
             )
         return self._long_definition(name, restriction, partial=partial, expandable=expandable)
+
+    def _external_clause(self) -> None:
+        """Read and drop a function's external body: ``external "C" [ref =] call [annotation];``.
+
+        The call is in another language and cannot run here, so a function that reaches the
+        simulator this way is refused where a call would inline it (it has no algorithm section),
+        not at parse. Reading it lets the standard library's `Modelica.Utilities`, and the table
+        and random functions -- all external, all imported widely -- load.
+        """
+        self._accept(Kind.STRING)  # the language, "C" or "FORTRAN 77" -- optional
+        if not self._check(Kind.OP, ";") and not self._check(Kind.KEYWORD, "annotation"):
+            self.expression()  # `ref` (the output) or the call itself
+            if self._accept(Kind.OP, "="):
+                self.expression()  # the external call, when `ref =` preceded it
+        self._annotation()
+        self._terminate()
 
     def _long_definition(  # noqa: C901, PLR0912, PLR0915 -- one flat dispatch, one arm per
         # element kind. Modelica has eleven of them and they share nothing but the loop that
@@ -1212,6 +1238,9 @@ class _Parser:
                 if definition is not None:
                     nested.append(definition)
                 components += declared
+                continue
+            if self._accept(Kind.KEYWORD, "external"):
+                self._external_clause()
                 continue
             if self._looks_like_class():
                 nested.append(self.class_definition())
