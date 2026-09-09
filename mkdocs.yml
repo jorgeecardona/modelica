@@ -107,6 +107,7 @@ nav:
   - Ideas:
       - What else exists in Python: ideas/landscape.md
       - Reachability and agreement: ideas/coverage.md
+      - Simplifying Modelica: ideas/simplifications.md
       - Drawing a graph: ideas/layout.md
       - Backends: ideas/backends.md
       - Benchmarks: ideas/benchmarks.md
