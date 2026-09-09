@@ -39,7 +39,7 @@ from modelica.ir.flat import BaseType, FlatModel, FlatVariable
 from modelica.ir.rewrite import names, substitute
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
 __all__ = [
     "Effective",
@@ -692,7 +692,38 @@ def _boolean(node: ir.Expr, values: Mapping[str, float], what: str) -> bool:
     return value
 
 
-def _prefix_expr(  # noqa: PLR0911, PLR0913 -- one case per node type, one flag per rule
+def _expand_comprehension(
+    node: ir.Comprehension, prefix: Callable[[ir.Expr], ir.Expr], values: Mapping[str, float]
+) -> ir.Expr:
+    """A comprehension as a plain array: one element per combination of its iterators.
+
+    Expanded where the ranges can be read, each iterator a literal substituted into the body
+    before it is prefixed -- the same move :meth:`_Flattener._unroll` makes for a ``for`` equation.
+    Nested for more than one iterator, so a two-index comprehension is a matrix. Downstream then
+    sees an array, so ``sum({f(i) for i in 1:n})`` folds through the ordinary reduction of one.
+    """
+    ranges: list[tuple[str, list[int]]] = []
+    for name, over in node.iterators:
+        if not isinstance(over, ir.Range):
+            raise FlattenError(f"the range of {name!r} in a comprehension must be 'a:b'")
+        what = f"the range of {name!r} in a comprehension"
+        lo = _integer(prefix(over.start), values, what)
+        hi = _integer(prefix(over.stop), values, what)
+        step = _integer(prefix(over.step or ir.IntLiteral(1)), values, what)
+        if step == 0:
+            raise FlattenError(f"the range of {name!r} in a comprehension steps by zero")
+        ranges.append((name, list(range(lo, hi + (1 if step > 0 else -1), step))))
+
+    def build(bound: dict[str, ir.Expr], rest: list[tuple[str, list[int]]]) -> ir.Expr:
+        if not rest:
+            return prefix(_substitute(node.body, bound))
+        name, indices = rest[0]
+        return ir.Array(tuple(build({**bound, name: ir.IntLiteral(i)}, rest[1:]) for i in indices))
+
+    return build({}, ranges)
+
+
+def _prefix_expr(  # noqa: C901, PLR0911, PLR0913 -- one case per node type, one flag per rule
     node: ir.Expr,
     prefix: _Path,
     local: frozenset[str],
@@ -724,6 +755,10 @@ def _prefix_expr(  # noqa: PLR0911, PLR0913 -- one case per node type, one flag 
             path = _prefix_ref(base, prefix, local, strict=strict, outer=outer).parts
             resolved = [_integer(go(i), values, f"the subscript of {base.name!r}") for i in indices]
             return ir.Ref((*path[:-1], element(path[-1], resolved)))
+        case ir.Comprehension():
+            if values is None:
+                raise FlattenError("a comprehension is not expanded here")
+            return _expand_comprehension(node, go, values)
         case ir.Range():
             raise FlattenError("a range is read only in the header of a 'for' equation")
         case _:

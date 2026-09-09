@@ -103,6 +103,39 @@ def test_an_empty_range_writes_no_equations() -> None:
     assert equations(model) == []
 
 
+def test_a_sum_over_a_comprehension_folds_to_an_explicit_sum() -> None:
+    """``sum({f(i) for i in 1:n})`` expands the comprehension, then folds the array to a sum."""
+    model = flat(
+        "  parameter Integer n = 3;\n  Real x[n];\n  Real total;\n"
+        "equation\n  der(x) = -x;\n  total = sum({2 * x[i] for i in 1:n});\n"
+    )
+    assert "total = 2 * x[1] + 2 * x[2] + 2 * x[3];" in equations(model)
+
+
+def test_a_brace_less_comprehension_reduction_reads_the_same() -> None:
+    """``sum(x[i] for i in 1:n)`` is the brace-less spelling and folds identically."""
+    model = flat(
+        "  parameter Integer n = 3;\n  Real x[n];\n  Real total;\n"
+        "equation\n  der(x) = -x;\n  total = sum(x[i] for i in 1:n);\n"
+    )
+    assert "total = x[1] + x[2] + x[3];" in equations(model)
+
+
+def test_a_bare_comprehension_is_an_array_scalarised_elementwise() -> None:
+    """``y = {2 * x[i] for i in 1:n}`` is an array equation, one scalar equation per element."""
+    model = flat(
+        "  parameter Integer n = 3;\n  Real x[n];\n  Real y[n];\n"
+        "equation\n  der(x) = -x;\n  y = {2 * x[i] for i in 1:n};\n"
+    )
+    assert "y[2] = 2 * x[2];" in equations(model)
+
+
+def test_a_two_index_comprehension_sums_over_every_pair() -> None:
+    """``sum({(i + j) for i in 1:2, j in 1:2})`` folds the nested array over all four pairs."""
+    model = flat("  Real g;\nequation\n  g = sum({i + j for i in 1:2, j in 1:2});\n")
+    assert equations(model) == ["g = 1 + 1 + (1 + 2) + (2 + 1) + (2 + 2);"]
+
+
 def test_a_for_equation_may_initialise() -> None:
     """Initialising ``n`` cells is exactly what a method-of-lines model needs.
 
