@@ -104,6 +104,58 @@ def test_a_discrete_variable_drives_the_continuous_part() -> None:
     assert result.at(1.5)["x"] == pytest.approx(0.5, abs=1e-6), "falling after the flip"
 
 
+def test_a_when_on_a_boolean_relation_variable_fires_at_the_crossing() -> None:
+    """``when b`` where ``b = x > c`` fires the same as ``when x > c``.
+
+    A crossing written once and named is what the event machinery could not read: it needs the
+    relation, not a variable standing for it. Flattening now inlines the defining relation into
+    the condition, so the ``when`` fires at the crossing and the body runs, and ``b`` is still a
+    variable of the model, readable at every point.
+    """
+    source = """model M
+      Real x(start = 0, fixed = true);
+      Boolean above(start = false);
+      discrete Real count(start = 0, fixed = true);
+    equation
+      der(x) = 1;
+      above = x > 2.5;
+      when above then
+        count = pre(count) + 1;
+      end when;
+    end M;
+    """
+    result = simulate(system(source), stop=5.0, tolerance=1e-9)
+    assert any(event.time == pytest.approx(2.5, abs=1e-6) for event in result.events), "at x = 2.5"
+    assert result.at(2.4)["count"] == pytest.approx(0.0), "before the crossing"
+    assert result.at(2.6)["count"] == pytest.approx(1.0), "fired once, after it"
+    assert result.at(2.6)["above"] == pytest.approx(1.0), "the named relation is still a variable"
+
+
+def test_a_when_on_a_compound_boolean_is_still_refused() -> None:
+    """Only a single crossing is inlined; ``when a and b`` is not one relation, so it is refused.
+
+    The variables it names are still substituted, so the message shows the relations rather than
+    the opaque names -- but a conjunction is not a threshold the crossing detector can watch, and
+    it stays refused, the catch-all in front of the inlining.
+    """
+    source = """model M
+      Real x(start = 0, fixed = true);
+      Boolean a(start = false);
+      Boolean b(start = false);
+      discrete Real count(start = 0, fixed = true);
+    equation
+      der(x) = 1;
+      a = x > 2.5;
+      b = x < 4.0;
+      when a and b then
+        count = pre(count) + 1;
+      end when;
+    end M;
+    """
+    with pytest.raises(EmitError, match="has to be a relation"):
+        build(system(source))
+
+
 def test_two_when_clauses_may_disagree_which_is_what_hysteresis_is() -> None:
     """One `when` turns it on and another turns it off, and neither can see the other.
 

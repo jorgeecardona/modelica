@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Final, Literal
 from modelica.ir import nodes as ir
 from modelica.ir.evaluate import EvaluationError, at, evaluate
 from modelica.ir.flat import BaseType, FlatModel, FlatVariable
-from modelica.ir.rewrite import names
+from modelica.ir.rewrite import names, substitute
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -2293,6 +2293,48 @@ def _with_prelude(program: ir.Program) -> ir.Program:
     return ir.Program(missing + program.classes) if missing else program
 
 
+_CROSSING_OPS = frozenset({"<", "<=", ">", ">="})
+
+
+def _resolve_boolean_when_conditions(
+    equations: Sequence[ir.Equation], whens: Sequence[ir.When]
+) -> tuple[ir.When, ...]:
+    """Inline a Boolean variable's defining relation into a ``when`` condition.
+
+    ``Boolean b = x > 2.5; when b then ... end when;`` writes the crossing once and names it,
+    which the event machinery cannot read: a ``when`` fires on a threshold crossing and needs the
+    relation itself, not a variable standing for it. Every continuous equation ``b = <relation>``
+    whose right-hand side is such a crossing is collected, and a ``when`` condition mentioning ``b``
+    gets the relation in its place, so ``when b`` becomes ``when x > 2.5`` -- the form the crossing
+    detector already handles, so the whole event pipeline (causalize, emit, the Rust loop) sees a
+    relation and nothing new. The defining equation stays, so ``b`` is still a variable of the model,
+    observable like any other. Only a single relation counts: a compound definition (``b and c``, an
+    equality ``==``) is not collected, so a condition that is not one crossing is left untouched and
+    still refused downstream. A ``b`` set inside a ``when`` body (a discrete latch) is not a
+    continuous equation and is not collected either -- that is edge/change territory, not this.
+    """
+    relations: dict[str, ir.Expr] = {
+        equation.lhs.parts[0]: equation.rhs
+        for equation in equations
+        if isinstance(equation, ir.Equal)
+        and isinstance(equation.lhs, ir.Ref)
+        and len(equation.lhs.parts) == 1
+        and isinstance(equation.rhs, ir.Binary)
+        and equation.rhs.op in _CROSSING_OPS
+    }
+    if not relations:
+        return tuple(whens)
+    return tuple(
+        ir.When(
+            tuple(
+                ir.WhenBranch(substitute(branch.condition, relations), branch.body)
+                for branch in when.branches
+            )
+        )
+        for when in whens
+    )
+
+
 def flatten(program: ir.Program, model: str) -> FlatModel:
     """Flatten class ``model`` (a dotted name) as found in ``program``."""
     program = _with_prelude(program)
@@ -2309,7 +2351,7 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
         name=found.cls.name,
         variables=tuple(flattener.variables),
         equations=tuple(flattener.equations),
-        whens=tuple(flattener.whens),
+        whens=_resolve_boolean_when_conditions(flattener.equations, flattener.whens),
         asserts=tuple(flattener.asserts),
         initial_equations=tuple(flattener.initial_equations),
     )
