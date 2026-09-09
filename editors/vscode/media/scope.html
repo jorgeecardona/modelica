@@ -841,6 +841,11 @@ function select(i) {
   D = MODELS[i];
   paintSolver();
   names = Object.keys(D.series);
+  // On a switch to a different model, drop the last model's derived expressions and take this
+  // model's remembered ones instead (a re-run of the same model keeps what is in hand). Set here,
+  // before applyDerived compiles them into series and pushes their names, so the selection restore
+  // below sees them as ordinary variables.
+  if (lastModel !== D.model) { const saved = loadDerived(D.model); derived = saved ? saved.map((src) => ({src})) : []; }
   applyDerived();
   T = D.t; N = T.length;
   // The angle toggle earns its place only on a model that has an angle; otherwise it is clutter.
@@ -2817,7 +2822,7 @@ if (deriveBox) deriveBox.addEventListener("keydown", (e) => {
     derived.splice(derived.indexOf(already), 1);
     delete D.series[src]; names = names.filter((n) => n !== src); on.delete(src);
     deriveBox.value = ""; deriveBox.title = ""; deriveBox.classList.remove("bad");
-    saveSelection(); draw(); paintLegend(); return;
+    saveSelection(); saveDerived(); draw(); paintLegend(); return;
   }
   try { compileExpr(src, D.series, T); }
   catch (err) { deriveBox.classList.add("bad"); deriveBox.title = "cannot plot: " + err.message; return; }
@@ -2826,7 +2831,7 @@ if (deriveBox) deriveBox.addEventListener("keydown", (e) => {
   applyDerived();
   on.add(src); preSolo = null;
   deriveBox.value = "";
-  saveSelection(); draw();
+  saveSelection(); saveDerived(); draw();
 });
 const stepBtn = document.getElementById("stepbtn");
 if (stepBtn) stepBtn.onclick = () => {
@@ -3659,6 +3664,26 @@ function loadView(model) {
     const all = JSON.parse(localStorage.getItem(VIEW_KEY) || "{}") || {};
     const view = all[model];
     if (view && typeof view === "object") return view;
+  } catch (e) { /* storage unavailable */ }
+  return null;
+}
+// The derive-box expressions, kept per model like the drawn set and the view. An expression is
+// written against a model's variables (`r*cos(phi)`), so it only means anything for the model it
+// was written on; a model reopens with the expressions it last carried, and no others.
+const DERIVED_KEY = "pymodelica.scope.derived";
+function saveDerived() {
+  if (!D || !D.model) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(DERIVED_KEY) || "{}") || {};
+    all[D.model] = derived.map((d) => d.src);
+    localStorage.setItem(DERIVED_KEY, JSON.stringify(all));
+  } catch (e) { /* storage unavailable; skip */ }
+}
+function loadDerived(model) {
+  try {
+    const all = JSON.parse(localStorage.getItem(DERIVED_KEY) || "{}") || {};
+    const saved = all[model];
+    if (Array.isArray(saved)) return saved.filter((s) => typeof s === "string");
   } catch (e) { /* storage unavailable */ }
   return null;
 }
