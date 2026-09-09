@@ -149,6 +149,44 @@ end M;
         _system(source)
 
 
+def test_a_singular_algebraic_loop_is_named_not_a_division_by_zero() -> None:
+    """An inconsistent algebraic loop is caught here, where its equation can still be named.
+
+    ``a = b + 1`` and ``b = a + 1`` say ``a - b = 1`` and ``a - b = -1``: no solution. Alias
+    elimination reduces it to a single equation whose unknown has a zero coefficient, and without
+    the check that used to reach the emitted code as ``a = .../0.0`` -- a bare ``ZeroDivisionError``
+    from the generated function with no clue which equations were at fault. Now it is refused at
+    causalization, naming the singular loop, and a *consistent* loop still solves.
+    """
+    inconsistent = """
+    model M
+      Real x(start = 1, fixed = true);
+      Real a;
+      Real b;
+    equation
+      der(x) = -x;
+      a = b + 1;
+      b = a + 1;
+    end M;
+    """
+    with pytest.raises(CausalizationError, match="singular algebraic loop"):
+        _system(inconsistent)
+
+    # A genuinely solvable loop must still build: this one is a - 2*b = x, b = a - 1.
+    solvable = """
+    model M
+      Real x(start = 1, fixed = true);
+      Real a;
+      Real b;
+    equation
+      der(x) = -x;
+      a = 2 * b + x;
+      b = a - 1;
+    end M;
+    """
+    assert _system(solvable) is not None
+
+
 def test_walking_the_differentiation_chain_stops_even_if_it_loops() -> None:
     """`_Work.chain` is bounded, so a cycle in ``integral`` is a wrong answer and not a hang.
 

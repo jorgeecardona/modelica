@@ -869,6 +869,17 @@ def _blocks(work: _Work, matched: dict[int, str]) -> tuple[Block, ...]:
                 continue
             assignment = solve_for(left, unknowns[0])
             pivot = simplify(d_dx(left, unknowns[0]))
+            # A pivot that folds to a constant zero means the unknown's coefficient in the equation
+            # meant to compute it is zero: the equation does not determine it. This is what an
+            # inconsistent algebraic loop reduces to -- `a = b + 1` and `b = a + 1` leave `0 = 2`
+            # once aliased -- and without this it reached the emitted code as a division by a literal
+            # zero, a bare ZeroDivisionError with no clue which equations were at fault.
+            if _number(pivot) == 0:
+                raise CausalizationError(
+                    f"{work.name}: the equation `{_show(equations[0])}` cannot be solved for "
+                    f"{unknowns[0]!r} -- its coefficient there is zero, so this is a singular "
+                    "algebraic loop with no solution (two equations saying incompatible things)."
+                )
             blocks.append(Block(unknowns, equations, assignment, pivot))
             continue
         blocks.append(_tear(unknowns, equations))

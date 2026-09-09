@@ -6,6 +6,14 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **An inconsistent algebraic loop is named, not a `ZeroDivisionError`.** `a = b + 1` and
+  `b = a + 1` say `a - b = 1` and `a - b = -1` at once: no solution. Alias elimination reduces this
+  to a single equation whose unknown has a zero coefficient, and the emitted code used to divide by
+  that literal zero, so a real model with a contradictory pair of equations failed at runtime with a
+  bare `ZeroDivisionError` and no clue which equations were at fault. Causalization now checks the
+  pivot before it emits: a coefficient that folds to zero is refused with the model name, the
+  offending equation as Modelica source, and the words "singular algebraic loop". A consistent loop
+  (`a = 2*b + x`, `b = a - 1`) still solves.
 - `examples/WaveString`: **the wave equation on a string with fixed ends, the second PDE in the
   corpus.** A string of length 1 held at both ends, discretised in space by the method of lines --
   eight interior points, each obeying `u'' = c^2 * (second difference of its neighbours)`, the same
