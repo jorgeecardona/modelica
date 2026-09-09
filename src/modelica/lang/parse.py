@@ -70,9 +70,18 @@ _INFIX: Final[dict[str, ir.BinaryOp]] = {
     ">=": ">=",
     "+": "+",
     "-": "-",
+    # `.+`/`.-` are identical to `+`/`-` here -- an array `+`/`-` is already elementwise -- so
+    # they fold to the plain operator. `.*`/`./`/`.^` differ from `*`/`/`/`^` for arrays (a
+    # contraction versus an elementwise product, a refusal versus an elementwise divide/power),
+    # so they keep their own op and the flattener reads them elementwise.
+    ".+": "+",
+    ".-": "-",
     "*": "*",
     "/": "/",
+    ".*": ".*",
+    "./": "./",
     "^": "^",
+    ".^": ".^",
 }
 _SIGN: Final[dict[str, ir.UnaryOp]] = {"+": "+", "-": "-"}
 

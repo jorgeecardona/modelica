@@ -10,9 +10,10 @@ it, including the per-element share of an array-valued ``start``.
 A ``*`` between two arrays is a contraction, not elementwise, and is scalarised as such: the
 dot product ``a * x``, the matrix-vector ``A * x`` (``der(x) = A * x``, the linear system), and
 the matrix-matrix ``A * B`` all become the sums they stand for. ``+`` and ``-`` between two arrays
-are elementwise (the shared shape); array ``/`` and ``^`` have no such reading and are refused,
-naming the loop as the way to write them. ``transpose(A)`` swaps a matrix's two indices,
-``transpose(A)[i, j] = A[j, i]``, whole or inside a product.
+are elementwise (the shared shape); ``*`` is a contraction, so ``.*`` is the elementwise product,
+and ``./`` and ``.^`` are the elementwise divide and power that plain ``/`` and ``^`` refuse.
+``transpose(A)`` swaps a matrix's two indices, ``transpose(A)[i, j] = A[j, i]``, whole or inside a
+product.
 
 A reduction folds a whole array into one scalar: ``sum(x)`` is ``x[1] + ... + x[n]``,
 ``product(x)`` the same with ``*``, and ``min(x)`` / ``max(x)`` fold through the pairwise
@@ -128,6 +129,57 @@ def test_an_array_slash_between_two_arrays_is_still_refused() -> None:
             """,
             "Bad",
         )
+
+
+def test_the_dotted_operators_are_elementwise() -> None:
+    """``.*`` / ``./`` / ``.^`` between two arrays are elementwise, unlike ``*`` (a contraction).
+
+    ``.*`` is the elementwise product ``*`` is not, ``./`` and ``.^`` are the elementwise divide and
+    power ``/`` and ``^`` refuse. Each reads out to its plain scalar sibling per element, so a rate
+    picks up its own factor per element: ``der(x) = -x .* p`` decays ``x[i]`` at rate ``p[i]``.
+    """
+    system = _system(
+        """
+        model Dotted
+          parameter Real p[2] = {2, 3};
+          Real x[2](start = {1, 1}, fixed = true);
+          Real q[2];
+          Real e[2];
+        equation
+          der(x) = -x .* p;
+          q = x ./ p;
+          e = x .^ 2;
+        end Dotted;
+        """,
+        "Dotted",
+    )
+    result = simulate(system, stop=1.0, tolerance=1e-10)
+    time = result.time
+    # x[i] decays at its own rate p[i]: x[1] = e^{-2t}, x[2] = e^{-3t}.
+    assert np.max(np.abs(result["x[1]"] - np.exp(-2 * time))) < 1e-8
+    assert np.max(np.abs(result["x[2]"] - np.exp(-3 * time))) < 1e-8
+    # q = x ./ p elementwise, e = x .^ 2 elementwise.
+    assert np.max(np.abs(result["q[1]"] - np.exp(-2 * time) / 2)) < 1e-8
+    assert np.max(np.abs(result["e[2]"] - np.exp(-3 * time) ** 2)) < 1e-8
+
+
+def test_the_dotted_plus_and_minus_fold_to_the_plain_operator() -> None:
+    """``.+`` / ``.-`` are identical to ``+`` / ``-`` (an array ``+`` is already elementwise)."""
+    system = _system(
+        """
+        model DotAdd
+          parameter Real p[2] = {1, 3};
+          Real x[2](start = {0, 0}, fixed = true);
+        equation
+          der(x) = p .- x;
+        end DotAdd;
+        """,
+        "DotAdd",
+    )
+    result = simulate(system, stop=5.0, tolerance=1e-10)
+    time = result.time
+    assert np.max(np.abs(result["x[1]"] - 1.0 * (1 - np.exp(-time)))) < 1e-8
+    assert np.max(np.abs(result["x[2]"] - 3.0 * (1 - np.exp(-time)))) < 1e-8
 
 
 def test_a_matrix_equation_scalarises_with_per_element_starts() -> None:

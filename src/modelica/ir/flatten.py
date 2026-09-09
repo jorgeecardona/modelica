@@ -418,6 +418,10 @@ def element(name: str, indices: Sequence[int]) -> str:
 
 MATRIX_RANK: Final = 2  # a matrix is two-dimensional; `transpose` swaps its two indices
 
+# The dotted elementwise operators become their plain sibling once an element is read out: the
+# whole point of `x .* y` was to be elementwise, and one element of it is an ordinary scalar `*`.
+_DOTTED: Final[dict[str, ir.BinaryOp]] = {".*": "*", "./": "/", ".^": "^"}
+
 
 def _element(  # noqa: C901, PLR0911, PLR0912 -- one case per node type, as its neighbours have
     node: ir.Expr, indices: tuple[int, ...], shapes: Mapping[_Path, tuple[int, ...]]
@@ -469,7 +473,8 @@ def _element(  # noqa: C901, PLR0911, PLR0912 -- one case per node type, as its 
                 summed = ir.Binary("+", summed, term)
             return summed
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
-            return ir.Binary(op, go(lhs), go(rhs))
+            # A dotted operator (`.*`/`./`/`.^`) reads out as its plain scalar sibling.
+            return ir.Binary(_DOTTED.get(op, op), go(lhs), go(rhs))
         case ir.Call(name="sum" | "product", args=(arg,)) if _infer_shape(arg, shapes):
             # A reduction folds the whole array into one scalar, so it does not depend on the
             # equation's own index: `sum(x)` is `x[1] + x[2] + ... + x[n]` in every element it
@@ -613,8 +618,9 @@ def _infer_shape(  # noqa: C901, PLR0911, PLR0912 -- one node arm each
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             left, right = _infer_shape(lhs, shapes), _infer_shape(rhs, shapes)
             if left and right:
-                # `*` between two arrays contracts; `+`/`-` are elementwise (the shared shape, via
-                # the merge below); anything else has no elementwise reading and is refused.
+                # `*` between two arrays contracts; `+`/`-` and the dotted operators `.*`/`./`/`.^`
+                # are elementwise (the shared shape, via the merge below); a plain `/`/`^` has no
+                # elementwise reading and is refused, naming its dotted form.
                 if op == "*":
                     if left[-1] != right[0]:
                         raise FlattenError(
@@ -622,10 +628,10 @@ def _infer_shape(  # noqa: C901, PLR0911, PLR0912 -- one node arm each
                             f" ({left[-1]} against {right[0]})"
                         )
                     return (*left[:-1], *right[1:])
-                if op not in ("+", "-"):
+                if op not in ("+", "-", ".*", "./", ".^"):
                     raise FlattenError(
-                        f"an array `{op}` is not supported; `+`/`-` are elementwise and `*` is a"
-                        " product, and anything else must be written over the elements in a `for` loop"
+                        f"an array `{op}` is not supported; `+`/`-`/`.*`/`./`/`.^` are elementwise"
+                        f" and `*` is a product -- write `.{op}` for an elementwise `{op}`"
                     )
             return _merge_shape(left, right)
         case ir.IfExpr(then=then, otherwise=otherwise):

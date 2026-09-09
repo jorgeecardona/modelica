@@ -6,6 +6,14 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **The elementwise operators `.*`, `./`, `.^` (and `.+`, `.-`).** Modelica's dotted operators are
+  elementwise between two arrays: `x .* y` is the elementwise product `*` is not (a `*` between two
+  arrays is a contraction), and `./` and `.^` are the elementwise divide and power that plain `/`
+  and `^` refuse. The parser now accepts them (they were tokenised but rejected); `.+`/`.-` fold to
+  `+`/`-`, which are already elementwise for arrays, and `.*`/`./`/`.^` keep their own operator that
+  the flattener reads out elementwise -- each element is its plain scalar sibling, so causalization,
+  the Jacobian and every emitter (the Rust backend included) see ordinary `*`/`/`/`^` and need no
+  new rule. A plain `/` or `^` between two arrays now names its dotted form in the refusal.
 - **`transpose(A)` swaps a matrix's two indices.** `transpose(A)[i, j]` is `A[j, i]`, whether it is
   written whole (`B = transpose(A)`) or read through a product (`transpose(A) * x`, the linear form
   a state-space model and a quadratic form use). It is expanded where an array equation scalarises,

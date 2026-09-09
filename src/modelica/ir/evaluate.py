@@ -100,6 +100,11 @@ _ARITHMETIC: Final[dict[str, Callable[[float, float], float]]] = {
     # `math.pow` rather than `**`: a negative base with a fractional exponent is a domain
     # error, and `**` answers it with a complex number instead of raising.
     "^": math.pow,
+    # A dotted operator on two scalars is its plain sibling; on arrays the flattener has already
+    # read it out elementwise, so anything that reaches here is scalar.
+    ".*": lambda a, b: a * b,
+    "./": lambda a, b: a / b,
+    ".^": math.pow,
 }
 
 _COMPARISON: Final[dict[str, Callable[[float, float], bool]]] = {  # `operator` types these

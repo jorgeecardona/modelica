@@ -39,15 +39,22 @@ BINARY: Final[dict[str, int]] = {
     ">=": 4,
     "+": 5,
     "-": 5,
+    # The dotted forms are Modelica's elementwise operators: `.+`/`.-` at the additive level,
+    # `.*`/`./` at the multiplicative one, `.^` at the power level, each beside its plain sibling.
+    ".+": 5,
+    ".-": 5,
     "*": 6,
     "/": 6,
+    ".*": 6,
+    "./": 6,
     "^": 8,
+    ".^": 8,
 }
 
 UNARY_SIGN: Final = 7
 PRIMARY: Final = 9
 
-# `^` and the relational operators are non-associative: both operands print one level
+# `^`/`.^` and the relational operators are non-associative: both operands print one level
 # tighter, so `a ^ b ^ c` comes back out parenthesised rather than silently reparsed, and
 # the parser refuses to chain them at all.
-NON_ASSOCIATIVE: Final = frozenset({"^", "==", "<>", "<", "<=", ">", ">="})
+NON_ASSOCIATIVE: Final = frozenset({"^", ".^", "==", "<>", "<", "<=", ">", ">="})

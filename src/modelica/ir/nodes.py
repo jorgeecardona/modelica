@@ -79,7 +79,13 @@ __all__ = [
 # Expressions
 # --------------------------------------------------------------------------------------
 
-type BinaryOp = Literal["+", "-", "*", "/", "^", "==", "<>", "<", "<=", ">", ">=", "and", "or"]
+# The dotted forms `.*`/`./`/`.^` are Modelica's elementwise operators, kept distinct from
+# `*`/`/`/`^` because those mean a contraction (or a refusal) between two arrays; the flattener
+# reads a dotted operator elementwise and scalarises it to its plain sibling. (`.+`/`.-` are not
+# here: they are identical to `+`/`-` and the parser folds them to those.)
+type BinaryOp = Literal[
+    "+", "-", "*", "/", "^", ".*", "./", ".^", "==", "<>", "<", "<=", ">", ">=", "and", "or"
+]
 type UnaryOp = Literal["+", "-", "not"]
 
 

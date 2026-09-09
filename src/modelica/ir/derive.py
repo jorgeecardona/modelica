@@ -151,6 +151,11 @@ _FOLD: dict[ir.BinaryOp, Callable[[ir.Expr, ir.Expr], ir.Expr]] = {
     "*": mul,
     "/": div,
     "^": pow_,
+    # A dotted operator that survives to here is on scalars (arrays are read out elementwise before
+    # a Jacobian is taken), so it differentiates as its plain sibling.
+    ".*": mul,
+    "./": div,
+    ".^": pow_,
 }
 
 

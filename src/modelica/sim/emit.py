@@ -77,7 +77,7 @@ from __future__ import annotations
 
 import keyword
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Final
 
 from modelica.ir import nodes as ir
@@ -260,6 +260,10 @@ def _precedence(node: ir.Expr, dialect: Dialect) -> int:
             return _PRIMARY
 
 
+# A dotted operator on scalars is its plain sibling; emit only ever sees scalars.
+_DOTTED_EMIT: dict[str, ir.BinaryOp] = {".*": "*", "./": "/", ".^": "^"}
+
+
 def emit_expr(
     node: ir.Expr,
     symbols: Mapping[str, str],
@@ -268,6 +272,10 @@ def emit_expr(
     dialect: Dialect = PYTHON,
 ) -> str:
     """Render ``node`` in ``dialect``, parenthesised if it binds looser than ``minimum``."""
+    # A dotted operator that reaches emit is on scalars -- an array `.*` was read out elementwise
+    # into plain scalar `*` at flatten -- so it renders as its plain sibling.
+    if isinstance(node, ir.Binary) and node.op in _DOTTED_EMIT:
+        node = replace(node, op=_DOTTED_EMIT[node.op])
     text = _render(_unwrap(node), symbols, dialect)
     return f"({text})" if _precedence(node, dialect) < minimum else text
 
