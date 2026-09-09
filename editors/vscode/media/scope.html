@@ -314,6 +314,7 @@
   .axis { stroke: var(--line); }
   .tick { fill: var(--dim); font-size: 10px; }
   .grid { stroke: var(--line); stroke-dasharray: 2 3; opacity: .65; }
+  .zero { stroke: var(--dim); opacity: .38; }
   .event { stroke: var(--dim); stroke-dasharray: 4 3; opacity: .8; }
   .terminated { stroke: var(--vscode-editorWarning-foreground, #cca700); stroke-width: 1.5; opacity: .9; }
   .termlab { fill: var(--vscode-editorWarning-foreground, #cca700); font-size: 10px; font-weight: 600; }
@@ -1835,6 +1836,21 @@ function stripLabels(frag, lo, hi, y0, y1) {
       "text-anchor": "end"}, fmtEdge(lo)));
   }
 }
+// A faint solid baseline at the display zero, for a time-mode strip whose data straddles zero, so
+// a signed signal -- a velocity, a current, an error, a derived drift -- shows where it changes
+// sign and what it settles toward. Only the stacked strips (by-unit, split) need it: they carry
+// edge labels alone, while the shared/log/norm axes and a phase plot already lay round ticks that
+// include 0. Skipped when the data is all one sign (the edge already gives the floor). The "0"
+// label is dropped within 14px of an edge, where it would collide with the edge label. The zero is
+// taken in display units (undisp(0, u)) so a strip shown in degC gets its 0 degC line, not 0 K.
+function zeroLine(frag, yFor, u, dataLo, dataHi, y0, y1) {
+  if (!(disp(dataLo, u) < 0 && disp(dataHi, u) > 0)) return;
+  const y = yFor(undisp(0, u));
+  if (!(y > y0 && y < y1)) return;
+  frag.appendChild(el("line", {class: "zero", x1: M.l, x2: box.w - M.r, y1: y, y2: y}));
+  if (y - y0 > 14 && y1 - y > 14)
+    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y + 3, "text-anchor": "end"}, "0"));
+}
 
 // Each selected variable in its own horizontal strip with its own y-scale, so a signal near
 // zero stays legible beside one in the hundreds. This is the "split" answer to a model like
@@ -1872,6 +1888,7 @@ function drawSplit(frag) {
     }
     frag.appendChild(el("text", {x: M.l + 5, y: y0 + 10, fill: colour(nm),
       "font-size": 10, "font-weight": 600}, nm + (u ? "  " + dispUnit(u) : "")));
+    if (!xVar) zeroLine(frag, yFor, u, dataLo, dataHi, y0, y1);
     stripLabels(frag, disp(dataLo, u), disp(dataHi, u), y0, y1);
   });
 }
@@ -1939,6 +1956,7 @@ function drawUnits(frag) {
           tickLabel(dv, disp(hi, u) - disp(lo, u))));
       }
     } else {
+      zeroLine(frag, yFor, u, dataLo, dataHi, y0, y1);
       stripLabels(frag, disp(dataLo, u), disp(dataHi, u), y0, y1);
     }
     const unitLabel = dispUnit(u) || "(dimensionless)";
