@@ -1,0 +1,101 @@
+summary = "The figure-eight three-body choreography: three equal masses moving under their mutual Newtonian gravity, chasing one another around a single closed figure-eight curve. Discovered numerically by Moore and proved to exist by Chenciner and Montgomery, it is the most famous of the periodic three-body orbits, and its initial condition (the Chenciner-Montgomery values used here) is a fixed landmark. Where KeplerOrbit is a single body in a fixed central field, this is the real N-body problem: every body pulls on every other, six coupled inverse-square accelerations, and the orbit stays bounded and periodic only because the three interact just so. It is a conservative Hamiltonian system with several constants of motion held here as invariants -- the energy 0.5*sum|v|^2 - gm*sum(1/r_ij), the total linear momentum (the centre of mass, which stays at the origin), and the total angular momentum, which for this configuration is exactly zero. None is a state the solver integrates, so holding them fixed over a full period is the test; over one period at 1e-10 the energy drifts by about 2.5e-12. After half a period the configuration is its own mirror image (bodies 1 and 2 have swapped places), and after a full period T = 6.3259 every body has returned to where it began."
+teaches = ["the gravitational N-body problem: every mass pulls on every other, six coupled inverse-square accelerations", "a choreography -- several bodies sharing one closed curve -- the figure-eight being the canonical example", "conserved quantities as invariants: energy, linear momentum (the centre of mass) and angular momentum, none of them integrated", "a periodic orbit that closes: mirror-symmetric at half a period, back to the start after a full one"]
+requires = []
+
+[parse]
+classes = ["FigureEight"]
+
+[flatten]
+model = "FigureEight"
+states = ["x1", "y1", "x2", "y2", "x3", "y3", "vx1", "vy1", "vx2", "vy2", "vx3", "vy3"]
+equations = 12
+balanced = true
+
+# Three equal masses in the plane under mutual gravity, the inverse-square law per component:
+#   d(x_i)/dt = vx_i,  d(vx_i)/dt = gm * sum_{j != i} (x_j - x_i) / |r_j - r_i|^3
+# and likewise in y. The denominators are the cubed pairwise separations, written as
+# ((x_i - x_j)^2 + (y_i - y_j)^2)^1.5. From the Chenciner-Montgomery initial condition the
+# three bodies run along one figure-eight without ever colliding -- the curve keeps every pair
+# a finite distance apart -- so there is no singularity, only the fast passages near the centre
+# where two bodies swing close. The energy, the centre of mass and the angular momentum are
+# constants of the motion, checked as invariants over a full period.
+[simulate]
+stop = 6.5
+tolerance = 1e-10
+
+# One point on each sixth of the run, so the whole figure-eight is pinned. At t = 3, half a
+# period in, the configuration is the mirror of the start: body 1 sits where body 2 began.
+[[simulate.point]]
+t = 1.0
+values = { x1 = 0.9935829255, y1 = 0.2192049472, x2 = -0.05073428112, y2 = 0.04686124579, x3 = -0.9428486343, y3 = -0.266066193, vx1 = -0.4027488797, vy1 = 0.446097703, vx2 = 0.9371919115, vy2 = -0.8586421845, vx3 = -0.5344430218, vy3 = 0.4125444815 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 2.0
+values = { x1 = 0.1019817933, y1 = 0.09305642204, x2 = 0.9118620457, y2 = -0.2877637969, x3 = -1.013843819, y3 = 0.1947073748, vx1 = -0.9511812096, vy1 = -0.8401243133, vx2 = 0.6071660963, vy2 = 0.384887734, vx3 = 0.3440151233, vy3 = 0.4552365793 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 3.0
+values = { x1 = -0.8768205958, y1 = -0.3077028359, x2 = 1.031036149, y2 = 0.1698096037, x3 = -0.1542155233, y3 = 0.1378932322, vx1 = -0.6835501912, vy1 = 0.3474647712, vx2 = -0.2896998515, vy2 = 0.4610167863, vx3 = 0.9732500527, vy3 = -0.8084815575 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 4.0
+values = { x1 = -1.045388131, y1 = 0.1446661835, x2 = 0.2078249806, y2 = 0.1806329926, x3 = 0.8375631905, y3 = -0.3252991761, vx1 = 0.2393529923, vy1 = 0.4644279712, vx2 = -1.001430214, vy2 = -0.7627409401, vx3 = 0.7620772313, vy3 = 0.2983129689 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 5.0
+values = { x1 = -0.2630677029, y1 = 0.2204832166, x2 = -0.7940334192, y2 = -0.3398670559, x3 = 1.057101172, y3 = 0.1193838392, vx1 = 1.032826234, vy1 = -0.7019560582, vx2 = -0.8403868224, vy2 = 0.2357116824, vx3 = -0.1924394014, vy3 = 0.4662443758 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 6.0
+values = { x1 = 0.7463274767, y1 = -0.3506428332, x2 = -1.066346036, y2 = 0.0940324073, x3 = 0.3200186194, y3 = 0.2566104259, vx1 = 0.9152347475, vy1 = 0.1585911753, vx2 = 0.1483792924, vy2 = 0.4670569985, vx3 = -1.06361403, vy3 = -0.6256481738 }
+rtol = 1e-6
+source = "reference"
+
+# The energy is a constant of the motion: 0.5*sum|v|^2 - gm*(1/r12 + 1/r13 + 1/r23) = -1.28714,
+# and it stays there. Held to 1e-6, far above the ~2.5e-12 the integrator drifts over one period.
+[[simulate.invariant]]
+expr = "0.5 * (vx1^2 + vy1^2 + vx2^2 + vy2^2 + vx3^2 + vy3^2) - gm * (1 / sqrt((x1 - x2)^2 + (y1 - y2)^2) + 1 / sqrt((x1 - x3)^2 + (y1 - y3)^2) + 1 / sqrt((x2 - x3)^2 + (y2 - y3)^2))"
+value = -1.2871419871
+atol = 1e-6
+
+# The total angular momentum is the other constant, and this configuration is chosen to make it
+# exactly zero: sum_i (x_i*vy_i - y_i*vx_i) = 0 for all time.
+[[simulate.invariant]]
+expr = "x1*vy1 - y1*vx1 + x2*vy2 - y2*vx2 + x3*vy3 - y3*vx3"
+value = 0.0
+atol = 1e-6
+
+# The centre of mass does not move: the total momentum is zero, so (x1+x2+x3)/3 and (y1+y2+y3)/3
+# stay at the origin. (The published initial velocities carry a rounding residual of about 1e-8 in
+# the x momentum, far below this tolerance, so the centre creeps by ~2e-8 over the run.)
+[[simulate.invariant]]
+expr = "(x1 + x2 + x3) / 3"
+value = 0.0
+atol = 1e-6
+
+[[simulate.invariant]]
+expr = "(y1 + y2 + y3) / 3"
+value = 0.0
+atol = 1e-6
+
+# The figure-eight's extent: every body runs along the same curve, roughly 2.16 wide and 0.72
+# tall, so each coordinate stays inside these bounds.
+[[simulate.invariant]]
+expr = "x1"
+min = -1.09
+max = 1.09
+
+[[simulate.invariant]]
+expr = "y1"
+min = -0.36
+max = 0.36
