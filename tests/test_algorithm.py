@@ -124,6 +124,35 @@ def test_an_assignment_inside_a_when_is_still_written_with_equals() -> None:
     assert unparse(parse(source)) == source
 
 
+WHEN_WITH_IF = """\
+model M
+  discrete Real d;
+equation
+  when time > 1.0 then
+    if time < 2.0 then
+      d = 1.0;
+    else
+      d = 2.0;
+    end if;
+  end when;
+end M;
+"""
+
+
+def test_an_if_inside_a_when_body_parses_and_round_trips() -> None:
+    """`Blocks.Math` latches `if u < pre(...) then ...` inside a `when`; it reads and prints back."""
+    program = parse(WHEN_WITH_IF)
+    (when,) = program.find("M").equations  # type: ignore[union-attr]
+    assert isinstance(when, ir.When)
+    assert isinstance(when.branches[0].body[0], ir.IfStatement)
+    assert parse(unparse(program)) == program
+
+
+def test_flattening_an_if_inside_a_when_is_refused_by_name() -> None:
+    with pytest.raises(FlattenError, match=r"IfStatement inside a 'when' is not supported yet"):
+        flatten(parse(WHEN_WITH_IF), "M")
+
+
 # --------------------------------------------------------------------------------------
 # The Python front end says the same things
 # --------------------------------------------------------------------------------------

@@ -785,7 +785,11 @@ class _Parser:
             while not self._keyword("elsewhen", "end"):
                 if self._check(Kind.END):
                     raise self._error("unterminated 'when': expected 'end when;'", opening)
-                body.append(self._statement())
+                # A `when` body is a run of statements, and may hold an `if` or a `for` -- the
+                # `Blocks.Math` extremum blocks latch `if u < pre(...) then ...` inside `when`. The
+                # algorithm-statement parser reads the compound forms; the simple ones fall through
+                # it unchanged, so an ordinary assignment body is read exactly as before.
+                body.append(self._algorithm_statement())
             branches.append(ir.WhenBranch(condition, tuple(body)))
             keyword = "elsewhen"
         self._expect(Kind.KEYWORD, "end")

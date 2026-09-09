@@ -42,6 +42,32 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-09, after an `if` inside a `when` body parses
+
+A `when` body is a run of statements and may hold an `if` or a `for`; `Blocks.Math`'s extremum
+blocks latch `if u < pre(y_min) then t_min = time; else ...` inside a `when`, and the standard
+library's samplers do the same. The when-body parser read only simple assignments, so the
+compound form was refused at parse. It reads the algorithm statement forms now, and a plain
+assignment body is unchanged.
+
+The stage counts do not move (parsed holds 415 / 430): the files that carry this construct meet
+another one right after (`Blocks.Math` an array-valued modification, the Clocked samplers the
+`Clock` builtin), and flattening refuses an `if` in a `when` by name -- a conditional in the
+discrete-event pipeline is separate work. What moved is the parse frontier: the `if`-in-`when`
+refusal is gone from the work list, and `IfStatement inside a 'when' is not supported yet` is now
+the honest message, at flatten, for the models that reach it.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     12 |  2.8 % |
+| causalized |     10 |  2.3 % |
+| simulated  |      8 |  1.9 % |
+
+The largest blockers are unchanged: a composite component with a value (66), an array shape not
+known at flatten (52), unqualified constants (50), the `Clock` builtin (49), and, in parse, a type
+alias to an array type and a subscript on an inner component. Agreement is still unmeasured.
+
 ### 2026-09-09, after quoted identifiers and the bare operator class
 
 Two constructs the operator-overloading half of the library needs, both on `Complex.mo` and the
