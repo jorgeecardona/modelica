@@ -2192,6 +2192,33 @@ class _Flattener:
             case _:
                 return node
 
+    def _carry(
+        self,
+        node: ir.Expr,
+        prefix: _Path,
+        local: frozenset[str],
+        scope: Scope,
+        outer: Mapping[str, _Path] | None,
+    ) -> ir.Expr:
+        """The expression rewrite every equation form shares: literals, then names, then folding.
+
+        Three rewrites, in the order their outputs feed each other. An enumeration literal becomes a
+        number first, because it is not a reference and prefixing would turn it into one. Then a call
+        is resolved in the scope of the class that wrote it, and what comes back is an expression in
+        that class's own names -- which is exactly what prefixing then qualifies. A last pass folds
+        any array reduction (`sum(x)` and its kin) now that the names are flat: an equation is split
+        element by element after this, but a `when` condition, an `if`-equation condition or an assert
+        is not, so this is where their reductions become the arithmetic the emitter can read.
+        """
+        written = _literals(node, scope, local)
+        prefixed = _prefix_expr(
+            _inline_calls(written, scope), prefix, local, values=self.values, outer=outer
+        )
+        # Then any array constructor (`zeros(n)`, `identity(n)`) becomes its literal array, the way a
+        # declaration expands one -- its size arguments are structural and known here, so a forced
+        # linear system `der(x) = A * x + ones(n)` reads as the arithmetic it stands for.
+        return _fold_reductions(self._constructors(prefixed), self.shapes)
+
     def _equation(  # noqa: C901, PLR0913 -- one arm per equation form; the scope
         # resolves a call, the outer map a name
         self,
@@ -2204,24 +2231,7 @@ class _Flattener:
         initial: bool = False,
     ) -> None:
         def carry(node: ir.Expr) -> ir.Expr:
-            # Three rewrites, in the order their outputs feed each other. An enumeration
-            # literal becomes a number first, because it is not a reference and prefixing
-            # would turn it into one. Then a call is resolved in the scope of the class that
-            # wrote it, and what comes back is an expression in that class's own names --
-            # which is exactly what prefixing then qualifies. A last pass folds any array
-            # reduction (`sum(x)` and its kin) now that the names are flat: an equation is
-            # split element by element after this, but a `when` condition or an assert is not,
-            # so this is where their reductions become the arithmetic the emitter can read.
-            written = _literals(node, scope, local)
-            prefixed = _prefix_expr(
-                _inline_calls(written, scope), prefix, local, values=self.values, outer=outer
-            )
-            # Then any array constructor (`zeros(n)`, `identity(n)`) becomes its literal array, the
-            # way a declaration expands one -- its size arguments are structural and known here, so
-            # a forced linear system `der(x) = A * x + ones(n)` reads as the arithmetic it stands
-            # for. And last the reductions (`sum(x)`), for the contexts an equation split never
-            # reaches (a `when` condition, an assert).
-            return _fold_reductions(self._constructors(prefixed), self.shapes)
+            return self._carry(node, prefix, local, scope, outer)
 
         if initial and not isinstance(equation, (ir.Equal, ir.CallEquation, ir.ForEquation)):
             raise FlattenError("only `a = b` equations may appear in initial equation")
@@ -2360,7 +2370,11 @@ class _Flattener:
         """
         body = node.otherwise
         for branch in node.branches:
-            condition = _prefix_expr(branch.condition, prefix, local, values=self.values)
+            # The full expression rewrite, not a bare prefix: the condition may name an enumeration
+            # literal (`homotopyType == LimiterHomotopy.NoHomotopy`) or a package constant, which has
+            # to become its number before the condition can be evaluated here -- the same treatment a
+            # `when` condition and a top-level equation get.
+            condition = self._carry(branch.condition, prefix, local, scope, outer)
             if _boolean(condition, self.values, "the condition of an if-equation"):
                 body = branch.body
                 break

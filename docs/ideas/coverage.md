@@ -42,6 +42,33 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-09, after an enumeration literal in an if-equation condition resolves
+
+The condition of a structural `if`-equation was prefixed but not put through the rewrite that turns an
+enumeration literal into its number. The op-amp and limiter blocks the analog library builds on write
+`if homotopyType == Modelica.Blocks.Types.LimiterHomotopy.NoHomotopy then`, a kept structural `if`
+(its guard `strict` defaults to true), and the literal on the right stayed a name that flattening then
+could not resolve, so the model failed with "unknown name". A top-level equation and a `when`
+condition already took the full rewrite; the if-equation condition was the one place that took only a
+bare prefix. The rewrite is now one method, shared by all three, so the literal becomes its ordinal
+before the condition is evaluated.
+
+Flattening climbs from 31 to 47 of 430 example models, and reachable simulation from eleven to
+fourteen: the op-amp examples (`OpAmps.Adder`, `Comparator`, and their neighbours) and the models that
+instantiate a limiter clear the wall together. The "unknown name" line, which led the flatten work
+list two measurements ago, is off the top of it entirely.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     47 | 10.9 % |
+| causalized |     19 |  4.4 % |
+| simulated  |     14 |  3.3 % |
+
+The leaders are now a composite component with a value (70), the `Clock` builtin (62), an array shape
+not known at flatten (52), a subscript on an inner component and a type alias to an array type in
+parse (32 each), and a condition not known at flatten (31). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-09, after a package constant resolves unqualified and across packages
 
 The `Modelica.Constants` values the library leans on stopped a run at flatten. Two forms were

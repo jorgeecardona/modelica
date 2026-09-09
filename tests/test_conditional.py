@@ -140,6 +140,39 @@ def test_a_structural_elseif_chain_picks_its_branch() -> None:
     assert "9.0" in _equations(ELSEIF_MODEL.format(sel="5"))
 
 
+def test_an_if_equation_condition_resolves_an_enumeration_literal() -> None:
+    """The MSL writes `if homotopyType == Types.LimiterHomotopy.NoHomotopy` in a kept structural if.
+
+    The condition names an enumeration literal, which has to become its number before the condition
+    can be evaluated at flatten -- the same rewrite a top-level equation and a `when` condition get,
+    which the if-equation condition was skipping.
+    """
+    source = (
+        "package P\n"
+        "  type Mode = enumeration(off, on);\n"
+        "  model M\n"
+        "    parameter Mode m = Mode.on;\n"
+        "    parameter Boolean strict = true;\n"
+        "    Real x(start = 1, fixed = true);\n"
+        "  equation\n"
+        "    if strict then\n"
+        "      if m == P.Mode.on then\n"
+        "        der(x) = -2.0 * x;\n"
+        "      else\n"
+        "        der(x) = -7.0 * x;\n"
+        "      end if;\n"
+        "    else\n"
+        "      der(x) = -9.0 * x;\n"
+        "    end if;\n"
+        "  end M;\n"
+        "end P;\n"
+    )
+    eqs = " ".join(str(equation) for equation in flatten(parse(source), "P.M").equations)
+    assert "2.0" in eqs  # m == on holds, so the -2.0 branch survives
+    assert "7.0" not in eqs
+    assert "9.0" not in eqs
+
+
 def test_an_if_equation_on_a_continuous_variable_is_refused() -> None:
     source = (
         "model M\n  Real x(start = 1, fixed = true);\n  Real y;\n"
