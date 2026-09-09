@@ -76,6 +76,25 @@ SIMULATE_TIMEOUT = 120
 # process, attributed to its model, rather than the machine's problem.
 MEMORY_LIMIT = 4 << 30
 
+
+def _cap_address_space(limit: int) -> None:
+    """Cap this process's address space where the platform allows it.
+
+    ``RLIMIT_AS`` is a guard against a pathological flatten taking the machine down, not a
+    correctness requirement. Linux honours it; macOS does not — its current hard limit sits
+    below any useful ceiling, so a bare ``setrlimit`` to a fixed 4 GiB raises
+    ``ValueError: current limit exceeds maximum limit`` and the whole run never starts. So the
+    request is clamped to the current hard limit, and a platform that refuses it outright runs
+    without the guard rather than not running at all.
+    """
+    try:
+        _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        ceiling = limit if hard == resource.RLIM_INFINITY else min(limit, hard)
+        resource.setrlimit(resource.RLIMIT_AS, (ceiling, hard))
+    except (ValueError, OSError) as error:
+        print(f"note: address-space guard unavailable on this platform ({error}); continuing")
+
+
 STAGES = ("parse", "flatten", "causalize", "simulate")
 PAST = {
     "parse": "parsed",
@@ -551,7 +570,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=0, help="measure only the first N examples")
     arguments = parser.parse_args()
 
-    resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT, MEMORY_LIMIT))
+    _cap_address_space(MEMORY_LIMIT)
     sys.setrecursionlimit(20_000)
 
     msl = fetch()

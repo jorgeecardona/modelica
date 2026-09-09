@@ -42,6 +42,35 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-09, first run on macOS, after the array and builtin work
+
+The harness ran on this platform for the first time. `RLIMIT_AS` is a Linux guard that macOS
+refuses (`current limit exceeds maximum limit`), and the bare `setrlimit` was aborting the
+whole run before it started. The request is clamped to the current hard limit now, and a
+platform that refuses it outright runs without the guard rather than not running at all, with
+a note saying so.
+
+The measurement, against MSL v4.1.0 with `modelica` 0.0.163: parsed **411 / 430 (95.6 %)**,
+one past the 2026-09-01 row. Reachability is still 0 %, and the work list keeps its shape:
+one construct stands between the library and its first flatten, and it is the same one.
+
+| models | stage | refusal |
+| -----: | ----- | ------- |
+|    311 | parse | operator overloading (`operator record`, reached through `import Modelica.Units.SI`) |
+|     48 | parse | `:=` versus `=` inside a `when` statement |
+|     19 | parse | `impure` on a function |
+|     10 | flatten | the `Clock` builtin (`nothing named 'Clock'`) |
+|      7 | flatten | a medium's composite component cannot carry a value |
+|      6 | parse | a subscript on an `inner` component |
+|     29 | parse/flatten | twelve rarer refusals; `coverage.json` has every one |
+
+Operator overloading is three-quarters of the library on one construct, and it is a
+prerequisite, not a leaf: `Modelica.Units.SI` defines its unit types with `operator record`,
+and almost every model imports it. Until that parses, the 311 cannot advance to show what
+they would fail on next, so reachability cannot move off 0 % no matter what else lands. That
+is the next construct worth building for this number: the array, reduction and builtin work
+since 2026-09-01, which the fifteen-model example corpus exercises, does not touch it.
+
 ### 2026-09-01, after the base prefix on short classes
 
 `connector RealInput = input Real` — the MSL's most-used connector. The causality is
