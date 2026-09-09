@@ -6,6 +6,11 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **`transpose(A)` swaps a matrix's two indices.** `transpose(A)[i, j]` is `A[j, i]`, whether it is
+  written whole (`B = transpose(A)`) or read through a product (`transpose(A) * x`, the linear form
+  a state-space model and a quadratic form use). It is expanded where an array equation scalarises,
+  so causalization, the Jacobian and every emitter (the Rust backend included) see the swapped
+  element; a non-square `A[m, n]` transposes to `A[n, m]`.
 - **`+` and `-` between two arrays are elementwise.** `x + y` and `x - y` for two same-shaped arrays
   are the elementwise sum and difference, as `der(x) = p - x` (an array settling to a constant array)
   needs. The shape pass had refused any non-`*` operator between two arrays outright, so this had to

@@ -416,7 +416,10 @@ def element(name: str, indices: Sequence[int]) -> str:
     return f"{name}[{', '.join(str(i) for i in indices)}]"
 
 
-def _element(  # noqa: C901, PLR0911 -- one case per node type, as its neighbours have
+MATRIX_RANK: Final = 2  # a matrix is two-dimensional; `transpose` swaps its two indices
+
+
+def _element(  # noqa: C901, PLR0911, PLR0912 -- one case per node type, as its neighbours have
     node: ir.Expr, indices: tuple[int, ...], shapes: Mapping[_Path, tuple[int, ...]]
 ) -> ir.Expr:
     """One scalar element of an array-valued expression, at ``indices``.
@@ -479,6 +482,12 @@ def _element(  # noqa: C901, PLR0911 -- one case per node type, as its neighbour
             # (The two-argument `min(a, b)` form is left for the general call arm below.)
             terms = [_element(arg, idx, shapes) for idx in _indices(_infer_shape(arg, shapes))]
             return _reduce_call(node.name, terms)
+        case ir.Call(name="transpose", args=(arg,)) if (
+            len(_infer_shape(arg, shapes)) == MATRIX_RANK
+        ):
+            # `transpose(A)[i, j]` is `A[j, i]`: the first two indices swap.
+            i, j, *rest = indices
+            return _element(arg, (j, i, *rest), shapes)
         case ir.Call(name=name, args=args):
             return ir.Call(name, tuple(go(a) for a in args))
         case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
@@ -591,6 +600,11 @@ def _infer_shape(  # noqa: C901, PLR0911, PLR0912 -- one node arm each
             return ()  # a reduction over an array is one scalar
         case ir.Call(name="min" | "max", args=(arg,)) if _infer_shape(arg, shapes):
             return ()  # min/max of a single array is a scalar reduction
+        case ir.Call(name="transpose", args=(arg,)) if (
+            len(_infer_shape(arg, shapes)) == MATRIX_RANK
+        ):
+            rows, columns = _infer_shape(arg, shapes)
+            return (columns, rows)  # transpose swaps the two dimensions of a matrix
         case ir.Call(args=args):
             shape: tuple[int, ...] = ()
             for argument in args:

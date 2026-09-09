@@ -11,7 +11,8 @@ A ``*`` between two arrays is a contraction, not elementwise, and is scalarised 
 dot product ``a * x``, the matrix-vector ``A * x`` (``der(x) = A * x``, the linear system), and
 the matrix-matrix ``A * B`` all become the sums they stand for. ``+`` and ``-`` between two arrays
 are elementwise (the shared shape); array ``/`` and ``^`` have no such reading and are refused,
-naming the loop as the way to write them.
+naming the loop as the way to write them. ``transpose(A)`` swaps a matrix's two indices,
+``transpose(A)[i, j] = A[j, i]``, whole or inside a product.
 
 A reduction folds a whole array into one scalar: ``sum(x)`` is ``x[1] + ... + x[n]``,
 ``product(x)`` the same with ``*``, and ``min(x)`` / ``max(x)`` fold through the pairwise
@@ -234,6 +235,71 @@ def test_a_matrix_matrix_product_scalarises() -> None:
     assert result["C[1, 2]"][0] == pytest.approx(8.0)
     assert result["C[2, 1]"][0] == pytest.approx(15.0)
     assert result["C[2, 2]"][0] == pytest.approx(3.0)
+
+
+def test_transpose_swaps_a_matrix_and_reads_through_a_product() -> None:
+    """``transpose(A)[i, j]`` is ``A[j, i]``, whether written whole or inside a product.
+
+    ``B = transpose(A)`` fills the swapped matrix; ``transpose(A) * x`` with the rotation matrix
+    turns the plane the other way -- the product reads each element of the transpose through the
+    contraction, so ``der(x) = transpose(A) x`` is ``x1 = cos t``, ``x2 = -sin t``.
+    """
+    swapped = _system(
+        """
+        model Swap
+          parameter Real A[2, 2] = {{5, 7}, {9, 11}};
+          Real B[2, 2];
+          Real k(start = 0, fixed = true);
+        equation
+          B = transpose(A);
+          der(k) = 0;
+        end Swap;
+        """,
+        "Swap",
+    )
+    row = simulate(swapped, stop=0.1, tolerance=1e-10)
+    # B[i, j] = A[j, i]: the off-diagonal entries trade places.
+    assert row["B[1, 2]"][0] == pytest.approx(9.0)
+    assert row["B[2, 1]"][0] == pytest.approx(7.0)
+
+    rotation = _system(
+        """
+        model Rot
+          parameter Real A[2, 2] = {{0, -1}, {1, 0}};
+          Real x[2](start = {1, 0}, fixed = true);
+        equation
+          der(x) = transpose(A) * x;
+        end Rot;
+        """,
+        "Rot",
+    )
+    result = simulate(rotation, stop=3.0, tolerance=1e-10)
+    time = result.time
+    # transpose of [[0,-1],[1,0]] is [[0,1],[-1,0]], so der(x1)=x2, der(x2)=-x1 from (1,0).
+    assert np.max(np.abs(result["x[1]"] - np.cos(time))) < 1e-8
+    assert np.max(np.abs(result["x[2]"] + np.sin(time))) < 1e-8
+
+
+def test_a_non_square_transpose_reverses_the_shape() -> None:
+    """``transpose`` of a 2x3 is a 3x2: the shape reverses and ``B[3, 1]`` is ``A[1, 3]``."""
+    system = _system(
+        """
+        model Wide
+          parameter Real A[2, 3] = {{1, 2, 3}, {4, 5, 6}};
+          Real B[3, 2];
+          Real k(start = 0, fixed = true);
+        equation
+          B = transpose(A);
+          der(k) = 0;
+        end Wide;
+        """,
+        "Wide",
+    )
+    assert sorted(str(s) for s in system.states) == ["k"]
+    result = simulate(system, stop=0.1, tolerance=1e-10)
+    # B is 3x2: B[i, j] = A[j, i], so B[3, 1] = A[1, 3] = 3 and B[3, 2] = A[2, 3] = 6.
+    assert result["B[3, 1]"][0] == pytest.approx(3.0)
+    assert result["B[3, 2]"][0] == pytest.approx(6.0)
 
 
 def test_sum_reduces_an_array_to_a_scalar() -> None:
