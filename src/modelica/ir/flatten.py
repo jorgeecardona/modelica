@@ -573,11 +573,12 @@ def _infer_shape(  # noqa: C901, PLR0911, PLR0912 -- one node arm each
     """The array shape of an already-flattened expression, ``()`` for a scalar.
 
     A reference is array-valued when its flat path is a key of ``shapes``; ``der``/``pre``/
-    ``noEvent``/``smooth`` and the elementwise operators pass a shape through, and ``+``/``-``
-    and a function call broadcast their operands. A ``*`` between two arrays is a contraction --
-    the last dimension of the left runs against the first of the right and both drop out, so a
-    vector times a vector is a scalar, a matrix times a vector a vector, a matrix times a matrix
-    a matrix. Array ``/`` and ``^`` have no elementwise reading and are refused.
+    ``noEvent``/``smooth`` and a function call pass a shape through. ``+`` and ``-`` between two
+    arrays are elementwise -- the two shapes must match -- and broadcast a scalar against an array.
+    A ``*`` between two arrays is a contraction -- the last dimension of the left runs against the
+    first of the right and both drop out, so a vector times a vector is a scalar, a matrix times a
+    vector a vector, a matrix times a matrix a matrix. Array ``/`` and ``^`` have no elementwise
+    reading (Modelica spells those ``./`` and ``.^``) and are refused.
     """
     match node:
         case ir.Ref(parts=parts):
@@ -598,17 +599,20 @@ def _infer_shape(  # noqa: C901, PLR0911, PLR0912 -- one node arm each
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             left, right = _infer_shape(lhs, shapes), _infer_shape(rhs, shapes)
             if left and right:
-                if op != "*":
+                # `*` between two arrays contracts; `+`/`-` are elementwise (the shared shape, via
+                # the merge below); anything else has no elementwise reading and is refused.
+                if op == "*":
+                    if left[-1] != right[0]:
+                        raise FlattenError(
+                            f"array shapes {left} and {right} do not conform for a product"
+                            f" ({left[-1]} against {right[0]})"
+                        )
+                    return (*left[:-1], *right[1:])
+                if op not in ("+", "-"):
                     raise FlattenError(
-                        f"an array `{op}` is not supported; a product is `*`, and anything else"
-                        " must be written over the elements in a `for` loop"
+                        f"an array `{op}` is not supported; `+`/`-` are elementwise and `*` is a"
+                        " product, and anything else must be written over the elements in a `for` loop"
                     )
-                if left[-1] != right[0]:
-                    raise FlattenError(
-                        f"array shapes {left} and {right} do not conform for a product"
-                        f" ({left[-1]} against {right[0]})"
-                    )
-                return (*left[:-1], *right[1:])
             return _merge_shape(left, right)
         case ir.IfExpr(then=then, otherwise=otherwise):
             return _merge_shape(_infer_shape(then, shapes), _infer_shape(otherwise, shapes))
@@ -1882,6 +1886,52 @@ class _Flattener:
         """The array shape of an already-flattened expression, against this model's arrays."""
         return _infer_shape(node, self.shapes)
 
+    def _dim(self, node: ir.Expr) -> int:
+        """One dimension of an array constructor, evaluated against the structural parameters."""
+        return _integer(node, self.values, "an array constructor's size")
+
+    def _constructors(self, node: ir.Expr) -> ir.Expr:  # noqa: PLR0911 -- one case per constructor
+        """Expand every array constructor in an expression to its literal array.
+
+        The counterpart of :func:`_shape_constructor` for a constructor written in an *equation*
+        rather than a declaration: the declaration knows its own shape, an equation reads the shape
+        off the constructor's own size arguments, which are structural and known here. Only a
+        constructor is rewritten; everything else is copied through, so applying it to an equation
+        that has none does nothing.
+        """
+        match node:
+            case ir.Call(name="zeros" | "ones", args=args) if args:
+                return (
+                    _shape_constructor(node, tuple(self._dim(a) for a in args), ("<equation>",))
+                    or node
+                )
+            case ir.Call(name="fill", args=(value, *dims)) if dims:
+                built = ir.Call("fill", (self._constructors(value), *dims))
+                return (
+                    _shape_constructor(built, tuple(self._dim(a) for a in dims), ("<equation>",))
+                    or built
+                )
+            case ir.Call(name="identity", args=(n,)):
+                size = self._dim(n)
+                return _shape_constructor(node, (size, size), ("<equation>",)) or node
+            case ir.Call(name="linspace", args=(lo, hi, n)):
+                built = ir.Call("linspace", (self._constructors(lo), self._constructors(hi), n))
+                return _shape_constructor(built, (self._dim(n),), ("<equation>",)) or built
+            case ir.Call(name=name, args=args):
+                return ir.Call(name, tuple(self._constructors(a) for a in args), node.named)
+            case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+                return ir.Binary(op, self._constructors(lhs), self._constructors(rhs))
+            case ir.Unary(op=op, operand=operand):
+                return ir.Unary(op, self._constructors(operand))
+            case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+                return ir.IfExpr(
+                    self._constructors(condition),
+                    self._constructors(then),
+                    self._constructors(otherwise),
+                )
+            case _:
+                return node
+
     def _equation(  # noqa: C901, PLR0913 -- one arm per equation form; the scope
         # resolves a call, the outer map a name
         self,
@@ -1906,7 +1956,12 @@ class _Flattener:
             prefixed = _prefix_expr(
                 _inline_calls(written, scope), prefix, local, values=self.values, outer=outer
             )
-            return _fold_reductions(prefixed, self.shapes)
+            # Then any array constructor (`zeros(n)`, `identity(n)`) becomes its literal array, the
+            # way a declaration expands one -- its size arguments are structural and known here, so
+            # a forced linear system `der(x) = A * x + ones(n)` reads as the arithmetic it stands
+            # for. And last the reductions (`sum(x)`), for the contexts an equation split never
+            # reaches (a `when` condition, an assert).
+            return _fold_reductions(self._constructors(prefixed), self.shapes)
 
         if initial and not isinstance(equation, (ir.Equal, ir.CallEquation, ir.ForEquation)):
             raise FlattenError("only `a = b` equations may appear in initial equation")

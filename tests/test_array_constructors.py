@@ -5,7 +5,9 @@ declaration a start or a value -- ``Real x[n](start =
 zeros(n))``, ``parameter Real A[n, n] = identity(n)``, ``parameter Real g[n] = linspace(0, 1, n)``.
 Each one is array-valued and structural, so it is expanded at flatten into the literal array of the
 declared shape, exactly as a written ``{...}`` would be; before that the whole call reached the
-emitter as an untranslated function and the model would not build.
+emitter as an untranslated function and the model would not build. A constructor written in an
+equation rather than a declaration (``der(x) = A * x + ones(n)``) is expanded the same way, reading
+its shape off its own size arguments.
 """
 
 from __future__ import annotations
@@ -102,3 +104,28 @@ def test_a_two_dimensional_fill_covers_every_cell() -> None:
     )
     for cell in ("T[1, 1]", "T[1, 2]", "T[2, 1]", "T[2, 2]"):
         assert result[cell][-1] == pytest.approx(3.0 * math.exp(-1.0), rel=1e-7)
+
+
+def test_a_constructor_in_an_equation_reads_its_shape_off_its_own_size() -> None:
+    """``der(x) = fill(2, n) - x`` expands the constructor in the equation, not only a declaration.
+
+    An equation has no declared shape to lend the constructor, so it reads the size off the call's
+    own argument. ``fill(2, 2)`` is the forcing, ``identity(2)`` the plain unit matrix.
+    """
+    forced = _run(
+        "model M Real x[2](start = zeros(2), each fixed = true);"
+        " equation der(x) = fill(2.0, 2) - x; end M;",
+        "M",
+    )
+    # x settles to 2 along 2 (1 - e^{-t}).
+    assert forced["x[1]"][-1] == pytest.approx(2.0 * (1 - math.exp(-1.0)), rel=1e-6)
+
+    grows = _run(
+        "model M Real x[2](start = {1, 2}, each fixed = true);"
+        " equation der(x) = identity(2) * x; end M;",
+        "M",
+        stop=0.5,
+    )
+    # identity keeps the two states apart, each its own e^{t} -- a wrong (all-ones) identity mixes them.
+    assert grows["x[1]"][-1] == pytest.approx(math.exp(0.5), rel=1e-7)
+    assert grows["x[2]"][-1] == pytest.approx(2.0 * math.exp(0.5), rel=1e-7)

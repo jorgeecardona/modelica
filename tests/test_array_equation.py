@@ -9,8 +9,9 @@ it, including the per-element share of an array-valued ``start``.
 
 A ``*`` between two arrays is a contraction, not elementwise, and is scalarised as such: the
 dot product ``a * x``, the matrix-vector ``A * x`` (``der(x) = A * x``, the linear system), and
-the matrix-matrix ``A * B`` all become the sums they stand for. Array ``/`` and ``^`` have no
-such reading and are refused, naming the loop as the way to write them.
+the matrix-matrix ``A * B`` all become the sums they stand for. ``+`` and ``-`` between two arrays
+are elementwise (the shared shape); array ``/`` and ``^`` have no such reading and are refused,
+naming the loop as the way to write them.
 
 A reduction folds a whole array into one scalar: ``sum(x)`` is ``x[1] + ... + x[n]``,
 ``product(x)`` the same with ``*``, and ``min(x)`` / ``max(x)`` fold through the pairwise
@@ -85,6 +86,47 @@ def test_a_scalar_broadcasts_across_the_array() -> None:
     exact = 0.5 + 0.5 * np.exp(-2.0 * time)
     assert np.max(np.abs(result["x[1]"] - exact)) < 1e-9
     assert np.max(np.abs(result["x[2]"] - exact)) < 1e-9
+
+
+def test_two_arrays_add_and_subtract_elementwise() -> None:
+    """``x + y`` and ``x - y`` between two vectors are elementwise, not a product or an error.
+
+    Only ``*`` between two arrays is a contraction; ``+`` and ``-`` are elementwise, the shared
+    shape. Before this the shape pass refused any non-``*`` operator between two arrays outright,
+    so ``der(x) = p - x`` -- an array settling to a constant array -- had to be a ``for`` loop.
+    """
+    system = _system(
+        """
+        model Elementwise
+          parameter Real p[2] = {1, 3};
+          Real x[2](start = {0, 0}, fixed = true);
+        equation
+          der(x) = p - x;
+        end Elementwise;
+        """,
+        "Elementwise",
+    )
+    result = simulate(system, stop=5.0, tolerance=1e-10)
+    time = result.time
+    # x[i] settles to p[i] along p[i] (1 - e^{-t}): x[1] -> 1, x[2] -> 3.
+    assert np.max(np.abs(result["x[1]"] - 1.0 * (1 - np.exp(-time)))) < 1e-9
+    assert np.max(np.abs(result["x[2]"] - 3.0 * (1 - np.exp(-time)))) < 1e-9
+
+
+def test_an_array_slash_between_two_arrays_is_still_refused() -> None:
+    """``/`` between two arrays has no elementwise reading (Modelica spells it ``./``), so it stays refused."""
+    with pytest.raises(FlattenError, match="not supported"):
+        _system(
+            """
+            model Bad
+              Real x[2](start = {1, 1}, fixed = true);
+              parameter Real p[2] = {2, 2};
+            equation
+              der(x) = x / p;
+            end Bad;
+            """,
+            "Bad",
+        )
 
 
 def test_a_matrix_equation_scalarises_with_per_element_starts() -> None:

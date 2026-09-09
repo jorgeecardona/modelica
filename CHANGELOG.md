@@ -6,6 +6,16 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **`+` and `-` between two arrays are elementwise.** `x + y` and `x - y` for two same-shaped arrays
+  are the elementwise sum and difference, as `der(x) = p - x` (an array settling to a constant array)
+  needs. The shape pass had refused any non-`*` operator between two arrays outright, so this had to
+  be written as a `for` loop, even though the element pass already read it correctly; now only `/`
+  and `^` (which Modelica spells `./` and `.^`) are refused between two arrays. `*` stays the
+  contraction it was.
+- **Array constructors work in an equation, not only a declaration.** `der(x) = A * x + ones(n)`,
+  `der(x) = fill(2, n) - x`: a constructor written in an equation is expanded to its literal array
+  the same way a declaration's is, reading its shape off its own size arguments (structural, known
+  at flatten). This completes the constructors added just above, which were scoped to declarations.
 - **The array-constructor functions in a declaration: `zeros`, `ones`, `fill`, `identity`,
   `linspace`.** `Real x[n](start = zeros(n))`, `parameter Real A[n, n] = identity(n)`,
   `parameter Real g[n] = linspace(0, 1, n)` -- the ordinary way to give an array declaration its
