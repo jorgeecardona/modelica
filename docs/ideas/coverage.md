@@ -42,6 +42,33 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after the same element inherited through two paths is merged
+
+The other half of the "twice" refusal: a name that reaches a class through two `extends` paths.
+MSL's battery `CellData` extends both a base record and an icon record, and each declares an identical
+`constant String CellType`, so the name arrives twice -- the same element, which the tools merge, but
+flattening refused it, "CellData inherits 'CellType' twice". The inherited-member loop in `effective`
+now compares the two the same way the re-statement fix compares a re-declaration: identical (but for a
+description or a placement) is the one element, kept once; a difference is still a clash. A
+modification the second `extends` writes on the name still applies, on top of the member already
+placed.
+
+That empties the "twice" refusal from the work list -- 12 two measurements ago, 3 after the
+re-statement fix, 0 now. The stage counts hold at 47 flattened and 14 simulated: the battery examples
+that clear this wall meet the next one, an array whose shape is not known at flatten (`OCV_SOC[:,2]`),
+so the frontier moves without the tally.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     47 | 10.9 % |
+| causalized |     19 |  4.4 % |
+| simulated  |     14 |  3.3 % |
+
+The leaders are unchanged: a composite component with a value (70), the `Clock` builtin (62), an array
+shape not known at flatten (52), a subscript on an inner component and a type alias to an array type in
+parse (32 each), and a condition not known at flatten (31). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after an identical re-statement of an inherited component is accepted
 
 A derived class may declare a component its base already declares, identically: MSL's

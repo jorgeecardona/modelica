@@ -266,7 +266,7 @@ def _same_declaration(a: ir.Component, b: ir.Component) -> bool:
     return replace(a, **blank) == replace(b, **blank)
 
 
-def effective(found: Found, scope: Scope) -> Effective:
+def effective(found: Found, scope: Scope) -> Effective:  # noqa: C901 -- extends, redeclare, own members
     inner = scope.inside(found)
     result = Effective()
     for extends in found.cls.extends:
@@ -278,9 +278,19 @@ def effective(found: Found, scope: Scope) -> Effective:
             )
         base_effective = effective(base, inner)
         for name, member in base_effective.members.items():
-            if name in result.members:
-                raise FlattenError(f"{found.cls.name} inherits {name!r} twice")
             picked_up = extends.modification.entries.get(name)
+            existing = result.members.get(name)
+            if existing is not None:
+                # The same element inherited through two `extends` paths -- MSL's `CellData` reaches
+                # an identical `constant String CellType` through both a base record and an icon
+                # record. Identical declarations are the one element, kept once, so the record is
+                # accepted; declarations that differ are a real conflict. A modification this
+                # `extends` writes on the name still applies, on top of the member already placed.
+                if not _same_declaration(existing.component, member.component):
+                    raise FlattenError(f"{found.cls.name} inherits {name!r} twice")
+                if picked_up is not None:
+                    result.members[name] = replace(existing, mods=(*existing.mods, picked_up))
+                continue
             result.members[name] = (
                 member if picked_up is None else replace(member, mods=(*member.mods, picked_up))
             )

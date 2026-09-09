@@ -312,3 +312,28 @@ def test_a_restatement_that_differs_is_still_a_clash() -> None:
     )
     with pytest.raises(FlattenError, match="declares 'x' twice"):
         flatten(parse(source), "M")
+
+
+def test_the_same_element_inherited_through_two_extends_paths_is_merged() -> None:
+    """MSL's ``CellData`` inherits an identical ``constant String CellType`` through two records.
+
+    Two ``extends`` that each bring the same name, declared identically, are the one element, kept
+    once, so the record flattens rather than being refused for a name inherited twice.
+    """
+    source = (
+        'record A\n  constant String CellType = "Cell" "type";\n  Real a;\nend A;\n'
+        'record B\n  constant String CellType = "Cell" "type";\n  Real b;\nend B;\n'
+        "model M\n  extends A;\n  extends B;\nequation\n  a = 1;\n  b = 2;\nend M;\n"
+    )
+    assert [v.name for v in flatten(parse(source), "M").variables] == ["CellType", "a", "b"]
+
+
+def test_a_name_inherited_twice_with_a_difference_is_still_a_clash() -> None:
+    """Only identical inherited elements are merged: a different binding is a genuine conflict."""
+    source = (
+        'record A\n  constant String CellType = "Cell" "type";\n  Real a;\nend A;\n'
+        'record B\n  constant String CellType = "Other" "type";\n  Real b;\nend B;\n'
+        "model M\n  extends A;\n  extends B;\nequation\n  a = 1;\n  b = 2;\nend M;\n"
+    )
+    with pytest.raises(FlattenError, match="inherits 'CellType' twice"):
+        flatten(parse(source), "M")
