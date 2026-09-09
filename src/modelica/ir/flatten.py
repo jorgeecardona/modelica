@@ -467,6 +467,18 @@ def _element(  # noqa: C901, PLR0911 -- one case per node type, as its neighbour
             return summed
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             return ir.Binary(op, go(lhs), go(rhs))
+        case ir.Call(name="sum" | "product", args=(arg,)) if _infer_shape(arg, shapes):
+            # A reduction folds the whole array into one scalar, so it does not depend on the
+            # equation's own index: `sum(x)` is `x[1] + x[2] + ... + x[n]` in every element it
+            # appears in. `product` is the same fold with `*`. A 2-D argument folds every element.
+            terms = [_element(arg, idx, shapes) for idx in _indices(_infer_shape(arg, shapes))]
+            return _reduce_binary("+" if node.name == "sum" else "*", terms)
+        case ir.Call(name="min" | "max", args=(arg,)) if _infer_shape(arg, shapes):
+            # `min`/`max` of a single array is a reduction too, folded through the pairwise
+            # `min(a, b)` / `max(a, b)` the interpreter and the derivative rules already handle.
+            # (The two-argument `min(a, b)` form is left for the general call arm below.)
+            terms = [_element(arg, idx, shapes) for idx in _indices(_infer_shape(arg, shapes))]
+            return _reduce_call(node.name, terms)
         case ir.Call(name=name, args=args):
             return ir.Call(name, tuple(go(a) for a in args))
         case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
@@ -481,6 +493,27 @@ def _element(  # noqa: C901, PLR0911 -- one case per node type, as its neighbour
             return _element(rows[row - 1][column - 1], tuple(rest), shapes)
         case _:
             return node
+
+
+def _indices(shape: tuple[int, ...]) -> list[tuple[int, ...]]:
+    """Every one-based multi-index of an array of ``shape``, row-major."""
+    return list(product(*(range(1, size + 1) for size in shape)))
+
+
+def _reduce_binary(op: ir.BinaryOp, terms: list[ir.Expr]) -> ir.Expr:
+    """Left-fold ``terms`` with a binary operator: ``[a, b, c]`` becomes ``(a op b) op c``."""
+    result = terms[0]
+    for term in terms[1:]:
+        result = ir.Binary(op, result, term)
+    return result
+
+
+def _reduce_call(name: str, terms: list[ir.Expr]) -> ir.Expr:
+    """Fold ``terms`` through a two-argument call: ``[a, b, c]`` becomes ``name(a, name(b, c))``."""
+    result = terms[-1]
+    for term in reversed(terms[:-1]):
+        result = ir.Call(name, (term, result))
+    return result
 
 
 def _merge_shape(left: tuple[int, ...], right: tuple[int, ...]) -> tuple[int, ...]:
@@ -515,6 +548,10 @@ def _infer_shape(  # noqa: C901, PLR0911, PLR0912 -- one node arm each
             return _infer_shape(operand, shapes)
         case ir.Call(name="der" | "pre" | "noEvent" | "smooth", args=args) if args:
             return _infer_shape(args[-1], shapes)
+        case ir.Call(name="sum" | "product", args=(arg,)) if _infer_shape(arg, shapes):
+            return ()  # a reduction over an array is one scalar
+        case ir.Call(name="min" | "max", args=(arg,)) if _infer_shape(arg, shapes):
+            return ()  # min/max of a single array is a scalar reduction
         case ir.Call(args=args):
             shape: tuple[int, ...] = ()
             for argument in args:

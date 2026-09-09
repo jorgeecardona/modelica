@@ -6,6 +6,15 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **Array reductions fold to a scalar: `sum`, `product`, `min`, `max` over a whole array.**
+  `total = sum(x)` for a vector `x` is `x[1] + x[2] + ... + x[n]`, `product(x)` the same with
+  `*`, and `min(x)` / `max(x)` fold through the pairwise `min(a, b)` / `max(a, b)`. Before this
+  the scalariser treated a reduction as elementwise and mangled `sum(x)` into `sum(x[1])`, one
+  copy per equation element, so a conservation sum or an extremum over an array could not be
+  written. The fold happens at flatten, so causalization, the Jacobian and every emitter (the
+  Rust backend included) see ordinary arithmetic and need no reduction rule of their own; a
+  two-argument `min(a, b)` stays the pairwise operator it was. A 2-D array folds every element.
+  This completes the array arc that began with whole-array equations and array products.
 - **An inconsistent algebraic loop is named, not a `ZeroDivisionError`.** `a = b + 1` and
   `b = a + 1` say `a - b = 1` and `a - b = -1` at once: no solution. Alias elimination reduces this
   to a single equation whose unknown has a zero coefficient, and the emitted code used to divide by

@@ -11,6 +11,12 @@ A ``*`` between two arrays is a contraction, not elementwise, and is scalarised 
 dot product ``a * x``, the matrix-vector ``A * x`` (``der(x) = A * x``, the linear system), and
 the matrix-matrix ``A * B`` all become the sums they stand for. Array ``/`` and ``^`` have no
 such reading and are refused, naming the loop as the way to write them.
+
+A reduction folds a whole array into one scalar: ``sum(x)`` is ``x[1] + ... + x[n]``,
+``product(x)`` the same with ``*``, and ``min(x)`` / ``max(x)`` fold through the pairwise
+``min(a, b)`` / ``max(a, b)``. The fold happens at flatten, so causalization, the Jacobian and
+every emitter see ordinary arithmetic and need no reduction rule of their own; the two-argument
+``min(a, b)`` stays the pairwise operator it was.
 """
 
 from __future__ import annotations
@@ -181,6 +187,123 @@ def test_a_matrix_matrix_product_scalarises() -> None:
     assert result["C[1, 2]"][0] == pytest.approx(8.0)
     assert result["C[2, 1]"][0] == pytest.approx(15.0)
     assert result["C[2, 2]"][0] == pytest.approx(3.0)
+
+
+def test_sum_reduces_an_array_to_a_scalar() -> None:
+    """``sum(x)`` folds the whole array: ``x[1] + x[2] + x[3]``, not ``sum(x[1])`` per element."""
+    system = _system(
+        """
+        model Sum
+          Real x[3](each start = 1, each fixed = true);
+          Real total;
+        equation
+          der(x) = -x;
+          total = sum(x);
+        end Sum;
+        """,
+        "Sum",
+    )
+    result = simulate(system, stop=1.0, tolerance=1e-10)
+    # sum of three copies of e^{-t} is 3 e^{-t}.
+    assert np.max(np.abs(result["total"] - 3.0 * np.exp(-result.time))) < 1e-9
+
+
+def test_product_reduces_an_array_to_a_scalar() -> None:
+    """``product(x)`` folds with ``*``: three copies of ``2 e^{-t}`` multiply to ``8 e^{-3t}``."""
+    system = _system(
+        """
+        model Prod
+          Real x[3](each start = 2, each fixed = true);
+          Real p;
+        equation
+          der(x) = -x;
+          p = product(x);
+        end Prod;
+        """,
+        "Prod",
+    )
+    result = simulate(system, stop=1.0, tolerance=1e-10)
+    assert np.max(np.abs(result["p"] - 8.0 * np.exp(-3.0 * result.time))) < 1e-8
+
+
+def test_min_and_max_reduce_a_single_array() -> None:
+    """``min(x)`` / ``max(x)`` fold through the pairwise operators; the extremes track the ends."""
+    system = _system(
+        """
+        model Extremes
+          Real x[3](start = {1, 2, 3}, fixed = true);
+          Real lo;
+          Real hi;
+        equation
+          der(x) = -x;
+          lo = min(x);
+          hi = max(x);
+        end Extremes;
+        """,
+        "Extremes",
+    )
+    result = simulate(system, stop=0.5, tolerance=1e-10)
+    # Each x[i] decays keeping its order, so min is x[1] = e^{-t} and max is x[3] = 3 e^{-t}.
+    assert np.max(np.abs(result["lo"] - np.exp(-result.time))) < 1e-9
+    assert np.max(np.abs(result["hi"] - 3.0 * np.exp(-result.time))) < 1e-9
+
+
+def test_a_two_argument_min_is_still_the_pairwise_operator() -> None:
+    """The reduction is only for a single array; ``min(a, b)`` of two scalars is untouched."""
+    system = _system(
+        """
+        model Pair
+          Real x(start = 1, fixed = true);
+          Real y(start = 3, fixed = true);
+          Real lo;
+        equation
+          der(x) = -x;
+          der(y) = 0;
+          lo = min(x, y);
+        end Pair;
+        """,
+        "Pair",
+    )
+    result = simulate(system, stop=1.0, tolerance=1e-10)
+    # x = e^{-t} < y = 3 throughout, so min(x, y) = x.
+    assert np.max(np.abs(result["lo"] - np.exp(-result.time))) < 1e-9
+
+
+def test_a_reduction_inside_a_derivative_builds_its_jacobian() -> None:
+    """``der(x[2]) = -x[2] + sum(x)`` is a coupled system whose Jacobian needs the folded sum."""
+    system = _system(
+        """
+        model Coupled
+          Real x[2](start = {1, 2}, fixed = true);
+        equation
+          der(x[1]) = -x[1];
+          der(x[2]) = -x[2] + sum(x);
+        end Coupled;
+        """,
+        "Coupled",
+    )
+    result = simulate(system, stop=1.0, tolerance=1e-10)
+    # sum(x) = x[1] + x[2], so der(x[2]) = x[1] = e^{-t}; from x[2](0) = 2 that is 3 - e^{-t}.
+    assert np.max(np.abs(result["x[1]"] - np.exp(-result.time))) < 1e-9
+    assert np.max(np.abs(result["x[2]"] - (3.0 - np.exp(-result.time)))) < 1e-8
+
+
+def test_a_two_dimensional_sum_folds_every_element() -> None:
+    """``sum(T)`` over a 2-D array folds all of its elements, not one row."""
+    system = _system(
+        """
+        model Grid
+          Real T[2, 2](each start = 1, each fixed = true);
+          Real s;
+        equation
+          der(T) = -T;
+          s = sum(T);
+        end Grid;
+        """,
+        "Grid",
+    )
+    result = simulate(system, stop=1.0, tolerance=1e-10)
+    assert np.max(np.abs(result["s"] - 4.0 * np.exp(-result.time))) < 1e-9
 
 
 def test_array_divide_and_power_are_refused_and_name_the_loop() -> None:
