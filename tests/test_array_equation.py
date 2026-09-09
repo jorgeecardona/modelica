@@ -18,8 +18,9 @@ A reduction folds a whole array into one scalar: ``sum(x)`` is ``x[1] + ... + x[
 every emitter see ordinary arithmetic and need no reduction rule of their own; the two-argument
 ``min(a, b)`` stays the pairwise operator it was. And the fold reaches the scalar contexts an
 equation split never touches -- a ``when`` condition (``when sum(x) < 1``), an assert
-(``assert(sum(x) < top, ...)``) -- through the flattener's expression rewrite, so a reduction
-there means what it says instead of reaching the emitter as an untranslated ``sum``.
+(``assert(sum(x) < top, ...)``) and a leaf's own binding or attribute (``parameter Real total =
+sum(x0)``, ``Real y(start = sum(x0))``) -- so a reduction there means what it says instead of
+reaching the emitter as an untranslated ``sum``.
 """
 
 from __future__ import annotations
@@ -366,6 +367,56 @@ def test_a_reduction_in_an_assert_is_evaluated_not_skipped() -> None:
         _system(source.replace("BOUND", "3.0"), "AssertSum"), stop=1.0, tolerance=1e-10
     )
     assert result["x[1]"][-1] == pytest.approx(np.exp(-1.0), rel=1e-7)
+
+
+def test_a_reduction_in_a_parameter_binding_folds_at_the_declaration() -> None:
+    """``parameter Real total = sum(x0)`` folds where the array it sums is already declared.
+
+    A parameter is a leaf, not an equation, so it never passes through the equation split; the
+    fold runs where the leaf is built instead, once the array's shape is known. ``sum``, ``min``
+    and ``product`` each reduce their array parameter to the scalar the binding stands for.
+    """
+    system = _system(
+        """
+        model Totals
+          parameter Real x0[3] = {2, 3, 4};
+          parameter Real s = sum(x0);
+          parameter Real lo = min(x0);
+          parameter Real p = product(x0);
+          Real ys(start = 0, fixed = true);
+          Real yl(start = 0, fixed = true);
+          Real yp(start = 0, fixed = true);
+        equation
+          der(ys) = s;
+          der(yl) = lo;
+          der(yp) = p;
+        end Totals;
+        """,
+        "Totals",
+    )
+    result = simulate(system, stop=1.0, tolerance=1e-10)
+    # s = 9, lo = 2, p = 24: each integrated over one second is that constant.
+    assert result["ys"][-1] == pytest.approx(9.0, abs=1e-9)
+    assert result["yl"][-1] == pytest.approx(2.0, abs=1e-9)
+    assert result["yp"][-1] == pytest.approx(24.0, abs=1e-9)
+
+
+def test_a_reduction_in_a_start_attribute_folds_too() -> None:
+    """``Real y(start = sum(x0))`` folds the reduction in the attribute, so y starts at the sum."""
+    system = _system(
+        """
+        model StartSum
+          parameter Real x0[3] = {1, 2, 3};
+          Real y(start = sum(x0), fixed = true);
+        equation
+          der(y) = -y;
+        end StartSum;
+        """,
+        "StartSum",
+    )
+    result = simulate(system, stop=1.0, tolerance=1e-10)
+    # y starts at sum(x0) = 6 and decays as 6 e^{-t}.
+    assert np.max(np.abs(result["y"] - 6.0 * np.exp(-result.time))) < 1e-8
 
 
 def test_array_divide_and_power_are_refused_and_name_the_loop() -> None:

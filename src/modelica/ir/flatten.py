@@ -1791,7 +1791,8 @@ class _Flattener:
 
         def attribute(key: str) -> ir.Expr | None:
             entry = total.entries.get(key)
-            return _fold(entry.value) if entry is not None else None
+            folded = _fold(entry.value) if entry is not None else None
+            return _fold_reductions(folded, self.shapes) if folded is not None else None
 
         unit = attribute("unit")
         if unit is not None and not isinstance(unit, ir.StringLiteral):
@@ -1800,7 +1801,14 @@ class _Flattener:
         if fixed is not None and not isinstance(fixed, ir.BoolLiteral):
             raise FlattenError(f"{name}: `fixed` must be a boolean literal")
 
-        binding = _fold(total.value)
+        # A reduction in a scalar binding (`parameter Real total = sum(x0)`) or an attribute folds
+        # here, where the array it sums has already been declared and its shape is known. A leaf
+        # never passes through the equation split that folds the reductions in an equation, so
+        # without this the call reached the emitter as an untranslated `sum`.
+        folded_binding = _fold(total.value)
+        binding = (
+            _fold_reductions(folded_binding, self.shapes) if folded_binding is not None else None
+        )
         variable = FlatVariable(
             name=name,
             base_type=base,

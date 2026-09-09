@@ -33,8 +33,13 @@ source of truth and is bumped automatically when shipped source changes.
   which the run does not report as a variable, only its elements `x[1]`, `x[2]`). Now the fold
   runs in the flattener's expression rewrite, so a reduction in either context becomes the
   arithmetic it stands for: the `when` is an ordinary crossing of `x[1] + x[2]`, and the assert
-  guards the real total and stops the run when it is violated. A reduction in a parameter binding
-  is still folded only when it reaches an equation, not in the binding itself.
+  guards the real total and stops the run when it is violated.
+- **Array reductions fold in a parameter binding and an attribute too.** `parameter Real total =
+  sum(x0)`, `Real y(start = sum(x0))` -- a leaf is not an equation, so it never passes through the
+  equation split; the fold now runs where the leaf is built, once the array it reduces is declared
+  and its shape is known. `sum`, `min` and `product` each reduce their array parameter to the scalar
+  the binding stands for, in both backends. (An array declared after the leaf that reduces it is the
+  one case left: its shape is not yet known there, so that reduction still needs an equation.)
 - **Array reductions fold to a scalar: `sum`, `product`, `min`, `max` over a whole array.**
   `total = sum(x)` for a vector `x` is `x[1] + x[2] + ... + x[n]`, `product(x)` the same with
   `*`, and `min(x)` / `max(x)` fold through the pairwise `min(a, b)` / `max(a, b)`. Before this
