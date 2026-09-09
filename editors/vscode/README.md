@@ -161,7 +161,10 @@ over the chart listing them all -- so the ones below need not be memorised.
   there too, wrapped so the whole message is readable.
 - **Legend.** Click a variable to toggle it; **alt-click** to *solo* it -- show only that one,
   which on a component model of dozens of variables beats clicking the rest off; alt-click it
-  again to bring back the set that was on before. `all`, `none` and `reset` act on the set. The
+  again to bring back the set that was on before. Just **hovering** a row picks its curve out of
+  the plot: that variable's line keeps its weight and every other fades while you point, so one
+  signal is found in a crowd without changing what is drawn (time and Cartesian phase views).
+  `all`, `none` and `reset` act on the set. The
   **filter** box by the `variables` heading narrows the list to the names that contain what you
   type (case-insensitive), and `all` / `none` then act on just what it shows -- a component
   model flattens to dozens of connector-internal variables (`supply.p.i`, `converter.flange.tau`,

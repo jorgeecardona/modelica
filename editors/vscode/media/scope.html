@@ -479,6 +479,7 @@
             <div>
               <div class="helpsec">legend</div>
               <div class="hk"><b>click a row</b><span>show or hide that variable</span></div>
+              <div class="hk"><b>hover a row</b><span>pick its curve out of the plot; the rest fade while you point</span></div>
               <div class="hk"><b>alt-click a row</b><span>solo it; alt-click the soloed one to restore the set</span></div>
               <div class="hk"><b>drag the divider</b><span>resize the legend; double-click it to collapse</span></div>
               <div class="hk"><b>filter box</b><span>narrow the list; all / none then act on the shown set</span></div>
@@ -589,6 +590,11 @@ let speed = "1e-6";
 // `xwin` is a zoom in that variable's units, `XD` the domain X() maps from, set once per draw.
 let xVar = null;
 let xwin = null;
+// The variable whose legend row the pointer is over, or null. While it is set, that variable's
+// curve is drawn full and every other is faded, so one line can be picked out of a crowded plot
+// (a component model flattens to dozens). Only the line-drawn views read it (time, Cartesian
+// phase); the 3D and polar views draw a chosen few axes, where fading the rest means nothing.
+let hoverVar = null;
 // The angle variable in a polar phase plot: `xVar` is then the radius and this is the angle, and
 // the trajectory is (radius*cos(angle), radius*sin(angle)). Only read while `coords === "polar"`.
 let thVar = null;
@@ -1083,11 +1089,16 @@ function drawPath(frag, vs, a, b, yOf, nm, ri) {
     if (pts) pts.push({x: px, y: y});
   }
   if (!d) return;
-  const attrs = {d: d, fill: "none", "stroke-width": st.w, stroke: colour(nm),
-    "stroke-linejoin": "round", opacity: st.op};
+  // While a legend row is hovered, the hovered variable's curve keeps its weight and every other
+  // fades, so it stands out of a crowded plot. Every run of the hovered variable stays lit.
+  const focus = hoverVar !== null && names.includes(hoverVar);
+  const op = focus && nm !== hoverVar ? st.op * 0.12 : st.op;
+  const w = focus && nm === hoverVar ? st.w + 0.8 : st.w;
+  const attrs = {d: d, fill: "none", "stroke-width": w, stroke: colour(nm),
+    "stroke-linejoin": "round", opacity: op};
   if (st.dash) attrs["stroke-dasharray"] = st.dash;
   frag.appendChild(el("path", attrs));
-  if (arrows) { phaseArrows(frag, pts, colour(nm), st.op); phaseEndpoints(frag, pts, colour(nm), st.op); }
+  if (arrows) { phaseArrows(frag, pts, colour(nm), op); phaseEndpoints(frag, pts, colour(nm), op); }
 }
 // The two ends of a phase trajectory: a hollow ring where time begins, a filled dot where it ends,
 // both in the variable's colour with a background halo so they read over the curve. The arrows say
@@ -1918,6 +1929,7 @@ function paintLegend(at) {
   for (const nm of shown) {
     const row = document.createElement("div");
     row.className = "row" + (on.has(nm) ? "" : " off");
+    row.dataset.var = nm;
     const dot = document.createElement("span"); dot.className = "swatch";
     dot.style.background = colour(nm);
     const name = document.createElement("span"); name.className = "name"; name.textContent = nm;
@@ -2842,6 +2854,20 @@ function togglePlay() {
 const playBtn = document.getElementById("playbtn");
 if (playBtn) playBtn.onclick = () => togglePlay();
 document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
+// Hover a legend row to pick its curve out of the plot: delegated on the container, which
+// outlives the rows `paintLegend` rebuilds on every draw, so re-hovering a rebuilt row still
+// tracks. Only the line-drawn views (time, Cartesian phase) fade the rest; a 3D or polar plot
+// draws a chosen few axes, so a redraw there would only cost time for no visible change.
+const usesLinePaths = () => mode !== "xyz" && !(mode === "xy" && coords === "polar");
+legend.onmouseover = (e) => {
+  const row = e.target.closest(".row");
+  const nm = row ? row.dataset.var : null;
+  if (nm && on.has(nm) && nm !== hoverVar && usesLinePaths()) { hoverVar = nm; draw(); }
+};
+legend.onmouseout = (e) => {
+  const to = e.relatedTarget;
+  if (hoverVar !== null && (!to || !to.closest || !to.closest(".row"))) { hoverVar = null; draw(); }
+};
 // Speed: the relative tolerance the run is drawn at. A change is a fresh run (a checkpoint holds
 // only at its own tolerance), on the live run; the control is only live for an open .mo.
 const speedSel = document.getElementById("speed");
@@ -2899,7 +2925,7 @@ function defaultPolar() {
   xVar = r; thVar = th;
 }
 function setMode(m) {
-  mode = m; view3d = m === "xyz"; xwin = null;
+  mode = m; view3d = m === "xyz"; xwin = null; hoverVar = null;
   if (m === "t") xVar = null;
   else if (m === "xy") { LOGT = false; if (coords === "polar") defaultPolar(); else if (!xVar || !names.includes(xVar)) xVar = defaultAxes()[0]; }
   else { LOGT = false; xVar = null; if (ax3.some((nm) => !names.includes(nm))) ax3 = defaultAxes(); }
