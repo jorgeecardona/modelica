@@ -6,6 +6,15 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **Array reductions work in a `when` condition and an assert, not only an equation.** A
+  reduction is folded as an equation is scalarised, but a `when` condition and an assert never
+  pass through that split, so `when sum(x) < 1` reached the emitter as an untranslated `sum` and
+  failed, and `assert(sum(x) < top, ...)` was quietly skipped (its condition named the array `x`,
+  which the run does not report as a variable, only its elements `x[1]`, `x[2]`). Now the fold
+  runs in the flattener's expression rewrite, so a reduction in either context becomes the
+  arithmetic it stands for: the `when` is an ordinary crossing of `x[1] + x[2]`, and the assert
+  guards the real total and stops the run when it is violated. A reduction in a parameter binding
+  is still folded only when it reaches an equation, not in the binding itself.
 - **Array reductions fold to a scalar: `sum`, `product`, `min`, `max` over a whole array.**
   `total = sum(x)` for a vector `x` is `x[1] + x[2] + ... + x[n]`, `product(x)` the same with
   `*`, and `min(x)` / `max(x)` fold through the pairwise `min(a, b)` / `max(a, b)`. Before this

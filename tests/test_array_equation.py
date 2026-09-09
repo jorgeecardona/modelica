@@ -16,7 +16,10 @@ A reduction folds a whole array into one scalar: ``sum(x)`` is ``x[1] + ... + x[
 ``product(x)`` the same with ``*``, and ``min(x)`` / ``max(x)`` fold through the pairwise
 ``min(a, b)`` / ``max(a, b)``. The fold happens at flatten, so causalization, the Jacobian and
 every emitter see ordinary arithmetic and need no reduction rule of their own; the two-argument
-``min(a, b)`` stays the pairwise operator it was.
+``min(a, b)`` stays the pairwise operator it was. And the fold reaches the scalar contexts an
+equation split never touches -- a ``when`` condition (``when sum(x) < 1``), an assert
+(``assert(sum(x) < top, ...)``) -- through the flattener's expression rewrite, so a reduction
+there means what it says instead of reaching the emitter as an untranslated ``sum``.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from modelica.ir.causalize import causalize
 from modelica.ir.flatten import FlattenError
 from modelica.lang import parse
 from modelica.sim import flatten, simulate
+from modelica.sim.solve import SimulationError
 
 
 def _system(source: str, name: str):  # noqa: ANN202 - the causalized System
@@ -304,6 +308,64 @@ def test_a_two_dimensional_sum_folds_every_element() -> None:
     )
     result = simulate(system, stop=1.0, tolerance=1e-10)
     assert np.max(np.abs(result["s"] - 4.0 * np.exp(-result.time))) < 1e-9
+
+
+def test_a_reduction_in_a_when_condition_fires_at_the_right_instant() -> None:
+    """``when sum(x) < 1`` is a state event on the folded total, not an untranslated ``sum``.
+
+    A ``when`` condition never passes through the equation split, so before the fold reached the
+    flattener's expression rewrite this stopped at the emitter with "no translation for 'sum'".
+    Now the total is folded there and the event is an ordinary crossing of ``x[1] + x[2]``.
+    """
+    system = _system(
+        """
+        model WhenSum
+          Real x[2](start = {1, 1}, each fixed = true);
+          discrete Real hit(start = 0, fixed = true);
+        equation
+          der(x[1]) = -x[1];
+          der(x[2]) = -x[2];
+          when sum(x) < 1.0 then
+            hit = 1.0;
+          end when;
+        end WhenSum;
+        """,
+        "WhenSum",
+    )
+    result = simulate(system, stop=2.0, tolerance=1e-10)
+    # sum(x) = 2 e^{-t} crosses 1 at t = ln 2; hit is 0 before and 1 after.
+    time = result.time
+    hit = np.asarray(result["hit"])
+    assert hit[0] == 0.0
+    assert hit[-1] == 1.0
+    crossing = time[np.argmax(hit > 0.5)]
+    assert crossing == pytest.approx(np.log(2.0), abs=1e-2)
+
+
+def test_a_reduction_in_an_assert_is_evaluated_not_skipped() -> None:
+    """``assert(sum(x) < top, ...)`` guards the total, and a violated guard stops the run.
+
+    An assert whose condition named the array ``x`` (rather than its elements) was quietly
+    skipped, because the run reports ``x[1]``/``x[2]`` and not ``x``: a conservation guard that
+    did nothing. With the reduction folded the condition names the reported elements, so it is
+    evaluated -- it raises when violated and passes when satisfied.
+    """
+    source = """
+    model AssertSum
+      Real x[2](start = {1, 1}, each fixed = true);
+    equation
+      der(x[1]) = -x[1];
+      der(x[2]) = -x[2];
+      assert(sum(x) < BOUND, "sum too large");
+    end AssertSum;
+    """
+    # sum(x) starts at 2: a bound of 1.5 is violated at t = 0, a bound of 3 never is.
+    with pytest.raises(SimulationError, match="sum too large"):
+        simulate(_system(source.replace("BOUND", "1.5"), "AssertSum"), stop=1.0, tolerance=1e-10)
+    result = simulate(
+        _system(source.replace("BOUND", "3.0"), "AssertSum"), stop=1.0, tolerance=1e-10
+    )
+    assert result["x[1]"][-1] == pytest.approx(np.exp(-1.0), rel=1e-7)
 
 
 def test_array_divide_and_power_are_refused_and_name_the_loop() -> None:

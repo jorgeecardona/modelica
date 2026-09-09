@@ -516,6 +516,44 @@ def _reduce_call(name: str, terms: list[ir.Expr]) -> ir.Expr:
     return result
 
 
+def _fold_reductions(  # noqa: PLR0911 -- one case per node type, as its neighbours have
+    node: ir.Expr, shapes: Mapping[_Path, tuple[int, ...]]
+) -> ir.Expr:
+    """Expand every array reduction in ``node``, leaving the rest of its structure untouched.
+
+    :func:`_element` folds a reduction as it scalarises an *equation*; this is the same fold for
+    the scalar contexts an equation split never reaches -- a ``when`` condition, an assert -- so
+    ``when sum(x) < 1`` and ``assert(sum(x) < top, ...)`` mean what they say instead of reaching
+    the emitter as an untranslated ``sum``. Unlike ``_element`` this is safe on an array-valued
+    expression: it touches only a reduction call (which is scalar) and copies a bare array
+    reference or a product through unchanged, so applying it to both sides of an array equation
+    before that equation is split does no harm.
+    """
+    match node:
+        case ir.Call(name="sum" | "product", args=(arg,)) if _infer_shape(arg, shapes):
+            folded = _fold_reductions(arg, shapes)
+            terms = [_element(folded, idx, shapes) for idx in _indices(_infer_shape(arg, shapes))]
+            return _reduce_binary("+" if node.name == "sum" else "*", terms)
+        case ir.Call(name="min" | "max", args=(arg,)) if _infer_shape(arg, shapes):
+            folded = _fold_reductions(arg, shapes)
+            terms = [_element(folded, idx, shapes) for idx in _indices(_infer_shape(arg, shapes))]
+            return _reduce_call(node.name, terms)
+        case ir.Call(name=name, args=args):
+            return ir.Call(name, tuple(_fold_reductions(a, shapes) for a in args), node.named)
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, _fold_reductions(lhs, shapes), _fold_reductions(rhs, shapes))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _fold_reductions(operand, shapes))
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(
+                _fold_reductions(condition, shapes),
+                _fold_reductions(then, shapes),
+                _fold_reductions(otherwise, shapes),
+            )
+        case _:
+            return node
+
+
 def _merge_shape(left: tuple[int, ...], right: tuple[int, ...]) -> tuple[int, ...]:
     """The shape two operands share, broadcasting a scalar against an array.
 
@@ -1776,11 +1814,15 @@ class _Flattener:
             # literal becomes a number first, because it is not a reference and prefixing
             # would turn it into one. Then a call is resolved in the scope of the class that
             # wrote it, and what comes back is an expression in that class's own names --
-            # which is exactly what prefixing then qualifies.
+            # which is exactly what prefixing then qualifies. A last pass folds any array
+            # reduction (`sum(x)` and its kin) now that the names are flat: an equation is
+            # split element by element after this, but a `when` condition or an assert is not,
+            # so this is where their reductions become the arithmetic the emitter can read.
             written = _literals(node, scope, local)
-            return _prefix_expr(
+            prefixed = _prefix_expr(
                 _inline_calls(written, scope), prefix, local, values=self.values, outer=outer
             )
+            return _fold_reductions(prefixed, self.shapes)
 
         if initial and not isinstance(equation, (ir.Equal, ir.CallEquation, ir.ForEquation)):
             raise FlattenError("only `a = b` equations may appear in initial equation")
