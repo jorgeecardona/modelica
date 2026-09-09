@@ -120,10 +120,11 @@ def test_a_stencil_is_tridiagonal_and_the_pattern_says_so() -> None:
 
 
 #: The corpus models big and sparse enough to cross the 16-state threshold onto the sparse path:
-#: ``TorusHeat``, the 64-state 2-D grid stencil, and ``WaveString``, the 16-state 1-D tridiagonal
-#: string. Both are method-of-lines discretisations, one a 2-D heat equation and the other a 1-D
-#: wave equation, so the sparse path is exercised on both shapes of stencil.
-SPARSE_MODELS: frozenset[str] = frozenset({"TorusHeat", "WaveString"})
+#: ``TorusHeat``, the 64-state 2-D grid stencil; ``WaveString``, the 16-state 1-D tridiagonal
+#: string; and ``FisherKPP``, a 16-state 1-D reaction-diffusion front. All are method-of-lines
+#: discretisations, so the sparse path is exercised on both shapes of stencil, and FisherKPP shows
+#: a local reaction leaves the pattern tridiagonal (it adds only a diagonal term).
+SPARSE_MODELS: frozenset[str] = frozenset({"TorusHeat", "WaveString", "FisherKPP"})
 
 
 def test_only_the_grid_models_take_the_sparse_path() -> None:

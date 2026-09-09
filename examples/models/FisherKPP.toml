@@ -1,0 +1,90 @@
+summary = "The Fisher-KPP equation, u_t = d * u_xx + r * u * (1 - u): diffusion plus logistic growth, the canonical reaction-diffusion model. Fisher wrote it in 1937 for the spread of an advantageous gene, and Kolmogorov, Petrovsky and Piskunov analysed it the same year; it is the textbook model of a biological invasion, a flame front, or any process where local growth saturates and spreads by diffusion. Discretised by the method of lines on sixteen interior points, the left end is held at the invaded state (u = 1) and the right end empty (u = 0), with the interior starting empty. A front forms at the left and travels right at the asymptotic speed 2 * sqrt(r * d) = 2, connecting the invaded state behind it to the empty state ahead. It is the corpus's third PDE and its first reaction-diffusion one: where TorusHeat is pure diffusion (parabolic) and WaveString a pure wave (hyperbolic), this couples diffusion to a nonlinear local reaction, and the nonlinearity is what makes the front. The comparison principle keeps every u[i] in [0, 1] for all time, and the front only ever advances, both held here as invariants. Sixteen states, so it crosses onto the sparse-Jacobian path with the other two grids -- the reaction adds only a diagonal term, so the pattern stays tridiagonal."
+teaches = ["reaction-diffusion: a diffusion term coupled to a nonlinear local reaction, the class behind pattern formation and invasion fronts", "the Fisher-KPP travelling front, invading the empty state at speed 2*sqrt(r*d)", "the method of lines on a reaction-diffusion PDE, with a held (Dirichlet) boundary driving the invasion", "the comparison principle as an invariant: the solution stays between its two equilibria, 0 and 1, for all time"]
+requires = []
+
+[parse]
+classes = ["FisherKPP"]
+
+[flatten]
+model = "FisherKPP"
+states = ["u[1]", "u[2]", "u[3]", "u[4]", "u[5]", "u[6]", "u[7]", "u[8]", "u[9]", "u[10]", "u[11]", "u[12]", "u[13]", "u[14]", "u[15]", "u[16]"]
+equations = 16
+balanced = true
+
+# u_t = d * u_xx + r * u * (1 - u) by the method of lines: each interior point gets the second
+# difference a * (u[i-1] - 2 u[i] + u[i+1]), a = d / h^2, plus the reaction r * u[i] * (1 - u[i]).
+# The left boundary is held invaded (u[0] = u_left = 1), the right empty (u[n+1] = 0, term drops),
+# the interior starts at zero. The front forms at the left and travels right; the solution stays in
+# [0, 1]. Sixteen states, so the run takes the sparse path (test_sparsity pins it), same as the
+# other two method-of-lines models.
+[simulate]
+stop = 8.0
+tolerance = 1e-10
+
+# One point per second across the run, so the front is pinned all the way from where it forms at
+# the left (t = 2, the right end still near zero) to where it reaches the right (t = 7).
+[[simulate.point]]
+t = 2.0
+values = { "u[1]" = 0.8806338431, "u[2]" = 0.751865603, "u[3]" = 0.6127620081, "u[4]" = 0.469966298, "u[5]" = 0.3351549941, "u[6]" = 0.2203448604, "u[7]" = 0.1329680424, "u[8]" = 0.07363003944, "u[9]" = 0.03751723763, "u[10]" = 0.01766968104, "u[11]" = 0.007731394159, "u[12]" = 0.003158417415, "u[13]" = 0.00121002775, "u[14]" = 0.0004362277043, "u[15]" = 0.0001475933928, "u[16]" = 4.375099974e-05 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 3.0
+values = { "u[1]" = 0.937132602, "u[2]" = 0.8677837242, "u[3]" = 0.7877480177, "u[4]" = 0.69529402, "u[5]" = 0.5916418233, "u[6]" = 0.4812275286, "u[7]" = 0.3711820902, "u[8]" = 0.2697168459, "u[9]" = 0.1838062952, "u[10]" = 0.1172338872, "u[11]" = 0.06999934202, "u[12]" = 0.0392035557, "u[13]" = 0.02064726164, "u[14]" = 0.01023116817, "u[15]" = 0.004703422355, "u[16]" = 0.001795763409 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 4.0
+values = { "u[1]" = 0.9670989571, "u[2]" = 0.9306816367, "u[3]" = 0.8877405191, "u[4]" = 0.8357569439, "u[5]" = 0.772887884, "u[6]" = 0.6983401712, "u[7]" = 0.6128522761, "u[8]" = 0.519096259, "u[9]" = 0.4217130272, "u[10]" = 0.3267172721, "u[11]" = 0.2402566042, "u[12]" = 0.1671129719, "u[13]" = 0.109591243, "u[14]" = 0.06726536217, "u[15]" = 0.0375404646, "u[16]" = 0.01656547634 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 5.0
+values = { "u[1]" = 0.9831791528, "u[2]" = 0.9646146935, "u[3]" = 0.9426368096, "u[4]" = 0.9155811744, "u[5]" = 0.8817807105, "u[6]" = 0.8396345989, "u[7]" = 0.7877755088, "u[8]" = 0.7253460156, "u[9]" = 0.6523611604, "u[10]" = 0.570069787, "u[11]" = 0.4811463851, "u[12]" = 0.3894987541, "u[13]" = 0.2995449034, "u[14]" = 0.2150395916, "u[15]" = 0.1378369431, "u[16]" = 0.06717046555 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 6.0
+values = { "u[1]" = 0.9916096415, "u[2]" = 0.9823922753, "u[3]" = 0.9715104546, "u[4]" = 0.9580668328, "u[5]" = 0.9410644857, "u[6]" = 0.9193803089, "u[7]" = 0.8917575334, "u[8]" = 0.8568246999, "u[9]" = 0.81314596, "u[10]" = 0.7592978131, "u[11]" = 0.693947899, "u[12]" = 0.6158873881, "u[13]" = 0.5239648886, "u[14]" = 0.4169445996, "u[15]" = 0.2935496962, "u[16]" = 0.1533985536 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 7.0
+values = { "u[1]" = 0.995899842, "u[2]" = 0.9914140725, "u[3]" = 0.9861391278, "u[4]" = 0.97962351, "u[5]" = 0.9713343237, "u[6]" = 0.9606161998, "u[7]" = 0.9466358759, "u[8]" = 0.9283007492, "u[9]" = 0.9041315309, "u[10]" = 0.8720579837, "u[11]" = 0.8290975529, "u[12]" = 0.7708882727, "u[13]" = 0.6911323477, "u[14]" = 0.5812868974, "u[15]" = 0.4315254119, "u[16]" = 0.2352153587 }
+rtol = 1e-6
+source = "reference"
+
+# The comparison principle: every point stays between the two equilibria, 0 (empty) and 1
+# (invaded), for all time. Checked at the leading, middle and trailing points, with a little slack.
+[[simulate.invariant]]
+expr = "u[1]"
+min = -0.01
+max = 1.01
+
+[[simulate.invariant]]
+expr = "u[8]"
+min = -0.01
+max = 1.01
+
+[[simulate.invariant]]
+expr = "u[16]"
+min = -0.01
+max = 1.01
+
+# The front only ever advances: the leading point is never below the trailing one, so u[1] - u[16]
+# stays non-negative (zero only at t = 0, when the whole interior is still empty).
+[[simulate.invariant]]
+expr = "u[1] - u[16]"
+min = 0.0
+atol = 1e-9
+
+# By t = 6 the front has passed the first point, which is then all but fully invaded.
+[[simulate.invariant]]
+expr = "u[1]"
+min = 0.99
+after = 6.0
