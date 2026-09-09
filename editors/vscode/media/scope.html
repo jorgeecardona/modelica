@@ -508,7 +508,7 @@
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
-    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), T[1,1]-T[8,8]" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; an array element is written with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
+    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), v>0, if h>0 then h else 0" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; an array element is written with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); a comparison (v>0, e<>0) reads as 1 or 0, and `if c then a else b` is Modelica's own conditional; Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
@@ -800,14 +800,37 @@ function compileExpr(src, series, time) {
   // its brackets are not left over; then the ordinary tokens. The series is keyed with a space
   // after the comma (`T[1, 1]`), so a whitespace-stripped index into it lets a user write the
   // element without the space (`T[1,1]`) and still resolve.
-  const toks = src.trim().match(/[A-Za-z_]\w*\[[^\]]*\]|[A-Za-z_]\w*|\d*\.?\d+(?:[eE][+-]?\d+)?|\*\*|[-+*/^(),]/g) || [];
+  const toks = src.trim().match(/[A-Za-z_]\w*\[[^\]]*\]|[A-Za-z_]\w*|\d*\.?\d+(?:[eE][+-]?\d+)?|<=|>=|==|<>|!=|\*\*|[-+*/^(),<>]/g) || [];
   const canon = {};
   for (const k in series) canon[k.replace(/\s+/g, "")] = k;
   const seriesOf = (name) => series[name] || series[canon[name.replace(/\s+/g, "")]];
   let p = 0;
   const peek = () => toks[p];
   const eat = () => toks[p++];
+  // The grammar, loosest binding first: an `if c then a else b` (Modelica's spelling, so a model's
+  // own expression pastes in), then a comparison (which reads as 1 or 0, so `v > 0` is an indicator
+  // curve and `if h > 0 then 1 else 0` a gate), then the arithmetic. A comparison is non-associative
+  // -- one operator, as Modelica has it -- so `a < b < c` is a syntax error, not a silent misread.
+  const CMP = {
+    "<": (x, y) => x < y, "<=": (x, y) => x <= y, ">": (x, y) => x > y, ">=": (x, y) => x >= y,
+    "==": (x, y) => x === y, "<>": (x, y) => x !== y, "!=": (x, y) => x !== y,
+  };
   const expr = () => {
+    if (peek() === "if") {
+      eat();
+      const c = expr();
+      if (eat() !== "then") throw new Error("expected 'then'");
+      const a = expr();
+      if (eat() !== "else") throw new Error("expected 'else'");
+      const b = expr();
+      return (j) => (c(j) ? a(j) : b(j));
+    }
+    const a = additive();
+    const op = peek();
+    if (op in CMP) { eat(); const b = additive(), cmp = CMP[op]; return (j) => (cmp(a(j), b(j)) ? 1 : 0); }
+    return a;
+  };
+  const additive = () => {
     let a = term();
     while (peek() === "+" || peek() === "-") { const o = eat(), b = term();
       a = o === "+" ? ((f, g) => (j) => f(j) + g(j))(a, b) : ((f, g) => (j) => f(j) - g(j))(a, b); }
