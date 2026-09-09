@@ -2,7 +2,7 @@
   "name": "pymodelica-scope",
   "displayName": "pymodelica Simulation Scope",
   "description": "Simulate the Modelica .mo file you are editing and see its trajectory, in an interactive chart inside VS Code.",
-  "version": "0.1.112",
+  "version": "0.1.113",
   "publisher": "JorgeCardona",
   "license": "MIT",
   "repository": {

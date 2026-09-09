@@ -301,6 +301,12 @@
     letter-spacing: 0; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px;
     background: var(--bg); color: var(--ink); font-family: var(--mono, ui-monospace, monospace); }
   #derive::placeholder { color: var(--dim); font-family: var(--font); }
+  /* A small action at the right of a section title (copy the stats table). Sits on the baseline row,
+     pushed to the end by the auto margin, quiet until hovered. */
+  .titlebtn { margin-left: auto; font: inherit; font-size: 10px; letter-spacing: .5px;
+    text-transform: uppercase; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--bg); color: var(--dim); cursor: pointer; }
+  .titlebtn:hover { color: var(--ink); border-color: var(--accent); }
   #derive.bad { border-color: var(--vscode-inputValidation-errorBorder, #e51400); }
   .legcount { color: var(--dim); font-weight: 500; letter-spacing: 0; text-transform: none; }
   .row { display: flex; align-items: baseline; gap: 7px; padding: 2px 12px; cursor: pointer;
@@ -506,7 +512,7 @@
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
-    <div class="legtitle" id="statstitle" hidden>stats <span class="legcount" id="statswin"></span></div><div id="statslist"></div>
+    <div class="legtitle" id="statstitle" hidden>stats <span class="legcount" id="statswin"></span><button type="button" id="statscopy" class="titlebtn" title="copy the stats table as tab-separated values (variable, unit, min, peak, mean, sigma, final) over the window on screen -- ready to paste into a spreadsheet or a report">copy</button></div><div id="statslist"></div>
     <div class="legtitle" id="ptitle" hidden>parameters</div><div id="plist"></div>
     <div class="legtitle" id="stitle" hidden>sweep</div>
     <div id="sweepctl" class="frm" hidden>
@@ -3095,6 +3101,8 @@ const statsBtn = document.getElementById("statsbtn");
 if (statsBtn) statsBtn.onclick = () => {
   statsOn = !statsOn; statsBtn.setAttribute("aria-pressed", String(statsOn)); draw();
 };
+const statsCopyBtn = document.getElementById("statscopy");
+if (statsCopyBtn) statsCopyBtn.onclick = copyStats;
 // Playback: sweep the cursor through the samples so the hover-only field insets (the 1-D profile
 // line, the 2-D heatmap) animate on their own -- scrubbing without a hand on the mouse. It drives
 // `cursor()` at each step (the same overlay a hover draws, no full redraw), one interval, ~4 s a
@@ -3859,11 +3867,41 @@ function copyReadout() {
     text = ["t = " + fmt(toT(T[j])) + " " + tUnit(), ...rows].join("\n");
   }
   if (!text) { foot.textContent = "hover a point, or place two marks, then press c to copy the readout"; return; }
-  const landed = () => { foot.textContent = "copied the readout to the clipboard"; };
+  copyText(text, "copied the readout to the clipboard");
+}
+// Write plain text to the clipboard and say so in the footer. Guarded by try/catch since a webview's
+// clipboard can refuse; the `.then(landed, landed)` reports the same either way, because a refusal
+// here is not worth a second, scarier message.
+function copyText(text, okMsg) {
+  const landed = () => { foot.textContent = okMsg; };
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(landed, landed);
     else landed();
   } catch (err) { foot.textContent = "the clipboard is not available here"; }
+}
+// The stats table as tab-separated text: a header row and one row per drawn variable, in the display
+// units, ready to paste into a spreadsheet or a report as columns. The window it covers rides in the
+// footer confirmation, not the table, so the paste stays pure columns. A spread (sigma) scales but
+// does not shift, so it is the gap between two converted values, the same as the panel shows.
+function copyStats() {
+  if (!statsOn || xVar || view3d || !N) { foot.textContent = "turn on stats (against time) to copy the table"; return; }
+  const cols = selected();
+  if (!cols.length) { foot.textContent = "draw a variable, then copy the stats"; return; }
+  const lines = [["variable", "unit", "min", "peak", "mean", "sigma", "final"].join("\t")];
+  for (const nm of cols) {
+    const s = windowStats(nm); if (!s) continue;
+    const u = unitOf(nm);
+    lines.push([
+      nm, dispUnit(u) || "",
+      fmt(disp(s.min, u)), fmt(disp(s.max, u)), fmt(disp(s.mean, u)),
+      fmt(disp(s.mean + s.std, u) - disp(s.mean, u)), fmt(disp(s.final, u)),
+    ].join("\t"));
+  }
+  if (lines.length < 2) { foot.textContent = "no numeric stats to copy"; return; }
+  copyText(
+    lines.join("\n") + "\n",
+    "copied the stats over " + fmt(toT(win[0])) + "–" + fmt(toT(win[1])) + " " + tUnit() + " to the clipboard",
+  );
 }
 // A simulation error (a violated assert, a singular model, a solver that gave up) comes back
 // from the extension as a `{type:"error"}` message. Show it as a banner over the chart -- the
