@@ -112,8 +112,11 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   once), and the data stays in radians: only what is printed converts, and a polar phase plot is
   still drawn from the radians.
 - **Remembered.** The display units, the angle units, the time unit, the solver speed and the legend
-  width are kept across reopens, so a panel you work in °F and minutes stays that way. The vertical scale is not:
-  a freshly opened model picks its own (a single `.mo` opens split by unit).
+  width are kept across reopens, so a panel you work in °F and minutes stays that way. Which
+  variables are drawn, and how a model is looked at (the plot mode and its coordinate system), are
+  kept **per model**: an orbit reopens as its rosette and a decay against time, each the way you
+  last left it. The vertical scale is not remembered: a freshly opened model picks its own (a
+  single `.mo` opens split by unit).
 
 ### Reading the chart
 

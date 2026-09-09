@@ -888,6 +888,20 @@ function select(i) {
     // above is still the model's own choice, since it is not what was saved.
     const remembered = loadSelection(D.model, names);
     if (remembered) on = remembered;
+    // And how it was last viewed, when there is a record. An unremembered model keeps whatever
+    // mode was in hand, as before; a remembered one returns to its plot mode and coordinates,
+    // with `xyz` dropped when the model no longer has the three variables it needs (paintXAxis
+    // downgrades it too, but setting `mode` here keeps the two in step).
+    const view = loadView(D.model);
+    if (view) {
+      if (view.mode === "xy") { mode = "xy"; coords = view.coords === "polar" ? "polar" : "cartesian"; }
+      else if (view.mode === "xyz" && names.length >= 3) {
+        mode = "xyz";
+        coords = ["cylindrical", "spherical"].includes(view.coords) ? view.coords : "cartesian";
+      } else mode = "t";
+      view3d = mode === "xyz";
+      modeDefaults();
+    }
   }
   document.querySelectorAll(".item").forEach((el) => el.classList.toggle("on", +el.dataset.i === i));
   document.getElementById("mname").textContent = D.model;
@@ -2924,12 +2938,22 @@ function defaultPolar() {
   }
   xVar = r; thVar = th;
 }
+// The axis slots and log-time flag a mode needs, filled from the model where the last choice
+// does not fit. Shared by `setMode` (a button press) and the per-model view restore in `select`,
+// so both set a mode up the same way.
+function modeDefaults() {
+  if (mode === "t") { xVar = null; return; }
+  LOGT = false;
+  if (mode === "xy" && coords === "polar") { defaultPolar(); return; }
+  if (mode === "xy") { if (!xVar || !names.includes(xVar)) xVar = defaultAxes()[0]; return; }
+  xVar = null;
+  if (ax3.some((nm) => !names.includes(nm))) ax3 = defaultAxes();
+}
 function setMode(m) {
   mode = m; view3d = m === "xyz"; xwin = null; hoverVar = null;
-  if (m === "t") xVar = null;
-  else if (m === "xy") { LOGT = false; if (coords === "polar") defaultPolar(); else if (!xVar || !names.includes(xVar)) xVar = defaultAxes()[0]; }
-  else { LOGT = false; xVar = null; if (ax3.some((nm) => !names.includes(nm))) ax3 = defaultAxes(); }
+  modeDefaults();
   if (spin3 && m !== "xyz") stopSpin();
+  saveView();
   paintXAxis(); draw();
 }
 // The controls for the model shown: the pressed mode, xyz only with three variables to give it,
@@ -2998,6 +3022,7 @@ document.getElementById("aspectbtn").onclick = () => { aspectLock = !aspectLock;
 document.getElementById("coords").onchange = (e) => {
   coords = e.target.value;
   if (mode === "xy" && coords === "polar") defaultPolar();
+  saveView();
   paintXAxis(); draw();
   // drawPolar and draw3d set their own footer; only the Cartesian 2D phase plot leaves it to the
   // cursor, so reset it there off whatever a self-drawing view last wrote.
@@ -3610,6 +3635,26 @@ function loadSelection(model, names) {
       const valid = saved.filter((nm) => present.has(nm));
       if (valid.length) return new Set(valid);
     }
+  } catch (e) { /* storage unavailable */ }
+  return null;
+}
+// How a model was last looked at -- the plot mode and its coordinate system -- kept per model
+// the way the drawn variables are, so an orbit reopens as its rosette and a step against time,
+// rather than every model inheriting whatever the last one happened to be in.
+const VIEW_KEY = "pymodelica.scope.view";
+function saveView() {
+  if (!D || !D.model) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(VIEW_KEY) || "{}") || {};
+    all[D.model] = { mode, coords };
+    localStorage.setItem(VIEW_KEY, JSON.stringify(all));
+  } catch (e) { /* storage unavailable; skip */ }
+}
+function loadView(model) {
+  try {
+    const all = JSON.parse(localStorage.getItem(VIEW_KEY) || "{}") || {};
+    const view = all[model];
+    if (view && typeof view === "object") return view;
   } catch (e) { /* storage unavailable */ }
   return null;
 }
