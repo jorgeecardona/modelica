@@ -42,6 +42,28 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-09, after a `when` tuple equation reads `=`
+
+**Eight models simulate now, up from four.** A `when` in an equation section takes equations,
+and a multi-output call is an equation written `(a, b) = f(x)`. The parser reads a `when` body as
+statements and its tuple case required `:=`, so the equation spelling was refused. The one file
+that trips on it is `Modelica.Blocks.Interfaces` (its `PartialNoise` draws a random pair that
+way), and that file is imported across the library, so refusing it blocked well over a hundred
+example models at the point they looked it up. Either operator is accepted now.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    411 | 95.6 % |
+| flattened  |     12 |  2.8 % |
+| causalized |     10 |  2.3 % |
+| simulated  |      8 |  1.9 % |
+
+The four new reachable models are Mechanics again -- `Rotational.Examples.ElasticBearing` and
+`Translational.Examples.{Accelerate, SignConvention, WhyArrows}` -- which use Blocks sources and
+sensors and so needed that file to load. The parse frontier has moved off the Blocks `:=`/`=`;
+what leads the work list now is genuine flatten work: a composite component that carries a value
+(66) and array shapes not known at flatten time (52). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-09, after `StateSelect` -- the first models reach simulation
 
 **Reachability moved off zero.** Four example models parse, flatten, causalize and simulate

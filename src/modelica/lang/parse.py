@@ -807,8 +807,10 @@ class _Parser:
         ):
             return self._assert_equation(self._at(self.token))
         if self._check(Kind.OP, "("):
-            # `(a, b) := f(x);` -- the statement twin of the call equation, and the only
-            # way an algorithm reads two results from one call.
+            # `(a, b) := f(x);` reads two results from one call. Inside a `when` this is an
+            # equation section, where the same multi-output form is written `(a, b) = f(x)` --
+            # `Modelica.Blocks.Interfaces.PartialNoise` draws its random pair that way -- so
+            # either operator is accepted here, exactly as the scalar assignment below does.
             where = self._at(self.token)
             self.at += 1
             targets: list[ir.Ref | None] = []
@@ -820,7 +822,7 @@ class _Parser:
                 if not self._accept(Kind.OP, ","):
                     break
             self._expect(Kind.OP, ")")
-            self._expect(Kind.OP, ":=")
+            self._assignment_operator()
             call = self.expression()
             if not isinstance(call, ir.Call):
                 raise self._error("an output list is assigned from a function call")
@@ -842,11 +844,15 @@ class _Parser:
             args, named = self._arguments()
             self._terminate()
             return ir.CallStatement((), ir.Call(target.name, args, named), where)
-        if self._accept(Kind.OP, ":=") is None:
-            self._expect(Kind.OP, "=")
+        self._assignment_operator()
         value = self.expression()
         self._terminate()
         return ir.Assign(target, value)
+
+    def _assignment_operator(self) -> None:
+        """Accept `:=` (as in an algorithm) or `=` (the equation-section `when` spelling)."""
+        if self._accept(Kind.OP, ":=") is None:
+            self._expect(Kind.OP, "=")
 
     # -- algorithm sections -----------------------------------------------------------
 
