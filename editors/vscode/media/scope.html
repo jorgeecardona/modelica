@@ -443,7 +443,7 @@
             <option value="deg">deg</option>
           </select>
           <button type="button" id="stepbtn" aria-pressed="false" title="step-response metrics for each drawn variable: its final value, overshoot, 10-90% rise time and 2% settling time -- for a model driven from one state to another, like a controller reaching a setpoint">step</button>
-          <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs), mean and final value of each drawn variable over the window on screen -- the peak current, the mean power, the settled temperature in the region you are looking at; zoom to narrow it">stats</button>
+          <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs), mean, σ (the standard deviation, how much it swings about the mean) and final value of each drawn variable over the window on screen -- the peak current, the mean power, the ripple amplitude, the settled temperature in the region you are looking at; zoom to narrow it">stats</button>
           <button type="button" id="playbtn" aria-pressed="false" title="play the cursor through time so a field's spatial profile animates -- the 1-D line or 2-D heatmap inset breathing, the standing wave swinging; Space to play or pause">&#9654;</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
@@ -3695,7 +3695,18 @@ function windowStats(nm) {
     if (v > hi) { hi = v; tmax = T[k]; }
     sum += v; cnt++; last = v;
   }
-  return cnt ? {min: lo, max: hi, mean: sum / cnt, tmax, final: last} : null;
+  if (!cnt) return null;
+  const mean = sum / cnt;
+  // The spread about the mean (the population standard deviation), in a second pass so a signal that
+  // sits on a large offset -- a temperature in kelvin with a small ripple -- does not lose the ripple
+  // to floating-point cancellation. Zero for a constant; the swing of an oscillation; the residual
+  // wiggle of a settling signal when the window is zoomed to its tail.
+  let sq = 0;
+  for (let k = i0; k <= i1; k++) {
+    const v = vs[k]; if (v === null || v === undefined || !isFinite(v)) continue;
+    const d = v - mean; sq += d * d;
+  }
+  return {min: lo, max: hi, mean, std: Math.sqrt(sq / cnt), tmax, final: last};
 }
 function paintStats() {
   const show = statsOn && !xVar && !view3d && N > 0;
@@ -3715,6 +3726,9 @@ function paintStats() {
       "min " + fmt(disp(s.min, u)),
       "peak " + fmt(disp(s.max, u)) + (s.tmax !== null ? " @ " + fmt(toT(s.tmax)) + " " + tUnit() : ""),
       "mean " + fmt(disp(s.mean, u)),
+      // A spread scales but does not shift, so it is read as the gap between two displayed values --
+      // exact for an offset unit (degC/degF) where `disp` alone would wrongly add the offset.
+      "σ " + fmt(disp(s.mean + s.std, u) - disp(s.mean, u)),
       "final " + fmt(disp(s.final, u)) + du,
     ];
     const sm = document.createElement("span"); sm.className = "sm"; sm.textContent = bits.join("  ·  ");
