@@ -131,7 +131,9 @@ over the chart listing them all -- so the ones below need not be memorised.
   a two-minute run is sharp without touching the resolution knob (the automatic form of `Δt ≤`):
   the integration is unchanged, only the output is read more finely where you are looking. A
   live `.mo` only, and only when the window is actually sparse. Once zoomed, the **left and right
-  arrow keys** pan the window a quarter of its width at a time, stopping at the ends of the run.
+  arrow keys** pan the window a quarter of its width at a time, stopping at the ends of the run,
+  and **+ / −** zoom it in and out about its middle (the keyboard partner to the wheel, which
+  centres on the pointer; in the 3D view both zoom the camera).
   **Double-click** the chart to
   reset the zoom and clear the marks. **Hover** for a cursor readout of every drawn variable, in
   the display units, at the nearest sample: a line marks the instant and a dot sits on each

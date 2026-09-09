@@ -468,6 +468,7 @@
               <div class="helpsec">chart</div>
               <div class="hk"><b>drag</b><span>zoom the time window (or the x variable in a phase plot)</span></div>
               <div class="hk"><b>wheel</b><span>zoom the x window in and out around the pointer (the camera, in 3D)</span></div>
+              <div class="hk"><b>+ / −</b><span>zoom the window in and out about its middle, from the keyboard</span></div>
               <div class="hk"><b>← / →</b><span>pan the zoomed time window left or right</span></div>
               <div class="hk"><b>click</b><span>drop a mark to read every variable's value there; a second click reads Δ, the average rate and ∫ between the two</span></div>
               <div class="hk"><b>shift-click</b><span>drop a level line and read off where each curve crosses it</span></div>
@@ -3088,30 +3089,32 @@ document.getElementById("view3").onchange = (e) => {
   else if (v === "spin") { if (spin3) stopSpin(); else spin3 = setInterval(() => { rot3.az += 0.012; draw(); }, 40); }
   draw();
 };
+// Zoom the x window by `factor` (>1 widens, <1 narrows) about `center`, clamped to the data and
+// never collapsed; back at the full span the domain is handed to autoscale. Time zooms `win`,
+// a phase plot `xwin`; a 3D or polar view has no such window. The wheel centres on the pointer,
+// the +/- keys on the window's middle. Returns whether it changed anything.
 let wheelResampleTimer = null;
-svg.addEventListener("wheel", (e) => {
-  if (view3d) {
-    e.preventDefault();
-    zoom3 = Math.max(0.3, Math.min(6, zoom3 * (e.deltaY > 0 ? 0.9 : 1.1)));
-    draw();
-    return;
-  }
-  // In the time and phase views the wheel zooms the x window around the pointer, so a scroll homes
-  // in on the instant (or the phase value) under the cursor and back out again -- the fluid partner
-  // to the drag-a-band zoom. A polar plot keeps its own equal-aspect frame and has no x window.
-  if (!D || !N || (mode === "xy" && coords === "polar")) return;
-  e.preventDefault();
+function zoomWindow(factor, center) {
+  if (!D || !N || view3d || (mode === "xy" && coords === "polar")) return false;
   const bounds = xVar ? xFullRange() : [T[0], T[N - 1]];
-  if (!bounds) return;
-  const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;  // scroll up narrows the window (zooms in)
-  const center = timeAt(e);
+  if (!bounds) return false;
   const cur = xVar ? (xwin || xdom()) : win;
-  const lo = Math.max(bounds[0], center - (center - cur[0]) * factor);
-  const hi = Math.min(bounds[1], center + (cur[1] - center) * factor);
-  if (!(hi - lo > (bounds[1] - bounds[0]) * 1e-4)) return;  // do not collapse the window to nothing
-  const whole = hi - lo >= (bounds[1] - bounds[0]) * (1 - 1e-9);
+  const fullSpan = bounds[1] - bounds[0];
+  // Once the window the zoom asks for reaches the whole span, hand it back to autoscale rather
+  // than clamp it (which, pivoting on a drifting centre, would only approach the full view). Below
+  // that, clamp to the data, and refuse a window narrowed to nothing.
+  let lo;
+  let hi;
+  if ((cur[1] - cur[0]) * factor >= fullSpan * (1 - 1e-9)) {
+    [lo, hi] = bounds;
+  } else {
+    lo = Math.max(bounds[0], center - (center - cur[0]) * factor);
+    hi = Math.min(bounds[1], center + (cur[1] - center) * factor);
+    if (!(hi - lo > fullSpan * 1e-4)) return false;
+  }
+  const whole = hi - lo >= fullSpan * (1 - 1e-9);
   if (xVar) {
-    xwin = whole ? null : [lo, hi];  // back at the full range, hand the domain back to autoscale
+    xwin = whole ? null : [lo, hi];
   } else {
     win = whole ? [T[0], T[N - 1]] : [lo, hi];
     // A live model sharpens the window it settles on; debounce so a flick of the wheel is one run.
@@ -3119,6 +3122,20 @@ svg.addEventListener("wheel", (e) => {
     wheelResampleTimer = setTimeout(() => { wheelResampleTimer = null; maybeResample(win[0], win[1]); }, 200);
   }
   draw();
+  return true;
+}
+// The middle of the window a keyboard zoom pivots on -- the phase window or the time window.
+function windowCentre() { const w = xVar ? (xwin || xdom()) : win; return (w[0] + w[1]) / 2; }
+svg.addEventListener("wheel", (e) => {
+  if (view3d) {
+    e.preventDefault();
+    zoom3 = Math.max(0.3, Math.min(6, zoom3 * (e.deltaY > 0 ? 0.9 : 1.1)));
+    draw();
+    return;
+  }
+  // The wheel zooms the x window around the pointer, homing in on the instant (or phase value)
+  // under the cursor and back out -- the fluid partner to the drag-a-band zoom.
+  if (zoomWindow(e.deltaY > 0 ? 1.15 : 1 / 1.15, timeAt(e))) e.preventDefault();
 }, {passive: false});
 window.addEventListener("resize", draw);
 
@@ -3538,6 +3555,19 @@ document.addEventListener("keydown", (e) => {
   if (!typing && (e.key === "1" || e.key === "2" || e.key === "3")) {
     const target = { "1": "t", "2": "xy", "3": "xyz" }[e.key];
     if (target !== "xyz" || names.length >= 3) { e.preventDefault(); setMode(target); }
+  }
+  // + / - zoom the window about its middle, the keyboard partner to the wheel (which centres on
+  // the pointer); in 3D they zoom the camera, as the wheel does there. `=` doubles for `+` so
+  // no shift is needed. Held together with the arrows, this is pan-and-zoom without the mouse.
+  if (!typing && (e.key === "+" || e.key === "=" || e.key === "-")) {
+    const zoomIn = e.key !== "-";
+    if (view3d) {
+      e.preventDefault();
+      zoom3 = Math.max(0.3, Math.min(6, zoom3 * (zoomIn ? 1.15 : 1 / 1.15)));
+      draw();
+    } else if (zoomWindow(zoomIn ? 1 / 1.15 : 1.15, windowCentre())) {
+      e.preventDefault();
+    }
   }
 });
 // `c` copies the readout to the clipboard as plain text: the two-mark measurement if a pair is
