@@ -410,11 +410,13 @@ def _auto_stop(  # noqa: PLR0913, PLR0917 - the knobs of one search, passed stra
     return fallback, _integrate(kernel, fallback, params, solver), note
 
 
-def _response(result: Result, spec: str) -> float | None:
-    """One number read off a run: ``final:<variable>`` or ``event:<cause>`` (its first time).
+def _response(result: Result, spec: str) -> float | None:  # noqa: PLR0911 - one branch per kind
+    """One number read off a run, chosen by ``spec``.
 
-    ``None`` when there is no such number -- an event that never fired -- which the panel draws
-    as a gap rather than a zero.
+    ``final:<variable>`` is its last value, ``peak:<variable>`` its maximum over the run,
+    ``peaktime:<variable>`` the time of that maximum, ``event:<cause>`` the first time it fires.
+    ``None`` when there is no such number -- an event that never fired -- which the panel draws as a
+    gap rather than a zero.
     """
     kind, _, target = spec.partition(":")
     if kind == "event":
@@ -426,6 +428,15 @@ def _response(result: Result, spec: str) -> float | None:
         column = np.asarray(result[target], dtype=float)
         finite = column[np.isfinite(column)]
         return float(finite[-1]) if finite.size else None
+    if kind in ("peak", "peaktime") and target in result.names:
+        column = np.asarray(result[target], dtype=float)
+        finite = np.isfinite(column)
+        if not finite.any():
+            return None
+        index = int(np.argmax(np.where(finite, column, -np.inf)))
+        if kind == "peaktime":
+            return float(np.asarray(result.time, dtype=float)[index])
+        return float(column[index])
     return None
 
 
@@ -757,7 +768,7 @@ def main() -> None:
         default=None,
         metavar="SPEC",
         help="also run every editable parameter a step either way and read off this response: "
-        "'final:<variable>' or 'event:<cause>'",
+        "'final:<variable>', 'peak:<variable>', 'peaktime:<variable>' or 'event:<cause>'",
     )
     ap.add_argument(
         "--sensitivity-step",

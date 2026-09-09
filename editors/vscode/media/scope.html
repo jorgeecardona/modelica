@@ -513,14 +513,14 @@
       <span class="l">from</span><div class="c"><input id="sfrom" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"><span class="l">to</span><input id="sto" type="text" inputmode="decimal" spellcheck="false" autocomplete="off"></div>
       <span class="l">in</span><div class="c"><input id="ssteps" type="text" inputmode="numeric" spellcheck="false" autocomplete="off" value="5"><span class="l">runs</span></div>
       <div class="c full"><button type="button" id="srun" title="simulate the model once per value, each as a pinned run">run sweep</button><button type="button" id="sclear" title="drop the sweep's runs">clear</button></div>
-      <span class="l">response</span><div class="c"><select id="sresp" title="the number read off each run and plotted against the parameter"></select></div>
+      <span class="l">response</span><div class="c"><select id="sresp" title="the number read off each run and plotted against the parameter: a variable's final value, its peak, the time of its peak, or the time an event fires"></select></div>
       <svg id="schart" class="schart full"></svg>
     </div>
     <div class="legtitle" id="ltitle" hidden>measured</div>
     <div id="loglist"></div>
     <div class="legtitle" id="ntitle" hidden>sensitivity</div>
     <div id="sensctl" class="frm" hidden>
-      <span class="l">of</span><div class="c"><select id="nresp" title="the response: a variable's final value, or the time an event first fires"></select></div>
+      <span class="l">of</span><div class="c"><select id="nresp" title="the response: a variable's final value, its peak, the time of its peak, or the time an event first fires"></select></div>
       <span class="l" title="each editable parameter is run this far below and above its value">step</span><div class="c"><span class="l">&plusmn;</span><input id="nstep" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" value="5"><span class="l">%</span></div>
       <div class="c full"><button type="button" id="nrun" title="run every editable parameter a step either way (two simulations each) and read the response off each">compute</button></div>
       <svg id="tchart" class="tchart full"></svg>
@@ -2328,10 +2328,10 @@ function drawTornado() {
     svgT.replaceChildren(frag); return;
   }
   const choice = responseChoices().find((c) => c.key === S.response);
-  const isEvent = choice && choice.kind === "event";
-  const u = choice && choice.kind === "final" ? unitOf(choice.name) : "";
-  const shown = (v) => v === null || v === undefined ? null : (isEvent ? toT(v) : disp(v, u));
-  const unitLabel = isEvent ? tUnit() : dispUnit(u);
+  const isTime = choice && (choice.kind === "event" || choice.kind === "peaktime");
+  const u = choice && (choice.kind === "final" || choice.kind === "peak") ? unitOf(choice.name) : "";
+  const shown = (v) => v === null || v === undefined ? null : (isTime ? toT(v) : disp(v, u));
+  const unitLabel = isTime ? tUnit() : dispUnit(u);
   const rows = S.rows.map((r) => ({name: r.name, minus: shown(r.minus), plus: shown(r.plus)}));
   const base = shown(S.base);
   const rh = 18, top = 16, left = 74, right = 8, h = top + rows.length * rh + 6;
@@ -2487,9 +2487,18 @@ if (svgBtn) svgBtn.onclick = () => {
 // Each value becomes a pinned run (its chip names the value) so the trajectories overlay as
 // any comparison does; the runs are slots filled by the extension's answers, keyed by runId.
 function editableParams() { return ((D && D.parameters) || []).filter((p) => !p.derived); }
-// The response choices: a variable's final value, or the time an event first fires.
+// The response choices, per variable: its final value, its peak (the maximum over the run), the
+// time of that peak; then the time an event first fires. The peak is what a parametric study of a
+// transient asks for -- the peak infected against R0, the overshoot against a gain, the highest
+// temperature against a load -- which the final value cannot answer for a signal that rises and
+// falls. `final` stays first so the default response is unchanged.
 function responseChoices() {
-  const out = names.map((nm) => ({key: "final:" + nm, label: "final " + nm, kind: "final", name: nm}));
+  const out = [];
+  for (const nm of names) {
+    out.push({key: "final:" + nm, label: "final " + nm, kind: "final", name: nm});
+    out.push({key: "peak:" + nm, label: "peak " + nm, kind: "peak", name: nm});
+    out.push({key: "peaktime:" + nm, label: "time of peak " + nm, kind: "peaktime", name: nm});
+  }
   const causes = new Set();
   for (const run of RUNS) for (const e of ((run.data || {}).events || [])) if (e.cause) causes.add(e.cause);
   for (const c of causes) out.push({key: "event:" + c, label: "time of: " + c, kind: "event", cause: c});
@@ -2500,6 +2509,21 @@ function responseOf(run, choice) {
   if (choice.kind === "event") {
     const hit = (data.events || []).find((e) => e.cause === choice.cause);
     return hit ? {v: toT(hit.t), unit: tUnit()} : null;
+  }
+  if (choice.kind === "peak" || choice.kind === "peaktime") {
+    const vs = data.series[choice.name]; if (!vs) return null;
+    let best = -Infinity, at = -1;
+    for (let k = 0; k < vs.length; k++) {
+      const v = vs[k];
+      if (v !== null && v !== undefined && isFinite(v) && v > best) { best = v; at = k; }
+    }
+    if (at < 0) return null;
+    if (choice.kind === "peaktime") {
+      const tt = (data.t || [])[at];
+      return tt === undefined || tt === null ? null : {v: toT(tt), unit: tUnit()};
+    }
+    const u = (data.units || {})[choice.name] || "";
+    return {v: disp(best, u), unit: dispUnit(u)};
   }
   const vs = data.series[choice.name]; if (!vs) return null;
   for (let k = vs.length - 1; k >= 0; k--) { const v = vs[k]; if (v !== null && v !== undefined && isFinite(v)) {
@@ -2595,7 +2619,14 @@ function drawResponse() {
   frag.appendChild(el("line", {class: "rax", x1: m.l, x2: m.l, y1: m.t, y2: h - m.b}));
   frag.appendChild(el("line", {class: "rax", x1: m.l, x2: w - m.r, y1: h - m.b, y2: h - m.b}));
   frag.appendChild(el("text", {class: "rtick", x: w - m.r, y: h - m.b - 4, "text-anchor": "end"}, pname + (p && dispUnit(p.unit) ? " " + dispUnit(p.unit) : "")));
-  const yl = sweepChoice ? (sweepChoice.kind === "event" ? "t of event, " + tUnit() : sweepChoice.name + (pts.find((q) => q.unit) ? " " + pts.find((q) => q.unit).unit : "")) : "";
+  const yUnit = pts.find((q) => q.unit) ? " " + pts.find((q) => q.unit).unit : "";
+  const yl = sweepChoice
+    ? sweepChoice.kind === "event"
+      ? "t of event, " + tUnit()
+      : sweepChoice.kind === "peaktime"
+        ? "t of peak, " + tUnit()
+        : (sweepChoice.kind === "peak" ? sweepChoice.label : sweepChoice.name) + yUnit
+    : "";
   frag.appendChild(el("text", {class: "rtick", x: m.l + 4, y: m.t + 2}, yl));
   let d = "", pen = false;
   for (const q of pts) {

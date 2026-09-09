@@ -239,8 +239,11 @@ over the chart listing them all -- so the ones below need not be memorised.
   pauses on a click or the space bar. Time view only.
 - **Sweep.** Pick a parameter, a range and a number of runs; **run sweep** simulates the model
   once per value, each as a pinned run, and plots a **response** against the parameter: a
-  variable's final value or the time an event first fires. The response defaults to a model
-  event when one fires (the roaster's drop) until you choose otherwise.
+  variable's final value, its **peak** (the maximum over the run) or the **time of that peak**, or
+  the time an event first fires. The peak is what a study of a transient asks -- the peak infected
+  against the reproduction number, the overshoot against a gain -- which the final value cannot
+  answer for a signal that rises and falls. The same responses drive the sensitivity study. The
+  response defaults to a model event when one fires (the roaster's drop) until you choose otherwise.
 - **Sensitivity.** Pick a response and a relative step; **compute** runs every editable
   parameter a step either way (two simulations each) and draws a **tornado**: parameters
   sorted by how much they move the response, with an undefined end (an event that never
