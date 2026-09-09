@@ -1212,6 +1212,21 @@ function ticks(lo, hi, want) {
   for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(v);
   return out;
 }
+// Ticks for a log axis, whose domain [lo, hi] is in decades (log10). A log axis is labelled at
+// whole powers of ten -- 1e-6, 1e-5, ... -- not at the half-decade "1e-0.5" that `ticks` gives
+// when it treats the exponent as an ordinary linear range. The step widens to 2 or more decades
+// only when a decade a line would be too crowded to read.
+function logTicks(lo, hi, want) {
+  const first = Math.ceil(lo - 1e-9), last = Math.floor(hi + 1e-9);
+  // Under a decade of span there are at most one or two whole powers of ten, too sparse to read an
+  // axis by, so a narrow range is left to the ordinary tick chooser and only a full decade or more
+  // is labelled by its powers of ten.
+  if (last - first < 1) return ticks(lo, hi, want);
+  const step = Math.max(1, Math.ceil((last - first + 1) / Math.max(1, want)));
+  const out = [];
+  for (let e = first; e <= last; e += step) out.push(e);
+  return out;
+}
 function spanPad(lo, hi) {
   if (!(isFinite(lo) && isFinite(hi))) return [0, 1];
   if (hi > lo) { const pad = (hi - lo) * 0.06; return [lo - pad, hi + pad]; }
@@ -1819,13 +1834,18 @@ function drawOverlay(frag) {
   if (scale !== "norm") {
     const lo = scale === "linear" ? disp(dom[0], su) : dom[0];
     const hi = scale === "linear" ? disp(dom[1], su) : dom[1];
-    for (const dv of ticks(lo, hi, Math.max(2, Math.round(box.h / 44)))) {
+    const want = Math.max(2, Math.round(box.h / 44));
+    for (const dv of (scale === "log" ? logTicks(lo, hi, want) : ticks(lo, hi, want))) {
       const v = scale === "linear" ? undisp(dv, su) : dv;
       const y = Y((v - dom[0]) / (dom[1] - dom[0]));
       if (y < M.t - 0.5 || y > box.h - M.b + 0.5) continue;
       frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r, y1: y, y2: y}));
-      frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y + 3, "text-anchor": "end"},
-        scale === "log" ? "1e" + fmt(dv) : tickLabel(dv, hi - lo)));
+      // A whole power of ten reads as `1e-6`; a fractional exponent (a narrow range's finer ticks)
+      // reads as the value it stands for, since `1e-0.75` is not a number anyone thinks in.
+      const label = scale === "log"
+        ? (Number.isInteger(dv) ? "1e" + fmt(dv) : fmt(Math.pow(10, dv)))
+        : tickLabel(dv, hi - lo);
+      frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y + 3, "text-anchor": "end"}, label));
     }
   }
   const [a, b] = visible();
