@@ -187,6 +187,11 @@ over the chart listing them all -- so the ones below need not be memorised.
   **min**, its **peak** (with the time the peak occurs) and its **mean** -- the peak current, the
   mean power, the lowest temperature in the region you are looking at. Zooming the time axis
   narrows the window and the numbers follow it; the heading names the span they cover. Time view only.
+- **Play.** The **`▶`** button (or the **space** bar) sweeps the cursor through time on its own, so
+  a model whose state is an array field animates: the 1-D spatial-profile line and the 2-D heatmap
+  that a hover draws now breathe without a hand on the mouse -- a standing wave swinging, a heat
+  field decaying, a tracer circulating a ring. It loops, sweeps the visible window when zoomed, and
+  pauses on a click or the space bar. Time view only.
 - **Sweep.** Pick a parameter, a range and a number of runs; **run sweep** simulates the model
   once per value, each as a pinned run, and plots a **response** against the parameter: a
   variable's final value or the time an event first fires. The response defaults to a model

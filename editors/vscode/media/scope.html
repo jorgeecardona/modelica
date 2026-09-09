@@ -125,6 +125,7 @@
   #legendbtn[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   #stepbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   #statsbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  #playbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   #steptitle, #statstitle { margin-top: 12px; }
   #helpbtn { font-weight: 700; }
   #helpbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
@@ -438,6 +439,7 @@
           </select>
           <button type="button" id="stepbtn" aria-pressed="false" title="step-response metrics for each drawn variable: its final value, overshoot, 10-90% rise time and 2% settling time -- for a model driven from one state to another, like a controller reaching a setpoint">step</button>
           <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs) and mean of each drawn variable over the window on screen -- the peak current, the mean power, the lowest temperature in the region you are looking at; zoom to narrow it">stats</button>
+          <button type="button" id="playbtn" aria-pressed="false" title="play the cursor through time so a field's spatial profile animates -- the 1-D line or 2-D heatmap inset breathing, the standing wave swinging; Space to play or pause">&#9654;</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
           <button type="button" id="csvbtn" title="save the drawn run as a CSV: a time column and one column per variable, in SI units -- re-importable as a measured log" hidden>csv</button>
@@ -467,6 +469,7 @@
               <div class="hk"><b>drag the ⇥ marker</b><span>move the stop time and re-run to there</span></div>
               <div class="hk"><b>double-click</b><span>reset the zoom, the marks and the level lines</span></div>
               <div class="hk"><b>c</b><span>copy the readout (a mark's values, the two-mark measurement, or the cursor values) to the clipboard</span></div>
+              <div class="hk"><b>space</b><span>play the cursor through time so a field's profile inset animates; press again to pause</span></div>
               <div class="hk"><b>drag · wheel (3D)</b><span>rotate the camera · zoom, in the xyz view</span></div>
             </div>
             <div>
@@ -823,6 +826,7 @@ function applyDerived() {
   }
 }
 function select(i) {
+  stopPlay();  // new data (a re-run or a different model) changes the sample grid; stop any playback
   D = MODELS[i];
   paintSolver();
   names = Object.keys(D.series);
@@ -2622,6 +2626,7 @@ function stopMarker(x) {
 }
 svg.addEventListener("pointermove", (e) => {
   if (!D) return;
+  if (playing) return;  // playback owns the hud; a hover would fight the animation
   // The polar plot has its own equal-aspect frame, not the shared x-domain, so its cursor snaps to
   // the trajectory in pixels rather than reading a time off X().
   if (mode === "xy" && coords === "polar") { polarCursor(e); return; }
@@ -2653,6 +2658,7 @@ svg.addEventListener("pointermove", (e) => {
 });
 svg.addEventListener("pointerdown", (e) => {
   if (!D) return;
+  if (playing) { stopPlay(); return; }  // a deliberate press pauses playback and hands control back
   // The polar plot is read-only for now (a cursor, no drag-zoom or marks), so a press does nothing.
   if (mode === "xy" && coords === "polar") return;
   svg.setPointerCapture(e.pointerId);
@@ -2688,6 +2694,7 @@ svg.addEventListener("pointerup", (e) => {
   draw();
 });
 svg.addEventListener("pointerleave", () => {
+  if (playing) return;  // the animation keeps drawing the hud; leaving must not clear it
   if (drag === null && !stopDrag) { cursorIndex = null; hud.replaceChildren(); foot.textContent = restFooter(); paintLegend(); }
 });
 svg.addEventListener("dblclick", () => {
@@ -2734,6 +2741,41 @@ const statsBtn = document.getElementById("statsbtn");
 if (statsBtn) statsBtn.onclick = () => {
   statsOn = !statsOn; statsBtn.setAttribute("aria-pressed", String(statsOn)); draw();
 };
+// Playback: sweep the cursor through the samples so the hover-only field insets (the 1-D profile
+// line, the 2-D heatmap) animate on their own -- scrubbing without a hand on the mouse. It drives
+// `cursor()` at each step (the same overlay a hover draws, no full redraw), one interval, ~4 s a
+// pass, looping; it sweeps the visible window when zoomed, else the whole run. Time view only.
+let playing = false, playTimer = null, playIdx = 0;
+function playRange() {
+  const lo = win ? nearestIndex(win[0]) : 0, hi = win ? nearestIndex(win[1]) : N - 1;
+  return hi > lo + 1 ? [lo, hi] : [0, N - 1];
+}
+function stopPlay() {
+  if (playTimer !== null) { clearInterval(playTimer); playTimer = null; }
+  playing = false;
+  const b = document.getElementById("playbtn");
+  if (b) { b.setAttribute("aria-pressed", "false"); b.innerHTML = "&#9654;"; }
+}
+function playStep() {
+  if (!N || xVar || mode !== "t") { stopPlay(); return; }
+  const [lo, hi] = playRange();
+  playIdx += Math.max(1, Math.ceil((hi - lo) / 90));
+  if (playIdx >= hi) playIdx = lo;  // loop within the range
+  cursor(T[playIdx]);
+}
+function togglePlay() {
+  if (playing) { stopPlay(); return; }
+  if (!N || xVar || mode !== "t") return;
+  const [lo, hi] = playRange();
+  playIdx = cursorIndex !== null && cursorIndex >= lo && cursorIndex < hi ? cursorIndex : lo;
+  playing = true;
+  const b = document.getElementById("playbtn");
+  if (b) { b.setAttribute("aria-pressed", "true"); b.innerHTML = "&#10073;&#10073;"; }
+  cursor(T[playIdx]);
+  playTimer = setInterval(playStep, 45);
+}
+const playBtn = document.getElementById("playbtn");
+if (playBtn) playBtn.onclick = () => togglePlay();
 document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
 // Speed: the relative tolerance the run is drawn at. A change is a fresh run (a checkpoint holds
 // only at its own tolerance), on the live run; the control is only live for an open .mo.
@@ -2807,6 +2849,11 @@ function paintXAxis() {
   document.querySelector('#mode button[data-mode="xyz"]').disabled = names.length < 3;
   const logt = document.getElementById("logt");
   logt.hidden = mode !== "t"; logt.setAttribute("aria-pressed", String(LOGT));
+  // Playback belongs to the time view (a phase plot's x is a variable, not the instant a field
+  // profile is read at), so the button hides elsewhere and any run in progress stops.
+  const playBtnEl = document.getElementById("playbtn");
+  if (playBtnEl) playBtnEl.hidden = mode !== "t";
+  if (mode !== "t") stopPlay();
   const polar = mode === "xy" && coords === "polar";
   // Equal aspect belongs to the Cartesian phase plot; polar (and the 3D cylindrical/spherical views)
   // are inherently equal-aspect -- a spatial shape -- so the 1:1 button hides there.
@@ -3305,6 +3352,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !errBar.hidden) { clearError(); return; }
   if (e.key === "?" && !typing) { e.preventDefault(); setHelp(helpCard.hidden); }
   if ((e.key === "c" || e.key === "C") && !typing && !e.metaKey && !e.ctrlKey) copyReadout();
+  if (e.key === " " && !typing) { e.preventDefault(); togglePlay(); }
   if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing && panWindow(e.key === "ArrowLeft" ? -1 : 1)) {
     e.preventDefault();
   }
