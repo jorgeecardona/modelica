@@ -467,6 +467,7 @@
             <div>
               <div class="helpsec">chart</div>
               <div class="hk"><b>drag</b><span>zoom the time window (or the x variable in a phase plot)</span></div>
+              <div class="hk"><b>wheel</b><span>zoom the x window in and out around the pointer (the camera, in 3D)</span></div>
               <div class="hk"><b>← / →</b><span>pan the zoomed time window left or right</span></div>
               <div class="hk"><b>click</b><span>drop a mark to read every variable's value there; a second click reads Δ, the average rate and ∫ between the two</span></div>
               <div class="hk"><b>shift-click</b><span>drop a level line and read off where each curve crosses it</span></div>
@@ -475,7 +476,7 @@
               <div class="hk"><b>c</b><span>copy the readout (a mark's values, the two-mark measurement, or the cursor values) to the clipboard</span></div>
               <div class="hk"><b>space</b><span>play the cursor through time so a field's profile inset animates; press again to pause</span></div>
               <div class="hk"><b>1 / 2 / 3</b><span>switch the plot: against time, a phase plot, three axes</span></div>
-              <div class="hk"><b>drag · wheel (3D)</b><span>rotate the camera · zoom, in the xyz view</span></div>
+              <div class="hk"><b>drag (3D)</b><span>rotate the camera in the xyz view (the wheel zooms it)</span></div>
             </div>
             <div>
               <div class="helpsec">legend</div>
@@ -1318,6 +1319,17 @@ function xdom() {
       if (v < lo) lo = v; if (v > hi) hi = v; }
   }
   return isFinite(lo) ? spanPad(lo, hi) : [0, 1];
+}
+// The phase variable's full range over every sample (not just the visible ones), so a wheel
+// zoom knows how far out it may go regardless of the window it is currently in.
+function xFullRange() {
+  let lo = Infinity, hi = -Infinity;
+  for (let ri = 0; ri < RUNS.length; ri++) {
+    const vs = seriesOf(ri, xVar); if (!vs) continue;
+    for (const v of vs) { if (v === null || v === undefined || !isFinite(v)) continue;
+      if (v < lo) lo = v; if (v > hi) hi = v; }
+  }
+  return isFinite(lo) ? spanPad(lo, hi) : null;
 }
 const Y = (u) => box.h - M.b - u * (box.h - M.t - M.b);
 
@@ -3076,10 +3088,36 @@ document.getElementById("view3").onchange = (e) => {
   else if (v === "spin") { if (spin3) stopSpin(); else spin3 = setInterval(() => { rot3.az += 0.012; draw(); }, 40); }
   draw();
 };
+let wheelResampleTimer = null;
 svg.addEventListener("wheel", (e) => {
-  if (!view3d) return;
+  if (view3d) {
+    e.preventDefault();
+    zoom3 = Math.max(0.3, Math.min(6, zoom3 * (e.deltaY > 0 ? 0.9 : 1.1)));
+    draw();
+    return;
+  }
+  // In the time and phase views the wheel zooms the x window around the pointer, so a scroll homes
+  // in on the instant (or the phase value) under the cursor and back out again -- the fluid partner
+  // to the drag-a-band zoom. A polar plot keeps its own equal-aspect frame and has no x window.
+  if (!D || !N || (mode === "xy" && coords === "polar")) return;
   e.preventDefault();
-  zoom3 = Math.max(0.3, Math.min(6, zoom3 * (e.deltaY > 0 ? 0.9 : 1.1)));
+  const bounds = xVar ? xFullRange() : [T[0], T[N - 1]];
+  if (!bounds) return;
+  const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;  // scroll up narrows the window (zooms in)
+  const center = timeAt(e);
+  const cur = xVar ? (xwin || xdom()) : win;
+  const lo = Math.max(bounds[0], center - (center - cur[0]) * factor);
+  const hi = Math.min(bounds[1], center + (cur[1] - center) * factor);
+  if (!(hi - lo > (bounds[1] - bounds[0]) * 1e-4)) return;  // do not collapse the window to nothing
+  const whole = hi - lo >= (bounds[1] - bounds[0]) * (1 - 1e-9);
+  if (xVar) {
+    xwin = whole ? null : [lo, hi];  // back at the full range, hand the domain back to autoscale
+  } else {
+    win = whole ? [T[0], T[N - 1]] : [lo, hi];
+    // A live model sharpens the window it settles on; debounce so a flick of the wheel is one run.
+    clearTimeout(wheelResampleTimer);
+    wheelResampleTimer = setTimeout(() => { wheelResampleTimer = null; maybeResample(win[0], win[1]); }, 200);
+  }
   draw();
 }, {passive: false});
 window.addEventListener("resize", draw);

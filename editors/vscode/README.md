@@ -124,7 +124,9 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
 The chart carries about ten mouse gestures. The **`?`** button, or the **`?`** key, opens a card
 over the chart listing them all -- so the ones below need not be memorised.
 
-- **Drag** to zoom in time (or in x, in a phase plot). Zooming into a window the run only
+- **Drag** to zoom in time (or in x, in a phase plot), or **scroll the wheel** to zoom the window
+  in and out around the pointer, homing in on the instant under the cursor and back out again (in
+  the 3D view the wheel zooms the camera instead). Zooming into a window the run only
   samples sparsely re-reads it at full density over just that span, so the sub-second spike of
   a two-minute run is sharp without touching the resolution knob (the automatic form of `Δt ≤`):
   the integration is unchanged, only the output is read more finely where you are looking. A
