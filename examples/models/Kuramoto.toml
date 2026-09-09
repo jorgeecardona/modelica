@@ -1,0 +1,70 @@
+summary = "The Kuramoto model, the canonical account of how coupled oscillators fall into step: four phase oscillators, each running at its own natural frequency, each pulled toward every other by the sine of their phase difference, der(theta_i) = omega_i + k/n * sum_j sin(theta_j - theta_i). It is the model behind fireflies flashing together, pacemaker cells, power-grid generators staying in phase and a room of metronomes on a shared table syncing up. With the coupling k below a critical value the oscillators drift apart, each keeping its own frequency; above it -- k = 1.5 here, against a frequency spread of 1.2 -- they lock, holding a fixed pattern of phase offsets and rotating together at the mean frequency, which is zero for this symmetric set, so the locked cluster stands still. The order parameter r = |mean(exp(i*theta))|, written here as sqrt(mean(cos)^2 + mean(sin)^2), measures how tight the cluster is: 0 when the phases are spread evenly around the circle, 1 when they coincide. Started spread out (r = 0.05) it climbs to r = 0.95 and holds, the signature of synchronisation. It is the corpus's first model of a coupled-oscillator network and its first with a synchronisation transition, distinct from the chaotic tumblers and the reaction oscillators by pulling many rhythms into one."
+teaches = ["the Kuramoto model: N phase oscillators coupled through the sine of their phase differences", "synchronisation: above a critical coupling the phases lock into a fixed pattern and rotate together", "the order parameter r as the measure of coherence, climbing from incoherent (0) to synchronised (1)", "an all-to-all coupled network written as a sum over every other oscillator"]
+requires = []
+
+[parse]
+classes = ["Kuramoto"]
+
+[flatten]
+model = "Kuramoto"
+states = ["theta[1]", "theta[2]", "theta[3]", "theta[4]"]
+equations = 5
+balanced = true
+
+# der(theta_i) = omega_i + k/n * sum_j sin(theta_j - theta_i), one equation per oscillator, with
+# the coupling written out over all four (the self term sin(0) = 0 is kept for symmetry). r is the
+# order parameter, sqrt(mean(cos theta)^2 + mean(sin theta)^2). Started at phases {0, 1.5, 3, 4.5}
+# with k above the threshold, the phases lock by t = 10 and r settles at 0.95, checked as invariants.
+[simulate]
+stop = 30.0
+tolerance = 1e-10
+
+# One point as the cluster forms (t = 3), then down the locked plateau, so both the pull into sync
+# and the steady synchronised state are pinned.
+[[simulate.point]]
+t = 3.0
+values = { "theta[1]" = -1.321023056, "theta[2]" = -0.5867985991, "theta[3]" = 5.086798599, "theta[4]" = 5.821023056, r = 0.9315559135 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 6.0
+values = { "theta[1]" = -1.326091055, "theta[2]" = -1.026051512, "theta[3]" = 5.526051512, "theta[4]" = 5.826091055, r = 0.9490276627 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 10.0
+values = { "theta[1]" = -1.32697226, "theta[2]" = -1.032623201, "theta[3]" = 5.532623201, "theta[4]" = 5.82697226, r = 0.9483908357 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 15.0
+values = { "theta[1]" = -1.326988498, "theta[2]" = -1.032649728, "theta[3]" = 5.532649728, "theta[4]" = 5.826988498, r = 0.948385547 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 20.0
+values = { "theta[1]" = -1.326988559, "theta[2]" = -1.032649761, "theta[3]" = 5.532649761, "theta[4]" = 5.826988559, r = 0.9483855317 }
+rtol = 1e-6
+source = "reference"
+
+[[simulate.point]]
+t = 25.0
+values = { "theta[1]" = -1.326988559, "theta[2]" = -1.032649761, "theta[3]" = 5.532649761, "theta[4]" = 5.826988559, r = 0.9483855316 }
+rtol = 1e-6
+source = "reference"
+
+# The order parameter is a magnitude of an average of unit vectors, so it is always in [0, 1].
+[[simulate.invariant]]
+expr = "r"
+min = -0.001
+max = 1.001
+
+# By t = 10 the oscillators have locked: the cluster is tight and stays tight, r near 0.95.
+[[simulate.invariant]]
+expr = "r"
+min = 0.9
+after = 10.0

@@ -71,6 +71,7 @@ FLAT = {
     "HeatExchanger",
     "HenonHeiles",
     "KeplerOrbit",
+    "Kuramoto",
     "Lorenz",
     "LotkaVolterra",
     "MagLev",
