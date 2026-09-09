@@ -42,6 +42,38 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-09, after the `operator` class prefix parses
+
+`operator record` and `operator function` parse now, each as its plain kind (a record, a
+function), carried through and refused where the overloading would be applied. This was the
+top of the previous work list: `Modelica.Units` defines dozens of `operator record` aliases of
+`Complex`, its file would not parse, and every model that imports `Modelica.Units.SI` (nearly
+all of them) needs that file. The file parses now, and one fewer file refuses across the
+library (107 to 106).
+
+The stage line did not move (parsed 411 / 430, reachability 0 %), because those 311 models were
+already counted as parsed: they reached parse on their own files and then died at flatten
+looking up a name in the unparseable `Units.mo`, attributed back to it. What moved is the work
+list, which is the half that matters. **Operator overloading is gone from it.** The 311 now
+flatten `Modelica.Units.SI` and get much further, to a new and now dominant wall: the
+`quantity` attribute.
+
+| models | stage | refusal |
+| -----: | ----- | ------- |
+|   ~230 | flatten | `unknown attribute(s) ['quantity']` on a `Real` subtype (summed over its many names: `Vrms`, `VNominal`, `f`, ...) |
+|     48 | parse | `:=` versus `=` inside a `when` statement |
+|     19 | parse | `impure` on a function |
+|     10 | flatten | the `Clock` builtin (`nothing named 'Clock'`) |
+|      7 | flatten | a medium's composite component cannot carry a value |
+|      6 | parse | a subscript on an `inner` component |
+|    ~40 | parse/flatten | the rest; `coverage.json` has every one |
+
+The `quantity` attribute is descriptive, like `unit`: `type Voltage = Real(quantity=
+"ElectricPotential", unit="V")`. The flattener rejects the unknown attribute rather than
+carrying it. Accepting (and ignoring) `quantity` the way `unit` is already ignored is the next
+construct worth building, and it is now what stands between the bulk of the electrical and
+machine libraries and their first flatten.
+
 ### 2026-09-09, first run on macOS, after the array and builtin work
 
 The harness ran on this platform for the first time. `RLIMIT_AS` is a Linux guard that macOS

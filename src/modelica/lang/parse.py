@@ -1074,6 +1074,10 @@ class _Parser:
         while (token := self._ahead(offset)).kind is Kind.KEYWORD and token.text in _ELEMENT_PREFIX:
             offset += 1
         token = self._ahead(offset)
+        # `operator record` / `operator function`: the `operator` prefix sits in front of the
+        # kind, so the class keyword is one token further on.
+        if token.kind is Kind.KEYWORD and token.text == "operator":
+            token = self._ahead(offset + 1)
         return token.kind is Kind.KEYWORD and token.text in _RESTRICTIONS
 
     def class_definition(self, *, terminated: bool = True) -> ir.Class:
@@ -1087,6 +1091,12 @@ class _Parser:
         self._accept(Kind.KEYWORD, "final")
         partial = self._accept(Kind.KEYWORD, "partial") is not None
         expandable = self._accept(Kind.KEYWORD, "expandable") is not None
+        # `operator record` / `operator function`: the class parses as its plain kind so the
+        # file it sits in loads (`Modelica.Units` defines dozens of `operator record` aliases,
+        # and every model that imports `Modelica.Units.SI` needs that file to parse). The
+        # overloading itself -- the `operator function '+'` bodies, in `Complex.mo` -- is a
+        # separate matter, refused where such an operator would be applied.
+        self._accept(Kind.KEYWORD, "operator")
         keyword = self.token
         if expandable and not (keyword.kind is Kind.KEYWORD and keyword.text == "connector"):
             raise self._error("`expandable` qualifies only a connector")
@@ -1197,10 +1207,10 @@ class _Parser:
                     nested.append(definition)
                 components += declared
                 continue
-            self._refuse_unsupported()
             if self._looks_like_class():
                 nested.append(self.class_definition())
                 continue
+            self._refuse_unsupported()
             components += self._component_clause()
 
         self._expect(Kind.KEYWORD, "end")
