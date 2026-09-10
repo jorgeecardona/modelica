@@ -2496,9 +2496,11 @@ class _Flattener:
                 # is removed together with the component, silently: that is the one
                 # reference the specification allows to survive the removal.
                 if not self._severed(a, prefix, local) and not self._severed(b, prefix, local):
-                    self.connections.join(
-                        self._endpoint(a, prefix, local), self._endpoint(b, prefix, local)
-                    )
+                    for element_a, element_b in self._connect_pairs(a, b, prefix, local):
+                        self.connections.join(
+                            self._endpoint(element_a, prefix, local),
+                            self._endpoint(element_b, prefix, local),
+                        )
             case ir.When(branches=branches):
                 self.whens.append(
                     ir.When(
@@ -2638,6 +2640,60 @@ class _Flattener:
         ref = end.base if isinstance(end, ir.Subscript) else end
         path = _prefix_ref(ref, prefix, local).parts
         return any(path[:length] in self.disabled for length in range(1, len(path) + 1))
+
+    def _connect_pairs(
+        self,
+        a: ir.Ref | ir.Subscript,
+        b: ir.Ref | ir.Subscript,
+        prefix: _Path,
+        local: frozenset[str],
+    ) -> list[tuple[ir.Ref | ir.Subscript, ir.Ref | ir.Subscript]]:
+        """``connect(x, y)`` element by element when both name a whole array of connectors.
+
+        The polyphase and power-converter models connect a plug's pins, or a replicator's outputs,
+        as whole arrays -- ``connect(internalEnable, booleanReplicator.y)`` -- rather than writing the
+        loop. Each side is one array of connectors of the same length, so it is the element-wise
+        connect it stands for: ``x[i]`` to ``y[i]`` for every ``i``. A plain connect (neither side an
+        array of connectors) is returned as the single pair it already was, so the ordinary case is
+        untouched; two arrays of different lengths cannot be joined and say so.
+        """
+        shape_a = self._connector_array_shape(a, prefix, local)
+        shape_b = self._connector_array_shape(b, prefix, local)
+        if shape_a is None and shape_b is None:
+            return [(a, b)]
+        # A shape is recorded only for a plain reference, so a side with one is an `ir.Ref`.
+        if shape_a is None or shape_b is None or shape_a != shape_b:
+            raise FlattenError(
+                "connect() joins two arrays of connectors of different sizes"
+                f" ({shape_a} and {shape_b})"
+            )
+        if not isinstance(a, ir.Ref) or not isinstance(b, ir.Ref):
+            return [(a, b)]
+        (size,) = (
+            shape_a  # a connector array is one-dimensional; `_connector_array_shape` checked it
+        )
+        return [
+            (ir.Subscript(a, (ir.IntLiteral(i),)), ir.Subscript(b, (ir.IntLiteral(i),)))
+            for i in range(1, size + 1)
+        ]
+
+    def _connector_array_shape(
+        self, end: ir.Ref | ir.Subscript, prefix: _Path, local: frozenset[str]
+    ) -> tuple[int, ...] | None:
+        """The shape of ``end`` when it names a whole one-dimensional array of connectors, else None.
+
+        A subscript already picks an element, so it is never a whole array; a reference is one when a
+        shape was recorded for it and the first element is a registered connector.
+        """
+        if isinstance(end, ir.Subscript):
+            return None
+        path = _prefix_ref(end, prefix, local, strict=False).parts
+        shape = self.shapes.get(tuple(path))
+        if shape is None or len(shape) != 1:
+            return None
+        if (*path[:-1], element(path[-1], (1,))) in self.connectors:
+            return shape
+        return None
 
     def _endpoint(
         self, end: ir.Ref | ir.Subscript, prefix: _Path, local: frozenset[str]

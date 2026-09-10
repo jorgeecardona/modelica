@@ -42,6 +42,31 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a whole array of connectors is connected element by element
+
+The power converters connect two arrays of connectors at once -- `connect(internalEnable,
+booleanReplicator.y)`, a replicator's outputs to an enable line, both arrays of the same length --
+rather than writing the loop. A connect endpoint was resolved to one connector, so a whole array was
+refused, with the advice to connect the elements. It now is: when both sides name a one-dimensional
+array of connectors of the same length, the connect is read as the element-wise connect it stands for,
+`x[i]` to `y[i]` for every `i`. A plain connect is untouched, and two arrays of different lengths, or an
+array joined to a single connector, are refused as the size mismatch they are.
+
+The refusal leaves twenty models. They do not reach a new stage -- each meets the next wall at once, an
+enumeration literal used as a name, a connect endpoint the resolver still does not see -- so the stage
+totals hold. No model regressed.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     59 | 13.7 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are a connect endpoint not seen as a connector (parse), the `Clock` builtin (62), an array
+shape unknown at flatten (24 and 17), a subscript on an inner component in parse, and an if-equation
+condition unknown at flatten (14). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after an assignment to an array element parses
 
 `Modelica.Blocks.Math` and `Modelica.Blocks.Routing` did not parse: the FFT block writes `buf[iTick] :=

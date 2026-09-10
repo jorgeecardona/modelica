@@ -81,9 +81,23 @@ def test_a_for_loop_connects_each_element_of_an_array_of_connectors() -> None:
     assert ir.Equal(ir.Ref(("p[1]", "v")), ir.Ref(("common", "v"))) in flat.equations
 
 
-def test_a_whole_array_connect_is_refused_by_name() -> None:
+def test_a_whole_array_connect_joins_the_elements() -> None:
+    """`connect(p, q)` between two arrays of connectors is the element-wise connect it stands for.
+
+    The power-converter models write `connect(internalEnable, booleanReplicator.y)` between two arrays
+    rather than looping; each side is one array of the same length, so it joins p[i] to q[i].
+    """
+    source = LIB + "model M\n  Pin p[2];\n  Pin q[2];\nequation\n  connect(p, q);\nend M;\n"
+    flat = flatten(parse(source), "M")
+    # Each element pair is joined: the potentials equal, the flows sum to zero, for element 1 and 2.
+    assert ir.Equal(ir.Ref(("p[1]", "v")), ir.Ref(("q[1]", "v"))) in flat.equations
+    assert ir.Equal(ir.Ref(("p[2]", "v")), ir.Ref(("q[2]", "v"))) in flat.equations
+
+
+def test_an_array_connected_to_a_scalar_is_refused_by_name() -> None:
+    """An array of connectors and a single one have different sizes and cannot be joined."""
     source = LIB + "model M\n  Pin p[2];\n  Lamp lamp;\nequation\n  connect(p, lamp.p);\nend M;\n"
-    with pytest.raises(FlattenError, match="whole array of connectors is not supported yet"):
+    with pytest.raises(FlattenError, match="different sizes"):
         flatten(parse(source), "M")
 
 
