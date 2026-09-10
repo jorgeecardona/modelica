@@ -1275,6 +1275,10 @@ def _inline(found: Found, scope: Scope, call: ir.Call, depth: int) -> ir.Expr:
     result = environment.get(outputs[0].name)
     if result is None:
         raise FlattenError(f"function {name!r} never assigns its output {outputs[0].name!r}")
+    # A name the body reads that is not a local -- an enumeration literal, a package constant, the
+    # `Modelica.Constants.T_zero` the unit conversions add -- is resolved in the function's own scope,
+    # the same rewrite an equation gets, before prefixing would try to make it a variable.
+    result = _literals(result, inner, frozenset(merged.members))
     # The body may itself call a function, and it resolves in the function's own scope.
     return _inline_calls(result, inner, depth + 1)
 
@@ -1311,12 +1315,15 @@ def _inline_all(found: Found, scope: Scope, call: ir.Call, depth: int) -> dict[s
         if component.causality != "input" and component.modification.value is not None:
             environment[component.name] = component.modification.value
     environment = _sequence(found.cls.algorithms[0], environment, f"function {name!r}")
+    local = frozenset(merged.members)
     written: dict[str, ir.Expr] = {}
     for component in outputs:
         value = environment.get(component.name)
         if value is None:
             raise FlattenError(f"function {name!r} never assigns its output {component.name!r}")
-        written[component.name] = _inline_calls(value, inner, depth + 1)
+        # As in `_inline`: a package constant or an enumeration literal the body reads is resolved in
+        # the function's own scope before prefixing sees it.
+        written[component.name] = _inline_calls(_literals(value, inner, local), inner, depth + 1)
     return written
 
 

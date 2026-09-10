@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from modelica.ir.source import flatten
 from modelica.lang import parse
-from modelica.lang.unparse import unparse
+from modelica.lang.unparse import unparse, unparse_equation
 
 PURE = """\
 package P
@@ -73,3 +73,22 @@ def test_a_model_that_only_imports_an_external_function_still_flattens() -> None
     source = f"{EXTERNAL[:-1]}\nmodel M\n  Real z(start = 1);\nequation\n  der(z) = -z;\nend M;\n"
     flat = flatten(parse(source, "<test>"), "M")
     assert any(v.name == "z" for v in flat.variables)
+
+
+def test_a_package_constant_in_a_function_body_resolves() -> None:
+    """MSL's unit conversions read `Modelica.Constants.T_zero` inside `to_degC`, then inline them.
+
+    The body of an inlined function is resolved in the function's own scope, so a package constant
+    (or an enumeration literal) it reads becomes its value before prefixing would try to make it a
+    variable -- which it was not doing, so a model calling the conversion failed with "unknown name".
+    """
+    source = (
+        "package P\n"
+        "  package Constants\n    constant Real T_zero = -273.15;\n  end Constants;\n"
+        "  function to_degC\n    input Real k;\n    output Real c;\n"
+        "  algorithm\n    c := k + P.Constants.T_zero;\n  end to_degC;\n"
+        "  model M\n    Real x;\n  equation\n    x = P.to_degC(300);\n  end M;\n"
+        "end P;\n"
+    )
+    equation = unparse_equation(flatten(parse(source), "P.M").equations[0])[0]
+    assert equation == "x = 300 + -273.15;"

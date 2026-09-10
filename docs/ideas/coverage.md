@@ -42,6 +42,30 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a package constant in a function body resolves
+
+`Modelica.Units.Conversions.to_degC` reads `Modelica.Constants.T_zero` in its body and is inlined
+wherever a model converts a temperature. The inlined body was prefixed but never took the rewrite that
+turns a package constant into its value -- the rewrite an equation gets -- so the name survived as a
+reference that flattening then could not resolve, and every model using the conversion failed with
+"unknown name 'Modelica.Constants.T_zero'". The body is now resolved in the function's own scope, so a
+package constant or an enumeration literal it reads becomes its value before prefixing sees it.
+
+Flattening climbs from 47 to 50 of 430 example models: the electrical and thermal examples that convert
+a temperature clear the wall. Reachable simulation holds at 21 -- the newly flattening models meet a
+later wall, a derivative of a boolean `or` among them -- so causalize edges to 22 while simulate stays.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     50 | 11.6 % |
+| causalized |     22 |  5.1 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are unchanged: a composite component with a value (70), the `Clock` builtin (62), an array
+shape not known at flatten (52), a subscript on an inner component and a type alias to an array type in
+parse (32 each), and a condition not known at flatten (31). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after a homotopy written with named arguments resolves
 
 `homotopy(actual = ..., simplified = ...)` is how the standard library's ideal op-amp writes the
