@@ -490,7 +490,7 @@
             </div>
             <div>
               <div class="helpsec">legend</div>
-              <div class="hk"><b>click a row</b><span>show or hide that variable</span></div>
+              <div class="hk"><b>click a row</b><span>show or hide that variable; while the derive box is focused, drops its name into the expression instead</span></div>
               <div class="hk"><b>hover a row</b><span>pick its curve out of the plot; the rest fade while you point</span></div>
               <div class="hk"><b>alt-click a row</b><span>solo it; alt-click the soloed one to restore the set</span></div>
               <div class="hk"><b>drag the divider</b><span>resize the legend; double-click it to collapse</span></div>
@@ -509,7 +509,7 @@
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
-    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), der(v), integral(P), v>0, if h>0 then h else 0" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; a component's variable is written with its dotted name (motor.coil.i), an array element with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); der(expr) is the rate of change over time and integral(expr) the cumulative area under it from the start of the run, both over the samples; a comparison (v>0, e<>0) reads as 1 or 0, and `if c then a else b` is Modelica's own conditional; Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
+    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), der(v), integral(P), v>0, if h>0 then h else 0" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; a component's variable is written with its dotted name (motor.coil.i), an array element with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); der(expr) is the rate of change over time and integral(expr) the cumulative area under it from the start of the run, both over the samples; a comparison (v>0, e<>0) reads as 1 or 0, and `if c then a else b` is Modelica's own conditional; click a legend row while this is focused to drop its name in; Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
@@ -2155,6 +2155,19 @@ function paintLegend(at) {
     const desc = D.descriptions && D.descriptions[nm];
     row.title = (desc ? desc + "\n" : "") + nm + "  ·  alt-click to show only this";
     row.onclick = (e) => {
+      // While the derive box is being edited, a click on a row drops that variable's name into the
+      // expression at the cursor instead of toggling it -- a long dotted name (motor.rotor.phi) is
+      // then picked, not typed. A plain div is not focusable, so the click does not steal the box's
+      // focus, and the box keeps it after the insert.
+      const box = document.getElementById("derive");
+      if (box && document.activeElement === box) {
+        const a = box.selectionStart ?? box.value.length, b = box.selectionEnd ?? box.value.length;
+        box.value = box.value.slice(0, a) + nm + box.value.slice(b);
+        const at = a + nm.length;
+        box.setSelectionRange(at, at);
+        box.focus();
+        return;
+      }
       if (e.altKey) {
         // Solo: show only this variable. Alt-clicking the one already soloed restores the set
         // that was on before the solo began, so it is its own undo; soloing another variable
