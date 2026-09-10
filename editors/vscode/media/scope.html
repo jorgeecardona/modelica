@@ -168,12 +168,15 @@
     opacity: 0; transition: opacity .12s; }
   .split:hover::after, .split.on::after { opacity: .6; }
   body.legend-collapsed .legend { display: none; }
-  /* The events, below the variables: time, then the relation that fired. */
+  /* The events, below the variables: time, the interval since the previous event, then the
+     relation that fired. */
   #evtitle { margin-top: 12px; }
   .evrow { display: flex; align-items: baseline; gap: 8px; padding: 2px 12px; cursor: pointer;
     white-space: nowrap; font-size: 12px; }
   .evrow:hover { background: var(--panel); }
   .evrow .evt { font-variant-numeric: tabular-nums; min-width: 5.5ch; text-align: right; }
+  .evrow .evgap { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 5ch;
+    text-align: right; font-size: 11px; }
   .evrow .evc { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
   /* One assert the model carries: the condition it holds to, then the message it stops with. */
   .guardrow { display: flex; align-items: baseline; gap: 8px; padding: 2px 12px; font-size: 12px; }
@@ -3834,12 +3837,23 @@ function paintEvents() {
   const evs = (D && D.events) || [];
   document.getElementById("evtitle").hidden = !evs.length;
   const frag = document.createDocumentFragment();
+  let prevT = null;
   for (const ev of evs) {
     const row = document.createElement("div");
-    row.className = "evrow"; row.title = (ev.cause || "event") + "  ·  click to zoom here";
+    // The interval since the previous event -- the flight time between two bounces, the period of a
+    // relay that chatters, the spacing of a load schedule -- reads off the decay or the rhythm the
+    // absolute times only imply. The first event has no previous, so its gap column is blank.
+    const since = prevT === null ? null : toT(ev.t) - toT(prevT);
+    row.className = "evrow";
+    row.title = (ev.cause || "event")
+      + (since !== null ? "  ·  " + fmt(since) + " " + tUnit() + " since the previous event" : "")
+      + "  ·  click to zoom here";
     const t = document.createElement("span"); t.className = "evt"; t.textContent = fmt(toT(ev.t));
+    const interval = document.createElement("span"); interval.className = "evgap";
+    interval.textContent = since === null ? "" : "+" + fmt(since);
     const c = document.createElement("span"); c.className = "evc"; c.textContent = ev.cause || "event";
-    row.append(t, c);
+    row.append(t, interval, c);
+    prevT = ev.t;
     // Clicking an event zooms the time window onto it, spanning a little past its nearest
     // neighbours -- so a crowded late bounce zooms in tight and a lone event gets a tenth of the
     // run either side. Non-destructive: the run is untouched (double-click or reset restores the
