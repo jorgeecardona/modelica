@@ -42,6 +42,31 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a connect inside a for-loop is unrolled
+
+The polyphase library wires a plug's pins in a loop: `for j in 1:m loop connect(plug_p.pin[j], pin_n);
+end for;`. Unrolling the loop substitutes the index everywhere it appears, but the connect was refused
+outright rather than substituted -- the reasoning that a connect names components and a loop index
+cannot be one of them missed that the index rides on the endpoints, which are indexed. The index is now
+substituted into each endpoint, so the loop comes out one connect per element, which the endpoint
+resolver reads like any other.
+
+The refusal leaves the work list -- 23 models carried it, the polyphase machines and rectifiers -- but
+the stage counts hold at 53 flattened and 21 simulated. The models that clear this wall meet the next
+one at once: a connect endpoint the resolver does not yet see as a connector, the array-of-connectors
+subtlety these same models lean on. So the frontier moves without the tally.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     53 | 12.3 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are a composite component with a value (70), the `Clock` builtin (62), a subscript on an
+inner component in parse (42, now the largest), an array shape not known at flatten (29), and a connect
+endpoint not seen as a connector (17). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after a conditional component gated by an extends-set parameter resolves
 
 A transistor puts its heat port behind a condition it inherits: `extends ConditionalHeatPort(useHeatPort

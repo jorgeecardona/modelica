@@ -62,6 +62,25 @@ def test_the_subscript_may_be_a_parameter() -> None:
     assert ir.Equal(ir.Ref(("p[1]", "v")), ir.Ref(("lamp", "p", "v"))) in flat.equations
 
 
+def test_a_for_loop_connects_each_element_of_an_array_of_connectors() -> None:
+    """MSL's polyphase `Star` wires a plug's pins to a common node in a `for` loop.
+
+    The loop index rides on the endpoints, which are indexed, so it is substituted into each and the
+    loop comes out one connect per element -- ``connect(p[1], common)``, ``connect(p[2], common)`` --
+    which the endpoint resolver reads like any other.
+    """
+    source = (
+        LIB + "model M\n  Pin p[2];\n  Pin common;\n"
+        "equation\n  for j in 1:2 loop\n    connect(p[j], common);\n  end for;\nend M;\n"
+    )
+    flat = flatten(parse(source), "M")
+    equations = repr(flat.equations)
+    # Every element's potential is tied to the common node; the flows sum to zero at it.
+    assert "p[1]" in equations
+    assert "p[2]" in equations
+    assert ir.Equal(ir.Ref(("p[1]", "v")), ir.Ref(("common", "v"))) in flat.equations
+
+
 def test_a_whole_array_connect_is_refused_by_name() -> None:
     source = LIB + "model M\n  Pin p[2];\n  Lamp lamp;\nequation\n  connect(p, lamp.p);\nend M;\n"
     with pytest.raises(FlattenError, match="whole array of connectors is not supported yet"):

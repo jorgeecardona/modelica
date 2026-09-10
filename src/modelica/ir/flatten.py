@@ -859,7 +859,9 @@ def _substitute_statement(node: ir.Statement, values: Mapping[str, ir.Expr]) -> 
             )
 
 
-def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir.Equation:
+def _substitute_equation(  # noqa: C901, PLR0911 -- one case per equation form
+    node: ir.Equation, values: Mapping[str, ir.Expr]
+) -> ir.Equation:
     """The same substitution, over an equation and anything nested inside it."""
 
     def go(inner: ir.Expr) -> ir.Expr:
@@ -879,10 +881,18 @@ def _substitute_equation(node: ir.Equation, values: Mapping[str, ir.Expr]) -> ir
             if not isinstance(substituted, ir.Call):  # pragma: no cover - a call stays a call
                 raise FlattenError("an output list is assigned from a function call")
             return ir.CallEquation(targets, substituted, span)
-        case ir.Connect():
-            # A connection names components, and a loop index cannot be one of them: an
-            # array of connectors is indexed, which is a `Subscript` and not a bare `Ref`.
-            raise FlattenError("connect() inside a 'for' equation is not supported yet")
+        case ir.Connect(a=a, b=b):
+            # `connect(pin[i], other[i])` in a for-loop: the loop index rides on the endpoints, which
+            # are indexed (a `Subscript`). Substituting it into each turns the loop into one connect
+            # per value -- `connect(pin[1], other[1])` and its kin -- which the endpoint resolver reads
+            # like any other. An endpoint that does not come out a component reference (a subscript on
+            # a literal, say) is refused rather than passed on as something the resolver cannot use.
+            new_a, new_b = go(a), go(b)
+            if not isinstance(new_a, (ir.Ref, ir.Subscript)) or not isinstance(
+                new_b, (ir.Ref, ir.Subscript)
+            ):
+                raise FlattenError("a connect() endpoint in a 'for' equation must name a connector")
+            return ir.Connect(new_a, new_b)
         case ir.When(branches=branches):
             return ir.When(
                 tuple(

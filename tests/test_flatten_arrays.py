@@ -239,14 +239,13 @@ def test_a_range_that_steps_by_zero_is_refused() -> None:
         flat("  Real T[3];\nequation\n  for i in 1:0:3 loop\n    T[i] = 0;\n  end for;\n")
 
 
-def test_a_connect_inside_a_for_loop_is_refused_by_name() -> None:
-    """A subscripted endpoint parses now; the loop around it is the remaining refusal.
+def test_a_connect_inside_a_for_loop_is_unrolled() -> None:
+    """The loop index rides on the endpoints, so unrolling wires each element.
 
-    This test used to pin the parser's "arrays of connectors" refusal. That construct is
-    implemented -- ``connect(p[k], q)`` wires the element -- so the same source now walks
-    one stage further and meets the ``for``-loop expansion, which still refuses a
-    ``connect`` by name. When that lands too, this test moves again: it is a progress
-    meter, not a fence.
+    This test used to pin the parser's "arrays of connectors" refusal, then the ``for``-loop
+    expansion's refusal of a ``connect``. Both are implemented now: ``for k connect(p[k], p[k + 1])``
+    substitutes the index into the endpoints and comes out one connect per element -- the last stage
+    this source had left to walk.
     """
     source = (
         "package P\n"
@@ -263,5 +262,8 @@ def test_a_connect_inside_a_for_loop_is_refused_by_name() -> None:
         "  end M;\n"
         "end P;\n"
     )
-    with pytest.raises(FlattenError, match="connect\\(\\) inside a 'for' equation"):
-        flatten([parse(source)], "P.M")
+    flat = flatten([parse(source)], "P.M")
+    # k in 1:1 wires p[1] to p[2]: their potentials equal, their flows sum to zero.
+    equations = repr(flat.equations)
+    assert "p[1]" in equations
+    assert "p[2]" in equations
