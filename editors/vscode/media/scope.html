@@ -509,7 +509,7 @@
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
-    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), der(v), v>0, if h>0 then h else 0" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; an array element is written with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); der(expr) is the rate of change over time, a finite difference of the samples; a comparison (v>0, e<>0) reads as 1 or 0, and `if c then a else b` is Modelica's own conditional; Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
+    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), der(v), integral(P), v>0, if h>0 then h else 0" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; an array element is written with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); der(expr) is the rate of change over time and integral(expr) the cumulative area under it from the start of the run, both over the samples; a comparison (v>0, e<>0) reads as 1 or 0, and `if c then a else b` is Modelica's own conditional; Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
@@ -871,6 +871,23 @@ function compileExpr(src, series, time) {
             const k = j <= 0 ? 0 : n - 2;
             return (g(k + 1) - g(k)) / (time[k + 1] - time[k]);
           };
+        }
+        // The running integral, the complement of `der`: `integral(v)` is the cumulative area under
+        // the curve from the start of the run to each instant -- the distance under a velocity, the
+        // charge under a current, the energy under a power. Precomputed once by the trapezoid rule
+        // over the sample times, so it reads back per index. A non-finite sample adds nothing across
+        // its gap rather than poisoning the running sum from there on.
+        if (t === "integral") {
+          eat(); const g = expr();
+          if (eat() !== ")") throw new Error("missing )");
+          const n = time.length, cum = new Array(n);
+          if (n) cum[0] = 0;
+          for (let k = 1; k < n; k++) {
+            const a = g(k - 1), b = g(k);
+            const inc = isFinite(a) && isFinite(b) ? 0.5 * (a + b) * (time[k] - time[k - 1]) : 0;
+            cum[k] = cum[k - 1] + inc;
+          }
+          return (j) => cum[j];
         }
         // A reduction over a whole array field: `sum(T)` folds every `T[...]` element. Only a
         // single bare array-base argument reduces; anything else (including a pairwise `min(a, b)`)
