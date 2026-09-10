@@ -509,7 +509,7 @@
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
-    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), v>0, if h>0 then h else 0" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; an array element is written with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); a comparison (v>0, e<>0) reads as 1 or 0, and `if c then a else b` is Modelica's own conditional; Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
+    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), der(v), v>0, if h>0 then h else 0" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; an array element is written with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); der(expr) is the rate of change over time, a finite difference of the samples; a comparison (v>0, e<>0) reads as 1 or 0, and `if c then a else b` is Modelica's own conditional; Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
@@ -856,6 +856,22 @@ function compileExpr(src, series, time) {
     if (t === "(") { const a = expr(); if (eat() !== ")") throw new Error("missing )"); return a; }
     if (/^[A-Za-z_]/.test(t)) {
       if (peek() === "(") {
+        // A finite-difference time derivative of any expression in the drawn data: `der(v)` is the
+        // rate of change dv/dt, read off the samples by a central difference (one-sided at the two
+        // ends). The model's states carry their own der() as ordinary series; this is for everything
+        // else the data has but no series names -- the slope of an output, a temperature's cooling
+        // rate. A non-finite result (e.g. two samples at the same time) maps to a gap, as elsewhere.
+        if (t === "der") {
+          eat(); const g = expr();
+          if (eat() !== ")") throw new Error("missing )");
+          const n = time.length;
+          return (j) => {
+            if (n < 2) return 0;
+            if (j > 0 && j < n - 1) return (g(j + 1) - g(j - 1)) / (time[j + 1] - time[j - 1]);
+            const k = j <= 0 ? 0 : n - 2;
+            return (g(k + 1) - g(k)) / (time[k + 1] - time[k]);
+          };
+        }
         // A reduction over a whole array field: `sum(T)` folds every `T[...]` element. Only a
         // single bare array-base argument reduces; anything else (including a pairwise `min(a, b)`)
         // falls through to the elementwise call below.
