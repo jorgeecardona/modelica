@@ -565,28 +565,53 @@ class _Parser:
             literals=tuple(literals),
         )
 
-    def _import(self) -> ir.Import:
-        """``import A.B.C;``, ``import D = A.B.C;`` or ``import A.B.*;``.
+    def _import(self) -> list[ir.Import]:
+        """``import A.B.C;``, ``import D = A.B.C;``, ``import A.B.*;`` or ``import A.B.{C, D};``.
 
         The renaming form is told apart by looking one token past the name: ``import D =``
         can only be a rename, and ``import D.E`` can only be a path, so a single token of
-        lookahead settles it without backtracking.
+        lookahead settles it without backtracking. The list form brings several names from one
+        package in a single clause, each the same as ``import A.B.C``, and it becomes one import
+        per name -- so everything below the parser sees only the three forms it already knew.
         """
         self._expect(Kind.KEYWORD, "import")
         alias = ""
         if self._check(Kind.NAME) and self._ahead(1).text == "=":
             alias = self._expect(Kind.NAME).text
             self._expect(Kind.OP, "=")
-        path = self._type_name()
+        # Read the path a segment at a time rather than with `_type_name`, so a `.{...}` member list
+        # is caught where the dotted-name reader would consume the dot and choke on the brace.
+        self._accept(Kind.OP, ".")  # a leading dot is global scope; nothing to record
+        parts = [self._expect(Kind.NAME).text]
+        members: list[str] = []
+        while self._accept(Kind.OP, "."):
+            if self._check(Kind.OP, "{"):
+                members = self._import_members()
+                break
+            parts.append(self._expect(Kind.NAME).text)
+        path = ".".join(parts)
         # `.*` is one token: the lexer reads it as Modelica's element-wise product, which
         # is what it is everywhere except here.
         wildcard = self._accept(Kind.OP, ".*") is not None
-        if wildcard and alias:
-            raise self._error("an 'import' cannot both rename and use a wildcard")
+        if (wildcard or members) and alias:
+            raise self._error("an 'import' cannot both rename and use a wildcard or a list")
+        if wildcard and members:
+            raise self._error("an 'import' cannot be both a wildcard and a list")
         self._string_comment()
         self._annotation()
         self._expect(Kind.OP, ";")
-        return ir.Import(path, alias, wildcard=wildcard)
+        if members:
+            return [ir.Import(f"{path}.{member}") for member in members]
+        return [ir.Import(path, alias, wildcard=wildcard)]
+
+    def _import_members(self) -> list[str]:
+        """The ``{C, D, E}`` of a multiple import -- one or more names between braces."""
+        self._expect(Kind.OP, "{")
+        names = [self._expect(Kind.NAME).text]
+        while self._accept(Kind.OP, ","):
+            names.append(self._expect(Kind.NAME).text)
+        self._expect(Kind.OP, "}")
+        return names
 
     def _replaceable(self) -> tuple[ir.Class | None, list[ir.Component]]:
         """The element after a ``replaceable``: a class definition, or a component clause.
@@ -1236,7 +1261,7 @@ class _Parser:
                 algorithms.append(tuple(self._statements(until=_SECTION_END)))
                 continue
             if self._check(Kind.KEYWORD, "import"):
-                imports.append(self._import())
+                imports.extend(self._import())
                 continue
             if self._accept(Kind.KEYWORD, "extends"):
                 extends.append(ir.Extends(self._type_name(), self._modification()))

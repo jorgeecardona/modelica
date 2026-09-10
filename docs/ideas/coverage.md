@@ -42,6 +42,32 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after the multiple-import list parses
+
+`import Modelica.Blocks.Types.{ExternalCombiTable1D, Extrapolation, Smoothness}` brings several names
+from one package in a single clause, each the same as writing the qualified import three times. The
+standard library's rotational components -- `Clutch`, `LossyGear` and their neighbours -- open with two
+such clauses, and the dotted-name reader consumed the dot before the brace and then choked on it, so
+those files did not parse and every model that depends on them stopped there. The clause is read a
+segment at a time now, and a `{...}` list becomes one import per name, so nothing below the parser
+meets a fourth form.
+
+The refusal leaves the work list -- eleven models carried it -- but the stage counts hold at 47
+flattened and 19 simulated: the rotational examples that now get past their dependencies meet the next
+wall, an array whose shape is not known at flatten (`mu_pos`, `lossTable`), so the frontier moves
+without the tally.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     47 | 10.9 % |
+| causalized |     19 |  4.4 % |
+| simulated  |     19 |  4.4 % |
+
+The leaders are unchanged: a composite component with a value (70), the `Clock` builtin (62), an array
+shape not known at flatten (52), a subscript on an inner component and a type alias to an array type in
+parse (32 each), and a condition not known at flatten (31). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after a qualified call to a builtin reads as the builtin
 
 `Modelica.Math.sin(x)` is the builtin sin under its library path, and the standard library reaches the

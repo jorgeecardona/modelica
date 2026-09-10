@@ -122,6 +122,37 @@ def test_imports_are_written_before_everything_else() -> None:
     assert printed[2] == "  Real x;"
 
 
+def test_a_list_import_binds_each_name() -> None:
+    """``import Lib.{Part}`` is one clause per name, each the same as ``import Lib.Part``.
+
+    The standard library's `Rotational.Components.Clutch` and its neighbours write their table
+    functions this way, three names between braces in a single clause.
+    """
+    assert _one_variable("model M\n  import Lib.{Part};\n  Part p;\nend M;\n") == ["p.v"]
+
+
+def test_a_list_import_becomes_one_import_per_name() -> None:
+    """Each name is its own qualified import in the IR, so nothing below the parser is new."""
+    imports = parse("model M\n  import P.{A, B, C};\nend M;\n").classes[0].imports
+    assert [(i.path, i.name, i.wildcard) for i in imports] == [
+        ("P.A", "A", False),
+        ("P.B", "B", False),
+        ("P.C", "C", False),
+    ]
+
+
+def test_a_list_import_prints_back_as_separate_imports() -> None:
+    """It expands to one import per name, so it prints as the plain form it has become."""
+    printed = unparse(parse("model M\n  import P.{A, B};\n  Real x;\nend M;\n")).splitlines()
+    assert "  import P.A;" in printed
+    assert "  import P.B;" in printed
+
+
+def test_a_list_import_cannot_rename() -> None:
+    with pytest.raises(ModelicaSyntaxError, match="cannot both rename"):
+        parse("model M\n  import L = P.{A, B};\nend M;\n")
+
+
 def test_the_corpus_uses_one() -> None:
     """``RLCCircuit`` names five classes, so an alias earns its place there.
 
