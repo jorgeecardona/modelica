@@ -42,6 +42,33 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a conditional component gated by an extends-set parameter resolves
+
+A transistor puts its heat port behind a condition it inherits: `extends ConditionalHeatPort(useHeatPort
+= useTemperatureDependency)`. The gating parameter is set, through the extends, to another parameter of
+the class, and that one is declared after it, so its value was not in hand when the parameter was
+instantiated -- the condition on the heat port then failed with "nothing in the environment answers
+'...useHeatPort'". A parameter whose binding named another was only recorded when the other happened to
+come first. The unconditional members are now instantiated first and their values resolved among
+themselves to a fixed point, before the conditions are evaluated, so the heat port is kept or dropped by
+what the sibling settles on.
+
+Flattening climbs from 50 to 53 of 430 example models, and the "condition must be known" refusal loses
+its ten `useHeatPort` cases -- the analog examples with a transistor or a diode that carries a heat
+port. Three flatten through; the rest meet a later wall (an initial-equation form among them). Causalize
+and simulate hold at 23 and 21.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     53 | 12.3 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are unchanged: a composite component with a value (70), the `Clock` builtin (62), an array
+shape not known at flatten (52), a subscript on an inner component and a type alias to an array type in
+parse (32 each), and a condition not known at flatten (down to 21). Agreement is still unmeasured.
+
 ### 2026-09-10, after a boolean latch that reads its own pre value is isolated
 
 An on-off controller reads its previous state: `on = pre(on) and u < hi or u < lo`. `pre(on)` is the

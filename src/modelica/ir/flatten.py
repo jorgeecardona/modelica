@@ -1887,7 +1887,34 @@ class _Flattener:
 
     # -- components -------------------------------------------------------------------
 
-    def instantiate(  # noqa: C901, PLR0913, PLR0917 -- one pass over one class, and the
+    def _resolve_parameter_values(self, started: int) -> None:
+        """Record the value of any parameter added since ``started`` whose binding names another.
+
+        The value of a parameter is read by a dimension and by the condition on a conditional
+        component, and a literal binding lands in ``self.values`` as it is instantiated. A binding
+        that names another parameter -- ``useHeatPort = useTemperatureDependency`` -- cannot, because
+        the one it names may be instantiated after it. A fixed point over the parameters this class
+        added closes that: each pass evaluates what it can against the values gathered so far, and it
+        stops when a pass adds nothing. A parameter that never resolves is left for the ordinary
+        "unknown name" report to catch where it is used.
+        """
+        changed = True
+        while changed:
+            changed = False
+            for variable in self.variables[started:]:
+                if variable.name in self.values or variable.binding is None:
+                    continue
+                if variable.variability not in ("parameter", "constant"):
+                    continue
+                try:
+                    value = evaluate(variable.binding, self.values)
+                except EvaluationError:
+                    continue
+                if isinstance(value, (bool, int, float)):
+                    self.values[variable.name] = value
+                    changed = True
+
+    def instantiate(  # noqa: C901, PLR0912, PLR0913, PLR0917 -- one pass over one class, and the
         # `inner` declarations it can see have to travel with it: they are a property of
         # where the instance *sits*, which no other argument carries.
         self,
@@ -1919,11 +1946,31 @@ class _Flattener:
             if isinstance(entry.redeclare, ir.Class):
                 continue  # a class redeclaration; `_rebind` above already applied it
             raise FlattenError(f"{found.cls.name} has no component {name!r} to redeclare")
+        # The members that carry a condition are held back to a second pass. A condition names a
+        # parameter, and that parameter may name another (`useHeatPort = useTemperatureDependency` on
+        # a transistor's heat port), so every unconditional member has to be in -- and the parameter
+        # values resolved among themselves -- before a condition can be evaluated.
+        started = len(self.variables)
+        conditional: list[tuple[str, Member]] = []
         for name, member in merged.members.items():
             if member.component.scoping == "outer":
                 # An `outer` declares nothing. It named something further out, `_scoping`
                 # found what, and every reference to it now resolves there instead.
                 continue
+            if member.component.condition is not None:
+                conditional.append((name, member))
+                continue
+            self._component(
+                member,
+                (*prefix, name),
+                outer.entries.get(name, ir.EMPTY),
+                floor,
+                local,
+                writer=scope,
+                inners=visible,
+            )
+        self._resolve_parameter_values(started)
+        for name, member in conditional:
             self._component(
                 member,
                 (*prefix, name),
@@ -2145,12 +2192,17 @@ class _Flattener:
             comment=component.comment,
         )
         self.variables.append(variable)
-        if variability in ("parameter", "constant") and isinstance(
-            binding, (ir.IntLiteral, ir.RealLiteral, ir.BoolLiteral)
-        ):
-            # A Boolean lands here too: the condition on a conditional component reads it
-            # the way a dimension reads an Integer.
-            self.values[name] = binding.value
+        if variability in ("parameter", "constant") and binding is not None:
+            # The value is read by a dimension and by the condition on a conditional component. A
+            # literal is itself; a binding that names another parameter already recorded -- MSL's
+            # `useHeatPort = useTemperatureDependency` on a transistor's heat port -- is evaluated
+            # against those. One that names a parameter not yet in hand is left for a typo check.
+            try:
+                value = evaluate(binding, self.values)
+            except EvaluationError:
+                value = None
+            if isinstance(value, (bool, int, float)):
+                self.values[name] = value
         if binding is not None and variability not in ("parameter", "constant"):
             # A declaration equation on a non-constant is an ordinary equation.
             self.equations.append(ir.Equal(ir.Ref(path), binding))

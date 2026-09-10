@@ -74,6 +74,30 @@ def test_a_true_condition_keeps_the_component() -> None:
     assert "l.p.i" in names
 
 
+_HEATPORT = (
+    "connector HP\n  Real T;\nend HP;\n"
+    "partial model Cond\n  parameter Boolean useHeatPort = false;\n  HP heatPort if useHeatPort;\n"
+    "end Cond;\n"
+    "model NPN\n  extends Cond(useHeatPort = useOther);\n  parameter Boolean useOther = {use};\n"
+    "  Real p;\nequation\n  p = 1;\nend NPN;\n"
+    "model M\n  NPN d;\nend M;\n"
+)
+
+
+def test_a_condition_gated_by_a_parameter_set_through_an_extends_resolves() -> None:
+    """MSL's transistor writes ``extends ConditionalHeatPort(useHeatPort = useTemperatureDependency)``.
+
+    The gating parameter is set, through the ``extends``, to another parameter of the class. That one
+    may be declared after it, so its value is not in hand when the parameter is instantiated; the
+    parameter values are resolved among themselves before the conditions are evaluated, so the heat
+    port is kept or dropped by what the sibling settles on.
+    """
+    off = [v.name for v in flatten(parse(_HEATPORT.format(use="false")), "M").variables]
+    assert not any(name.startswith("d.heatPort") for name in off)
+    on = [v.name for v in flatten(parse(_HEATPORT.format(use="true")), "M").variables]
+    assert "d.heatPort.T" in on
+
+
 def test_a_condition_nobody_can_evaluate_is_refused() -> None:
     source = LIB + "model M\n  Real x;\n  Load l if x > 0;\nequation\n  x = 1;\nend M;\n"
     with pytest.raises(FlattenError, match="must be known when the model is flattened"):
