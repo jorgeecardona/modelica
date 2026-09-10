@@ -514,7 +514,7 @@
     <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), der(v), integral(P), v>0, if h>0 then h else 0" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; a component's variable is written with its dotted name (motor.coil.i), an array element with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); der(expr) is the rate of change over time and integral(expr) the cumulative area under it from the start of the run, both over the samples; initial(expr) and final(expr) are its value at the first and last sample held constant (v - initial(v) is the change from the start, v - final(v) the approach to the settled value); a comparison (v>0, e<>0) reads as 1 or 0, and `if c then a else b` is Modelica's own conditional; click a legend row while this is focused to drop its name in; Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
-    <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
+    <div class="legtitle" id="steptitle" hidden>step response<button type="button" id="stepcopy" class="titlebtn" title="copy the step-response table as tab-separated values (variable, unit, final, overshoot %, 10-90% rise time, 2% settling time) -- ready to paste into a spreadsheet or a report">copy</button></div><div id="steplist"></div>
     <div class="legtitle" id="statstitle" hidden>stats <span class="legcount" id="statswin"></span><button type="button" id="statscopy" class="titlebtn" title="copy the stats table as tab-separated values (variable, unit, min, peak, mean, sigma, final) over the window on screen -- ready to paste into a spreadsheet or a report">copy</button></div><div id="statslist"></div>
     <div class="legtitle" id="ptitle" hidden>parameters</div><div id="plist"></div>
     <div class="legtitle" id="stitle" hidden>sweep</div>
@@ -3317,6 +3317,8 @@ if (statsBtn) statsBtn.onclick = () => {
 };
 const statsCopyBtn = document.getElementById("statscopy");
 if (statsCopyBtn) statsCopyBtn.onclick = copyStats;
+const stepCopyBtn = document.getElementById("stepcopy");
+if (stepCopyBtn) stepCopyBtn.onclick = copyStep;
 // Playback: sweep the cursor through the samples so the hover-only field insets (the 1-D profile
 // line, the 2-D heatmap) animate on their own -- scrubbing without a hand on the mouse. It drives
 // `cursor()` at each step (the same overlay a hover draws, no full redraw), one interval, ~4 s a
@@ -4184,6 +4186,34 @@ function copyStats() {
     lines.join("\n") + "\n",
     "copied the stats over " + fmt(toT(win[0])) + "–" + fmt(toT(win[1])) + " " + tUnit() + " to the clipboard",
   );
+}
+// The step-response table as tab-separated text, a header row and one row per drawn variable, in the
+// display units: the final value each settled to, and -- for a signal that actually stepped to a new
+// level -- its overshoot, 10-90% rise time and 2% settling time. It reads the live run, the same as
+// the stats copy, so the two buttons behave alike; the run-to-run delta stays on the panel, not in the
+// paste, so the columns stay pure. A signal that is not step-like leaves the last three columns empty.
+function copyStep() {
+  if (!stepOn || xVar || view3d || N <= 2) { foot.textContent = "turn on step (against time) to copy the table"; return; }
+  const cols = selected();
+  if (!cols.length) { foot.textContent = "draw a variable, then copy the step table"; return; }
+  const live = RUNS.length - 1;
+  const lines = [
+    ["variable", "unit", "final", "overshoot_pct", "rise", "settle", "time_unit"].join("\t"),
+  ];
+  for (const nm of cols) {
+    const m = stepMetrics(nm, seriesOf(live, nm)); if (!m) continue;
+    const u = unitOf(nm);
+    lines.push([
+      nm, dispUnit(u) || "",
+      fmt(disp(m.final, u)),
+      m.stepLike ? fmt(m.overshoot) : "",
+      m.stepLike && m.rise !== null ? fmt(toT(m.rise)) : "",
+      m.stepLike && m.settle !== null ? fmt(toT(m.settle)) : "",
+      tUnit(),
+    ].join("\t"));
+  }
+  if (lines.length < 2) { foot.textContent = "no step metrics to copy"; return; }
+  copyText(lines.join("\n") + "\n", "copied the step-response table to the clipboard");
 }
 // A simulation error (a violated assert, a singular model, a solver that gave up) comes back
 // from the extension as a `{type:"error"}` message. Show it as a banner over the chart -- the
