@@ -65,6 +65,16 @@ __all__ = ["CausalizationError", "causalize"]
 # models need a handful; anything past this is a bug in the model or in this file.
 _BUDGET = 500
 
+# How deep one equation may be differentiated. The differentiation depth of a chain is the
+# index of the subsystem it belongs to, and a real DAE is index one to three (a constrained
+# multibody model, the worst of them, is three). A chain that goes far past this never
+# resolves: the subsystem is over-determined, and each further derivative only doubles the
+# size of an already-large expression. Stopping here reports that -- as :data:`_BUDGET` does
+# for a broad over-determination -- before the expressions explode, rather than after minutes
+# of building them. The margin over a real model's index is wide, so a well-posed one never
+# meets it.
+_MAX_DEPTH = 12
+
 
 class CausalizationError(Exception):
     """A model that cannot be arranged into a computation, and why."""
@@ -545,6 +555,18 @@ def _reduce_index(work: _Work) -> None:
     for start in range(len(work.equations)):
         index = start
         while True:
+            if work.depth[index] > _MAX_DEPTH:
+                # This chain has been differentiated past any real model's index without ever
+                # leaving a variable to solve for: the subsystem is over-determined or singular,
+                # the same condition the budget guards against, caught here before a derivative
+                # of a derivative doubles a large expression into an unusable one.
+                raise CausalizationError(
+                    f"{work.name}: no way to solve equation `{_show(work.equations[start])}` -- "
+                    f"differentiating it more than {_MAX_DEPTH} times never left it a variable to "
+                    "compute. The model is over-determined (an extra or duplicate equation) or "
+                    "structurally singular; check that the number of equations matches the number "
+                    "of unknowns."
+                )
             variables: set[str] = set()
             equations: set[int] = set()
             if _reach(work, index, assign, variables, equations):

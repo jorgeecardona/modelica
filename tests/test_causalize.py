@@ -149,6 +149,23 @@ end M;
         _system(source)
 
 
+def test_a_runaway_differentiation_chain_is_reported_before_it_explodes() -> None:
+    """An over-determined chain of derivatives is caught by the depth cap, not left to run away.
+
+    Sixteen integrators with two constraints on the first state is over-determined, and index
+    reduction differentiates the first equation without ever resolving it. Each further derivative
+    doubles an already-large expression, so a real machine model reaching this took minutes; the
+    depth cap stops it at once, with the same over-determined diagnosis the budget guard gives.
+    """
+    states = "".join(f"  Real x{i};\n" for i in range(1, 17))
+    chain = "".join(f"  der(x{i}) = x{i + 1};\n" for i in range(1, 16))
+    source = (
+        "model M\n" + states + "equation\n" + chain + "  x1 = time;\n  x1 = 2 * time;\nend M;\n"
+    )
+    with pytest.raises(CausalizationError, match="never left it a variable"):
+        _system(source)
+
+
 def test_a_singular_algebraic_loop_is_named_not_a_division_by_zero() -> None:
     """An inconsistent algebraic loop is caught here, where its equation can still be named.
 

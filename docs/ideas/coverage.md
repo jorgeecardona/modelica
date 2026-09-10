@@ -42,6 +42,29 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after index reduction is capped at a real model's depth
+
+Not a reachability change, a measurement-speed one, and a better diagnosis. The three DC machine
+examples that began to flatten last change turned out to be over-determined once flattened -- five more
+equations than unknowns, a redundancy in the connected machine our flattener does not yet resolve. Index
+reduction differentiates such a system looking for the equation that would balance it and never finds
+one, so it differentiated the same chain nineteen times, each derivative doubling an already-large
+expression until it reached tens of megabytes. The run took minutes and ended in a timeout.
+
+Index reduction now stops when a chain has been differentiated past twelve, far beyond any real model's
+index (a constrained multibody model, the deepest, is three), and reports the same over-determined
+diagnosis the equation-count budget already gave -- but at once, naming the equation, before the
+expressions explode. The three machines now fail in under a second with a message that points at the
+redundant equation (`dcpm.inertiaRotor.phi = loadInertia.phi`), the whole `moon run :coverage` is back to
+fifteen seconds from three minutes, and no well-posed model is touched. The stage counts are unchanged.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     59 | 13.7 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
 ### 2026-09-10, after a structural if-equation waits for a parameter a later sibling supplies
 
 The largest flatten wall was a structural if-equation whose condition names a parameter not yet known.
