@@ -449,7 +449,7 @@
             <option value="deg">deg</option>
           </select>
           <button type="button" id="stepbtn" aria-pressed="false" title="step-response metrics for each drawn variable: its final value, overshoot, 10-90% rise time and 2% settling time -- for a model driven from one state to another, like a controller reaching a setpoint">step</button>
-          <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs), mean, σ (the standard deviation, how much it swings about the mean), final value, and ∫ (the integral over the window, a power's energy or a flow's volume) of each drawn variable over the window on screen -- the peak current, the mean power, the ripple amplitude, the settled temperature in the region you are looking at; zoom to narrow it">stats</button>
+          <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs), mean, σ (the standard deviation, how much it swings about the mean), final value, and ∫ (the integral over the window, a power's energy or a flow's volume) of each drawn variable over the window on screen -- the peak current, the mean power, the ripple amplitude, the settled temperature in the region you are looking at; zoom to narrow it. With two runs pinned to compare, each row also reports how its peak, mean and final moved from run A.">stats</button>
           <button type="button" id="playbtn" aria-pressed="false" title="play the cursor through time so a field's spatial profile animates -- the 1-D line or 2-D heatmap inset breathing, the standing wave swinging; Space to play or pause">&#9654;</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
@@ -3866,8 +3866,8 @@ function paintStep() {
 // Min, peak and mean of one variable over the window on screen (the same visible range the axes
 // draw). Zooming in narrows it, so the peak reported is the peak of the region being looked at,
 // not of the whole run. Returns the peak's instant too, and null when nothing finite is in view.
-function windowStats(nm) {
-  const vs = D.series[nm];
+function windowStats(nm, series) {
+  const vs = series || D.series[nm];
   if (!vs || N < 1) return null;
   const [i0, i1] = visible();
   let lo = Infinity, hi = -Infinity, sum = 0, cnt = 0, tmax = null, last = null;
@@ -3916,9 +3916,10 @@ function paintStats() {
   // Name the span the numbers cover, so a zoomed-in peak is not mistaken for the whole run's.
   if (winlab) winlab.textContent = fmt(toT(win[0])) + "–" + fmt(toT(win[1])) + " " + tUnit();
   const frag = document.createDocumentFragment();
+  const live = RUNS.length - 1;
   for (const nm of selected()) {
-    const s = windowStats(nm); if (!s) continue;
     const u = unitOf(nm), du = dispUnit(u) ? " " + dispUnit(u) : "";
+    const s = windowStats(nm, seriesOf(live, nm)); if (!s) continue;
     const row = document.createElement("div"); row.className = "steprow";
     const sn = document.createElement("span"); sn.className = "sn"; sn.style.color = colour(nm); sn.textContent = nm;
     const bits = [
@@ -3934,10 +3935,24 @@ function paintStats() {
     // sharing the final's. Undefined across a data gap, so it is dropped rather than shown wrong.
     const area = windowIntegral(nm);
     if (area !== null) bits.push("∫ " + fmt(area) + " " + (dispUnit(u) ? dispUnit(u) + "·" : "") + tUnit());
-    const sm = document.createElement("span"); sm.className = "sm"; sm.textContent = bits.join("  ·  ");
+    // With exactly two runs pinned to compare, the stats above are the live run's; a second line
+    // reports how its peak, mean and final moved from the base run (A), which is the reason the two
+    // are side by side -- the effect of the parameter change on the numbers, not just the curves.
+    // The offset of a shifted unit cancels in each difference, so `disp` is exact.
+    let delta = "";
+    if (RUNS.length === 2) {
+      const base = windowStats(nm, seriesOf(0, nm));
+      if (base) {
+        const d = (a, b) => { const x = disp(a, u) - disp(b, u); return (x >= 0 ? "+" : "") + fmt(x); };
+        delta = "Δ vs A   peak " + d(s.max, base.max) + "  ·  mean " + d(s.mean, base.mean) +
+          "  ·  final " + d(s.final, base.final) + du;
+      }
+    }
+    const reading = bits.join("  ·  ") + (delta ? "      " + delta : "");
+    const sm = document.createElement("span"); sm.className = "sm"; sm.textContent = reading;
     // The row clips in a narrow pane, so the whole reading is the tooltip -- every column reachable
     // without widening the legend.
-    row.title = nm + ":  " + bits.join("  ·  ");
+    row.title = nm + ":  " + reading;
     row.append(sn, sm);
     frag.appendChild(row);
   }
