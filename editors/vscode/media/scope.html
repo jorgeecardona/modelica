@@ -495,6 +495,7 @@
               <div class="hk"><b>alt-click a row</b><span>solo it; alt-click the soloed one to restore the set</span></div>
               <div class="hk"><b>drag the divider</b><span>resize the legend; double-click it to collapse</span></div>
               <div class="hk"><b>filter box</b><span>narrow the list; all / none then act on the shown set</span></div>
+              <div class="hk"><b>/</b><span>jump to the filter box to search the variables; Escape returns to the chart</span></div>
               <div class="hk"><b>click a guard</b><span>plot the variable its condition watches</span></div>
             </div>
           </div>
@@ -3175,6 +3176,11 @@ const legFilter = document.getElementById("legfilter");
 if (legFilter) legFilter.addEventListener("input", (e) => {
   legendFilter = e.target.value.trim().toLowerCase(); paintLegend();
 });
+// Escape hands focus back to the chart, so the flow is `/` to filter, type, Escape to resume the
+// chart's own keys. A filled box keeps its filter; an empty one is nothing to leave behind.
+if (legFilter) legFilter.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.preventDefault(); legFilter.blur(); }
+});
 // Enter on the derive box adds the expression as a drawn series; Enter on one already added removes
 // it (so no per-row delete is needed). A parse error leaves the box red with the reason in its tip.
 const deriveBox = document.getElementById("derive");
@@ -3951,6 +3957,14 @@ document.addEventListener("keydown", (e) => {
   // for a hybrid model where the events are the points worth reading.
   if (!typing && (e.key === "[" || e.key === "]") && jumpToEvent(e.key === "]" ? 1 : -1)) {
     e.preventDefault();
+  }
+  // / focuses the variable filter, the search key everything else uses. A component model flattens
+  // to dozens of names (`supply.p.i`, ...) and this is the way to the few worth drawing without
+  // reaching for the mouse. Escape in the box (handled there) hands focus back to the chart.
+  if (e.key === "/" && !typing && legFilter) {
+    e.preventDefault();
+    legFilter.focus();
+    legFilter.select();
   }
 });
 // `c` copies the readout to the clipboard as plain text: the two-mark measurement if a pair is
