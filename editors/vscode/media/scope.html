@@ -2595,19 +2595,35 @@ function svgLegend(clone) {
   const NS = "http://www.w3.org/2000/svg";
   const ink = getComputedStyle(document.body).color || "#000";
   const bg = getComputedStyle(document.body).backgroundColor || "#fff";
-  const rows = cols.map((nm) => {
-    const u = dispUnit(unitOf(nm));
-    return { label: u ? nm + " [" + u + "]" : nm, colour: colour(nm) };
-  });
   // The model's name heads the key, so a saved figure says which model it is, not only which curve
   // is which. A long qualified name is trimmed to keep the panel off the plot.
   const font = "system-ui, -apple-system, sans-serif";
   const title = ((D && D.model) || "").slice(0, 40);
   const fs = 11, rh = 15, pad = 6, sw = 16; // font size, row height, padding, swatch width
-  const rowW = Math.max(...rows.map((r) => sw + 5 + r.label.length * fs * 0.6));
+  // A variable is a solid line in its colour; a run, when several are compared, is a dashed line in
+  // its own style keyed to what it overrides -- so the figure carries both halves of what the on-
+  // screen legend and run chips show, colour for the variable and dash for the run.
+  const varRows = cols.map((nm) => {
+    const u = dispUnit(unitOf(nm));
+    return { label: u ? nm + " [" + u + "]" : nm, stroke: colour(nm), dash: null };
+  });
+  const runRows = LIVE && RUNS.length > 1
+    ? RUNS.map((run, ri) => {
+        const ov = Object.entries(run.overrides || {});
+        const letter = String.fromCharCode(65 + ri);
+        const label = (ov.length
+          ? letter + ": " + ov.map(([k, v]) => k + " = " + fmt(disp(v, paramUnit(k)))).join(", ")
+          : letter + ": as written").slice(0, 42);
+        return { label, stroke: ink, dash: runStyle(ri).dash };
+      })
+    : [];
+  const groups = runRows.length ? [varRows, runRows] : [varRows];
+  const allRows = groups.flat();
+  const rowW = Math.max(...allRows.map((r) => sw + 5 + r.label.length * fs * 0.6));
   const w = Math.ceil(Math.max(rowW, title.length * fs * 0.62) + pad * 2);
   const headH = title ? rh + 3 : 0;
-  const h = headH + rows.length * rh + pad * 2;
+  const gapH = runRows.length ? 6 : 0; // a gap between the variable group and the run group
+  const h = headH + allRows.length * rh + gapH + pad * 2;
   const x = Math.max(M.l, box.w - M.r - w - 4), y = M.t + 4;
   const mk = (tag, attrs, text) => {
     const el = document.createElementNS(NS, tag);
@@ -2620,12 +2636,19 @@ function svgLegend(clone) {
     "fill-opacity": "0.82", stroke: ink, "stroke-opacity": "0.15"}));
   if (title) g.appendChild(mk("text", {x: x + pad, y: y + pad + fs, "font-size": fs,
     "font-weight": 600, "font-family": font, fill: ink}, title));
-  rows.forEach((r, i) => {
-    const ry = y + pad + headH + i * rh + rh * 0.5;
-    g.appendChild(mk("line", {x1: x + pad, x2: x + pad + sw, y1: ry, y2: ry,
-      stroke: r.colour, "stroke-width": "2"}));
-    g.appendChild(mk("text", {x: x + pad + sw + 5, y: ry + fs * 0.35, "font-size": fs,
-      "font-family": font, fill: ink}, r.label));
+  let ry = y + pad + headH;
+  groups.forEach((group, gi) => {
+    if (gi > 0) ry += gapH;
+    for (const r of group) {
+      const cy = ry + rh * 0.5;
+      const line = mk("line", {x1: x + pad, x2: x + pad + sw, y1: cy, y2: cy,
+        stroke: r.stroke, "stroke-width": "2"});
+      if (r.dash) line.setAttribute("stroke-dasharray", r.dash);
+      g.appendChild(line);
+      g.appendChild(mk("text", {x: x + pad + sw + 5, y: cy + fs * 0.35, "font-size": fs,
+        "font-family": font, fill: ink}, r.label));
+      ry += rh;
+    }
   });
   clone.appendChild(g);
 }
