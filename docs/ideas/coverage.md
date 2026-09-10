@@ -42,6 +42,33 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a comprehension in an array declaration binding is expanded
+
+The machines set a per-phase parameter as a comprehension: `parameter Real x[m] = {f(i) for i in 1:m}`.
+An array declaration is split into one variable per element, and an array constructor in its binding
+(`zeros(m)`, `identity(m)`) was already expanded to the literal array first, so each element could take
+its own value. A comprehension was not, so it reached the element split whole -- every element carrying
+the entire comprehension, which the emitter then could not read, or, where the binding was prefixed
+without the parameter values in hand, refused as "a comprehension is not expanded here".
+
+The comprehension is now expanded the same way a constructor is: to the array it stands for, one element
+per iterator value, evaluated against the parameters that are the shape. So `x[1]` binds `f(1)`, `x[2]`
+binds `f(2)`, each its own value -- and the refusal, twenty-five induction-machine examples, leaves the
+list. They do not reach a new stage; each meets the next wall at once, a thermal-port connect the
+resolver does not see, so the stage totals hold. No model regressed, and the wrong binding it would have
+produced is corrected.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     62 | 14.4 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are a connect endpoint not seen as a connector (parse), the `Clock` builtin (62), an
+if-equation condition unknown at flatten (27), and an array shape unknown at flatten (24 and 23).
+Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after a whole array of connectors is reached through an array of components
 
 The element-wise connect of the previous change found the array only on the last name of a reference --

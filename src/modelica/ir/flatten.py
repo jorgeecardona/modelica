@@ -1395,19 +1395,25 @@ def _filled(sizes: tuple[int, ...], element: ir.Expr) -> ir.Expr:
 
 
 def _shape_constructor(  # noqa: PLR0911 -- one case per constructor, as its neighbours have
-    value: ir.Expr | None, sizes: tuple[int, ...], path: _Path
+    value: ir.Expr | None, sizes: tuple[int, ...], path: _Path, values: Mapping[str, float]
 ) -> ir.Expr | None:
     """Expand an array-constructor call into the literal array of the declared shape.
 
     ``zeros(n)``, ``ones(n)`` and ``fill(v, n)`` fill the shape; ``identity(n)`` is the square
-    unit matrix; ``linspace(a, b, n)`` steps evenly from ``a`` to ``b``. They are the ordinary
-    way to give an array declaration its start or its value, and without expanding them here the
-    whole call reached the emitter as an untranslated ``zeros``. The declared ``sizes`` are the
-    shape (the constructor's own size argument only has to agree with it), so this needs no
-    structural evaluation of its own. Anything else is left untouched.
+    unit matrix; ``linspace(a, b, n)`` steps evenly from ``a`` to ``b``. A comprehension binding --
+    ``{f(i) for i in 1:n}``, the way the machines set a per-phase parameter -- is the array it stands
+    for, one element per iterator value. They are the ordinary way to give an array declaration its
+    start or its value, and without expanding them here the whole call reached the emitter as an
+    untranslated ``zeros``. The declared ``sizes`` are the shape (the constructor's own size argument
+    only has to agree with it), so this needs no structural evaluation of its own. Anything else is
+    left untouched.
     """
     where = ".".join(path)
     match value:
+        case ir.Comprehension():
+            # The iterator values are literals substituted into the body; the elements are prefixed
+            # later, when the array reaches `_prefix_expr` element by element, so identity here.
+            return _expand_comprehension(value, lambda expr: expr, values)
         case ir.Call(name="zeros"):
             return _filled(sizes, ir.RealLiteral(0.0))
         case ir.Call(name="ones"):
@@ -1443,7 +1449,7 @@ def _shape_constructor(  # noqa: PLR0911 -- one case per constructor, as its nei
 
 
 def _shape_modification(
-    mod: ir.Modification, sizes: tuple[int, ...], path: _Path
+    mod: ir.Modification, sizes: tuple[int, ...], path: _Path, values: Mapping[str, float]
 ) -> ir.Modification:
     """Expand an array constructor in a modification's value and each of its attributes.
 
@@ -1451,8 +1457,10 @@ def _shape_modification(
     share the component's shape, so the same ``sizes`` expand both, and everything below then sees
     the literal array it already knows how to read out element by element.
     """
-    value = _shape_constructor(mod.value, sizes, path)
-    entries = {key: _shape_modification(entry, sizes, path) for key, entry in mod.entries.items()}
+    value = _shape_constructor(mod.value, sizes, path, values)
+    entries = {
+        key: _shape_modification(entry, sizes, path, values) for key, entry in mod.entries.items()
+    }
     if value is mod.value and all(entries[key] is entry for key, entry in mod.entries.items()):
         return mod
     return replace(mod, value=value, entries=entries)
@@ -2232,7 +2240,7 @@ class _Flattener:
         # An array constructor -- `start = zeros(n)`, `A = identity(n)` -- becomes the literal array
         # of this shape before the element loop reads it, so each element gets its own entry the way
         # it would from a written `{...}` (the whole call reached the emitter untranslated otherwise).
-        shaped = _shape_modification(component.modification, tuple(sizes), path)
+        shaped = _shape_modification(component.modification, tuple(sizes), path, self.values)
         scalar = replace(component, dimensions=(), modification=shaped)
         for indices in product(*(range(1, size + 1) for size in sizes)):
             self._component(
@@ -2383,21 +2391,28 @@ class _Flattener:
         match node:
             case ir.Call(name="zeros" | "ones", args=args) if args:
                 return (
-                    _shape_constructor(node, tuple(self._dim(a) for a in args), ("<equation>",))
+                    _shape_constructor(
+                        node, tuple(self._dim(a) for a in args), ("<equation>",), self.values
+                    )
                     or node
                 )
             case ir.Call(name="fill", args=(value, *dims)) if dims:
                 built = ir.Call("fill", (self._constructors(value), *dims))
                 return (
-                    _shape_constructor(built, tuple(self._dim(a) for a in dims), ("<equation>",))
+                    _shape_constructor(
+                        built, tuple(self._dim(a) for a in dims), ("<equation>",), self.values
+                    )
                     or built
                 )
             case ir.Call(name="identity", args=(n,)):
                 size = self._dim(n)
-                return _shape_constructor(node, (size, size), ("<equation>",)) or node
+                return _shape_constructor(node, (size, size), ("<equation>",), self.values) or node
             case ir.Call(name="linspace", args=(lo, hi, n)):
                 built = ir.Call("linspace", (self._constructors(lo), self._constructors(hi), n))
-                return _shape_constructor(built, (self._dim(n),), ("<equation>",)) or built
+                return (
+                    _shape_constructor(built, (self._dim(n),), ("<equation>",), self.values)
+                    or built
+                )
             case ir.Call(name=name, args=args):
                 return ir.Call(name, tuple(self._constructors(a) for a in args), node.named)
             case ir.Binary(op=op, lhs=lhs, rhs=rhs):

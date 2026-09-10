@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from modelica import ir
 from modelica.ir.flatten import FlattenError
 from modelica.ir.source import flatten
 from modelica.lang import parse
@@ -128,6 +129,23 @@ def test_a_bare_comprehension_is_an_array_scalarised_elementwise() -> None:
         "equation\n  der(x) = -x;\n  y = {2 * x[i] for i in 1:n};\n"
     )
     assert "y[2] = 2 * x[2];" in equations(model)
+
+
+def test_a_comprehension_in_an_array_declaration_binding_expands_per_element() -> None:
+    """``parameter Real x[n] = {2 * i for i in 1:n}`` gives each element its own value.
+
+    The machines set a per-phase parameter this way. The comprehension is expanded to the array it
+    stands for before the declaration is split, so ``x[1]`` binds ``2 * 1``, ``x[2]`` binds ``2 * 2``,
+    rather than every element carrying the whole comprehension (which reached no further than here).
+    """
+    model = flat("  parameter Integer n = 3;\n  parameter Real x[n] = {2 * i for i in 1:n};\n")
+    bindings = {
+        v.name: unparse_equation(ir.Equal(ir.Ref((v.name,)), v.binding))[0].strip()
+        for v in model.variables
+        if v.binding is not None and v.name.startswith("x")
+    }
+    assert bindings["x[1]"] == "x[1] = 2 * 1;"
+    assert bindings["x[3]"] == "x[3] = 2 * 3;"
 
 
 def test_a_two_index_comprehension_sums_over_every_pair() -> None:
