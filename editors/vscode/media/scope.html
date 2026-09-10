@@ -1886,6 +1886,11 @@ function drawOverlay(frag) {
       frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: y + 3, "text-anchor": "end"}, label));
     }
   }
+  // When every drawn variable shares one unit, name it at the top of the axis -- the shared scale's
+  // answer to the per-strip unit label the by-unit view carries -- so the numbers on the axis, and
+  // the SVG export of them, say what they are measured in.
+  const sul = scale === "linear" ? dispUnit(su) : "";
+  if (sul) frag.appendChild(el("text", {class: "tick", x: M.l + 5, y: M.t + 10, "font-weight": 600}, sul));
   const [a, b] = visible();
   for (const nm of selected()) {
     const to = project(nm, dom);
