@@ -51,8 +51,30 @@ def names(node: ir.Expr) -> Iterator[str]:
             return
 
 
-def contains(node: ir.Expr, name: str) -> bool:
-    return any(found == name for found in names(node))
+def contains(node: ir.Expr, name: str) -> bool:  # noqa: PLR0911 -- one case per node type
+    """Whether ``name`` is read in ``node`` -- but ``pre(name)`` does not count.
+
+    ``pre(x)`` is the value of ``x`` at the previous event, a known in the current phase, not a
+    reference to the current unknown. So ``y = pre(y) and u < a`` has ``y`` alone on the left, and
+    :func:`isolated` can read it off as an assignment -- the boolean right-hand side is never
+    differentiated, which it could not be. Counting the ``pre(y)`` as ``y`` would send it down the
+    linear-solve path instead, where a boolean ``or`` has no derivative.
+    """
+    match node:
+        case ir.Call(name="pre"):
+            return False
+        case ir.Ref(parts=parts):
+            return ".".join(parts) == name
+        case ir.Binary(lhs=lhs, rhs=rhs):
+            return contains(lhs, name) or contains(rhs, name)
+        case ir.Unary(operand=operand):
+            return contains(operand, name)
+        case ir.Call(args=args):
+            return any(contains(argument, name) for argument in args)
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return contains(condition, name) or contains(then, name) or contains(otherwise, name)
+        case _:
+            return False
 
 
 def substitute(node: ir.Expr, mapping: Mapping[str, ir.Expr]) -> ir.Expr:  # noqa: PLR0911 - one case per node type

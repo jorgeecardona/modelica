@@ -128,3 +128,23 @@ def test_the_isolated_shape_is_used_for_ordinary_equations_too() -> None:
     """
     result = simulate(system(source), stop=1.0, tolerance=1e-10)
     assert result.at(0.5)["y"] == pytest.approx(2 * result.at(0.5)["x"], rel=1e-12)
+
+
+def test_a_boolean_latch_that_reads_its_own_pre_value_is_isolated() -> None:
+    """``on = pre(on) and x < hi or x < lo`` is an on-off controller: it reads its previous value.
+
+    ``pre(on)`` is the value at the last event, a known, not a reference to the current ``on`` -- so
+    ``on`` stands alone on the left and its boolean right-hand side is read off as an assignment. It
+    was being counted as ``on`` appearing on both sides, which sent it down the linear-solve path,
+    where the ``or`` has no derivative and causalization fell over. MSL's `ControlledTemperature`
+    (its `OnOffController`) is the model that hit it.
+    """
+    source = """model M
+      Real x(start = 1, fixed = true);
+      Boolean on;
+    equation
+      der(x) = -1;
+      on = pre(on) and x < 0.8 or x < 0.2;
+    end M;
+    """
+    assert emit(system(source)).source  # causalizes and emits, where before it raised

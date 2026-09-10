@@ -42,6 +42,30 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a boolean latch that reads its own pre value is isolated
+
+An on-off controller reads its previous state: `on = pre(on) and u < hi or u < lo`. `pre(on)` is the
+value at the last event, a known in the current phase, not a reference to the current `on` -- so `on`
+stands alone on the left and its boolean right-hand side is the answer, read off without a derivative
+(a boolean `or` has none). The check for whether the unknown stood alone counted the `pre(on)` as
+`on`, so it took the linear-solve path instead and causalization fell over. It ignores a `pre` now, so
+the isolated shape catches the equation, as it already does for an ordinary `hot = x > 0.5`.
+
+Causalize climbs from 22 to 23 of 430 example models: MSL's `HeatTransfer...ControlledTemperature`,
+whose `OnOffController` is this latch, gets past the fall-over (it meets an initial-equation wall
+after). Reachable simulation holds at 21.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     50 | 11.6 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are unchanged: a composite component with a value (70), the `Clock` builtin (62), an array
+shape not known at flatten (52), a subscript on an inner component and a type alias to an array type in
+parse (32 each), and a condition not known at flatten (31). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after a package constant in a function body resolves
 
 `Modelica.Units.Conversions.to_degC` reads `Modelica.Constants.T_zero` in its body and is inlined
