@@ -42,6 +42,32 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a whole array of connectors is reached through an array of components
+
+The element-wise connect of the previous change found the array only on the last name of a reference --
+`plug_p.pin`, where `pin` is the array. The polyphase machines write the other shape: `connect(resistor.p,
+plug_p.pin)`, one resistor per phase, so `resistor.p` is a whole array of connectors reached *through* an
+array of components, the array sitting on `resistor` rather than on `p`. That earlier change then read one
+side as an array and the other as a single connector and refused them as unequal -- a refusal it had newly
+introduced, standing in front of sixty-three induction-machine examples.
+
+The array is now found on whichever segment of the reference carries it, last or earlier, and each side is
+expanded through that segment: `resistor.p` becomes `resistor[i].p`, `plug_p.pin` becomes `plug_p.pin[i]`,
+and the two are joined phase by phase. The refusal leaves sixty-three models. They do not reach a new
+stage -- each meets the next wall at once, a comprehension not yet expanded, an if-equation condition or an
+array shape unknown at flatten -- so the stage totals hold. No model regressed.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     62 | 14.4 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are a connect endpoint not seen as a connector (parse), the `Clock` builtin (62), an
+if-equation condition unknown at flatten (27), and an array shape unknown at flatten (24 and 23).
+Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after a conditional component's condition reads an enumeration literal
 
 The power converters gate a component on an enumeration: `SignalPWM referenceGenerator if refType ==

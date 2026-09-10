@@ -95,10 +95,26 @@ def test_a_whole_array_connect_joins_the_elements() -> None:
 
 
 def test_an_array_connected_to_a_scalar_is_refused_by_name() -> None:
-    """An array of connectors and a single one have different sizes and cannot be joined."""
+    """An array of connectors and a single one have unequal length and cannot be joined."""
     source = LIB + "model M\n  Pin p[2];\n  Lamp lamp;\nequation\n  connect(p, lamp.p);\nend M;\n"
-    with pytest.raises(FlattenError, match="different sizes"):
+    with pytest.raises(FlattenError, match="unequal array length"):
         flatten(parse(source), "M")
+
+
+def test_a_connect_reaches_a_connector_on_each_element_of_an_array_of_components() -> None:
+    """`connect(r.p, plug)` where `r` is an array of components joins `r[i].p` to `plug[i]`.
+
+    The array need not be the last name: the polyphase machines write `connect(resistor.p,
+    plug_p.pin)`, one resistor per phase, so `resistor.p` is a whole array of connectors reached
+    through the array of components it belongs to.
+    """
+    source = (
+        LIB
+        + "model M\n  Lamp lamp[2];\n  Pin plug[2];\nequation\n  connect(lamp.p, plug);\nend M;\n"
+    )
+    flat = flatten(parse(source), "M")
+    assert ir.Equal(ir.Ref(("lamp[1]", "p", "v")), ir.Ref(("plug[1]", "v"))) in flat.equations
+    assert ir.Equal(ir.Ref(("lamp[2]", "p", "v")), ir.Ref(("plug[2]", "v"))) in flat.equations
 
 
 def test_a_mid_path_subscript_is_refused_by_name() -> None:

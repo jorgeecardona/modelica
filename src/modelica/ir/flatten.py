@@ -2503,11 +2503,8 @@ class _Flattener:
                 # is removed together with the component, silently: that is the one
                 # reference the specification allows to survive the removal.
                 if not self._severed(a, prefix, local) and not self._severed(b, prefix, local):
-                    for element_a, element_b in self._connect_pairs(a, b, prefix, local):
-                        self.connections.join(
-                            self._endpoint(element_a, prefix, local),
-                            self._endpoint(element_b, prefix, local),
-                        )
+                    for endpoint_a, endpoint_b in self._connect_pairs(a, b, prefix, local):
+                        self.connections.join(endpoint_a, endpoint_b)
             case ir.When(branches=branches):
                 self.whens.append(
                     ir.When(
@@ -2654,52 +2651,58 @@ class _Flattener:
         b: ir.Ref | ir.Subscript,
         prefix: _Path,
         local: frozenset[str],
-    ) -> list[tuple[ir.Ref | ir.Subscript, ir.Ref | ir.Subscript]]:
-        """``connect(x, y)`` element by element when both name a whole array of connectors.
+    ) -> list[tuple[_Endpoint, _Endpoint]]:
+        """The endpoint pairs a ``connect`` joins -- one, or one per element of an array of connectors.
 
-        The polyphase and power-converter models connect a plug's pins, or a replicator's outputs,
-        as whole arrays -- ``connect(internalEnable, booleanReplicator.y)`` -- rather than writing the
-        loop. Each side is one array of connectors of the same length, so it is the element-wise
-        connect it stands for: ``x[i]`` to ``y[i]`` for every ``i``. A plain connect (neither side an
-        array of connectors) is returned as the single pair it already was, so the ordinary case is
-        untouched; two arrays of different lengths cannot be joined and say so.
+        The polyphase and power-converter models connect whole arrays of connectors rather than
+        writing the loop: a plug's pins to a replicator's outputs (`connect(internalEnable,
+        booleanReplicator.y)`), or every phase's resistor to the plug (`connect(resistor.p,
+        plug_p.pin)`, where `resistor` is an array of components so `resistor.p` is one `p` per
+        element). Each side that names a one-dimensional array of connectors is expanded to its
+        elements, and the two are joined element by element. A plain connect (neither side an array)
+        is the single pair it already was; two sides of unequal array length cannot be joined.
         """
-        shape_a = self._connector_array_shape(a, prefix, local)
-        shape_b = self._connector_array_shape(b, prefix, local)
-        if shape_a is None and shape_b is None:
-            return [(a, b)]
-        # A shape is recorded only for a plain reference, so a side with one is an `ir.Ref`.
-        if shape_a is None or shape_b is None or shape_a != shape_b:
+        elements_a = self._connector_array(a, prefix, local)
+        elements_b = self._connector_array(b, prefix, local)
+        if elements_a is None and elements_b is None:
+            return [(self._endpoint(a, prefix, local), self._endpoint(b, prefix, local))]
+        if elements_a is None or elements_b is None or len(elements_a) != len(elements_b):
+            here_a = len(elements_a) if elements_a is not None else "a single connector"
+            here_b = len(elements_b) if elements_b is not None else "a single connector"
             raise FlattenError(
-                "connect() joins two arrays of connectors of different sizes"
-                f" ({shape_a} and {shape_b})"
+                f"connect() joins connectors of unequal array length ({here_a} and {here_b});"
+                " an array of connectors joins only to an array of the same length"
             )
-        if not isinstance(a, ir.Ref) or not isinstance(b, ir.Ref):
-            return [(a, b)]
-        (size,) = (
-            shape_a  # a connector array is one-dimensional; `_connector_array_shape` checked it
-        )
-        return [
-            (ir.Subscript(a, (ir.IntLiteral(i),)), ir.Subscript(b, (ir.IntLiteral(i),)))
-            for i in range(1, size + 1)
-        ]
+        return list(zip(elements_a, elements_b, strict=True))
 
-    def _connector_array_shape(
+    def _connector_array(
         self, end: ir.Ref | ir.Subscript, prefix: _Path, local: frozenset[str]
-    ) -> tuple[int, ...] | None:
-        """The shape of ``end`` when it names a whole one-dimensional array of connectors, else None.
+    ) -> list[_Endpoint] | None:
+        """The element endpoints if ``end`` names a whole one-dimensional array of connectors, else None.
 
-        A subscript already picks an element, so it is never a whole array; a reference is one when a
-        shape was recorded for it and the first element is a registered connector.
+        The array may sit on any segment of the reference: the last (`plug_p.pin`, where `pin[m]` is
+        the array), or an earlier one (`resistor.p`, where `resistor[m]` is an array of components and
+        `p` a connector of each). The segment whose flat path has a shape recorded and whose first
+        element is a registered connector is the array; the elements are that path with the segment
+        subscripted, the rest of the reference following each. A subscript already picks one element,
+        so it is never a whole array.
         """
         if isinstance(end, ir.Subscript):
             return None
-        path = _prefix_ref(end, prefix, local, strict=False).parts
-        shape = self.shapes.get(tuple(path))
-        if shape is None or len(shape) != 1:
-            return None
-        if (*path[:-1], element(path[-1], (1,))) in self.connectors:
-            return shape
+        parts = end.parts
+        role: _Role = "outside" if len(parts) == 1 else "inside"
+        for split in range(len(parts)):
+            head = _prefix_ref(ir.Ref(parts[: split + 1]), prefix, local, strict=False).parts
+            shape = self.shapes.get(tuple(head))
+            if shape is None or len(shape) != 1:
+                continue
+            tail = parts[split + 1 :]
+            if (*head[:-1], element(head[-1], (1,)), *tail) not in self.connectors:
+                continue
+            return [
+                ((*head[:-1], element(head[-1], (index,)), *tail), role)
+                for index in range(1, shape[0] + 1)
+            ]
         return None
 
     def _endpoint(
