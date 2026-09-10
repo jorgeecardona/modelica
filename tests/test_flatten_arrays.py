@@ -228,6 +228,40 @@ def test_an_array_dimension_may_sit_on_the_type() -> None:
     ]
 
 
+def test_a_full_range_slice_is_one_equation_per_element() -> None:
+    """``x[1:m] = zeros(m)`` is m scalar equations, the way the MSL grounds a polyphase current.
+
+    A range subscript is a slice, so the left side is the whole array here; the right side is the
+    zeros constructor of the same length, and the two split element by element.
+    """
+    model = flat(
+        "  parameter Integer m = 3;\n  Real x[m];\n"
+        "equation\n  x[1:m] = zeros(m);\n  for i in 1:m loop\n    der(x[i]) = 0;\n  end for;\n"
+    )
+    assert "x[1] = 0.0;" in equations(model)
+    assert "x[3] = 0.0;" in equations(model)
+
+
+def test_a_partial_range_slice_selects_its_span() -> None:
+    """``x[2:3]`` is the two middle elements, not the whole array."""
+    model = flat("  Real x[4];\nequation\n  x[2:3] = {5, 6};\n  x[1] = 0;\n  x[4] = 0;\n")
+    assert equations(model)[:2] == ["x[2] = 5;", "x[3] = 6;"]
+
+
+def test_a_slice_holds_a_scalar_dimension_fixed() -> None:
+    """``A[1:2, 2]`` runs the first dimension and pins the second, so the slice is a column."""
+    model = flat(
+        "  Real A[2, 2];\nequation\n  A[1:2, 2] = {7, 8};\n  A[1, 1] = 0;\n  A[2, 1] = 0;\n"
+    )
+    assert equations(model)[:2] == ["A[1, 2] = 7;", "A[2, 2] = 8;"]
+
+
+def test_a_slice_honours_the_step_of_its_range() -> None:
+    """``x[1:2:5]`` is the odd indices, the same stepping a ``for`` header reads."""
+    model = flat("  Real x[5];\nequation\n  x[1:2:5] = {1, 3, 5};\n  x[2] = 0;\n  x[4] = 0;\n")
+    assert equations(model)[:3] == ["x[1] = 1;", "x[3] = 3;", "x[5] = 5;"]
+
+
 # --------------------------------------------------------------------------------------
 # What stays refused, and why each one has to be
 # --------------------------------------------------------------------------------------

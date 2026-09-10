@@ -721,6 +721,26 @@ def _boolean(node: ir.Expr, values: Mapping[str, float], what: str) -> bool:
     return value
 
 
+def _range_values(
+    over: ir.Range,
+    resolve: Callable[[ir.Expr], ir.Expr],
+    values: Mapping[str, float],
+    what: str,
+) -> list[int]:
+    """The integers a literal range enumerates, its bounds resolved and read as whole numbers.
+
+    A range decides how many equations or elements exist -- a ``for`` header, a comprehension
+    iterator, an array slice -- so its bounds are structural and known here; ``resolve`` prefixes
+    each bound before it is read, and a zero step is refused rather than looped forever.
+    """
+    lo = _integer(resolve(over.start), values, what)
+    hi = _integer(resolve(over.stop), values, what)
+    step = _integer(resolve(over.step or ir.IntLiteral(1)), values, what)
+    if step == 0:
+        raise FlattenError(f"{what} steps by zero")
+    return list(range(lo, hi + (1 if step > 0 else -1), step))
+
+
 def _expand_comprehension(
     node: ir.Comprehension, prefix: Callable[[ir.Expr], ir.Expr], values: Mapping[str, float]
 ) -> ir.Expr:
@@ -736,12 +756,7 @@ def _expand_comprehension(
         if not isinstance(over, ir.Range):
             raise FlattenError(f"the range of {name!r} in a comprehension must be 'a:b'")
         what = f"the range of {name!r} in a comprehension"
-        lo = _integer(prefix(over.start), values, what)
-        hi = _integer(prefix(over.stop), values, what)
-        step = _integer(prefix(over.step or ir.IntLiteral(1)), values, what)
-        if step == 0:
-            raise FlattenError(f"the range of {name!r} in a comprehension steps by zero")
-        ranges.append((name, list(range(lo, hi + (1 if step > 0 else -1), step))))
+        ranges.append((name, _range_values(over, prefix, values, what)))
 
     def build(bound: dict[str, ir.Expr], rest: list[tuple[str, list[int]]]) -> ir.Expr:
         if not rest:
@@ -750,6 +765,37 @@ def _expand_comprehension(
         return ir.Array(tuple(build({**bound, name: ir.IntLiteral(i)}, rest[1:]) for i in indices))
 
     return build({}, ranges)
+
+
+def _slice(
+    path: _Path,
+    indices: tuple[ir.Expr, ...],
+    resolve: Callable[[ir.Expr], ir.Expr],
+    values: Mapping[str, float],
+) -> ir.Expr:
+    """An array slice as a nested array literal: one array level per range dimension.
+
+    ``x[1:m]`` becomes ``{x[1], ..., x[m]}`` and ``A[1:2, 3]`` becomes ``{A[1, 3], A[2, 3]}`` -- a
+    range dimension adds a level and enumerates, a scalar dimension is held fixed. So the slice has
+    the shape of its ranges, and :func:`_element` reads it out exactly as it reads any array, which
+    makes an equation ``x[1:m] = zeros(m)`` split into one scalar equation per element like the rest.
+    """
+    what = f"the subscript of {path[-1]!r}"
+
+    def build(dim: int, fixed: tuple[int, ...]) -> ir.Expr:
+        if dim == len(indices):
+            return ir.Ref((*path[:-1], element(path[-1], fixed)))
+        index = indices[dim]
+        if isinstance(index, ir.Range):
+            return ir.Array(
+                tuple(
+                    build(dim + 1, (*fixed, value))
+                    for value in _range_values(index, resolve, values, what)
+                )
+            )
+        return build(dim + 1, (*fixed, _integer(resolve(index), values, what)))
+
+    return build(0, ())
 
 
 def _prefix_expr(  # noqa: C901, PLR0911, PLR0913 -- one case per node type, one flag per rule
@@ -782,6 +828,11 @@ def _prefix_expr(  # noqa: C901, PLR0911, PLR0913 -- one case per node type, one
             if values is None:
                 raise FlattenError("subscripted references are not expanded here")
             path = _prefix_ref(base, prefix, local, strict=strict, outer=outer).parts
+            if any(isinstance(i, ir.Range) for i in indices):
+                # A range subscript is a slice -- a sub-array, not one element -- so it becomes an
+                # array literal (one level per range dimension), which the equation split then reads
+                # element by element like any other array. `i[1:m] = zeros(m)` is m scalar equations.
+                return _slice(path, indices, go, values)
             resolved = [_integer(go(i), values, f"the subscript of {base.name!r}") for i in indices]
             return ir.Ref((*path[:-1], element(path[-1], resolved)))
         case ir.Comprehension():

@@ -4,8 +4,9 @@ The MSL measurement (docs/ideas/coverage.md) counted 60 example models whose fir
 refusal was a slice subscript. A range was already an expression the parser could read --
 but only in the header of a ``for``; the subscript is the other place the grammar expects
 one, and the bare ``:`` gets its own node (:class:`ir.Colon`) because it can only ever be
-the whole subscript. Both are carried the way :class:`ir.Array` is, so the file that
-writes one loads, and the semantic layers refuse them beside it at the point of use.
+the whole subscript. Both are carried the way :class:`ir.Array` is, so the file that writes
+one loads. A range subscript in an equation now flattens to the elements it selects; the
+other uses (a bare colon, a slice handed to the evaluator) are still refused at the point of use.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import pytest
 from modelica import ir
 from modelica.ir.evaluate import EvaluationError, evaluate
 from modelica.ir.flatten import FlattenError, flatten
-from modelica.lang import parse, parse_expression, unparse, unparse_expr
+from modelica.lang import parse, parse_expression, unparse, unparse_equation, unparse_expr
 
 
 def test_a_slice_subscript_is_read_and_round_trips() -> None:
@@ -40,9 +41,24 @@ def test_using_a_slice_is_refused_with_the_stage_named() -> None:
         evaluate(parse_expression("x[1:3]"), {})
 
 
-def test_a_sliced_equation_is_refused_by_name() -> None:
-    source = "model M\n  Real x[3];\nequation\n  x[1:3] = {0, 0, 0};\nend M;\n"
-    with pytest.raises(FlattenError, match="a range is read only in the header of a 'for'"):
+def test_a_sliced_equation_splits_into_one_equation_per_element() -> None:
+    """``x[1:3] = {1, 2, 3}`` is three scalar equations: a range subscript is an array slice.
+
+    A range in a subscript used to be refused (it read only in a ``for`` header); it now expands
+    to the elements it selects, so the equation splits like any equation between two arrays.
+    """
+    source = "model M\n  Real x[3];\nequation\n  x[1:3] = {1, 2, 3};\nend M;\n"
+    equations = [unparse_equation(e)[0].strip() for e in flatten(parse(source), "M").equations]
+    assert equations == ["x[1] = 1;", "x[2] = 2;", "x[3] = 3;"]
+
+
+def test_a_bare_colon_slice_is_still_refused() -> None:
+    """A bare ``:`` is refused, not silently ignored.
+
+    It needs the array's own extent, which the range handler does not read, so it stays refused.
+    """
+    source = "model M\n  Real x[3];\nequation\n  x[:] = {0, 0, 0};\nend M;\n"
+    with pytest.raises(FlattenError):
         flatten(parse(source), "M")
 
 

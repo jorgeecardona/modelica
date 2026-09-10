@@ -42,6 +42,32 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a range subscript is read as an array slice
+
+The polyphase transformers ground a delta connection with `transformerL.i[1:m] = zeros(m)` -- a range
+subscript on the left, a whole-array constructor on the right. A range in a subscript is a slice, a
+sub-array, but the subscript handler only knew the scalar case: every index had to resolve to one
+integer, and a range there was refused as "a range is read only in the header of a 'for' equation".
+
+A range subscript now expands to an array literal, one array level per range dimension and a scalar
+dimension held fixed: `x[1:m]` becomes `{x[1], ..., x[m]}`, `A[1:2, 3]` becomes `{A[1, 3], A[2, 3]}`.
+The slice then has the shape of its ranges, so `_element` reads it out exactly as it reads any array,
+and an equation between a slice and its right-hand side splits into one scalar equation per element
+like the rest. The range enumeration a `for` header and a comprehension already share is factored into
+one helper the slice reuses. Three examples carried the refusal (TransformerYD, TransformerYY,
+Rectifier6pulse) and all three now flatten.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     68 | 15.8 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are a subscript on an inner component (parse, 70), the `Clock` builtin (66), an if-equation
+condition unknown at flatten (27), and an array shape unknown at flatten (24 and 24). Agreement is
+still unmeasured (no `omc`).
+
 ### 2026-09-10, after an if-equation may appear in an initial equation section
 
 The SPICE transistors write `initial equation if UIC then vcs = IC; end if;` -- a parameter-gated
