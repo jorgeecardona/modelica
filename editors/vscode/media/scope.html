@@ -780,10 +780,25 @@ function groupMembers(series, base) {
 // alone in the dimensionless one. `product` is an n-th power, a different unit, so it and every
 // other expression stay unitless: an arbitrary combination has no single unit to claim.
 function derivedUnit(src) {
-  const m = src.trim().match(/^(sum|mean|min|max)\(\s*([A-Za-z_]\w*)\s*\)$/);
-  if (!m) return "";
-  const members = groupMembers((D && D.series) || {}, m[2]);
-  return members.length ? unitOf(members[0]) : "";
+  const s = src.trim();
+  const m = s.match(/^(sum|mean|min|max)\(\s*([A-Za-z_]\w*)\s*\)$/);
+  if (m) { const members = groupMembers((D && D.series) || {}, m[2]); return members.length ? unitOf(members[0]) : ""; }
+  // der(NAME) is the base unit per second, and integral(NAME) the base unit times seconds, so a
+  // rate and a running total land on a labelled strip rather than alone in the dimensionless one:
+  // der(position) is m/s, der(temperature) K/s; integral(power) is W.s (energy), integral(current)
+  // A.s (charge). A unit is only composed when it reads cleanly -- a base that already carries a `/`
+  // would give `m/s/s`, so der leaves it unitless; integral instead cancels a trailing `/s`, the one
+  // clean division (a velocity m/s integrates to m), and leaves any other `/` unit alone.
+  const d = s.match(/^der\(\s*([A-Za-z_]\w*)\s*\)$/);
+  if (d) { const u = unitOf(d[1]); return u && !u.includes("/") ? u + "/s" : ""; }
+  const it = s.match(/^integral\(\s*([A-Za-z_]\w*)\s*\)$/);
+  if (it) {
+    const u = unitOf(it[1]);
+    if (!u) return "";
+    if (u.endsWith("/s")) return u.slice(0, -2);
+    return u.includes("/") ? "" : u + ".s";
+  }
+  return "";
 }
 let derived = [];  // [{src}] -- the expressions, recompiled per model in applyDerived()
 // Compile `src` to a function `(j) => number` over the sample index, reading `series` and `time`.
