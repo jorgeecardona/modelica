@@ -457,6 +457,7 @@
           <button type="button" id="svgbtn" title="save the chart as an SVG image, self-contained (colours inlined, a key naming each drawn curve) for a report or slide" hidden>svg</button>
           <button id="all">all</button>
           <button id="none">none</button>
+          <button type="button" id="statesbtn" title="draw only the state variables -- the ones with a derivative, the model's degrees of freedom -- so a component model's connector-internal and der_ columns clear away, back to the physics" hidden>states</button>
           <button id="reset" title="or double-click the chart">reset</button>
           <button type="button" id="legendbtn" aria-pressed="false" title="show or hide the legend -- variables, events, parameters, sweep, sensitivity -- which a narrow pane hides by default">legend</button>
           <button type="button" id="helpbtn" aria-pressed="false" title="mouse and keyboard shortcuts for the chart (or press ?)">?</button>
@@ -495,6 +496,7 @@
               <div class="hk"><b>alt-click a row</b><span>solo it; alt-click the soloed one to restore the set</span></div>
               <div class="hk"><b>drag the divider</b><span>resize the legend; double-click it to collapse</span></div>
               <div class="hk"><b>filter box</b><span>narrow the list; all / none then act on the shown set</span></div>
+              <div class="hk"><b>states</b><span>draw only the state variables, clearing a component model's connector-internals away</span></div>
               <div class="hk"><b>/</b><span>jump to the filter box to search the variables; Escape returns to the chart</span></div>
               <div class="hk"><b>click a guard</b><span>plot the variable its condition watches</span></div>
             </div>
@@ -1005,6 +1007,10 @@ function select(i) {
       scale = "units";
       document.getElementById("scale").value = "units";
     }
+    // The `states` button is offered only when the model has states to draw -- a purely algebraic
+    // model, or the corpus gallery, has none, so it would select nothing.
+    document.getElementById("statesbtn").hidden =
+      !(Array.isArray(D.states) && D.states.some((s) => names.includes(s)));
     // A view remembered for this model wins over the default -- the variables only; the scale
     // above is still the model's own choice, since it is not what was saved.
     const remembered = loadSelection(D.model, names);
@@ -3242,6 +3248,14 @@ svg.addEventListener("dblclick", () => {
 document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; guides = []; draw(); foot.textContent = restFooter(); };
 document.getElementById("all").onclick = () => { for (const nm of filteredNames()) on.add(nm); preSolo = null; saveSelection(); draw(); };
 document.getElementById("none").onclick = () => { for (const nm of filteredNames()) on.delete(nm); preSolo = null; saveSelection(); draw(); };
+// Back to the states: the derivative-bearing variables are the model's degrees of freedom, and the
+// default a model opens on, so this restores that view after the connector-internal and der_ columns
+// of a component model have been turned on to look at. It replaces the selection rather than adding to
+// the shown set, since the point is to clear the rest away; the filter does not narrow it.
+document.getElementById("statesbtn").onclick = () => {
+  on = new Set((D.states || []).filter((nm) => names.includes(nm)));
+  preSolo = null; saveSelection(); draw();
+};
 const legFilter = document.getElementById("legfilter");
 if (legFilter) legFilter.addEventListener("input", (e) => {
   legendFilter = e.target.value.trim().toLowerCase(); paintLegend();
