@@ -2205,7 +2205,7 @@ class _Flattener:
                 inners=inners,
             )
 
-    def _leaf(
+    def _leaf(  # noqa: C901 -- one pass laying a scalar variable down, attribute by attribute
         self,
         component: ir.Component,
         path: _Path,
@@ -2228,7 +2228,18 @@ class _Flattener:
             raise FlattenError(f"{name}: `unit` must be a string literal")
         fixed = attribute("fixed")
         if fixed is not None and not isinstance(fixed, ir.BoolLiteral):
-            raise FlattenError(f"{name}: `fixed` must be a boolean literal")
+            # `fixed` may name a boolean parameter rather than spell the literal -- the fluid models
+            # write `T(start = T0, fixed = T0fixed)` with `parameter Boolean T0fixed = false` -- so it
+            # is evaluated against the parameter values gathered so far, the way a condition is. The
+            # parameter was declared before this component, so its value is already in hand; anything
+            # that still does not resolve to a boolean is the real error.
+            try:
+                resolved = evaluate(fixed, self.values)
+            except EvaluationError:
+                resolved = None
+            if not isinstance(resolved, bool):
+                raise FlattenError(f"{name}: `fixed` must be a boolean literal")
+            fixed = ir.BoolLiteral(resolved)
 
         # A reduction in a scalar binding (`parameter Real total = sum(x0)`) or an attribute folds
         # here, where the array it sums has already been declared and its shape is known. A leaf

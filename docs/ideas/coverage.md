@@ -42,6 +42,32 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a fixed attribute may name a boolean parameter
+
+The wall the medium constructor exposed. The fluid models write their outlet temperature as
+`T(start = T0, fixed = T0fixed)`, with `parameter Boolean T0fixed = false` a switch the modeller can
+flip, rather than spelling `fixed = false` at the declaration. The `fixed` attribute was required to be
+a boolean literal, so a parameter there was refused. It is now evaluated against the parameter values
+gathered so far, the way a condition or a dimension is, and the parameter was declared before the
+component, so its value is already in hand; a `fixed` that resolves to a number rather than a boolean is
+still the error it was.
+
+The ten fluid models leave this refusal and meet the next one, an if-equation condition the flattener
+cannot yet evaluate (the count there rises from 29 to 38). So the stage counts hold at 56 flattened;
+this is a wall cleared inside flatten rather than a model carried to the end of it. No model regressed.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     56 | 13.0 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are the `Clock` builtin (62), a subscript on an inner component in parse (51), a connect
+endpoint not seen as a connector (48), an array-shaped declaration met in parse (44 and 37), and an
+if-equation condition unknown at flatten (38, now the largest flatten wall). Agreement is still
+unmeasured (no `omc`).
+
 ### 2026-09-10, after a record constructor binding is read as a modification
 
 The follow-up to the whole-record binding, the case it left refused. A record component may be given a
