@@ -2599,9 +2599,15 @@ function svgLegend(clone) {
     const u = dispUnit(unitOf(nm));
     return { label: u ? nm + " [" + u + "]" : nm, colour: colour(nm) };
   });
+  // The model's name heads the key, so a saved figure says which model it is, not only which curve
+  // is which. A long qualified name is trimmed to keep the panel off the plot.
+  const font = "system-ui, -apple-system, sans-serif";
+  const title = ((D && D.model) || "").slice(0, 40);
   const fs = 11, rh = 15, pad = 6, sw = 16; // font size, row height, padding, swatch width
-  const w = Math.ceil(Math.max(...rows.map((r) => sw + 5 + r.label.length * fs * 0.6)) + pad * 2);
-  const h = rows.length * rh + pad * 2;
+  const rowW = Math.max(...rows.map((r) => sw + 5 + r.label.length * fs * 0.6));
+  const w = Math.ceil(Math.max(rowW, title.length * fs * 0.62) + pad * 2);
+  const headH = title ? rh + 3 : 0;
+  const h = headH + rows.length * rh + pad * 2;
   const x = Math.max(M.l, box.w - M.r - w - 4), y = M.t + 4;
   const mk = (tag, attrs, text) => {
     const el = document.createElementNS(NS, tag);
@@ -2612,12 +2618,14 @@ function svgLegend(clone) {
   const g = mk("g", {});
   g.appendChild(mk("rect", {x, y, width: w, height: h, rx: 3, fill: bg,
     "fill-opacity": "0.82", stroke: ink, "stroke-opacity": "0.15"}));
+  if (title) g.appendChild(mk("text", {x: x + pad, y: y + pad + fs, "font-size": fs,
+    "font-weight": 600, "font-family": font, fill: ink}, title));
   rows.forEach((r, i) => {
-    const ry = y + pad + i * rh + rh * 0.5;
+    const ry = y + pad + headH + i * rh + rh * 0.5;
     g.appendChild(mk("line", {x1: x + pad, x2: x + pad + sw, y1: ry, y2: ry,
       stroke: r.colour, "stroke-width": "2"}));
     g.appendChild(mk("text", {x: x + pad + sw + 5, y: ry + fs * 0.35, "font-size": fs,
-      "font-family": "system-ui, -apple-system, sans-serif", fill: ink}, r.label));
+      "font-family": font, fill: ink}, r.label));
   });
   clone.appendChild(g);
 }
