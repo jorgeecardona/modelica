@@ -2002,6 +2002,24 @@ function fmtEdge(v) {
   if (a !== 0 && (a < 1e-3 || a >= 1e5)) return v.toExponential(2);
   return String(Number(v.toPrecision(4)));
 }
+// Round ticks with gridlines down a time-mode strip, the same axis the shared and phase views lay,
+// but only when the strip is tall enough to hold three or more without crowding. A lone by-unit
+// strip that fills the pane (every drawn variable shares one unit) then reads its intermediate
+// values, not only its two extremes -- the case a linear axis handles and the stacked strips did
+// not. A short or stacked strip has no room, so the caller keeps the compact min/max edge labels;
+// `lo`/`hi` are the padded bounds `yFor` maps against, returns whether it drew the axis.
+function stripTicks(frag, u, lo, hi, y0, y1, yFor) {
+  const want = Math.round((y1 - y0) / 50);
+  if (want < 3) return false;
+  for (const dv of ticks(disp(lo, u), disp(hi, u), want)) {
+    const yy = yFor(undisp(dv, u));
+    if (yy < y0 - 0.5 || yy > y1 + 0.5) continue;
+    frag.appendChild(el("line", {class: "grid", x1: M.l, x2: box.w - M.r, y1: yy, y2: yy}));
+    frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: yy + 3, "text-anchor": "end"},
+      tickLabel(dv, disp(hi, u) - disp(lo, u))));
+  }
+  return true;
+}
 function stripLabels(frag, lo, hi, y0, y1) {
   // An edge that is negligible against the strip's own span is floating-point zero, not a real
   // small value -- the ball's height floor reads 2.2e-16 -- so it prints as 0, the same snap the
@@ -2067,8 +2085,10 @@ function drawSplit(frag) {
     }
     frag.appendChild(el("text", {x: M.l + 5, y: y0 + 10, fill: colour(nm),
       "font-size": 10, "font-weight": 600}, nm + (u ? "  " + dispUnit(u) : "")));
-    if (!xVar) zeroLine(frag, yFor, u, dataLo, dataHi, y0, y1);
-    stripLabels(frag, disp(dataLo, u), disp(dataHi, u), y0, y1);
+    if (xVar || !stripTicks(frag, u, lo, hi, y0, y1, yFor)) {
+      if (!xVar) zeroLine(frag, yFor, u, dataLo, dataHi, y0, y1);
+      stripLabels(frag, disp(dataLo, u), disp(dataHi, u), y0, y1);
+    }
   });
 }
 
@@ -2134,7 +2154,7 @@ function drawUnits(frag) {
         frag.appendChild(el("text", {class: "tick", x: M.l - 6, y: yy + 3, "text-anchor": "end"},
           tickLabel(dv, disp(hi, u) - disp(lo, u))));
       }
-    } else {
+    } else if (!stripTicks(frag, u, lo, hi, y0, y1, yFor)) {
       zeroLine(frag, yFor, u, dataLo, dataHi, y0, y1);
       stripLabels(frag, disp(dataLo, u), disp(dataHi, u), y0, y1);
     }
