@@ -449,7 +449,7 @@
             <option value="deg">deg</option>
           </select>
           <button type="button" id="stepbtn" aria-pressed="false" title="step-response metrics for each drawn variable: its final value, overshoot, 10-90% rise time and 2% settling time -- for a model driven from one state to another, like a controller reaching a setpoint">step</button>
-          <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs), mean, σ (the standard deviation, how much it swings about the mean) and final value of each drawn variable over the window on screen -- the peak current, the mean power, the ripple amplitude, the settled temperature in the region you are looking at; zoom to narrow it">stats</button>
+          <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs), mean, σ (the standard deviation, how much it swings about the mean), final value, and ∫ (the integral over the window, a power's energy or a flow's volume) of each drawn variable over the window on screen -- the peak current, the mean power, the ripple amplitude, the settled temperature in the region you are looking at; zoom to narrow it">stats</button>
           <button type="button" id="playbtn" aria-pressed="false" title="play the cursor through time so a field's spatial profile animates -- the 1-D line or 2-D heatmap inset breathing, the standing wave swinging; Space to play or pause">&#9654;</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
@@ -3828,6 +3828,23 @@ function windowStats(nm) {
   }
   return {min: lo, max: hi, mean, std: Math.sqrt(sq / cnt), tmax, final: last};
 }
+// The trapezoidal integral of a variable over the window on screen -- the charge under a current, the
+// volume under a flow, the energy under a power, in the display units so it matches the stats beside
+// it and the two-mark reading. Against time only (its differential is dt); a gap in the data leaves it
+// undefined rather than guessing across the hole.
+function windowIntegral(nm) {
+  const vs = D.series[nm];
+  if (xVar || !vs || N < 2) return null;
+  const u = unitOf(nm);
+  const [i0, i1] = visible();
+  let area = 0;
+  for (let k = i0; k < i1; k++) {
+    const p = disp(vs[k], u), q = disp(vs[k + 1], u);
+    if (p === null || q === null || !isFinite(p) || !isFinite(q)) return null;
+    area += 0.5 * (p + q) * (toT(T[k + 1]) - toT(T[k]));
+  }
+  return area;
+}
 function paintStats() {
   const show = statsOn && !xVar && !view3d && N > 0;
   document.getElementById("statstitle").hidden = !show;
@@ -3851,6 +3868,10 @@ function paintStats() {
       "σ " + fmt(disp(s.mean + s.std, u) - disp(s.mean, u)),
       "final " + fmt(disp(s.final, u)) + du,
     ];
+    // The integral has its own unit (a power's is energy, W·s), so it names it inline rather than
+    // sharing the final's. Undefined across a data gap, so it is dropped rather than shown wrong.
+    const area = windowIntegral(nm);
+    if (area !== null) bits.push("∫ " + fmt(area) + " " + (dispUnit(u) ? dispUnit(u) + "·" : "") + tUnit());
     const sm = document.createElement("span"); sm.className = "sm"; sm.textContent = bits.join("  ·  ");
     // The row clips in a narrow pane, so the whole reading is the tooltip -- every column reachable
     // without widening the legend.
@@ -4007,14 +4028,17 @@ function copyStats() {
   if (!statsOn || xVar || view3d || !N) { foot.textContent = "turn on stats (against time) to copy the table"; return; }
   const cols = selected();
   if (!cols.length) { foot.textContent = "draw a variable, then copy the stats"; return; }
-  const lines = [["variable", "unit", "min", "peak", "mean", "sigma", "final"].join("\t")];
+  const lines = [
+    ["variable", "unit", "min", "peak", "mean", "sigma", "final", "integral", "integral_unit"].join("\t"),
+  ];
   for (const nm of cols) {
     const s = windowStats(nm); if (!s) continue;
-    const u = unitOf(nm);
+    const u = unitOf(nm), area = windowIntegral(nm);
     lines.push([
       nm, dispUnit(u) || "",
       fmt(disp(s.min, u)), fmt(disp(s.max, u)), fmt(disp(s.mean, u)),
       fmt(disp(s.mean + s.std, u) - disp(s.mean, u)), fmt(disp(s.final, u)),
+      area !== null ? fmt(area) : "", area !== null ? (dispUnit(u) ? dispUnit(u) + "·" : "") + tUnit() : "",
     ].join("\t"));
   }
   if (lines.length < 2) { foot.textContent = "no numeric stats to copy"; return; }
