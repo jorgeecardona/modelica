@@ -1052,6 +1052,10 @@ def _statement(statement: ir.Statement, work: _Work) -> ir.Statement:
     """
     match statement:
         case ir.Assign(target=target, value=value) | ir.Reinit(target=target, value=value):
+            # Flattening refuses a subscripted assignment target, so by here every target is a plain
+            # name. Saying so keeps the reconstruction below well-typed and catches the impossible.
+            if not isinstance(target, ir.Ref):
+                raise CausalizationError(f"{work.name}: a subscripted assignment reached causalize")
             rewritten = simplify(substitute(_name_derivatives(value, work), work.aliases))
             return type(statement)(target, rewritten)
         case ir.CallStatement(call=ir.Call(name="terminate")):

@@ -329,7 +329,10 @@ EMPTY = Modification()
 
 @dataclass(frozen=True, slots=True)
 class Assign:
-    target: Ref
+    # A subscript on the target -- ``buf[iTick] := u`` in an algorithm, ``k[i] = 0`` in a `when` --
+    # is written as a whole element, so the target may be one where a plain name is; nothing narrower
+    # would read the standard library's FFT and routing blocks.
+    target: Ref | Subscript
     value: Expr
 
 

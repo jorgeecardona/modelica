@@ -176,7 +176,7 @@ def unparse_statement(  # noqa: C901, PLR0911, PLR0912 -- one arm per statement 
     pad = "  " * indent
     match node:
         case ir.Assign(target=target, value=value):
-            return [f"{pad}{target.name} {assign} {unparse_expr(value)};"]
+            return [f"{pad}{unparse_expr(target)} {assign} {unparse_expr(value)};"]
         case ir.Reinit(target=target, value=value):
             return [f"{pad}reinit({target.name}, {unparse_expr(value)});"]
         case ir.Assert(condition=condition, message=message, level=level):

@@ -1496,8 +1496,12 @@ def _run(
     such merge unless its trip count is known, and an early exit has no merge at all.
     """
     match statement:
-        case ir.Assign(target=target, value=value):
-            return {**environment, target.name: _substitute(value, environment)}
+        case ir.Assign(target=ir.Ref(name=name), value=value):
+            return {**environment, name: _substitute(value, environment)}
+        case ir.Assign():
+            # A subscripted target -- one element of an array, possibly at a run-time index -- names
+            # no single variable to fold here; it is refused later, at `_prefix_statement`.
+            return {**environment}
         case ir.IfStatement(branches=branches, otherwise=otherwise):
             return _merge_branches(branches, otherwise, environment, where)
         case _:
@@ -1765,7 +1769,16 @@ def _prefix_statement(node: ir.Statement, prefix: _Path, local: frozenset[str]) 
     variable that does not exist at this level.
     """
     match node:
-        case ir.Assign(target=target, value=value):
+        case ir.Assign(target=ir.Subscript(base=base)):
+            # ``buf[iTick] := u`` -- an assignment to one element of an array. The standard
+            # library's FFT and routing blocks write these; they parse now, but writing a single
+            # element of a scalarised array (often at a run-time index) is not carried through the
+            # rest of the pipeline yet, so it is refused here with the element it names.
+            raise FlattenError(
+                f"an assignment to the array element {base.name!r} in a 'when' or algorithm is not"
+                " supported yet"
+            )
+        case ir.Assign(target=ir.Ref() as target, value=value):
             return ir.Assign(_prefix_ref(target, prefix, local), _prefix_expr(value, prefix, local))
         case ir.Reinit(target=target, value=value):
             return ir.Reinit(_prefix_ref(target, prefix, local), _prefix_expr(value, prefix, local))

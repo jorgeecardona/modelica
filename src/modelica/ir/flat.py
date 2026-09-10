@@ -141,6 +141,6 @@ class FlatModel:
             for clause in self.whens
             for branch in clause.branches
             for statement in branch.body
-            if isinstance(statement, ir.Assign)
+            if isinstance(statement, ir.Assign) and isinstance(statement.target, ir.Ref)
         }
         return len(self.equations) == len(continuous) and all(v.name in assigned for v in discrete)

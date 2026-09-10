@@ -660,7 +660,9 @@ def _remembered(system: System) -> tuple[str, ...]:
         for when in system.whens
         for branch in when.branches
         for statement in branch.body
-        if isinstance(statement, ir.Assign) and statement.target.name not in states
+        if isinstance(statement, ir.Assign)
+        and isinstance(statement.target, ir.Ref)
+        and statement.target.name not in states
     }
     return tuple(name for name in (v.name for v in system.variables) if name in found)
 
@@ -1778,16 +1780,16 @@ class Emitter:
                 return f"    out[{states[target.name]}] = {self.expr(value)}"
             case ir.Reinit(target=target):
                 raise EmitError(f"reinit({target.name}) -- only a state can be reinitialised")
-            case ir.Assign(target=target, value=value) if target.name in self.remembered:
-                return f"    w[{self.slots[target.name]}] = {self.expr(value)}"
-            case ir.Assign(target=target) if target.name in states:
+            case ir.Assign(target=ir.Ref(name=name), value=value) if name in self.remembered:
+                return f"    w[{self.slots[name]}] = {self.expr(value)}"
+            case ir.Assign(target=ir.Ref(name=name)) if name in states:
                 raise EmitError(
-                    f"{target.name} is a continuous state, so a when-clause must "
-                    f"reinit({target.name}, ...) rather than assign it"
+                    f"{name} is a continuous state, so a when-clause must "
+                    f"reinit({name}, ...) rather than assign it"
                 )
-            case ir.Assign(target=target):
+            case ir.Assign(target=ir.Ref(name=name)):
                 raise EmitError(
-                    f"{target.name} is assigned in a when-clause but is not discrete; "
+                    f"{name} is assigned in a when-clause but is not discrete; "
                     f"declare it `discrete` so that it holds its value between events"
                 )
             case _:

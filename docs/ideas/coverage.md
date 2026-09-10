@@ -42,6 +42,34 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after an assignment to an array element parses
+
+`Modelica.Blocks.Math` and `Modelica.Blocks.Routing` did not parse: the FFT block writes `buf[iTick] :=
+u` in an algorithm, the routing block `k[i] = 0` in a `when`, and the statement parser read the target
+as a bare name and then expected an assignment where the subscript's `[` was. A file that does not parse
+takes its dependents with it -- a model that names any class in `Blocks.Math`, however small, failed at
+the lookup -- so this one refusal stood in front of forty-seven example models.
+
+The assignment target now carries a subscript, the way the last name of any reference does, and the two
+files parse. Writing a single element of a scalarised array (often at a run-time index, as the FFT does)
+is not carried through the rest of the pipeline yet, so a model that actually flattens such a block is
+refused there, by the element it names, rather than at the file that defines it.
+
+The dependency refusal leaves forty-seven models. They do not reach a new stage -- each meets the next
+wall at once, an array shape unknown at flatten or an if-equation condition it cannot evaluate, the
+counts of which rise as this one empties -- so the stage totals are unchanged. No model regressed.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     59 | 13.7 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are a connect endpoint not seen as a connector (68 in parse), the `Clock` builtin (62), an
+array shape unknown at flatten (24 and 17), a subscript on an inner component in parse, and an
+if-equation condition unknown at flatten (14). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after index reduction is capped at a real model's depth
 
 Not a reachability change, a measurement-speed one, and a better diagnosis. The three DC machine

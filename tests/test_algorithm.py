@@ -496,3 +496,41 @@ def test_a_bare_call_statement_is_read_and_round_trips() -> None:
     assert statement == ir.CallStatement((), ir.Call("check", (ir.Ref(("x",)),), ()))
     assert parse(unparse(program)) == program
     assert unparse(program) == source
+
+
+def test_an_assignment_to_an_array_element_parses_and_round_trips() -> None:
+    """``buf[iTick] := u`` -- the standard library's FFT and routing blocks write one element.
+
+    The subscript rides on the target the way it does on the last name of any reference, so the
+    target is a :class:`~modelica.ir.Subscript`; a plain name stays a bare :class:`~modelica.ir.Ref`.
+    Reading this is what lets ``Blocks/Math.mo`` and ``Blocks/Routing.mo`` load at all.
+    """
+    source = "model M\n  Real b[3];\n  Integer i;\nalgorithm\n  b[i] := 5.0;\nend M;\n"
+    program = parse(source)
+    m = program.find("M")
+    assert m is not None
+    statement = m.algorithms[0][0]
+    assert isinstance(statement, ir.Assign)
+    assert statement.target == ir.Subscript(ir.Ref(("b",)), (ir.Ref(("i",)),))
+    assert parse(unparse(program)) == program
+
+
+def test_a_when_equation_may_assign_an_array_element() -> None:
+    """``when c then k[i] = 0; end when;`` -- Routing writes its selection vector this way."""
+    source = (
+        "model M\n  Real k[3];\n  Boolean c;\nequation\n  when c then\n    k[2] = 0.0;\n"
+        "  end when;\nend M;\n"
+    )
+    program = parse(source)
+    assert parse(unparse(program)) == program
+
+
+def test_an_assignment_to_an_array_element_is_refused_when_it_is_flattened() -> None:
+    """Parsing it is one thing; writing a single scalarised element is not carried through yet."""
+    source = (
+        "model M\n  Real b[3](each start = 0);\n  Boolean c;\n"
+        "equation\n  der(b[1]) = 0;\n  der(b[2]) = 0;\n  der(b[3]) = 0;\n"
+        "  when c then\n    b[1] = 5.0;\n  end when;\n  c = time > 1;\nend M;\n"
+    )
+    with pytest.raises(FlattenError, match="assignment to the array element"):
+        flatten(parse(source), "M")

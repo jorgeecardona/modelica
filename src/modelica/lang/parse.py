@@ -865,14 +865,19 @@ class _Parser:
             self._expect(Kind.OP, ")")
             self._terminate()
             return ir.Reinit(target, value)
-        target = self._reference()
+        reference = self._reference()
         if self._check(Kind.OP, "("):
             # `isValidTable(table);` -- a bare call as a statement, the twin of the bare
             # call equation, and the same empty output list.
             where = self._at(self.token)
             args, named = self._arguments()
             self._terminate()
-            return ir.CallStatement((), ir.Call(target.name, args, named), where)
+            return ir.CallStatement((), ir.Call(reference.name, args, named), where)
+        # `buf[iTick] := u` / `k[i] = 0` -- an assignment to one element of an array, in an algorithm
+        # or a `when`. The subscript rides on the target the way it does on the last name of any
+        # reference; a plain name has no brackets and stays a bare Ref.
+        indices = self._bracketed()
+        target: ir.Ref | ir.Subscript = ir.Subscript(reference, indices) if indices else reference
         self._assignment_operator()
         value = self.expression()
         self._terminate()
