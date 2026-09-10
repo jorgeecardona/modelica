@@ -42,6 +42,35 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after `size` is resolved to its dimension length at flatten
+
+The polyphase sensors write `u .^ 2 / size(u, 1)`, and `size(u, 1)` is the length of the first
+dimension of `u` -- a structural number, three for a three-phase current. The shape reader did not know
+`size`: it took a function's shape to be the shape of its arguments, so `size(u, 1)` was read as a vector
+of length three, and `an array vector / a vector` was refused, "an array `/` is not supported". Even had
+the shape been right, the element split would then have subscripted `u` *inside* the call, `size(u[i], 1)`,
+which is not what it means.
+
+`size` is now resolved to a literal during flatten, the same pass that expands `zeros(n)` and `identity(n)`:
+`size(a, k)` becomes the k-th entry of `a`'s flat shape, `size(a)` the vector of its dimension lengths.
+Its argument is already flat, so the shape registry has the answer. The shape reader learned `size` too, so
+`size(a, k)` reads as a scalar wherever it is met. It is a structural read, so it never reaches the element
+split or the emitter as a call.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     84 | 19.5 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+Flattened rose from 68 to 84 -- `size` is written across the polyphase and machine library, so the one
+fix cleared far more than the six models the array division named. Every one of the 84 flattens with no
+`size` left in its equations, and causalized and simulated hold at 23 and 21, verified by a per-stage set
+difference. The leaders are now a subscript on an inner component (parse, 70), the `Clock` builtin (66),
+an array shape unknown at flatten (26 and 24), and an if-equation condition unknown (11). Agreement is
+still unmeasured (no `omc`).
+
 ### 2026-09-10, after a range subscript is read as an array slice
 
 The polyphase transformers ground a delta connection with `transformerL.i[1:m] = zeros(m)` -- a range

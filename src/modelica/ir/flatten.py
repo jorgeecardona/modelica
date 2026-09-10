@@ -653,6 +653,10 @@ def _infer_shape(  # noqa: C901, PLR0911, PLR0912 -- one node arm each
         ):
             rows, columns = _infer_shape(arg, shapes)
             return (columns, rows)  # transpose swaps the two dimensions of a matrix
+        case ir.Call(name="size", args=(_, _)):
+            return ()  # `size(a, k)` is the scalar length of one dimension, not an array
+        case ir.Call(name="size", args=(array,)):
+            return (len(_infer_shape(array, shapes)),)  # `size(a)` is the vector of dim lengths
         case ir.Call(args=args):
             shape: tuple[int, ...] = ()
             for argument in args:
@@ -2430,7 +2434,7 @@ class _Flattener:
         """One dimension of an array constructor, evaluated against the structural parameters."""
         return _integer(node, self.values, "an array constructor's size")
 
-    def _constructors(self, node: ir.Expr) -> ir.Expr:  # noqa: PLR0911 -- one case per constructor
+    def _constructors(self, node: ir.Expr) -> ir.Expr:  # noqa: C901, PLR0911 -- one case per constructor
         """Expand every array constructor in an expression to its literal array.
 
         The counterpart of :func:`_shape_constructor` for a constructor written in an *equation*
@@ -2463,6 +2467,24 @@ class _Flattener:
                 return (
                     _shape_constructor(built, (self._dim(n),), ("<equation>",), self.values)
                     or built
+                )
+            case ir.Call(name="size", args=(array, dim)):
+                # `size(a, k)` is the k-th dimension of a: a structural number read from the shape
+                # registry, not an element-wise value, so it is resolved to a literal here rather
+                # than left to broadcast (which would make the element split subscript `a` *inside*
+                # the call). Its argument is already prefixed, so its flat shape is known.
+                shape = self._shape(self._constructors(array))
+                index = _integer(dim, self.values, "the dimension argument of `size`")
+                if not 1 <= index <= len(shape):
+                    raise FlattenError(
+                        f"`size` asks for dimension {index} of a value with"
+                        f" {len(shape)} dimension(s)"
+                    )
+                return ir.IntLiteral(shape[index - 1])
+            case ir.Call(name="size", args=(array,)):
+                # `size(a)` is the vector of a's dimension lengths, itself a literal array.
+                return ir.Array(
+                    tuple(ir.IntLiteral(d) for d in self._shape(self._constructors(array)))
                 )
             case ir.Call(name=name, args=args):
                 return ir.Call(name, tuple(self._constructors(a) for a in args), node.named)

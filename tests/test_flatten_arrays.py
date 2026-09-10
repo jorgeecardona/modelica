@@ -262,6 +262,39 @@ def test_a_slice_honours_the_step_of_its_range() -> None:
     assert equations(model)[:3] == ["x[1] = 1;", "x[3] = 3;", "x[5] = 5;"]
 
 
+def test_size_of_a_dimension_resolves_to_its_length() -> None:
+    """``size(u, 1)`` is the structural length of a dimension, a number known at flatten.
+
+    The polyphase sensors write ``u .^ 2 / size(u, 1)``; ``size`` is not an element-wise value, so it
+    is resolved to the literal length before the equation splits, not left to be subscripted inside.
+    """
+    model = flat(
+        "  parameter Integer m = 3;\n  Real u[m];\n  Real p[m];\n"
+        "equation\n  der(u) = -u;\n  p = (u .^ 2) / size(u, 1);\n"
+    )
+    assert "p[1] = u[1] ^ 2 / 3;" in equations(model)
+    assert "p[3] = u[3] ^ 2 / 3;" in equations(model)
+
+
+def test_size_reads_the_asked_dimension_of_a_matrix() -> None:
+    """``size(A, 2)`` is the second dimension, ``size(A, 1)`` the first."""
+    model = flat(
+        "  Real A[2, 3];\n  Real rows;\n  Real cols;\n"
+        "equation\n  der(A) = -A;\n  rows = size(A, 1);\n  cols = size(A, 2);\n"
+    )
+    assert "rows = 2;" in equations(model)
+    assert "cols = 3;" in equations(model)
+
+
+def test_size_in_a_scalar_reduction_resolves() -> None:
+    """``sum(u) / size(u, 1)`` is a mean: the reduction folds and the size becomes the count."""
+    model = flat(
+        "  parameter Integer m = 3;\n  Real u[m];\n  Real mean;\n"
+        "equation\n  der(u) = -u;\n  mean = sum(u) / size(u, 1);\n"
+    )
+    assert "mean = (u[1] + u[2] + u[3]) / 3;" in equations(model)
+
+
 # --------------------------------------------------------------------------------------
 # What stays refused, and why each one has to be
 # --------------------------------------------------------------------------------------
