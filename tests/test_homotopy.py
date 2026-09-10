@@ -59,6 +59,19 @@ def test_a_linear_actual_simulates_as_that_actual() -> None:
     assert np.max(np.abs(result["x"] - exact)) < 1e-12
 
 
+def test_a_named_homotopy_reads_as_the_positional_one() -> None:
+    """The library writes ``homotopy(actual = ..., simplified = ...)``; it is the positional form.
+
+    A named call reached the differentiator with no positional arguments and crashed with an
+    IndexError (MSL's `IdealizedOpAmpLimited`, so `OpAmps.Multivibrator` and its neighbours). The
+    names are resolved to ``homotopy(actual, simplified)`` at flatten, so it flattens, causalizes,
+    differentiates and simulates the same as if it had been written positionally.
+    """
+    result = simulate(_system(NAMED, "HomoNamed"), stop=1.0, tolerance=1e-11)
+    exact = np.exp(-2.0 * result.time)
+    assert np.max(np.abs(result["x"] - exact)) < 1e-12
+
+
 def test_a_nonlinear_actual_exercises_the_jacobian_rule() -> None:
     """``der(x) = -homotopy(x^3, x)`` needs d/dx of the actual (3x^2) to be right.
 
@@ -98,4 +111,13 @@ model HomoCubic
 equation
   der(x) = -homotopy(x ^ 3, x);
 end HomoCubic;
+"""
+
+NAMED = """
+model HomoNamed
+  Real x(start = 1, fixed = true);
+  parameter Real a = 2;
+equation
+  der(x) = -homotopy(actual = a * x, simplified = x);
+end HomoNamed;
 """

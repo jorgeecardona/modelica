@@ -1189,7 +1189,26 @@ _SPELLING: Final[dict[type, str]] = {
 }
 
 
-def _inline_calls(  # noqa: PLR0911 -- one case per node type, as its neighbours have
+def _homotopy_positional(call: ir.Call) -> ir.Call:
+    """``homotopy(actual = A, simplified = S)`` as ``homotopy(A, S)``.
+
+    The standard library writes homotopy with named arguments, but every consumer of the call -- the
+    derivative, the emitter, the evaluator -- reads the actual off the first positional argument and
+    the simplified off the second. The names are resolved to that order once, here, so none of them
+    needs to know the call could be named. A call that is not the ``(actual, simplified)`` shape is
+    left as it is, to be refused where it is used rather than reshaped into something wrong.
+    """
+    if not call.named:
+        return call
+    by_name = dict(call.named)
+    actual = call.args[0] if call.args else by_name.get("actual")
+    simplified = call.args[1] if len(call.args) > 1 else by_name.get("simplified")
+    if actual is None or simplified is None:
+        return call
+    return ir.Call("homotopy", (actual, simplified), ())
+
+
+def _inline_calls(  # noqa: C901, PLR0911 -- one case per node type, as its neighbours have
     node: ir.Expr, scope: Scope, depth: int = 0
 ) -> ir.Expr:
     """Replace every call to a user-written ``function`` with the expression it computes."""
@@ -1200,6 +1219,8 @@ def _inline_calls(  # noqa: PLR0911 -- one case per node type, as its neighbours
     match node:
         case ir.Call(name=name, args=args, named=named):
             call = ir.Call(name, tuple(go(a) for a in args), tuple((k, go(v)) for k, v in named))
+            if name == "homotopy":
+                call = _homotopy_positional(call)
             found = scope.function(name)
             return call if found is None else _inline(found, scope, call, depth)
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):

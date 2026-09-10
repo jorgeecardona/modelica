@@ -42,6 +42,30 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a homotopy written with named arguments resolves
+
+`homotopy(actual = ..., simplified = ...)` is how the standard library's ideal op-amp writes the
+operator, and every consumer of the call read the actual off the first positional argument -- so with
+the arguments named and none positional, the differentiator indexed an empty tuple and the flatten
+stage fell over with a bare "tuple index out of range", an internal error rather than a refusal. The
+names are resolved to the positional `homotopy(actual, simplified)` at flatten now, once, so the
+derivative, the emitter and the evaluator each read it the way they always did.
+
+Reachable simulation climbs from 19 to 21 of 430 example models: `OpAmps.Multivibrator` and
+`SignalGenerator`, which build on the ideal op-amp, run end to end. Causalize and simulate stay level
+with each other at 21, every model that causalizes also simulates.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     47 | 10.9 % |
+| causalized |     21 |  4.9 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are unchanged: a composite component with a value (70), the `Clock` builtin (62), an array
+shape not known at flatten (52), a subscript on an inner component and a type alias to an array type in
+parse (32 each), and a condition not known at flatten (31). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after the multiple-import list parses
 
 `import Modelica.Blocks.Types.{ExternalCombiTable1D, Extrapolation, Smoothness}` brings several names
