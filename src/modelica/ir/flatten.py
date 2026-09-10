@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from itertools import pairwise, product
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple
 
 from modelica.ir import nodes as ir
 from modelica.ir.evaluate import EvaluationError, at, evaluate
@@ -1862,6 +1862,17 @@ def _tighten(declared: ir.Variability, floor: ir.Variability) -> ir.Variability:
     return declared if _FLOOR[declared] >= _FLOOR[floor] else floor
 
 
+class _DeferredIf(NamedTuple):
+    """A structural if-equation held for the final pass, with the scope it was met in."""
+
+    node: ir.IfEquation
+    prefix: _Path
+    local: frozenset[str]
+    scope: Scope
+    outer: Mapping[str, _Path] | None
+    initial: bool
+
+
 @dataclass
 class _Flattener:
     program: ir.Program
@@ -1878,6 +1889,15 @@ class _Flattener:
     Read by the ``connect()`` handling: a connect whose endpoint sits inside a disabled
     component is removed with it, which is the one reference the specification allows to
     outlive the removal.
+    """
+    deferred_ifs: list[_DeferredIf] = field(default_factory=list["_DeferredIf"])
+    """Structural if-equations whose condition could not be evaluated where they were met.
+
+    A condition names a parameter, and that parameter's value may be supplied by a sibling declared
+    *after* the component the if sits in (the machine friction: ``if frictionParameters.PRef <= 0``,
+    with ``frictionParameters`` set from a data record that comes later in the example). Such an if is
+    held here, with the scope it needs, and resolved by :meth:`resolve_deferred_ifs` once the whole
+    model's parameters have settled, when the condition is a number like any other.
     """
     values: dict[str, float] = field(default_factory=dict[str, float])
     """What every parameter and constant declared so far is worth, by flat name.
@@ -2539,6 +2559,7 @@ class _Flattener:
         scope: Scope,
         outer: Mapping[str, _Path] | None = None,
         initial: bool = False,
+        defer: bool = True,
     ) -> None:
         """Emit the body of the one branch whose condition holds -- a *structural* if.
 
@@ -2548,6 +2569,13 @@ class _Flattener:
         system whose active equations switch on an event -- which is a ``when``, a different machine
         and not this one; ``_boolean`` refuses such a condition by name, saying it must be known
         when the model is flattened.
+
+        A parameter in the condition may not have its value yet: it can be set from a sibling
+        declared later (the machine friction reads ``frictionParameters.PRef``, supplied by a data
+        record that comes after the machine in the example). While ``defer`` is set, a condition that
+        does not yet evaluate holds the whole if for :meth:`resolve_deferred_ifs`, run once every
+        parameter is in. On that final pass ``defer`` is off, so a condition that *still* does not
+        resolve is the genuine run-time one, and ``_boolean`` refuses it.
         """
         body = node.otherwise
         for branch in node.branches:
@@ -2556,11 +2584,41 @@ class _Flattener:
             # to become its number before the condition can be evaluated here -- the same treatment a
             # `when` condition and a top-level equation get.
             condition = self._carry(branch.condition, prefix, local, scope, outer)
+            if defer:
+                try:
+                    evaluate(condition, self.values)
+                except EvaluationError:
+                    self.deferred_ifs.append(
+                        _DeferredIf(node, prefix, local, scope, outer, initial)
+                    )
+                    return
             if _boolean(condition, self.values, "the condition of an if-equation"):
                 body = branch.body
                 break
         for inner in body:
             self._equation(inner, prefix, local, scope=scope, outer=outer, initial=initial)
+
+    def resolve_deferred_ifs(self) -> None:
+        """Resolve the if-equations held because a parameter in their condition was not yet known.
+
+        By now :meth:`instantiate` has returned and the model's parameters have all settled, so each
+        held condition is a number. A branch's body may itself hold a further if that only resolves
+        now, so the list is drained until empty; the final pass has ``defer`` off, so a condition that
+        cannot be evaluated even here is refused rather than held again.
+        """
+        while self.deferred_ifs:
+            pending = self.deferred_ifs
+            self.deferred_ifs = []
+            for held in pending:
+                self._if_equation(
+                    held.node,
+                    held.prefix,
+                    held.local,
+                    scope=held.scope,
+                    outer=held.outer,
+                    initial=held.initial,
+                    defer=False,
+                )
 
     def _severed(self, end: ir.Ref | ir.Subscript, prefix: _Path, local: frozenset[str]) -> bool:
         """Whether this connect endpoint sits inside a disabled conditional component."""
@@ -2760,6 +2818,7 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
         raise FlattenError(f"{model!r} is a {found.cls.restriction}, not a model")
     flattener = _Flattener(program)
     flattener.instantiate(found, scope, (), ir.EMPTY, "continuous")
+    flattener.resolve_deferred_ifs()
     flattener.expand_connections()
     return FlatModel(
         name=found.cls.name,

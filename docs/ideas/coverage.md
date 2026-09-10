@@ -42,6 +42,35 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a structural if-equation waits for a parameter a later sibling supplies
+
+The largest flatten wall was a structural if-equation whose condition names a parameter not yet known.
+The machine friction is written `if frictionParameters.PRef <= 0 then tau = 0 else tau = ...`, and
+`frictionParameters` is set from a data record declared *after* the machine in the example, so the
+condition could not be evaluated where the if sits. Such an if is now held and resolved in a final pass,
+once the whole model's parameters have settled and the condition is a number; a condition that still does
+not resolve on that pass is the genuine run-time one (a continuous variable, `if pipe.volumeFlow ...`)
+and is refused as before.
+
+The if-equation-condition wall falls from forty to eight (the eight that remain are the continuous
+conditions, which want a hybrid `when`, not this). Three DC machine examples flatten end to end
+(DCPM_Start, DCPM_QuasiStatic, DCPM_withLosses), so flattened moves 56 to 59. Their causalize does not
+finish inside the sixty-second budget, though: a permanent-magnet machine is a few hundred equations and
+the current causalizer is too slow on one that size, a new frontier this exposes rather than a
+regression (they failed earlier, at flatten, before). No model regressed, verified by a per-stage set
+difference.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     59 | 13.7 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are the `Clock` builtin (62), a subscript on an inner component in parse (51), a connect
+endpoint not seen as a connector (48), an array-shaped declaration met in parse (44 and 37), and an
+array shape unknown at flatten (21). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after a fixed attribute may name a boolean parameter
 
 The wall the medium constructor exposed. The fluid models write their outlet temperature as

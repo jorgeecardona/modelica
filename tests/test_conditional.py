@@ -205,3 +205,47 @@ def test_an_if_equation_on_a_continuous_variable_is_refused() -> None:
     )
     with pytest.raises(FlattenError, match="condition of an if-equation must be known"):
         flatten(parse(source), "M")
+
+
+DEFERRED_IF = """\
+package P
+  record Data
+    parameter Real pref = {pref};
+  end Data;
+  model Comp
+    parameter Real pref = 1;
+    Real tau;
+    Real w(start = 1);
+  equation
+    if pref <= 0 then
+      tau = 0;
+    else
+      tau = -w;
+    end if;
+    der(w) = tau;
+  end Comp;
+  model M
+    Comp comp(pref = data.pref);
+    Data data;
+  end M;
+end P;
+"""
+
+
+def _tau_rhs(source: str) -> ir.Expr:
+    """The right-hand side of the equation that defines `comp.tau`, whichever branch it came from."""
+    flat = flatten(parse(source), "P.M")
+    equation = next(e for e in flat.equations if e.lhs == ir.Ref(("comp", "tau")))
+    return equation.rhs
+
+
+def test_an_if_equation_whose_condition_a_later_sibling_supplies_is_deferred() -> None:
+    """The machine friction reads `frictionParameters.PRef`, set from a data record declared later.
+
+    The condition cannot be evaluated where the if sits, so it is held and resolved once every
+    parameter has settled. Both branches are reachable, chosen by the value the sibling supplies.
+    """
+    # data.pref = 0, so `pref <= 0` holds and the tau = 0 branch is the one kept.
+    assert _tau_rhs(DEFERRED_IF.format(pref="0")) == ir.IntLiteral(0)
+    # data.pref = 5, so the else branch survives: tau = -w.
+    assert _tau_rhs(DEFERRED_IF.format(pref="5")) == ir.Unary("-", ir.Ref(("comp", "w")))
