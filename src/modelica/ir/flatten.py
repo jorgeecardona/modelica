@@ -1925,33 +1925,55 @@ class _Flattener:
                     changed = True
 
     def _record_binding(
-        self, outer: ir.Modification, merged: Effective, prefix: _Path
+        self, outer: ir.Modification, merged: Effective, found: Found, prefix: _Path
     ) -> ir.Modification:
-        """A whole-record binding ``a = b`` is each member set to the matching member of ``b``.
+        """A record component given a value ``a = b`` is read as a modification of ``a``'s members.
 
-        A record component may be given another record as its value -- the machine models write
-        ``frictionParameters = dcpmData.frictionParameters``, one parameter record standing in for
-        another. The value arrived from the enclosing class already prefixed into the flat namespace,
-        so ``b.member`` is written by appending the member's name to it, and it is handed to the
-        member as an ordinary modification, which ``_component`` takes as-is. A member the caller
-        modified explicitly wins over the one copied from ``b``. Only a reference to another record is
-        expanded this way; a composite value of any other shape (a record constructor, a literal) is
-        still refused, since there is no name to read the members from.
+        A record may be given another record as its value, in one of two shapes. The machine models
+        write a *reference* -- ``frictionParameters = dcpmData.frictionParameters``, one record
+        standing in for another -- and each member of ``a`` reads the matching member of ``b``: the
+        value arrived from the enclosing class already prefixed into the flat namespace, so ``b.member``
+        is written by appending the member's name to it. The flux-tube and fluid models write a
+        *constructor* -- ``material = BaseData()`` for the record's own defaults, ``R(a = 5)`` to set a
+        field -- and each argument becomes that member's modification, positional ones matched to the
+        members in order. Either way the result is handed to the member as an ordinary modification,
+        which ``_component`` takes as-is, and a member the caller modified explicitly wins over the copy.
+
+        A constructor of a *different* record than the component's own type is a redeclaration (the
+        flux-tube examples pick a specific magnetic material this way), not a plain binding, and is
+        refused as one. So is a value of any other shape -- a literal, an array -- that names no members.
         """
         value = outer.value
-        if not isinstance(value, ir.Ref):
-            raise FlattenError(
-                f"{'.'.join(prefix)}: a composite component can only be bound to another by name"
-            )
         entries = dict(outer.entries)
-        for name, member in merged.members.items():
-            if member.component.scoping == "outer":
-                continue
-            entries.setdefault(
-                name,
-                ir.Modification(value=ir.Ref((*value.parts, name)), entries={}, redeclare=None),
-            )
-        return replace(outer, value=None, entries=entries)
+        settable = [
+            name for name, member in merged.members.items() if member.component.scoping != "outer"
+        ]
+        if isinstance(value, ir.Ref):
+            for name in settable:
+                entries.setdefault(
+                    name,
+                    ir.Modification(value=ir.Ref((*value.parts, name)), entries={}, redeclare=None),
+                )
+            return replace(outer, value=None, entries=entries)
+        if isinstance(value, ir.Call):
+            if value.name.rsplit(".", 1)[-1] != found.cls.name:
+                raise FlattenError(
+                    f"{'.'.join(prefix)}: a record constructor of a different type is a"
+                    " redeclaration, not supported yet"
+                )
+            for name, argument in zip(settable, value.args, strict=False):
+                entries.setdefault(
+                    name, ir.Modification(value=argument, entries={}, redeclare=None)
+                )
+            for name, argument in value.named:
+                entries.setdefault(
+                    name, ir.Modification(value=argument, entries={}, redeclare=None)
+                )
+            return replace(outer, value=None, entries=entries)
+        raise FlattenError(
+            f"{'.'.join(prefix)}: a composite component can only be bound to another record,"
+            " by name or by its constructor"
+        )
 
     def instantiate(  # noqa: C901, PLR0912, PLR0913, PLR0917 -- one pass over one class, and the
         # `inner` declarations it can see have to travel with it: they are a property of
@@ -1972,7 +1994,7 @@ class _Flattener:
         local = frozenset(merged.members)
         visible, resolved_outer = self._scoping(merged, prefix, inners or {})
         if outer.value is not None:
-            outer = self._record_binding(outer, merged, prefix)
+            outer = self._record_binding(outer, merged, found, prefix)
         inner = scope.inside(found)
         for name, entry in outer.entries.items():
             # A redeclaration is applied where the component is instantiated, below. One

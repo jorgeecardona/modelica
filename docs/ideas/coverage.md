@@ -42,6 +42,34 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a record constructor binding is read as a modification
+
+The follow-up to the whole-record binding, the case it left refused. A record component may be given a
+constructor rather than a reference: `material = BaseData()` for the record's own defaults,
+`R(a = 5)` to set a field. This is read the same way now -- each named or positional argument becomes
+that member's modification, an empty constructor leaves every member at the record's default -- so a
+field the constructor does not name (a `final`, most often) keeps its own formula rather than being
+copied, which is the cleaner reading. A constructor of a *different* record is a redeclaration, a
+change of type rather than a plain binding, and stays refused as one; the flux-tube examples that pick
+a specific magnetic material this way wait for that.
+
+This one moves the tally: three flux-tube examples flatten end to end (QuadraticCoreAirgap,
+ToroidalCoreAirgap, ToroidalCoreQuadraticCrossSection), whose cores default their material with an
+empty constructor. The fluid models whose medium is `Medium()` flatten past that binding too, then meet
+a `fixed` attribute that has to be a boolean literal, a new frontier of ten. No model regressed.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     56 | 13.0 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are the `Clock` builtin (62), a subscript on an inner component in parse (51), a connect
+endpoint not seen as a connector (48), an array-shaped declaration met in parse (44 and 37), and an
+if-equation condition unknown at flatten (29). The record-constructor redeclaration (10) and the
+`fixed` literal (10) are the next two flatten walls. Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after a whole-record binding is read member by member
 
 The machine models bind one parameter record to another rather than repeating every field:
