@@ -453,7 +453,7 @@
           <button type="button" id="playbtn" aria-pressed="false" title="play the cursor through time so a field's spatial profile animates -- the 1-D line or 2-D heatmap inset breathing, the standing wave swinging; Space to play or pause">&#9654;</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
-          <button type="button" id="csvbtn" title="save the drawn variables as a CSV: a time column and one column per drawn variable, in the model's own units with each column's unit named in its header (draw all for the whole set) -- re-importable as a measured log" hidden>csv</button>
+          <button type="button" id="csvbtn" title="save the drawn variables as a CSV: a time column and one column per drawn variable, in the model's own units with each column's unit named in its header (draw all for the whole set) -- re-importable as a measured log; with two runs pinned to compare, one column per run, tagged (A) and (B)" hidden>csv</button>
           <button type="button" id="svgbtn" title="save the chart as an SVG image, self-contained (colours inlined, a key naming each drawn curve) for a report or slide" hidden>svg</button>
           <button id="all">all</button>
           <button id="none">none</button>
@@ -2623,12 +2623,20 @@ function buildCsv() {
   // model's units (not the display units), so re-importing the file overlays it on the simulation
   // exactly: the import strips the `[unit]` back off the name to match the variable.
   const field = (s) => (/[",\n]/.test(s) ? '"' + String(s).replace(/"/g, '""') + '"' : String(s));
-  const header = (nm) => { const u = unitOf(nm); return field(u ? nm + " [" + u + "]" : nm); };
-  const lines = [[field("time [s]"), ...cols.map(header)].join(",")];
+  // With runs pinned to compare, each drawn variable gets one column per run, tagged with the run's
+  // letter (A, B, ...), so the file holds the comparison the plot shows. The pinned runs are already
+  // resampled onto the live run's time grid, so one time column serves them all. A single run has no
+  // tag, so its file is exactly what it was before -- one column per variable, re-importable.
+  const runs = RUNS.length;
+  const tag = (ri) => (runs > 1 ? " (" + String.fromCharCode(65 + ri) + ")" : "");
+  const header = (nm, ri) => { const u = unitOf(nm); return field((u ? nm + " [" + u + "]" : nm) + tag(ri)); };
+  const headers = [field("time [s]")];
+  for (const nm of cols) for (let ri = 0; ri < runs; ri++) headers.push(header(nm, ri));
+  const lines = [headers.join(",")];
   for (let k = 0; k < N; k++) {
     const cells = [T[k]];
-    for (const nm of cols) {
-      const vs = D.series[nm], v = vs ? vs[k] : null;
+    for (const nm of cols) for (let ri = 0; ri < runs; ri++) {
+      const vs = seriesOf(ri, nm), v = vs ? vs[k] : null;
       cells.push(v === null || v === undefined || !isFinite(v) ? "" : v);
     }
     lines.push(cells.join(","));
