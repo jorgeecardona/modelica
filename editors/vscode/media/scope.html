@@ -448,7 +448,7 @@
             <option value="rad">rad</option>
             <option value="deg">deg</option>
           </select>
-          <button type="button" id="stepbtn" aria-pressed="false" title="step-response metrics for each drawn variable: its final value, overshoot, 10-90% rise time and 2% settling time -- for a model driven from one state to another, like a controller reaching a setpoint">step</button>
+          <button type="button" id="stepbtn" aria-pressed="false" title="step-response metrics for each drawn variable: its final value, overshoot, 10-90% rise time and 2% settling time -- for a model driven from one state to another, like a controller reaching a setpoint. With two runs pinned to compare, each row also reports how those metrics moved from run A -- the effect of a gain change on the overshoot and settling time.">step</button>
           <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs), mean, σ (the standard deviation, how much it swings about the mean), final value, and ∫ (the integral over the window, a power's energy or a flow's volume) of each drawn variable over the window on screen -- the peak current, the mean power, the ripple amplitude, the settled temperature in the region you are looking at; zoom to narrow it. With two runs pinned to compare, each row also reports how its peak, mean and final moved from run A.">stats</button>
           <button type="button" id="playbtn" aria-pressed="false" title="play the cursor through time so a field's spatial profile animates -- the 1-D line or 2-D heatmap inset breathing, the standing wave swinging; Space to play or pause">&#9654;</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
@@ -3803,8 +3803,8 @@ function paintGuards() {
 // The step-response metrics of one variable over the whole run: where it ends, how far past that
 // it swung, and how long it took to rise and to settle. Defined for a signal driven from one
 // level to another; a flat or still-moving one reports what it can and leaves the rest null.
-function stepMetrics(nm) {
-  const vs = D.series[nm];
+function stepMetrics(nm, series) {
+  const vs = series || D.series[nm];
   if (!vs || N < 3) return null;
   const y0 = vs[0];
   const tail = Math.max(1, Math.floor(N * 0.02));
@@ -3846,8 +3846,9 @@ function paintStep() {
   const list = document.getElementById("steplist");
   if (!show) { list.replaceChildren(); return; }
   const frag = document.createDocumentFragment();
+  const live = RUNS.length - 1;
   for (const nm of selected()) {
-    const m = stepMetrics(nm); if (!m) continue;
+    const m = stepMetrics(nm, seriesOf(live, nm)); if (!m) continue;
     const u = unitOf(nm), du = dispUnit(u) ? " " + dispUnit(u) : "";
     const row = document.createElement("div"); row.className = "steprow"; row.title = nm;
     const sn = document.createElement("span"); sn.className = "sn"; sn.style.color = colour(nm); sn.textContent = nm;
@@ -3857,7 +3858,27 @@ function paintStep() {
       if (m.rise !== null) bits.push("tr " + fmt(toT(m.rise)) + " " + tUnit());
       if (m.settle !== null) bits.push("ts " + fmt(toT(m.settle)) + " " + tUnit());
     }
-    const sm = document.createElement("span"); sm.className = "sm"; sm.textContent = bits.join("  ·  ");
+    // With two runs pinned to compare, how the settling metrics moved from run A -- the answer to
+    // "did this gain change lower the overshoot, quicken the rise, shorten the settling time", which
+    // is why a controller is tuned by comparing runs. A metric only differences when both runs have
+    // it (both stepped, both rose past 90%), so a run that stopped stepping drops the term.
+    let delta = "";
+    if (RUNS.length === 2) {
+      const base = stepMetrics(nm, seriesOf(0, nm));
+      if (base) {
+        const sg = (x) => (x >= 0 ? "+" : "") + fmt(x);
+        const parts = ["final " + sg(disp(m.final, u) - disp(base.final, u)) + du];
+        if (m.stepLike && base.stepLike) {
+          if (m.overshoot > 0.05 || base.overshoot > 0.05) parts.push("OS " + sg(m.overshoot - base.overshoot) + "%");
+          if (m.rise !== null && base.rise !== null) parts.push("tr " + sg(toT(m.rise) - toT(base.rise)) + " " + tUnit());
+          if (m.settle !== null && base.settle !== null) parts.push("ts " + sg(toT(m.settle) - toT(base.settle)) + " " + tUnit());
+        }
+        delta = "Δ vs A   " + parts.join("  ·  ");
+      }
+    }
+    const reading = bits.join("  ·  ") + (delta ? "      " + delta : "");
+    const sm = document.createElement("span"); sm.className = "sm"; sm.textContent = reading;
+    row.title = nm + ":  " + reading;
     row.append(sn, sm);
     frag.appendChild(row);
   }
