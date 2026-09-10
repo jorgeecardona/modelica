@@ -1924,6 +1924,35 @@ class _Flattener:
                     self.values[variable.name] = value
                     changed = True
 
+    def _record_binding(
+        self, outer: ir.Modification, merged: Effective, prefix: _Path
+    ) -> ir.Modification:
+        """A whole-record binding ``a = b`` is each member set to the matching member of ``b``.
+
+        A record component may be given another record as its value -- the machine models write
+        ``frictionParameters = dcpmData.frictionParameters``, one parameter record standing in for
+        another. The value arrived from the enclosing class already prefixed into the flat namespace,
+        so ``b.member`` is written by appending the member's name to it, and it is handed to the
+        member as an ordinary modification, which ``_component`` takes as-is. A member the caller
+        modified explicitly wins over the one copied from ``b``. Only a reference to another record is
+        expanded this way; a composite value of any other shape (a record constructor, a literal) is
+        still refused, since there is no name to read the members from.
+        """
+        value = outer.value
+        if not isinstance(value, ir.Ref):
+            raise FlattenError(
+                f"{'.'.join(prefix)}: a composite component can only be bound to another by name"
+            )
+        entries = dict(outer.entries)
+        for name, member in merged.members.items():
+            if member.component.scoping == "outer":
+                continue
+            entries.setdefault(
+                name,
+                ir.Modification(value=ir.Ref((*value.parts, name)), entries={}, redeclare=None),
+            )
+        return replace(outer, value=None, entries=entries)
+
     def instantiate(  # noqa: C901, PLR0912, PLR0913, PLR0917 -- one pass over one class, and the
         # `inner` declarations it can see have to travel with it: they are a property of
         # where the instance *sits*, which no other argument carries.
@@ -1943,7 +1972,7 @@ class _Flattener:
         local = frozenset(merged.members)
         visible, resolved_outer = self._scoping(merged, prefix, inners or {})
         if outer.value is not None:
-            raise FlattenError(f"{'.'.join(prefix)}: a composite component cannot have a value")
+            outer = self._record_binding(outer, merged, prefix)
         inner = scope.inside(found)
         for name, entry in outer.entries.items():
             # A redeclaration is applied where the component is instantiated, below. One

@@ -42,6 +42,37 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a whole-record binding is read member by member
+
+The machine models bind one parameter record to another rather than repeating every field:
+`frictionParameters = dcpmData.frictionParameters`. A composite component given a value was refused
+outright, and this was the single largest flatten wall, 70 models. A record standing in for another
+record means each of its members equals the matching member of the other, so the binding is now read
+that way: the value arrived already prefixed into the flat namespace, and each member's copy is written
+by appending the member's name to it. A field derived from the others (a `final` in the record) comes
+out consistent because the fields it reads were copied too. Only a reference to another record is
+expanded; a value of any other shape (a record constructor, a medium) has no name to read the members
+from and stays refused, now with a message that says so.
+
+The 70-model refusal leaves the top of the list. About fifty-six of those models -- the DC and
+induction machines, which write the binding as a reference -- flatten past it and meet the next wall at
+once: a connect endpoint the resolver does not see as a connector, an array shape unknown at flatten, an
+if-equation condition it cannot yet evaluate. So the stage counts hold at 53 flattened and 21 simulated,
+the frontier moving without the tally, the same shape the connect-in-for change had. The twenty-two that
+remain bind a record *constructor* or a replaceable medium, the natural next case.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     53 | 12.3 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are now the `Clock` builtin (62), a subscript on an inner component in parse (51), a connect
+endpoint not seen as a connector (48), an array-shaped declaration met in parse as `expected '='` (44)
+or `expected ';'` (37), an if-equation condition unknown at flatten (29), and a composite bound to
+something other than a name (22, the follow-up to this change). Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after a connect inside a for-loop is unrolled
 
 The polyphase library wires a plug's pins in a loop: `for j in 1:m loop connect(plug_p.pin[j], pin_n);
