@@ -98,6 +98,40 @@ def test_a_condition_gated_by_a_parameter_set_through_an_extends_resolves() -> N
     assert "d.heatPort.T" in on
 
 
+_ENUM_GATED = """\
+package P
+  type Choice = enumeration(A, B);
+  model Sub
+    Real x(start = 1);
+  equation
+    der(x) = -x;
+  end Sub;
+  model M
+    import P.Choice;
+    parameter Choice mode = Choice.{value};
+    Sub sub if mode == Choice.A;
+    Real y(start = 1);
+  equation
+    der(y) = -y;
+  end M;
+end P;
+"""
+
+
+def test_a_condition_comparing_an_enumeration_literal_resolves() -> None:
+    """The power converters gate a component on `refType == SingleReferenceType.Sawtooth`.
+
+    A conditional component's condition takes the enumeration-literal rewrite an equation gets, so the
+    literal becomes its ordinal before the names are resolved; otherwise the imported `Choice.A` reads
+    as a variable that does not exist. The component is kept when the parameter picks the same literal
+    and dropped when it does not.
+    """
+    kept = [v.name for v in flatten(parse(_ENUM_GATED.format(value="A")), "P.M").variables]
+    assert "sub.x" in kept
+    dropped = [v.name for v in flatten(parse(_ENUM_GATED.format(value="B")), "P.M").variables]
+    assert not any(name.startswith("sub") for name in dropped)
+
+
 def test_a_condition_nobody_can_evaluate_is_refused() -> None:
     source = LIB + "model M\n  Real x;\n  Load l if x > 0;\nequation\n  x = 1;\nend M;\n"
     with pytest.raises(FlattenError, match="must be known when the model is flattened"):

@@ -2132,9 +2132,16 @@ class _Flattener:
         component = member.component
         if component.condition is not None:
             # Evaluated here for the same reason a dimension is: whether the component
-            # exists decides how many variables and equations the model has.
+            # exists decides how many variables and equations the model has. The condition takes
+            # the enumeration-literal rewrite first, the same one an if-equation condition gets:
+            # the power-converter blocks gate a component on `refType == SingleReferenceType.Sawtooth`,
+            # and that literal has to become its ordinal before the names are resolved, or prefixing
+            # reads it as a variable that does not exist.
+            resolved = _inline_calls(
+                _literals(component.condition, member.scope, local), member.scope
+            )
             held = _boolean(
-                _prefix_expr(component.condition, path[:-1], local, values=self.values),
+                _prefix_expr(resolved, path[:-1], local, values=self.values),
                 self.values,
                 f"the condition on {'.'.join(path)!r}",
             )

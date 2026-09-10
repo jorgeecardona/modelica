@@ -42,6 +42,30 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after a conditional component's condition reads an enumeration literal
+
+The power converters gate a component on an enumeration: `SignalPWM referenceGenerator if refType ==
+SingleReferenceType.Sawtooth`. The condition on a conditional component was resolved by prefixing its
+names, but an enumeration literal is not a name -- `SingleReferenceType.Sawtooth` has to become its
+ordinal first -- so prefixing read it as a variable that does not exist. An if-equation condition
+already took that rewrite; a component's condition did not.
+
+It does now, the same literal-then-names order an equation uses, so the literal becomes its number and
+the comparison against the parameter is a comparison of two numbers. Three DC/DC converter examples
+flatten end to end -- ChopperBuckBoost_DutyCycle, HBridge_R, HBridge_RL -- so flattened moves 59 to 62.
+No model regressed.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     62 | 14.4 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are a connect endpoint not seen as a connector (parse), the `Clock` builtin (62), an array
+shape unknown at flatten (24 and 17), an if-equation condition unknown at flatten (16), and a subscript
+on an inner component in parse. Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after a whole array of connectors is connected element by element
 
 The power converters connect two arrays of connectors at once -- `connect(internalEnable,
