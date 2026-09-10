@@ -42,6 +42,33 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-10, after an if-equation may appear in an initial equation section
+
+The SPICE transistors write `initial equation if UIC then vcs = IC; end if;` -- a parameter-gated
+initial condition, the same structural if the ordinary equation section already handles: the condition
+is a parameter, evaluated at flatten, and only the chosen branch's `a = b` survives, into the initial
+equations. The initial section refused it anyway. Its guard admitted only `a = b`, a call equation and a
+`for` equation, so an if there was rejected as "only `a = b` equations may appear in initial equation"
+before it could reach the handler.
+
+The handler needed nothing new: `_if_equation` already takes the `initial` flag, threads it through a
+deferred condition and into each branch body, so a branch's equations land among the initial equations
+on their own. Only the guard had to admit `ir.IfEquation`. Five examples carried the refusal; three now
+flatten (the difference amplifier and the two heating NOR gates), and the other two step to their next
+wall (an array shape, a record redeclaration). No model regressed, verified by a per-stage set
+difference.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     65 | 15.1 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+The leaders are a subscript on an inner component (parse, 70), the `Clock` builtin (66), an if-equation
+condition unknown at flatten (27), and an array shape unknown at flatten (24 and 24). Agreement is still
+unmeasured (no `omc`).
+
 ### 2026-09-10, after a comprehension in an array declaration binding is expanded
 
 The machines set a per-phase parameter as a comprehension: `parameter Real x[m] = {f(i) for i in 1:m}`.

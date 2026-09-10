@@ -14,7 +14,7 @@ import pytest
 
 from modelica import ir
 from modelica.ir.flatten import FlattenError, flatten
-from modelica.lang import parse, unparse
+from modelica.lang import parse, unparse, unparse_equation
 
 LIB = """\
 connector Pin
@@ -283,3 +283,29 @@ def test_an_if_equation_whose_condition_a_later_sibling_supplies_is_deferred() -
     assert _tau_rhs(DEFERRED_IF.format(pref="0")) == ir.IntLiteral(0)
     # data.pref = 5, so the else branch survives: tau = -w.
     assert _tau_rhs(DEFERRED_IF.format(pref="5")) == ir.Unary("-", ir.Ref(("comp", "w")))
+
+
+# The MSL SPICE transistors write `initial equation if UIC then vcs = IC; end if;` -- a
+# parameter-gated initial condition, the same structural if the equation section allows, so it
+# belongs among the initial equations, not refused as "only `a = b` may appear" there.
+INITIAL_IF = """\
+model M
+  parameter Boolean useInitial = {useInitial};
+  parameter Real v0 = 3;
+  Real v(start = 0);
+initial equation
+  if useInitial then
+    v = v0;
+  end if;
+equation
+  der(v) = -v;
+end M;
+"""
+
+
+def test_an_if_equation_may_appear_in_an_initial_equation_section() -> None:
+    """The chosen branch's `a = b` lands among the initial equations; a false condition emits none."""
+    kept = flatten(parse(INITIAL_IF.format(useInitial="true")), "M")
+    assert [unparse_equation(e)[0].strip() for e in kept.initial_equations] == ["v = v0;"]
+    dropped = flatten(parse(INITIAL_IF.format(useInitial="false")), "M")
+    assert dropped.initial_equations == ()

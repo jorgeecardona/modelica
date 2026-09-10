@@ -2469,7 +2469,9 @@ class _Flattener:
         def carry(node: ir.Expr) -> ir.Expr:
             return self._carry(node, prefix, local, scope, outer)
 
-        if initial and not isinstance(equation, (ir.Equal, ir.CallEquation, ir.ForEquation)):
+        if initial and not isinstance(
+            equation, (ir.Equal, ir.CallEquation, ir.ForEquation, ir.IfEquation)
+        ):
             raise FlattenError("only `a = b` equations may appear in initial equation")
 
         match equation:
