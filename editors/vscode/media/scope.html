@@ -511,7 +511,7 @@
   <div class="split" id="split" title="drag to resize · double-click to collapse"></div>
   <aside class="legend">
     <div class="legtitle">variables<span class="legcount" id="legcount"></span><input id="legfilter" type="text" placeholder="filter…" spellcheck="false" autocomplete="off"></div><div id="legend"></div>
-    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), der(v), integral(P), v>0, if h>0 then h else 0" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; a component's variable is written with its dotted name (motor.coil.i), an array element with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); der(expr) is the rate of change over time and integral(expr) the cumulative area under it from the start of the run, both over the samples; a comparison (v>0, e<>0) reads as 1 or 0, and `if c then a else b` is Modelica's own conditional; click a legend row while this is focused to drop its name in; Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
+    <div class="legtitle" id="derivetitle">derive<input id="derive" type="text" placeholder="an expression, e.g. r*cos(phi), sum(T), der(v), integral(P), v>0, if h>0 then h else 0" title="plot an expression in the drawn variables, the model's parameters, and pi, e, t; a component's variable is written with its dotted name (motor.coil.i), an array element with its index (T[1,1], u[4]); a reduction over a whole field is sum/product/min/max/mean of its base name (sum(T)); der(expr) is the rate of change over time and integral(expr) the cumulative area under it from the start of the run, both over the samples; initial(expr) and final(expr) are its value at the first and last sample held constant (v - initial(v) is the change from the start, v - final(v) the approach to the settled value); a comparison (v>0, e<>0) reads as 1 or 0, and `if c then a else b` is Modelica's own conditional; click a legend row while this is focused to drop its name in; Enter to add, Enter on the same one to remove" spellcheck="false" autocomplete="off"></div>
     <div class="legtitle" id="evtitle" hidden>events</div><div id="evlist"></div>
     <div class="legtitle" id="guardtitle" hidden>guards</div><div id="guardlist"></div>
     <div class="legtitle" id="steptitle" hidden>step response</div><div id="steplist"></div>
@@ -800,6 +800,10 @@ function derivedUnit(src) {
     if (u.endsWith("/s")) return u.slice(0, -2);
     return u.includes("/") ? "" : u + ".s";
   }
+  // `initial(NAME)` and `final(NAME)` are values of the base, so they carry its unit and sit on its
+  // strip -- a `final(T)` reads on the temperature axis beside the temperatures it is the endpoint of.
+  const b = s.match(/^(?:initial|final)\(\s*([A-Za-z_][\w.]*)\s*\)$/);
+  if (b) return unitOf(b[1]);
   return "";
 }
 let derived = [];  // [{src}] -- the expressions, recompiled per model in applyDerived()
@@ -906,6 +910,20 @@ function compileExpr(src, series, time) {
             cum[k] = cum[k - 1] + inc;
           }
           return (j) => cum[j];
+        }
+        // `initial(v)` and `final(v)` are the value of an expression at the first and last sample, held
+        // as a constant so a signal reads against its own baseline: `v - initial(v)` is the change from
+        // the start, `v - final(v)` the approach to the settled value. The endpoint may be a data gap,
+        // so the finite value nearest that end is taken -- inward from the last sample for `final`, from
+        // the first for `initial` -- and only an all-gap series has no baseline at all.
+        if (t === "initial" || t === "final") {
+          eat(); const g = expr();
+          if (eat() !== ")") throw new Error("missing )");
+          const n = time.length;
+          let value = NaN;
+          if (t === "final") { for (let k = n - 1; k >= 0; k--) { const v = g(k); if (isFinite(v)) { value = v; break; } } }
+          else { for (let k = 0; k < n; k++) { const v = g(k); if (isFinite(v)) { value = v; break; } } }
+          return () => value;
         }
         // A reduction over a whole array field: `sum(T)` folds every `T[...]` element, and the base
         // may be qualified (`sum(body.T)`). Only a single array-base argument reduces; anything else
