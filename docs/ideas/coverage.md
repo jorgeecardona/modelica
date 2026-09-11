@@ -42,6 +42,30 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-11, after a multi-output function in an expression yields its first output
+
+The machine sensors write `v_ = ToSpacePhasor(i)`, and `ToSpacePhasor` returns two values, the space
+phasor and the zero-sequence component. Called where one value is expected, Modelica takes the first
+output and drops the rest, but the flattener refused any call to a function with more than one output,
+"declares 2 outputs; only one can be inlined". The tuple form `(a, b) = f(x)` already had its own path.
+
+The single-value inline now reads the first output rather than refusing. The body is run once as
+before, so every output is computed and the unused ones are simply not read; only a function that
+declares no output at all is refused now, since there is then nothing to inline. So `v_ =
+ToSpacePhasor(i)` becomes the space phasor `2/m * {cos(phi), sin(phi)} * i`, the zero sequence dropped.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     86 | 20.0 % |
+| causalized |     23 |  5.3 % |
+| simulated  |     21 |  4.9 % |
+
+Flattened rose from 84 to 86 -- the polyphase rectifier and the sensor testbench, whose space-phasor
+readouts this had blocked. The other three that named the refusal step to their next wall (an array
+shape, an if-equation condition). Every one of the 86 still flattens, and causalized and simulated hold
+at 23 and 21, verified by a per-stage set difference. Agreement is still unmeasured (no `omc`).
+
 ### 2026-09-10, after `size` is resolved to its dimension length at flatten
 
 The polyphase sensors write `u .^ 2 / size(u, 1)`, and `size(u, 1)` is the length of the first

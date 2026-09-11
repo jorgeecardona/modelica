@@ -1326,10 +1326,8 @@ def _inline(found: Found, scope: Scope, call: ir.Call, depth: int) -> ir.Expr:
     components = [m.component for m in merged.members.values()]
     inputs = [c for c in components if c.causality == "input"]
     outputs = [c for c in components if c.causality == "output"]
-    if len(outputs) != 1:
-        raise FlattenError(
-            f"function {name!r} declares {len(outputs)} outputs; only one can be inlined"
-        )
+    if not outputs:
+        raise FlattenError(f"function {name!r} declares no output; there is nothing to inline")
 
     environment = _bind(name, inputs, call)
     for component in components:
@@ -1337,9 +1335,15 @@ def _inline(found: Found, scope: Scope, call: ir.Call, depth: int) -> ir.Expr:
             environment[component.name] = component.modification.value
     environment = _sequence(found.cls.algorithms[0], environment, f"function {name!r}")
 
-    result = environment.get(outputs[0].name)
+    # A function with more than one output, called where a single value is expected, yields its
+    # first output; the rest are computed by the same run of the body and then discarded. (The
+    # tuple form `(a, b) = f(x)` reads every output instead, through `_inline_all`.) So a call like
+    # `v_ = ToSpacePhasor(i)`, whose function returns a space phasor and a zero-sequence value, reads
+    # the phasor and drops the zero sequence, rather than being refused for having two outputs.
+    wanted = outputs[0]
+    result = environment.get(wanted.name)
     if result is None:
-        raise FlattenError(f"function {name!r} never assigns its output {outputs[0].name!r}")
+        raise FlattenError(f"function {name!r} never assigns its output {wanted.name!r}")
     # A name the body reads that is not a local -- an enumeration literal, a package constant, the
     # `Modelica.Constants.T_zero` the unit conversions add -- is resolved in the function's own scope,
     # the same rewrite an equation gets, before prefixing would try to make it a variable.

@@ -92,3 +92,24 @@ def test_a_package_constant_in_a_function_body_resolves() -> None:
     )
     equation = unparse_equation(flatten(parse(source), "P.M").equations[0])[0]
     assert equation == "x = 300 + -273.15;"
+
+
+def test_a_multi_output_function_in_an_expression_uses_its_first_output() -> None:
+    """A function with several outputs, called where one value is expected, yields the first.
+
+    MSL's `ToSpacePhasor` returns a space phasor and a zero-sequence value, and `v_ =
+    ToSpacePhasor(i)` wants the phasor; the flattener used to refuse a call to any function with more
+    than one output. The rest are computed by the same run of the body and then dropped -- the tuple
+    form `(a, b) = f(x)` reads every output instead, through a separate path.
+    """
+    source = (
+        "package P\n"
+        "  function divmod\n"
+        "    input Real a;\n    output Real q;\n    output Real r;\n"
+        "  algorithm\n    q := a / 2;\n    r := a - 2 * q;\n  end divmod;\n"
+        "  model M\n    Real x;\n    Real y;\n"
+        "  equation\n    der(x) = -x;\n    y = P.divmod(x) + 1;\n  end M;\n"
+        "end P;\n"
+    )
+    equations = [unparse_equation(e)[0].strip() for e in flatten(parse(source), "P.M").equations]
+    assert "y = x / 2 + 1;" in equations

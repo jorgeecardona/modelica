@@ -376,10 +376,16 @@ def test_a_variable_assigned_on_only_one_path_is_refused() -> None:
         flatten(parse(_function("  if u > 0.0 then\n    y := 1.0;\n  end if;\n")), "M")
 
 
-def test_two_outputs_are_refused_because_an_expression_has_one_value() -> None:
+def test_a_two_output_function_in_an_expression_yields_its_first_output() -> None:
+    """An expression wants one value, so a call to a two-output function reads the first output.
+
+    The second is computed by the same run of the body and dropped (the tuple form
+    ``(a, b) = f(x)`` reads both instead). The outputs are made distinct so the assertion pins that
+    it is the first, ``y := u``, that survives and not the second, ``w := 2 * u``.
+    """
     header = "  input Real u;\n  output Real y;\n  output Real w;\n"
-    with pytest.raises(FlattenError, match="2 outputs"):
-        flatten(parse(_function("  y := u;\n  w := u;\n", header=header)), "M")
+    source = _function("  y := u;\n  w := 2.0 * u;\n", header=header)
+    assert _equation_text(source, "M") == ["z = 1.0;"]
 
 
 def test_an_input_with_no_value_and_no_default_is_refused() -> None:
