@@ -3098,15 +3098,21 @@ function drawMarks(frag) {
   // interpolation. Each selected variable's value at the mark, in display units.
   if (marks.length === 1) {
     const j = marks[0];
-    const lines = [{t: "t = " + fmt(toT(T[j])) + " " + tUnit(), dim: false}];
+    // With runs pinned to compare, every variable is read once per run in run order (A │ B ...),
+    // with their difference when there are exactly two -- the same columns the legend shows at a
+    // hover, so a mark reads both curves at the instant, not only the live one.
+    const head = "t = " + fmt(toT(T[j])) + " " + tUnit() + (RUNS.length > 1 ? "   (A │ B)" : "");
+    const lines = [{t: head, dim: false}];
     if (xVar) { const u = unitOf(xVar), xs = seriesOf(live, xVar);
       if (xs && isFinite(xs[j])) lines.push({t: varLabel(xVar) + " = " + fmt(disp(xs[j], u)) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: true, nm: xVar}); }
     for (const nm of selected().slice(0, 6)) {
       if (nm === xVar) continue;  // already shown as the x-axis line, above
-      const vs = D.series[nm]; if (!vs) continue;
-      const u = unitOf(nm), v = disp(vs[j], u);
-      if (v === null || !isFinite(v)) continue;
-      lines.push({t: nm + " = " + fmt(v) + (dispUnit(u) ? " " + dispUnit(u) : ""), dim: true, nm});
+      const u = unitOf(nm), du = dispUnit(u) ? " " + dispUnit(u) : "";
+      const vals = RUNS.map((_, ri) => { const vs = seriesOf(ri, nm); return vs && isFinite(vs[j]) ? disp(vs[j], u) : null; });
+      if (vals.every((x) => x === null)) continue;
+      let text = nm + " = " + vals.map((x) => (x === null ? "–" : fmt(x))).join(" │ ") + du;
+      if (RUNS.length === 2 && vals[0] !== null && vals[1] !== null) text += "   Δ " + fmt(vals[1] - vals[0]);
+      lines.push({t: text, dim: true, nm});
     }
     lastMeasure = lines.map((l) => l.t);
     drawMeasureBox(frag, lines);
