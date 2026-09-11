@@ -125,6 +125,8 @@
   #legendbtn[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   #stepbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   #statsbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  #peaksbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .peaklab { font-size: 10px; font-variant-numeric: tabular-nums; }
   #playbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   #steptitle, #statstitle { margin-top: 12px; }
   #helpbtn { font-weight: 700; }
@@ -459,6 +461,7 @@
           </select>
           <button type="button" id="stepbtn" aria-pressed="false" title="step-response metrics for each drawn variable: its final value, overshoot, 10-90% rise time and 2% settling time -- for a model driven from one state to another, like a controller reaching a setpoint. With two runs pinned to compare, each row also reports how those metrics moved from run A -- the effect of a gain change on the overshoot and settling time.">step</button>
           <button type="button" id="statsbtn" aria-pressed="false" title="min, peak (with the time it occurs), mean, σ (the standard deviation, how much it swings about the mean), final value, and ∫ (the integral over the window, a power's energy or a flow's volume) of each drawn variable over the window on screen -- the peak current, the mean power, the ripple amplitude, the settled temperature in the region you are looking at; zoom to narrow it. With two runs pinned to compare, each row also reports how its peak, mean and final moved from run A.">stats</button>
+          <button type="button" id="peaksbtn" aria-pressed="false" title="draw a horizontal line at each drawn variable's peak over the window on screen, labelled with the value -- the maximum temperature a roast reaches, say. With runs pinned to compare, one line per run (tagged A, B), so the peaks of both curves read off the plot side by side.">peaks</button>
           <button type="button" id="playbtn" aria-pressed="false" title="play the cursor through time so a field's spatial profile animates -- the 1-D line or 2-D heatmap inset breathing, the standing wave swinging; Space to play or pause">&#9654;</button>
           <button type="button" id="pin" title="pin this run to compare against: it keeps drawing, dashed, while you change parameters" hidden>+ compare</button>
           <button type="button" id="logbtn" title="overlay a measured log: a CSV with a time column and one column per variable, named as in the model" hidden>log…</button>
@@ -581,6 +584,9 @@ let legendFilter = "";
 // to another -- a controller reaching a setpoint, a motor running up.
 let stepOn = false;
 let statsOn = false;
+// A horizontal line at each drawn variable's peak over the visible window, one per compared run,
+// labelled with the value -- "how hot did each curve get", read straight off the plot.
+let peaksOn = false;
 // The selection an alt-click "solo" replaced, to restore when the same variable is soloed again.
 // Alt-click a legend row to show only that variable; alt-click it again to bring the rest back.
 let preSolo = null;
@@ -1915,6 +1921,7 @@ function draw() {
   phaseEventDots(frag);
   drawMarks(frag);
   drawGuides(frag);
+  drawPeaks(frag);
   // The step-response settling instants: one vertical marker per drawn step-like variable at the
   // time it last left its 2% band, each in the variable's colour and labelled with the instant, so
   // "settled by here" reads off the plot per signal rather than as one anonymous line -- a servo's
@@ -3214,6 +3221,48 @@ function drawGuides(frag) {
     }
   }
 }
+// A horizontal line at each drawn variable's peak over the visible window, one per compared run.
+// The peak's y is read through the same strip mapping the curve uses, so it lands where the line
+// actually crests -- against time only, on a scale that has one value per pixel (linear, by-unit,
+// split; a log or normalised axis registers no strip, so it is skipped). The line takes the run's
+// own dash so it reads as that curve's ceiling; the label sits at the right edge with the value and,
+// when runs are compared, the run's tag. Labels that would overprint are stacked down.
+function drawPeaks(frag) {
+  if (!peaksOn || xVar || view3d || !N) return;
+  const [a, b] = visible();
+  const labels = [];
+  for (const nm of selected()) {
+    const strip = STRIPS.find((s) => s.members.includes(nm));
+    if (!strip) continue;
+    const u = unitOf(nm);
+    RUNS.forEach((_, ri) => {
+      const vs = seriesOf(ri, nm); if (!vs) return;
+      let vmax = -Infinity;
+      for (let k = a; k <= b; k++) {
+        const v = vs[k]; if (v === null || !isFinite(v)) continue;
+        if (v > vmax) vmax = v;
+      }
+      if (!isFinite(vmax)) return;
+      const y = strip.yFor(vmax);
+      if (y < M.t - 0.5 || y > box.h - M.b + 0.5) return;
+      const st = runStyle(ri);
+      const line = el("line", {class: "peakline", x1: M.l, x2: box.w - M.r, y1: y, y2: y,
+        stroke: colour(nm), "stroke-width": 1, opacity: 0.55 * st.op});
+      if (st.dash) line.setAttribute("stroke-dasharray", st.dash);
+      frag.appendChild(line);
+      const tag = RUNS.length > 1 ? " " + String.fromCharCode(65 + ri) : "";
+      labels.push({y, text: fmt(disp(vmax, u)) + (dispUnit(u) ? " " + dispUnit(u) : "") + tag, col: colour(nm)});
+    });
+  }
+  labels.sort((p, q) => p.y - q.y);
+  let lastY = -Infinity;
+  for (const lab of labels) {
+    const y = lab.y - lastY < 11 ? lastY + 11 : lab.y;
+    lastY = y;
+    frag.appendChild(el("text", {class: "peaklab", x: box.w - M.r - 3, y: y - 3,
+      "text-anchor": "end", fill: lab.col}, "max " + lab.text));
+  }
+}
 // A shift-click drops a level guide at the pointer's value on the strip under it, or lifts one
 // already within 6px. STRIPS is from the last draw(), so the mapping is the one on screen.
 function placeGuide(event) {
@@ -3434,6 +3483,10 @@ if (deriveBox) deriveBox.addEventListener("keydown", (e) => {
 const stepBtn = document.getElementById("stepbtn");
 if (stepBtn) stepBtn.onclick = () => {
   stepOn = !stepOn; stepBtn.setAttribute("aria-pressed", String(stepOn)); draw();
+};
+const peaksBtn = document.getElementById("peaksbtn");
+if (peaksBtn) peaksBtn.onclick = () => {
+  peaksOn = !peaksOn; peaksBtn.setAttribute("aria-pressed", String(peaksOn)); draw();
 };
 const statsBtn = document.getElementById("statsbtn");
 if (statsBtn) statsBtn.onclick = () => {
