@@ -337,3 +337,37 @@ def test_a_name_inherited_twice_with_a_difference_is_still_a_clash() -> None:
     )
     with pytest.raises(FlattenError, match="inherits 'CellType' twice"):
         flatten(parse(source), "M")
+
+
+def test_a_redeclaration_on_an_extends_clause_replaces_the_type() -> None:
+    """``extends Holder(redeclare Derived port)`` gives ``port`` the derived type and its added ports.
+
+    The machines redeclare a replaceable thermal port this way: a base port carries the common heat
+    ports, and the concrete machine's ``extends`` redeclares it to the type that adds its own. The
+    modification the extends clause writes carries the redeclaration, and it has to be applied like a
+    redeclaration written at instantiation; without it the base type is instantiated and a connect to
+    an added port fails as "not a connector".
+    """
+    source = (
+        "package P\n"
+        "  connector HeatPort\n    Real T;\n    flow Real Q;\n  end HeatPort;\n"
+        "  connector Base\n    HeatPort common;\n  end Base;\n"
+        "  connector Derived\n    extends Base;\n    HeatPort extra;\n  end Derived;\n"
+        "  model Holder\n    replaceable Base port;\n  end Holder;\n"
+        "  model M\n"
+        "    extends Holder(redeclare Derived port);\n"
+        "    HeatPort sink;\n"
+        "  equation\n"
+        "    connect(port.extra, sink);\n"
+        "  end M;\n"
+        "end P;\n"
+    )
+    model = flatten(parse(source), "P.M")
+    names = [v.name for v in model.variables]
+    # The derived-only sub-connector was instantiated, alongside the base's own.
+    assert "port.extra.T" in names
+    assert "port.extra.Q" in names
+    assert "port.common.T" in names
+    # The connect to the added port resolved: its potential equals the sink's, its flow sums to zero.
+    equations = [unparse_equation(e)[0].strip() for e in model.equations]
+    assert "port.extra.T = sink.T;" in equations

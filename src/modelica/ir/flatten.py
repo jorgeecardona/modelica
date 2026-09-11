@@ -266,6 +266,25 @@ def _same_declaration(a: ir.Component, b: ir.Component) -> bool:
     return replace(a, **blank) == replace(b, **blank)
 
 
+def _extends_member(
+    member: Member, picked_up: ir.Modification | None, writer: Scope, name: str
+) -> Member:
+    """A base member as an ``extends`` clause leaves it, given the modification the clause writes on it.
+
+    A component redeclaration (``extends Base(redeclare final T2 comp)``) replaces the member's type
+    the same way a redeclaration written at instantiation does -- the concrete machines redeclare a
+    ``replaceable`` thermal port to the type that carries their own heat ports this way, and without
+    it the base type is instantiated and the added ports are missing. Any other modification (a value,
+    an attribute) is carried on top of the member instead, applied when it is instantiated. A class
+    redeclaration is left on the mods for ``_rebind`` to read, not applied here.
+    """
+    if picked_up is None:
+        return member
+    if picked_up.redeclare is not None and not isinstance(picked_up.redeclare, ir.Class):
+        return _redeclared(member, picked_up, writer, (name,))
+    return replace(member, mods=(*member.mods, picked_up))
+
+
 def effective(found: Found, scope: Scope) -> Effective:  # noqa: C901 -- extends, redeclare, own members
     inner = scope.inside(found)
     result = Effective()
@@ -288,12 +307,9 @@ def effective(found: Found, scope: Scope) -> Effective:  # noqa: C901 -- extends
                 # `extends` writes on the name still applies, on top of the member already placed.
                 if not _same_declaration(existing.component, member.component):
                     raise FlattenError(f"{found.cls.name} inherits {name!r} twice")
-                if picked_up is not None:
-                    result.members[name] = replace(existing, mods=(*existing.mods, picked_up))
+                result.members[name] = _extends_member(existing, picked_up, inner, name)
                 continue
-            result.members[name] = (
-                member if picked_up is None else replace(member, mods=(*member.mods, picked_up))
-            )
+            result.members[name] = _extends_member(member, picked_up, inner, name)
         result.equations += base_effective.equations
         result.initial_equations += base_effective.initial_equations
     for replacement in found.cls.redeclarations:

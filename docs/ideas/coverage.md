@@ -42,6 +42,31 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-11, after a redeclaration on an extends clause replaces the type
+
+The machines declare a `replaceable` thermal port of a base type and, in each concrete machine,
+redeclare it to the type that carries that machine's own heat ports: `extends PartialBasicDCMachine(
+redeclare final ThermalPortDCEE internalThermalPort)`. The redeclaration rides on the modification the
+extends clause writes, and that modification was only ever carried as a value on the member, never
+applied. So the base type was instantiated, its added heat ports were missing, and a connect to one,
+`connect(re.heatPort, internalThermalPort.heatPortExcitation)`, failed as "not a connector".
+
+A redeclaration written on an extends clause now replaces the member's type, the same way one written
+at instantiation does. The two spellings meet in the same `_redeclared`, so there is one rule; a class
+redeclaration on an extends clause is still left for `_rebind`.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     90 | 20.9 % |
+| causalized |     41 |  9.5 % |
+| simulated  |     27 |  6.3 % |
+
+The reach jumps: flattened 86 to 90, causalized 23 to 41, simulated 21 to 27. The DC machines flatten,
+causalize and simulate now that their thermal ports and power-balance records redeclare to the right
+types; the induction and synchronous machines flatten past this wall and stop at the next (a space-phasor
+array shape, a star-point condition). No model regressed, verified by a per-stage set difference.
+
 ### 2026-09-11, after a multi-output function in an expression yields its first output
 
 The machine sensors write `v_ = ToSpacePhasor(i)`, and `ToSpacePhasor` returns two values, the space
