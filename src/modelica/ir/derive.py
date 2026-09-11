@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from modelica.ir import nodes as ir
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Container
+    from collections.abc import Callable, Container, Iterator
 
 __all__ = ["DerivativeError", "d_dt", "d_dx", "der_name", "simplify"]
 
@@ -64,6 +64,46 @@ def _number(node: ir.Expr) -> float | None:
 
 def _is(node: ir.Expr, value: float) -> bool:
     return _number(node) == value
+
+
+def _refs(node: ir.Expr) -> Iterator[ir.Ref]:  # noqa: C901 -- one case per node type
+    """Every variable reference in ``node``, for asking a subtree whether the target is even in it."""
+    match node:
+        case ir.Ref():
+            yield node
+        case ir.Binary(lhs=lhs, rhs=rhs):
+            yield from _refs(lhs)
+            yield from _refs(rhs)
+        case ir.Unary(operand=operand):
+            yield from _refs(operand)
+        case ir.Call(args=args):
+            for argument in args:
+                yield from _refs(argument)
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            yield from _refs(condition)
+            yield from _refs(then)
+            yield from _refs(otherwise)
+        case ir.Subscript(base=base, indices=indices):
+            yield from _refs(base)
+            for index in indices:
+                yield from _refs(index)
+        case ir.Array(elements=elements):
+            for element in elements:
+                yield from _refs(element)
+        case _:
+            return  # a literal, a range, a matrix: no scalar variable reference to reach here
+
+
+def _active(node: ir.Expr, leaf: Callable[[ir.Ref], ir.Expr]) -> bool:
+    """Whether ``node``'s derivative under ``leaf`` is not identically zero.
+
+    A relation or a boolean has no derivative rule, but its *value* only changes with the variables
+    inside it. Asked for a Jacobian entry with respect to a variable that does not appear there, or a
+    time derivative of a relation on constants, the derivative is simply zero and there is nothing to
+    refuse. So the refusal is kept for the case that matters -- the variable being solved for actually
+    sitting inside the relation -- and everything else it does not touch differentiates to zero.
+    """
+    return any(not _is(leaf(ref), 0) for ref in _refs(node))
 
 
 def neg(node: ir.Expr) -> ir.Expr:
@@ -310,7 +350,13 @@ def _binary(node: ir.Binary, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:
         case "^":
             return _power(lhs, rhs, leaf)
         case _:
-            raise DerivativeError(f"a {node.op!r} expression has no derivative")
+            # A relation or a logical operator (`>`, `or`) is not differentiable, but its value only
+            # turns on the variables inside it: a Jacobian entry for a variable that does not appear
+            # there is zero, not a refusal. This is why a thyristor's firing logic, `off or fire`, no
+            # longer stops the rectifier it sits in from causalizing.
+            if _active(node, leaf):
+                raise DerivativeError(f"a {node.op!r} expression has no derivative")
+            return ZERO
 
 
 def _power(base: ir.Expr, exponent: ir.Expr, leaf: Callable[[ir.Ref], ir.Expr]) -> ir.Expr:
@@ -324,7 +370,7 @@ def _power(base: ir.Expr, exponent: ir.Expr, leaf: Callable[[ir.Ref], ir.Expr]) 
     return mul(pow_(base, exponent), general)
 
 
-def _derive(  # noqa: C901 -- one case per node type
+def _derive(  # noqa: C901, PLR0911 -- one case per node type
     node: ir.Expr, leaf: Callable[[ir.Ref], ir.Expr]
 ) -> ir.Expr:
     match node:
@@ -342,7 +388,9 @@ def _derive(  # noqa: C901 -- one case per node type
             return _binary(node, leaf)
         case ir.Unary(op=op, operand=operand):
             if op == "not":
-                raise DerivativeError("a boolean expression has no derivative")
+                if _active(node, leaf):
+                    raise DerivativeError("a boolean expression has no derivative")
+                return ZERO
             return neg(_derive(operand, leaf)) if op == "-" else _derive(operand, leaf)
         case ir.Call():
             return _call(node, leaf)

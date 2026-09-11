@@ -42,6 +42,28 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-09-11, after a relation differentiates to zero for a variable it does not contain
+
+A Jacobian entry is taken for each variable a torn algebraic block solves for. When a residual carries
+a relation or a logical operator (`x > 0`, `off or fire`), differentiating it used to be refused
+outright, even for a variable the relation does not mention, whose derivative there is simply zero. The
+derivative rules now return zero in that case and keep the refusal only for the variable the relation
+actually turns on.
+
+| stage      | models | of 430 |
+| ---------- | -----: | -----: |
+| parsed     |    415 | 96.5 % |
+| flattened  |     90 | 20.9 % |
+| causalized |     41 |  9.5 % |
+| simulated  |     27 |  6.3 % |
+
+The totals hold at 90 / 41 / 27: no model was blocked only by this. The nine that named it are the ideal
+thyristor rectifiers, and there the slack variable `s` sits inside the relation itself
+(`off = s < 0 or (pre(off) and not fire)`), so the derivative is genuinely undefined. An ideal switch is
+a complementarity, a variable-structure element whose active equations change on an event; supporting it
+needs event-driven mode switching, not a derivative rule, so that wall stays. This fix is the correctness
+half: a relation the solved-for variable does not touch no longer stops a block it happens to share.
+
 ### 2026-09-11, after a redeclaration on an extends clause replaces the type
 
 The machines declare a `replaceable` thermal port of a base type and, in each concrete machine,

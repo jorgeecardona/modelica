@@ -142,6 +142,20 @@ def test_a_comparison_has_no_derivative() -> None:
         d_dt(ir.Binary("<", X, Y))
 
 
+def test_a_comparison_derives_to_zero_for_a_variable_it_does_not_mention() -> None:
+    """A Jacobian entry for a variable a relation or a logical operator does not contain is zero.
+
+    ``d/dy (x > 0)`` is zero: the relation's value turns only on x, so asked about y it contributes
+    nothing, and an algebraic block whose residual carries an unrelated relation can still take the
+    slope it needs. A relation on the variable itself stays a refusal -- there is no derivative then.
+    """
+    assert d_dx(ir.Binary(">", X, num(0)), "y") == ir.RealLiteral(0.0)
+    assert d_dx(ir.Binary("or", ir.Binary("<", X, num(0)), ref("b")), "y") == ir.RealLiteral(0.0)
+    assert d_dx(ir.Unary("not", ir.Binary(">", X, num(0))), "y") == ir.RealLiteral(0.0)
+    with pytest.raises(DerivativeError):
+        d_dx(ir.Binary(">", X, num(0)), "x")
+
+
 def test_an_unknown_function_has_no_derivative() -> None:
     with pytest.raises(DerivativeError):
         d_dt(ir.Call("mystery", (X,)))
