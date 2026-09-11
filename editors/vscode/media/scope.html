@@ -484,6 +484,7 @@
             <div>
               <div class="helpsec">chart</div>
               <div class="hk"><b>drag</b><span>zoom the time window (or the x variable in a phase plot)</span></div>
+              <div class="hk"><b>shift-drag</b><span>zoom the vertical axis to the range you drag over (the shared linear or log scale, against time)</span></div>
               <div class="hk"><b>wheel</b><span>zoom the x window in and out around the pointer (the camera, in 3D)</span></div>
               <div class="hk"><b>+ / −</b><span>zoom the window in and out about its middle, from the keyboard</span></div>
               <div class="hk"><b>← / →</b><span>pan the zoomed time window left or right</span></div>
@@ -615,6 +616,12 @@ let speed = "1e-6";
 // `xwin` is a zoom in that variable's units, `XD` the domain X() maps from, set once per draw.
 let xVar = null;
 let xwin = null;
+// A manual zoom of the shared vertical axis, in the domain units of the current scale (data value
+// for linear, log10 for log), or null for the automatic range that fits the visible data. Set by a
+// shift-drag down the plot, cleared by a reset or a scale change. Only the shared linear and log
+// scales in the time view have one y-domain to zoom; the by-unit and split strips each keep theirs.
+let yWin = null;
+let ydrag = null;  // the domain value and pixel where a vertical zoom-drag began, or null
 // The variable whose legend row the pointer is over, or null. While it is set, that variable's
 // curve is drawn full and every other is faded, so one line can be picked out of a crowded plot
 // (a component model flattens to dozens). Only the line-drawn views read it (time, Cartesian
@@ -1010,7 +1017,7 @@ function select(i) {
   // -- the zoom, so editing a parameter does not throw away the view being compared.
   const same = lastModel === D.model && on.size > 0;
   const stopMoved = !N || Math.abs(T[N - 1] - prevEnd) > 1e-9;
-  if (!same || stopMoved) win = N ? [T[0], T[N - 1]] : [0, 1];
+  if (!same || stopMoved) { win = N ? [T[0], T[N - 1]] : [0, 1]; yWin = null; }
   lastModel = D.model; prevEnd = N ? T[N - 1] : 0;
   if (!same) {
     // A different model: its variable names are different, so a filter from the last one would
@@ -1264,7 +1271,7 @@ function drawPath(frag, vs, a, b, yOf, nm, ri) {
   const op = focus && nm !== hoverVar ? st.op * 0.12 : st.op;
   const w = focus && nm === hoverVar ? st.w + 0.8 : st.w;
   const attrs = {d: d, fill: "none", "stroke-width": w, stroke: colour(nm),
-    "stroke-linejoin": "round", opacity: op};
+    "stroke-linejoin": "round", opacity: op, "clip-path": "url(#plotclip)"};
   if (st.dash) attrs["stroke-dasharray"] = st.dash;
   frag.appendChild(el("path", attrs));
   if (arrows) { phaseArrows(frag, pts, colour(nm), op); phaseEndpoints(frag, pts, colour(nm), op); }
@@ -1392,6 +1399,10 @@ function terminateMarker(e) {
 function bounds() {
   const [a, b] = visible();
   if (scale === "norm") return [0, 1];
+  // A manual vertical zoom overrides the automatic range on the shared scales it is drawn against
+  // (linear, log), in the time view. A phase plot has its own aspect frame and the stacked strips
+  // their own scales, so those ignore it.
+  if (yWin && !xVar && (scale === "linear" || scale === "log")) return yWin;
   let lo = Infinity, hi = -Infinity;
   for (const nm of selected()) {
     eachRun(nm, (vs) => {
@@ -1818,6 +1829,13 @@ function draw() {
   M.l = box.w < 360 ? 40 : box.w < 520 ? 50 : 60;
   svg.setAttribute("viewBox", "0 0 " + box.w + " " + box.h);
   const frag = document.createDocumentFragment();
+  // Clip the drawn curves to the plot rectangle, so a manual vertical (or horizontal) zoom that
+  // pushes part of a curve past an edge cuts it at the frame rather than drawing over the axes and
+  // gutter. Only the curves carry the clip; the axis labels sit in the margin and must stay.
+  const clip = el("clipPath", {id: "plotclip"});
+  clip.appendChild(el("rect", {x: M.l, y: M.t,
+    width: Math.max(0, box.w - M.l - M.r), height: Math.max(0, box.h - M.t - M.b)}));
+  frag.appendChild(clip);
 
   // The x domain for this draw: the time window, or the phase variable's range.
   XD = xdom();
@@ -3211,6 +3229,28 @@ function timeAt(event) {
   const x = Math.min(Math.max(event.clientX - r.left, M.l), r.width - M.r);
   return domAt((x - M.l) / (r.width - M.l - M.r), XD);
 }
+// Whether a vertical zoom applies to the current view: the shared linear or log scale, drawn
+// against time (not a phase plot, the 3D view, or the stacked-strip scales, which have no single
+// shared y-domain). The gesture and its reads all guard on this.
+function yZoomable() {
+  return !!D && !view3d && !xVar && (scale === "linear" || scale === "log");
+}
+// The y-axis domain value under the pointer, in the units bounds() works in (data value on a
+// linear axis, log10 on a log axis), read off the domain the last draw drew -- so a drag reads the
+// range now on screen, whether that is the automatic fit or a previous manual zoom.
+function valueAtY(event) {
+  const r = svg.getBoundingClientRect();
+  const py = Math.min(Math.max(event.clientY - r.top, M.t), r.height - M.b);
+  const u = (r.height - M.b - py) / (r.height - M.t - M.b);  // invert Y: 0 at the foot, 1 at the top
+  const d = aspectDom || bounds();
+  return d[0] + u * (d[1] - d[0]);
+}
+// The pixel y of a domain value in the current view, the inverse of valueAtY, for the zoom band.
+function pixelAtY(value) {
+  const d = aspectDom || bounds();
+  const u = (value - d[0]) / (d[1] - d[0]);
+  return Y(u);
+}
 // Like timeAt but not clamped at the plot's right edge: past it the time keeps growing at the
 // plot's own scale, which is how dragging the stop marker outward extends the horizon.
 function timeAtFree(event) {
@@ -3249,6 +3289,18 @@ svg.addEventListener("pointermove", (e) => {
     foot.textContent = "stop → " + fmt(toT(t)) + " " + tUnit() + (t > win[1] * (1 + 1e-9) ? "   (extending)" : "");
     return;
   }
+  if (ydrag !== null) {
+    // A horizontal band spanning the plot width, from where the drag began to the pointer: the
+    // range of the vertical axis it will zoom to.
+    const py = Math.min(Math.max(e.clientY - svg.getBoundingClientRect().top, M.t), box.h - M.b);
+    const top = Math.min(ydrag.py, py), bot = Math.max(ydrag.py, py);
+    hud.replaceChildren(el("rect", {class: "band", x: M.l, y: top,
+      width: box.w - M.l - M.r, height: Math.max(bot - top, 0)}));
+    const v = valueAtY(e), lo = Math.min(ydrag.v, v), hi = Math.max(ydrag.v, v);
+    const showY = scale === "log" ? (x) => Math.pow(10, x) : (x) => x;
+    foot.textContent = "zoom y → [" + fmt(showY(lo)) + ", " + fmt(showY(hi)) + "]";
+    return;
+  }
   if (drag !== null) {
     const t = timeAt(e);
     const x0 = X(Math.min(drag, t)), x1 = X(Math.max(drag, t));
@@ -3269,6 +3321,12 @@ svg.addEventListener("pointerdown", (e) => {
   if (view3d) { stopSpin(); rot3drag = {x: e.clientX, y: e.clientY, az: rot3.az, el: rot3.el}; return; }
   // Grabbing the stop handle moves the horizon; grabbing anywhere else starts a zoom band.
   if (e.target && e.target.classList && e.target.classList.contains("stopgrip")) { stopDrag = true; return; }
+  // Shift starts a vertical zoom on the shared scale: a drag down the plot selects a y-range. A
+  // shift-click with no drag still drops a level guide -- told apart at pointerup by the band height.
+  if (e.shiftKey && yZoomable()) {
+    ydrag = {v: valueAtY(e), py: e.clientY - svg.getBoundingClientRect().top};
+    return;
+  }
   drag = timeAt(e);
 });
 svg.addEventListener("pointerup", (e) => {
@@ -3280,6 +3338,16 @@ svg.addEventListener("pointerup", (e) => {
     hud.replaceChildren();
     document.getElementById("stop").value = cleanStop(toT(t));
     reRun();
+    return;
+  }
+  if (ydrag !== null) {
+    // A band tall enough is a vertical zoom; a shift-click (a band under a thousandth of the range)
+    // still drops a level guide, so the guide gesture is kept.
+    const v = valueAtY(e), lo = Math.min(ydrag.v, v), hi = Math.max(ydrag.v, v);
+    ydrag = null; hud.replaceChildren();
+    const d = aspectDom || bounds();
+    if (hi - lo > Math.abs(d[1] - d[0]) * 1e-3) { yWin = [lo, hi]; draw(); }
+    else if (!xVar) placeGuide(e);
     return;
   }
   if (drag === null) return;
@@ -3298,14 +3366,14 @@ svg.addEventListener("pointerup", (e) => {
 });
 svg.addEventListener("pointerleave", () => {
   if (playing) return;  // the animation keeps drawing the hud; leaving must not clear it
-  if (drag === null && !stopDrag) { cursorIndex = null; hud.replaceChildren(); foot.textContent = restFooter(); paintLegend(); }
+  if (drag === null && !stopDrag && ydrag === null) { cursorIndex = null; hud.replaceChildren(); foot.textContent = restFooter(); paintLegend(); }
 });
 svg.addEventListener("dblclick", () => {
   // In 3D a double-click resets the camera, the convention Plotly and MATLAB share.
   if (view3d) { stopSpin(); resetCamera(); draw(); return; }
-  win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; guides = []; draw(); foot.textContent = restFooter();
+  win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; yWin = null; marks = []; guides = []; draw(); foot.textContent = restFooter();
 });
-document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; marks = []; guides = []; draw(); foot.textContent = restFooter(); };
+document.getElementById("reset").onclick = () => { win = N ? [T[0], T[N - 1]] : [0, 1]; xwin = null; yWin = null; marks = []; guides = []; draw(); foot.textContent = restFooter(); };
 document.getElementById("all").onclick = () => { for (const nm of filteredNames()) on.add(nm); preSolo = null; saveSelection(); draw(); };
 document.getElementById("none").onclick = () => { for (const nm of filteredNames()) on.delete(nm); preSolo = null; saveSelection(); draw(); };
 // Back to the states: the derivative-bearing variables are the model's degrees of freedom, and the
@@ -3403,7 +3471,7 @@ function togglePlay() {
 }
 const playBtn = document.getElementById("playbtn");
 if (playBtn) playBtn.onclick = () => togglePlay();
-document.getElementById("scale").onchange = (e) => { scale = e.target.value; draw(); };
+document.getElementById("scale").onchange = (e) => { scale = e.target.value; yWin = null; draw(); };
 // Hover a legend row to pick its curve out of the plot: delegated on the container, which
 // outlives the rows `paintLegend` rebuilds on every draw, so re-hovering a rebuilt row still
 // tracks. Only the line-drawn views (time, Cartesian phase) fade the rest; a 3D or polar plot
