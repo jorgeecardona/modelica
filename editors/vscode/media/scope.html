@@ -485,6 +485,7 @@
               <div class="helpsec">chart</div>
               <div class="hk"><b>drag</b><span>zoom the time window (or the x variable in a phase plot)</span></div>
               <div class="hk"><b>shift-drag</b><span>zoom the vertical axis to the range you drag over (the shared linear or log scale, against time)</span></div>
+              <div class="hk"><b>shift-wheel</b><span>zoom the vertical axis in and out around the pointer, the fluid partner to shift-drag</span></div>
               <div class="hk"><b>wheel</b><span>zoom the x window in and out around the pointer (the camera, in 3D)</span></div>
               <div class="hk"><b>+ / −</b><span>zoom the window in and out about its middle, from the keyboard</span></div>
               <div class="hk"><b>← / →</b><span>pan the zoomed time window left or right</span></div>
@@ -3701,6 +3702,27 @@ function zoomWindow(factor, center) {
   draw();
   return true;
 }
+// The wheel with shift zooms the shared vertical axis around the pointer, the fluid partner to the
+// shift-drag band. It scales the current y-window (or the automatic fit, when none is set) about the
+// value under the cursor, clamped to the data's full range; zoomed back out to that range it hands
+// the axis back to the automatic fit, the same as reaching the whole span with the x wheel.
+function zoomYWindow(factor, center) {
+  if (!yZoomable()) return false;
+  const save = yWin; yWin = null; const full = bounds(); yWin = save;  // the automatic fit, sans yWin
+  const cur = yWin || full;
+  const fullSpan = full[1] - full[0];
+  if (!(cur[1] - cur[0] > 0) || !(fullSpan > 0)) return false;
+  if ((cur[1] - cur[0]) * factor >= fullSpan * (1 - 1e-9)) {
+    yWin = null;  // zoomed out to the whole range: back to the automatic fit
+  } else {
+    const lo = Math.max(full[0], center - (center - cur[0]) * factor);
+    const hi = Math.min(full[1], center + (cur[1] - center) * factor);
+    if (!(hi - lo > 0)) return false;
+    yWin = hi - lo >= fullSpan * (1 - 1e-9) ? null : [lo, hi];
+  }
+  draw();
+  return true;
+}
 // The middle of the window a keyboard zoom pivots on -- the phase window or the time window.
 function windowCentre() { const w = xVar ? (xwin || xdom()) : win; return (w[0] + w[1]) / 2; }
 svg.addEventListener("wheel", (e) => {
@@ -3710,6 +3732,9 @@ svg.addEventListener("wheel", (e) => {
     draw();
     return;
   }
+  // Shift zooms the vertical axis around the pointer instead -- the fluid partner to the shift-drag
+  // band, the same as the plain wheel is to the drag-a-band zoom of the x window.
+  if (e.shiftKey && zoomYWindow(e.deltaY > 0 ? 1.15 : 1 / 1.15, valueAtY(e))) { e.preventDefault(); return; }
   // The wheel zooms the x window around the pointer, homing in on the instant (or phase value)
   // under the cursor and back out -- the fluid partner to the drag-a-band zoom.
   if (zoomWindow(e.deltaY > 0 ? 1.15 : 1 / 1.15, timeAt(e))) e.preventDefault();
