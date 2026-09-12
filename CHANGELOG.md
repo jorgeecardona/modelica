@@ -6,6 +6,12 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **A parameter with no binding takes its `start` value.** The specification lets a parameter stand
+  on its `start` attribute (with a tool warning) when nothing binds it, and the machines rely on it:
+  a synchronous machine declares `parameter Boolean useDamperCage(start = true)` with no binding and
+  gates its damper-cage heat port on it, so `start` is the value the condition must read. An unbound
+  parameter now evaluates its `start` expression against the known values and records the result, so
+  a conditional component keyed on such a parameter resolves.
 - **The elementwise operators `.*`, `./`, `.^` (and `.+`, `.-`).** Modelica's dotted operators are
   elementwise between two arrays: `x .* y` is the elementwise product `*` is not (a `*` between two
   arrays is a contraction), and `./` and `.^` are the elementwise divide and power that plain `/`

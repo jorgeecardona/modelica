@@ -2328,7 +2328,7 @@ class _Flattener:
                 inners=inners,
             )
 
-    def _leaf(  # noqa: C901 -- one pass laying a scalar variable down, attribute by attribute
+    def _leaf(  # noqa: C901, PLR0912 -- one pass laying a scalar variable down, attribute by attribute
         self,
         component: ir.Component,
         path: _Path,
@@ -2398,6 +2398,19 @@ class _Flattener:
                 value = None
             if isinstance(value, (bool, int, float)):
                 self.values[name] = value
+        elif variability == "parameter":
+            # A parameter with no binding takes its `start` value: the specification lets a parameter
+            # stand on its start (with a tool warning), and the machines rely on it -- a synchronous
+            # machine declares `parameter Boolean useDamperCage(start = true)` with no binding and
+            # gates its damper-cage heat port on it, so `start` is the value the condition must read.
+            start_value = attribute("start")
+            if start_value is not None:
+                try:
+                    value = evaluate(start_value, self.values)
+                except EvaluationError:
+                    value = None
+                if isinstance(value, (bool, int, float)):
+                    self.values[name] = value
         if binding is not None and variability not in ("parameter", "constant"):
             # A declaration equation on a non-constant is an ordinary equation.
             self.equations.append(ir.Equal(ir.Ref(path), binding))
