@@ -37,8 +37,9 @@ editors/vscode/media/scope.data.json
 # regenerating it is what the generators are for.
 .hypothesis/
 
-# local agent instructions, not shared
-AGENTS.md
+# Personal or machine-specific agent notes. AGENTS.md and CLAUDE.md are committed
+# (the shared, tool-agnostic instructions); overrides go here and stay out of git.
+CLAUDE.local.md
 
 # generated diagram outputs
 /*.svg
