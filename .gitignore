@@ -37,8 +37,6 @@ editors/vscode/media/scope.data.json
 # regenerating it is what the generators are for.
 .hypothesis/
 
-# local agent instructions, not shared
-AGENTS.md
 
 # generated diagram outputs
 /*.svg
