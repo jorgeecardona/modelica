@@ -1,4 +1,10 @@
-# modelica -- task runner. uv is the only tool needed.
+# modelica -- human task verbs. The CI-graded tasks that match a moon task 1:1
+# (lint/format-check/typecheck/build/version-ahead) delegate to it, so the command
+# + its inputs/outputs live in ONE place (moon.yml) and `make` runs what CI runs,
+# with moon's caching. Kept direct on purpose: `test` (local `--parallel=process`
+# dogfood -- moon's :test is serial for CI determinism) and `docs` (drops the
+# notebook cache first -- moon's :docs assumes CI's clean checkout). format/bump/
+# install-hooks have no moon task.
 # One-time setup after cloning:  make install-hooks
 .DEFAULT_GOAL := help
 .PHONY: help install-hooks format lint format-check typecheck test check version-ahead bump build docs docs-prose
@@ -20,14 +26,14 @@ format: ## auto-format + autofix lint (ruff)
 	uv run ruff format $(FMT_SCOPE)
 	uv run ruff check --fix src tests
 
-lint: ## lint (ruff) -- same as CI
-	uv run ruff check src tests
+lint: ## lint (ruff) -- the CI :lint task
+	moon run :lint
 
-format-check: ## fail if anything in the CI scope is not ruff-formatted -- same as CI
-	uv run ruff format --check $(FMT_SCOPE)
+format-check: ## fail if anything in the CI scope is not ruff-formatted -- the CI :format-check task
+	moon run :format-check
 
-typecheck: ## type-check (pyright) -- same as CI
-	uv run pyright
+typecheck: ## type-check (pyright) -- the CI :typecheck task
+	moon run :typecheck
 
 test: ## run the test suite in parallel (pytest-parallex, worker count = CPU count)
 	uv run pytest -q --parallel=process
@@ -38,8 +44,8 @@ test: ## run the test suite in parallel (pytest-parallex, worker count = CPU cou
 
 check: lint format-check typecheck test ## the full CI test stage: lint + format + typecheck + test
 
-version-ahead: ## fail unless pyproject version is greater than origin/main (when src/ changed)
-	sh scripts/check-version-ahead
+version-ahead: ## fail unless pyproject version is greater than origin/main (when src/ changed) -- the CI :version-ahead task
+	moon run :version-ahead
 
 docs: ## build the site the way CI does -- notebooks re-executed, cache dropped first
 	rm -rf .cache/mkdocs-jupyter
@@ -51,5 +57,5 @@ docs-prose: ## rebuild fast for a prose edit -- reuses cached notebook output, w
 bump: ## bump version in pyproject.toml -- TYPE=patch|minor|major (default patch)
 	./scripts/bump-version $(or $(TYPE),patch)
 
-build: ## build sdist + wheel into dist/
-	uv build --out-dir dist
+build: ## build sdist + wheel into dist/ -- the CI :build task
+	moon run :build
