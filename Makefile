@@ -44,7 +44,7 @@ test: ## run the test suite in parallel (pytest-parallex, worker count = CPU cou
 
 check: lint format-check typecheck test ## the full CI test stage: lint + format + typecheck + test
 
-version-ahead: ## fail unless pyproject version is greater than origin/main (when src/ changed) -- the CI :version-ahead task
+version-ahead: ## fail unless __version__ is greater than origin/main (when src/ changed) -- the CI :version-ahead task
 	moon run :version-ahead
 
 docs: ## build the site the way CI does -- notebooks re-executed, cache dropped first
@@ -54,7 +54,7 @@ docs: ## build the site the way CI does -- notebooks re-executed, cache dropped 
 docs-prose: ## rebuild fast for a prose edit -- reuses cached notebook output, which may be stale
 	uv run --extra docs --extra sim --extra verify mkdocs build --strict
 
-bump: ## bump version in pyproject.toml -- TYPE=patch|minor|major (default patch)
+bump: ## bump __version__ in src/modelica/__init__.py -- TYPE=patch|minor|major (default patch)
 	./scripts/bump-version $(or $(TYPE),patch)
 
 build: ## build sdist + wheel into dist/ -- the CI :build task

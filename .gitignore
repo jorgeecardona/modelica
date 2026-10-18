@@ -41,3 +41,7 @@ editors/vscode/media/scope.data.json
 # generated diagram outputs
 /*.svg
 /*.png
+
+# Personal, machine-specific agent overrides (AGENTS.md is tracked)
+AGENTS.local.md
+CLAUDE.local.md

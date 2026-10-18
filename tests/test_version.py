@@ -1,10 +1,12 @@
-"""The version in ``modelica.__version__`` mirrors pyproject's.
+"""``modelica.__version__`` is the single source of truth; pyproject reads it dynamically.
 
-scripts/bump-version rewrites both, and this is what catches it when only one of them moves.
+scripts/bump-version rewrites only the literal in src/modelica/__init__.py; hatchling reads it
+back via ``[tool.hatch.version]``, so there is one source and nothing to drift against.
 """
 
 from __future__ import annotations
 
+import importlib.metadata
 import re
 import tomllib
 from pathlib import Path
@@ -12,10 +14,19 @@ from pathlib import Path
 import modelica
 
 
-def test_version_matches_pyproject() -> None:
+def test_version_matches_metadata() -> None:
+    # hatchling's dynamic version reads the literal in __init__.py, so the installed metadata must
+    # equal __version__. If they drift, the [tool.hatch.version] wiring is broken.
+    assert modelica.__version__ == importlib.metadata.version("modelica")
+
+
+def test_pyproject_version_is_dynamic() -> None:
+    # Guard the single source: pyproject declares the version dynamically and carries no static
+    # `version = "..."` that could diverge from the literal in __init__.py.
     pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
     data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    assert modelica.__version__ == data["project"]["version"]
+    assert "version" not in data["project"]
+    assert "version" in data["project"]["dynamic"]
 
 
 def test_version_is_semver() -> None:
