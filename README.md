@@ -159,15 +159,15 @@ make docs            # build the documentation site, strictly
 
 `.prototools` pins the toolchain (moon and uv); `proto install` brings it up. `moon.yml`
 holds every task and CI runs one command, `moon run :ci`. See
-[`AGENTS.md`](AGENTS.md) for the full build/test/convention detail and
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for how to send a change.
+[`AGENTS.md`](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/AGENTS.md) for the full build/test/convention detail and
+[`CONTRIBUTING.md`](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/CONTRIBUTING.md) for how to send a change.
 
 ## Links
 
 - **Repository:** <https://gitlab.com/cardona-oss/pymodelica>
 - **PyPI:** <https://pypi.org/project/modelica/>
 - **Documentation:** <https://cardona-oss.gitlab.io/pymodelica/>
-- **Changelog:** [`CHANGELOG.md`](CHANGELOG.md)
+- **Changelog:** [`CHANGELOG.md`](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/CHANGELOG.md)
 
 ## License
 
