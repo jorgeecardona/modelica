@@ -27,8 +27,7 @@ Mechanics.Translational and Rotational, Thermal.HeatTransfer, and a subset of Bl
 
 ## Build
 
-- Toolchain (moon 2.2.6, uv 0.11.19) pinned in `.prototools`; run `proto install` once after
-  cloning to bring up both.
+- Toolchain (moon, uv) pinned in `.prototools`; run `proto install` once after cloning to bring up both.
 - `uv sync --extra sim --extra verify` installs the dev environment.
 - `make install-hooks` wires up `.githooks/` (pre-commit auto-bumps patch version + runs ruff;
   pre-push runs the full check). Run once after cloning.
@@ -39,8 +38,9 @@ Mechanics.Translational and Rotational, Thermal.HeatTransfer, and a subset of Bl
 
 - `make test` — pytest with `--parallel=process` (one worker per CPU core via pytest-parallex).
   Drop the flag (`uv run pytest -q`) when debugging a single failure.
-- `make check` — the full CI gate: `lint + format-check + typecheck + test`. Must pass before
-  every commit. A green `make check` is the same gate CI runs.
+- `make check` — `lint + format-check + typecheck + test`. Must pass before every commit.
+  `:ci` runs more: test-python-floor, test-jit, build, docs, version-guard, and version-ahead
+  (`__version__` must be greater than `origin/main` when `src/` changed).
 - `moon run :test-python-floor` — proves the package imports and tests pass on Python 3.12
   (the `requires-python` floor) in an isolated environment.
 - `moon run :test-jit` — Numba/JIT tests in a throwaway env (Numba pins numpy < 2.5 and cannot
@@ -52,7 +52,7 @@ Mechanics.Translational and Rotational, Thermal.HeatTransfer, and a subset of Bl
 
 - `make format` — auto-format and autofix (ruff, line-length 100; covers `src tests examples
   docs/notebooks`).
-- `make lint` — ruff check only, no fixes (same as CI, scoped to `src tests`).
+- `make lint` — ruff check only, no fixes (same as CI, scoped to `src tests examples docs/notebooks`; `select = ["ALL"]` with per-file ignores).
 - `make format-check` — fail if anything is not formatted (CI scope: src, tests, examples,
   docs/notebooks). This is in the `make check` gate.
 - `make typecheck` — pyright strict mode over `src/` and `tests/`.
