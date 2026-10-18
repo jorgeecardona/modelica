@@ -1,155 +1,173 @@
 # modelica
 
-[![pipeline status](https://gitlab.com/jorgeecardona/pymodelica/badges/main/pipeline.svg)](https://gitlab.com/jorgeecardona/pymodelica/-/pipelines)
+[![pipeline status](https://gitlab.com/cardona-oss/pymodelica/badges/main/pipeline.svg)](https://gitlab.com/cardona-oss/pymodelica/-/pipelines)
 [![PyPI version](https://img.shields.io/pypi/v/modelica.svg)](https://pypi.org/project/modelica/)
 [![Python versions](https://img.shields.io/pypi/pyversions/modelica.svg)](https://pypi.org/project/modelica/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Documentation](https://img.shields.io/badge/docs-gitlab%20pages-blue.svg)](https://jorgeecardona.gitlab.io/pymodelica/)
 
-A Modelica toolchain written only in Python. It reads Modelica source, flattens it to a
-DAE, simulates it, and draws it. It also speaks the two exchange standards of the Modelica
-Association: **FMI 3.0** for one component, and **SSP 2.0** for a system of them.
+A Modelica toolchain in pure Python: parse `.mo` source, flatten it to a DAE, simulate it,
+and draw it, with **FMI 3.0** and **SSP 2.0** support. Every stage is an ordinary Python
+value you can read and change. For engineers and researchers who want Modelica semantics
+inside Python rather than behind a separate compiler.
 
-> The distribution is named `modelica`. The git repository keeps its older name,
-> `pymodelica`. PyPI holds the name `pymodelica` for an abandoned Modelon/JModelica.org
-> upload.
+> **Install name is `modelica`.** The git repository keeps its older name, `pymodelica`,
+> because PyPI's `pymodelica` holds an abandoned Modelon/JModelica.org upload. The import
+> package and the distribution are both `modelica`.
 
-```bash
-pip install modelica          # the core: parse, model structure, diagrams. No dependencies.
-pip install "modelica[sim]"   # adds numpy and scipy, and therefore simulation
-```
-
-**Documentation: <https://jorgeecardona.gitlab.io/pymodelica/>** — the architecture, the
-example corpus, and seven notebooks that are executed when the site is built.
-
-## Status
-
-Pre-alpha. This is a full rewrite of a Python 2 experiment from 2010. No code of that
-experiment is left. Only the goal is. Python 3.12 or later.
-
-## Why this exists
-
-Python has the two ends of a Modelica toolchain and very little of the middle.
-[FMPy](https://github.com/CATIA-Systems/FMPy) and
-[PyFMI](https://github.com/modelon-community/PyFMI) *run* an FMU that some other tool
-compiled. The tools that compile Modelica — Dymola, OpenModelica, JModelica — are large
-programs, and none of them is Python.
-
-The middle is not empty. [pymoca](https://github.com/pymoca/pymoca) parses Modelica and
-flattens it, and Deltares runs it under [RTC-Tools](https://github.com/rtc-tools/rtc-tools)
-to control water systems: that is a `.mo` file to a trajectory, in Python, in industrial
-use. It gets there with a fixed step and smooth residuals, because its consumer is an
-optimizer.
-
-So the gap is narrower than "nothing does this", and it is two things. Nothing in Python
-takes Modelica source to a trajectory the way a *hybrid* model needs — adaptive stiff
-integration, index reduction, and events the solver stops at. And nothing treats the model
-itself — the flat equations, the incidence structure, the index — as an ordinary Python
-value that you can read and change.
-
-[What else exists](https://jorgeecardona.gitlab.io/pymodelica/ideas/landscape/) is the
-evidence for both halves of that, tool by tool.
-
-That gap is the project. Every stage is a value you can hold.
-
-## The layers
-
-You can use each layer without the layers above it.
-
-| Module | What it does |
-| --- | --- |
-| `modelica.lang` | Modelica source to tokens to an AST. The lexer and the parser are written by hand. They carry source positions, so an error can say where. |
-| `modelica.build` | Python classes to the same AST values. A second front end, not a wrapper around the first. |
-| `modelica.ir` | AST to a flat model: variables, equations, an expression IR. Then matching, BLT sorting and index reduction. |
-| `modelica.sim` | Flat model to an ODE or DAE problem. Solver backends, and events. |
-| `modelica.diagram` | Any of the above to a picture: components and connections, equations and variables, or blocks in solution order. |
-| `modelica.fmi` | FMI 3.0. Read an FMU and simulate it, or export a flat model as one. |
-| `modelica.ssp` | SSP 2.0. Read the `.ssd`, `.ssv` and `.ssb` files in a `.ssp`, and run a co-simulation master over the components. |
-
-Read [the architecture notes](https://jorgeecardona.gitlab.io/pymodelica/architecture/)
-for the data model and the order the layers were built in.
-
-## What of Modelica it handles
-
-The language is large and this is pre-alpha, so the honest summary is a table, not a claim of
-completeness. The per-model measurement against the full Modelica Standard Library lives in
-[the coverage notes](https://jorgeecardona.gitlab.io/pymodelica/ideas/coverage/): about 95 % of
-its example models parse, fewer simulate end to end. The frontier there is one column below.
-
-| Area | Handled | Not yet |
-| --- | --- | --- |
-| Equations | `der`, algebraic, `connect` (flow/potential and signal), `when` with `reinit`, `terminate`, structural `if`-equations (a parameter or constant condition), `for`, `assert` | an `if`-equation on a *continuous* condition (a run-time structural switch, which is a `when`) |
-| Expressions | full arithmetic and relations, `if`-expressions, every built-in math function, `smooth` / `noEvent` / `pre` / `homotopy`, a second derivative written `der(der(x))` | `spatialDistribution`, `delay` |
-| Structure | components, `extends` with modification, conditional components, `redeclare`, `import` (all three forms), nested packages | operator overloading, external (C) functions, `impure` |
-| Types | `Real` / `Integer` / `Boolean`, discrete variables, enumerations, unit and `min`/`max` attributes, type aliases | |
-| Functions | user-defined functions with `algorithm` bodies, `if` and `for` statements | |
-| Arrays | indexed access, array parameters and starts, element-wise array equations (`der(x) = -x`, a scalar broadcast, an element-wise call) and array *products* (the dot product, matrix-vector `der(x) = A * x`, matrix-matrix), a `for` loop, multi-dimensional grids | array `/` and `^` (write them over the elements in a `for` loop) |
-| Numerics | index reduction (Pantelides), alias elimination, BLT sorting, adaptive stiff integration (Radau, LSODA), state events, a sparse Jacobian | a symplectic integrator |
-| Standards | FMI 3.0 (import and export), SSP 2.0 co-simulation | |
-
-The bundled Modelica Standard Library slice carries `Units.SI`, `Electrical.Analog`,
-`Mechanics.Translational` and `Rotational`, `Thermal.HeatTransfer`, and a piece of `Blocks`,
-under their real names, so a model that references `Modelica.*` resolves without configuration. It
-is a curated subset, not the whole library.
-
-## See a model
-
-A Modelica model is a graph. The components are the boxes and `connect()` gives the lines.
-The source text holds that graph, but a person cannot see it there. After flattening it is
-gone: the equations keep every piece of the information and none of the shape.
+## Install
 
 ```bash
-python -m modelica.diagram examples/models/DCMotor.mo examples/library/Electrical.mo \
-    examples/library/Rotational.mo examples/library/Machines.mo --depth 2 > motor.svg
+pip install modelica          # core: parse, model structure, diagrams. No dependencies.
+pip install "modelica[sim]"   # adds numpy and scipy, and with them simulation
 ```
 
-The picture needs no other program. This package draws the SVG itself. The image names no
-colour, so it reads correctly on a light page and on a dark one.
+**Status: pre-alpha.** A full rewrite of a 2010 Python 2 experiment; no code of it is left,
+only the goal. Python 3.12 or later.
+
+## Quickstart
+
+From Modelica source to a trajectory in four values. Each line is a stage you can stop at.
+
+```python
+from modelica.lang import parse
+from modelica.sim import flatten, causalize, simulate   # needs the sim extra: pip install "modelica[sim]"
+
+source = """
+model NewtonCooling "A hot object cooling toward ambient"
+  parameter Real T_amb = 25;
+  parameter Real k = 0.5;
+  Real T(start = 90, fixed = true);
+equation
+  der(T) = -k * (T - T_amb);
+end NewtonCooling;
+"""
+
+flat = flatten([parse(source)], "NewtonCooling")   # AST -> flat DAE
+system = causalize(flat)                            # matching, BLT sort, index reduction
+result = simulate(system, stop=10.0)                # integrate (Radau by default)
+
+print(system.states)   # ('T',)
+print(result.time)     # the solver's own steps
+print(result["T"])     # the trajectory, indexed by the name you wrote
+```
+
+`result.plot()` returns an interactive chart that writes itself to a self-contained HTML
+page with no CDN behind it (`result.plot().save("cooling.html")`), and in a notebook it
+renders when it is the last line of a cell. `result.write("cooling.mat")` writes a
+Dymola-format `.mat` that ModelicaRes, DyMat and BuildingsPy read.
+
+The layers compose from source to picture the same way. This draws a model to SVG with no
+other program:
+
+```bash
+python -m modelica.diagram examples/models/RLCCircuit.mo examples/library/Electrical.mo > rlc.svg
+```
 
 ```python
 from modelica import diagram
 
 picture = diagram.of("examples/models/RLCCircuit.mo", "examples/library/Electrical.mo")
-picture.write("rlc.svg")  # an image
-print(picture.to_mermaid())  # or text for a Markdown page
-print(picture.to_dot())  # or source for Graphviz
+picture.write("rlc.svg")          # an image, light- and dark-safe (it names no colour)
+print(picture.to_mermaid())       # or text for a Markdown page
+print(picture.to_dot())           # or source for Graphviz
 ```
 
-A notebook shows the picture when you put it on the last line of a cell.
+## Why modelica
+
+Python has the two ends of a Modelica toolchain and little of the middle.
+[FMPy](https://github.com/CATIA-Systems/FMPy) and
+[PyFMI](https://github.com/modelon-community/PyFMI) *run* an FMU that some other tool
+compiled. The tools that compile Modelica — **OpenModelica** (and its `OMPython` bridge),
+**Dymola**, **JModelica** — are large programs, and none of them is Python. If you want a
+mature, near-complete Modelica compiler for production, reach for one of those; this is not
+that yet.
+
+So the gap is narrow and specific, and it is two things:
+
+- **Nothing in Python takes Modelica source to a trajectory the way a *hybrid* model needs**
+  — adaptive stiff integration, index reduction, and events the solver stops at.
+- **Nothing treats the model itself as an ordinary Python value** — the flat equations, the
+  incidence structure, the index — that you can read, inspect and change.
+
+That gap is the project. Choose `modelica` when you want Modelica semantics *as a library*:
+to inspect the flat DAE, script the toolchain, or embed a solver in your own Python. Choose
+OpenModelica or Dymola when you need breadth of language coverage today.
+
+## Key features
+
+- **Two front ends, one IR.** A hand-written lexer and recursive-descent parser carry source
+  positions, so an error says where; a Python builder API (`modelica.build`) produces the
+  same AST values. The two are cross-checked against each other.
+- **Dependency-free core.** `import modelica` pulls in nothing. Numerics arrive as the `sim`
+  extra (numpy + scipy), so tooling that only reads model structure stays cheap to install.
+- **The flat model is a value.** Flattening resolves `extends`, modifications and `connect()`
+  into scalar variables and acausal equations; causalization does alias elimination, matching,
+  Tarjan BLT sorting and Pantelides index reduction. States, candidate state sets, index and
+  blocks are all readable off the `System`.
+- **Hybrid simulation.** Adaptive stiff integration (Radau, LSODA via SciPy), state and time
+  events with `reinit`, a sparse Jacobian, and asserts checked along the trajectory. The IR is
+  compilable by construction: `emit` writes the model as straight-line arithmetic.
+- **Diagrams with no extra program.** Any layer draws to SVG, Mermaid or DOT — components and
+  connections, the incidence of equations against variables, or blocks in solution order.
+- **FMI 3.0.** Read and simulate an existing FMU, or export a flat model as one
+  (`modelica.fmi`).
+- **SSP 2.0.** Read the `.ssd`/`.ssv`/`.ssb` files inside a `.ssp` and run a co-simulation
+  master over the components (`modelica.ssp`).
+- **A bundled Modelica Standard Library slice** under the real `Modelica.*` names: `Units.SI`,
+  `Electrical.Analog`, `Mechanics.Translational` and `Rotational`, `Thermal.HeatTransfer`, and
+  a piece of `Blocks`. A curated subset, not the whole library.
+
+## The layers
+
+Each layer is usable without the ones above it.
+
+| Module | What it does |
+| --- | --- |
+| `modelica.lang` | Modelica source to tokens to an AST, with source positions. |
+| `modelica.build` | Python classes to the same AST values. A second front end. |
+| `modelica.ir` | AST to a flat model; then matching, BLT sorting and index reduction. |
+| `modelica.sim` | Flat model to an ODE/DAE problem; solver backends and events. |
+| `modelica.diagram` | Any of the above to a picture: components, incidence, or blocks. |
+| `modelica.fmi` | FMI 3.0: read an FMU and simulate it, or export a flat model as one. |
+| `modelica.ssp` | SSP 2.0: read a `.ssp` and run a co-simulation master. |
+
+## What of Modelica it handles
+
+The language is large and this is pre-alpha, so the honest summary is a table. About 95 % of
+the Modelica Standard Library example models the project measures against parse; fewer
+simulate end to end. The per-model
+[coverage notes](https://cardona-oss.gitlab.io/pymodelica/ideas/coverage/) track the frontier.
+
+| Area | Handled | Not yet |
+| --- | --- | --- |
+| Equations | `der`, algebraic, `connect` (flow/potential and signal), `when` with `reinit`, `terminate`, structural `if`-equations, `for`, `assert` | an `if`-equation on a *continuous* condition |
+| Expressions | full arithmetic and relations, `if`-expressions, every built-in math function, `smooth` / `noEvent` / `pre` / `homotopy`, `der(der(x))` | `spatialDistribution`, `delay` |
+| Structure | components, `extends` with modification, conditional components, `redeclare`, `import`, nested packages | operator overloading, external (C) functions, `impure` |
+| Types | `Real` / `Integer` / `Boolean`, discrete variables, enumerations, unit and `min`/`max` attributes, type aliases | |
+| Functions | user functions with `algorithm` bodies, `if` and `for` statements | |
+| Arrays | indexed access, array parameters and starts, element-wise array equations and products (dot, matrix-vector, matrix-matrix), `for` loops, multi-dimensional grids | array `/` and `^` |
+| Numerics | index reduction (Pantelides), alias elimination, BLT sorting, adaptive stiff integration (Radau, LSODA), state events, sparse Jacobian | a symplectic integrator |
+| Standards | FMI 3.0 (import and export), SSP 2.0 co-simulation | |
 
 ## Development
 
 ```bash
-make install-hooks   # once, after you clone. A pre-commit hook bumps the version and runs ruff.
+make install-hooks   # once after cloning: pre-commit bumps the version and runs ruff
 make check           # lint, typecheck and test. This is what CI runs.
-make docs            # build the documentation site, strictly.
+make docs            # build the documentation site, strictly
 ```
 
-`.prototools` pins the toolchain, which is moon and uv. `proto install` brings up all of
-it. `moon.yml` holds the order of every task, and CI runs one command: `moon run :ci`.
+`.prototools` pins the toolchain (moon and uv); `proto install` brings it up. `moon.yml`
+holds every task and CI runs one command, `moon run :ci`. See
+[`AGENTS.md`](AGENTS.md) for the full build/test/convention detail and
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for how to send a change.
 
-## Releasing
+## Links
 
-There is no manual release step. The `version` in `pyproject.toml` is the only source of
-truth.
-
-* The pre-commit hook increases the patch version when a file under `src/**/*.py` changes.
-* `scripts/ci-version-guard` fails the pipeline if the shipped source moved and the version
-  did not. A hook can be bypassed. This cannot.
-* On `main`, `moon run :release` publishes to PyPI, but only if that version is not there
-  yet. It uses GitLab OIDC Trusted Publishing, so no API token is stored anywhere.
-
-The same pipeline publishes the documentation to GitLab Pages.
-
-## The documentation
-
-The documentation is at **<https://jorgeecardona.gitlab.io/pymodelica/>**. The same
-pipeline that tests the code builds it, and it executes every notebook on the way, so a
-page that stopped working fails the build.
-
-The pages follow ASD-STE100 Simplified Technical English. [How these pages are
-written](https://jorgeecardona.gitlab.io/pymodelica/style/) lists the rules and the two
-places this project departs from them.
+- **Repository:** <https://gitlab.com/cardona-oss/pymodelica>
+- **PyPI:** <https://pypi.org/project/modelica/>
+- **Documentation:** <https://cardona-oss.gitlab.io/pymodelica/>
+- **Changelog:** [`CHANGELOG.md`](CHANGELOG.md)
 
 ## License
 
@@ -158,5 +176,8 @@ MIT © Jorge Cardona
 ## Trademarks
 
 Modelica® is a registered trademark of the [Modelica Association](https://modelica.org/).
-FMI and SSP are also its trademarks. This page uses those names to identify the language
-this software reads and the standards it implements.
+FMI and SSP are also its trademarks. This package is an independent open-source
+implementation, not affiliated with or endorsed by the Modelica Association; the names
+identify the language it reads and the standards it implements.
+</content>
+</invoke>
