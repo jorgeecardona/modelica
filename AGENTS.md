@@ -62,7 +62,8 @@ Mechanics.Translational and Rotational, Thermal.HeatTransfer, and a subset of Bl
 
 ## Gotchas
 
-- **Version lives only in `pyproject.toml`.** The pre-commit hook auto-bumps the patch version
+- **Version lives as `__version__` in `src/modelica/__init__.py`** (hatchling reads it, so
+  `pyproject.toml` never disagrees). The pre-commit hook auto-bumps the patch version
   whenever a file under `src/**/*.py` is staged. Never hand-edit it; never commit with
   `--no-verify` on a src change — `scripts/ci-version-guard` will fail the pipeline anyway.
 - **Distribution name vs. repo name:** the package is `modelica`, not `pymodelica`. PyPI's

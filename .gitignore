@@ -13,6 +13,8 @@ logs/
 # absolute paths from wherever the checkout happens to live -- so it belongs in the
 # `.local` file, which is the one meant to stay out of git.
 .claude/settings.local.json
+# Claude Code worktrees scratch (per-machine)
+.claude/worktrees/
 .cache/
 # What `moon run :coverage` writes: per-model detail behind the two numbers the docs
 # record. The MSL itself lands under .cache/, covered above.

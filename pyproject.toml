@@ -105,8 +105,15 @@ docs = [
 [project.urls]
 Homepage = "https://gitlab.com/cardona-oss/pymodelica"
 Repository = "https://gitlab.com/cardona-oss/pymodelica"
+Issues = "https://gitlab.com/cardona-oss/pymodelica/-/issues"
 Changelog = "https://gitlab.com/cardona-oss/pymodelica/-/blob/main/CHANGELOG.md"
 Documentation = "https://cardona-oss.gitlab.io/pymodelica/"
+
+[tool.uv]
+# After the pre-commit hook auto-bumps __version__ in the package __init__, uv must treat the
+# editable install as stale and reinstall it; without the __init__ key the next `make check`
+# runs against the old version. (pyproject is already an implicit key; __init__ is the version source.)
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/modelica/__init__.py" }]
 
 [build-system]
 requires = ["hatchling"]
