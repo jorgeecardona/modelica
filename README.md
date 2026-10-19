@@ -3,7 +3,7 @@
 [![pipeline status](https://gitlab.com/cardona-oss/pymodelica/badges/main/pipeline.svg)](https://gitlab.com/cardona-oss/pymodelica/-/pipelines)
 [![PyPI version](https://img.shields.io/pypi/v/modelica.svg)](https://pypi.org/project/modelica/)
 [![Python versions](https://img.shields.io/pypi/pyversions/modelica.svg)](https://pypi.org/project/modelica/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/LICENSE)
 
 A Modelica toolchain in pure Python: parse `.mo` source, flatten it to a DAE, simulate it,
 and draw it, with **FMI 3.0** and **SSP 2.0** support. Every stage is an ordinary Python
@@ -171,7 +171,7 @@ holds every task and CI runs one command, `moon run :ci`. See
 
 ## License
 
-MIT © Jorge Cardona. See [LICENSE](LICENSE).
+MIT © Jorge Cardona. See [LICENSE](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/LICENSE).
 
 ## Trademarks
 
