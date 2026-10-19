@@ -59,6 +59,7 @@ def _system(model: Path) -> Any:
     return causalize(flatten([parse(f.read_text(encoding="utf-8")) for f in files], model.stem))
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("model", MODEL_FILES, ids=_ids(MODEL_FILES))
 def test_event_iteration_settles(model: Path) -> None:
     """At the initial instant, from every configuration the latches could be in."""
@@ -66,6 +67,7 @@ def test_event_iteration_settles(model: Path) -> None:
     assert report.ok, str(report)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("model", MODEL_FILES, ids=_ids(MODEL_FILES))
 def test_event_iteration_settles_at_every_event(model: Path) -> None:
     """And at every instant a real run stopped at, which is where events actually are.

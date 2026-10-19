@@ -7,7 +7,7 @@
 # install-hooks have no moon task.
 # One-time setup after cloning:  make install-hooks
 .DEFAULT_GOAL := help
-.PHONY: help install-hooks format lint format-check typecheck test check version-ahead bump build docs docs-prose
+.PHONY: help install-hooks format lint format-check typecheck test test-all check version-ahead bump build docs docs-prose
 
 # The scope CI's format-check runs over -- broader than lint's src+tests, so an unformatted
 # example (a .py twin) is caught locally before the push rather than in the pipeline.
@@ -35,14 +35,18 @@ format-check: ## fail if anything in the CI scope is not ruff-formatted -- the C
 typecheck: ## type-check (pyright) -- the CI :typecheck task
 	moon run :typecheck
 
-test: ## run the test suite in parallel (pytest-parallex, worker count = CPU count)
-	uv run pytest -q --parallel=process
-# `--parallel=process` runs the suite across one process per core with pytest-parallex, which
-# takes the ~2783 independent tests from ~305s serial to ~140s on a 14-core machine and scales
-# down cleanly on a smaller CI runner (auto workers = CPU count, so a 2-core box just uses 2).
-# Drop the flag -- `uv run pytest -q` -- to run serially when debugging a single failure.
+test: ## fast local loop: everything NOT marked `slow`, one worker per core (~40s/16 cores, ~65s/4)
+	uv run pytest -q --parallel=process -m "not slow"
+# `make test` is the quick inner loop: it deselects tests marked `slow` (whole-corpus ODE
+# integration, model checking, and codegen/compile), leaving ~2400 fast tests that scale with
+# cores. Nothing is lost -- the slow tests still run in CI (`moon run :test`) and in
+# `make test-all`, which pre-push and `make check` call. Drop `--parallel=process` to run
+# serially when debugging one failure; run `make test-all` to include the slow tests locally.
 
-check: lint format-check typecheck test ## the full CI test stage: lint + format + typecheck + test
+test-all: ## the whole suite in parallel -- what CI's :test runs (serially) and pre-push mirrors
+	uv run pytest -q --parallel=process
+
+check: lint format-check typecheck test-all ## the full CI test stage: lint + format + typecheck + ALL tests
 
 version-ahead: ## fail unless __version__ is greater than origin/main (when src/ changed) -- the CI :version-ahead task
 	moon run :version-ahead

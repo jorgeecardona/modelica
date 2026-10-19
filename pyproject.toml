@@ -150,6 +150,10 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "slow: integrates, model-checks or compiles a whole corpus model. `make test` skips these; CI (`moon run :test`, `make test-all`) runs them.",
+]
 
 [tool.ruff]
 line-length = 100

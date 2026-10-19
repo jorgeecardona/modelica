@@ -22,6 +22,10 @@ from modelica.ir.causalize import causalize
 from modelica.lang import parse
 from modelica.sim import rustsim
 
+# Whole file is slow: it compiles the Rust backend and runs it per model. `make test` skips it;
+# CI and `make test-all` run it.
+pytestmark = pytest.mark.slow
+
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 needs_rustc = pytest.mark.skipif(rustsim.compiler() is None, reason="no rustc on this machine")
 

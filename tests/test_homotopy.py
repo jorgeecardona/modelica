@@ -85,6 +85,7 @@ def test_a_nonlinear_actual_exercises_the_jacobian_rule() -> None:
     assert result["x"][-1] == pytest.approx(1.0 / math.sqrt(1.0 / 4.0 + 2.0), abs=1e-8)
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(rustsim.compiler() is None, reason="no rustc on this machine")
 def test_the_rust_backend_takes_the_actual_too(tmp_path: Path) -> None:
     """The shared unwrap strips homotopy in the Rust dialect as well: same trajectory."""

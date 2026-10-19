@@ -44,6 +44,7 @@ def _system(model: Path) -> System:
     return causalize(flatten(sources, model.stem))
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("model", MODELS, ids=[m.stem for m in MODELS])
 def test_the_two_modes_integrate_to_the_same_trajectory(model: Path) -> None:
     """The whole claim. Every variable, on a grid, over the model's own stop time.

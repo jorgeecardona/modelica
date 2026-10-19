@@ -14,6 +14,7 @@ reason. `test_every_model_is_accounted_for` holds that there is no third outcome
 
 from __future__ import annotations
 
+import functools
 import shutil
 import subprocess
 import tempfile
@@ -33,13 +34,21 @@ from modelica.sim.rustgen import unit
 if TYPE_CHECKING:
     from modelica.ir.system import System
 
+# Whole file is slow: it emits and compiles Rust for every supported corpus model. `make test`
+# skips it; CI and `make test-all` run it.
+pytestmark = pytest.mark.slow
+
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 MODELS = sorted((EXAMPLES / "models").glob("*.mo"))
 COMPILER = shutil.which("rustc")
 needs_rustc = pytest.mark.skipif(COMPILER is None, reason="no rustc on this machine")
 
 
+@functools.cache
 def _system(model: Path) -> System:
+    # Cached: parse+flatten+causalize is the same work for a given model, and `System` is a
+    # frozen dataclass, so the import-time callers below (plus every parametrized test) share one
+    # build instead of re-deriving it ~9x. This is the bulk of the suite's collection time.
     spec = tomllib.loads(model.with_suffix(".toml").read_text(encoding="utf-8"))
     sources = [
         parse((EXAMPLES / "library" / f"{name}.mo").read_text(encoding="utf-8"))
@@ -50,7 +59,8 @@ def _system(model: Path) -> System:
     return causalize(flatten(sources, model.stem))
 
 
-def _supported() -> list[Path]:
+@functools.cache
+def _supported() -> tuple[Path, ...]:
     """The models rustgen writes today, decided by trying rather than by a hand list."""
     out: list[Path] = []
     for model in MODELS:
@@ -59,7 +69,7 @@ def _supported() -> list[Path]:
         except EmitError:
             continue
         out.append(model)
-    return out
+    return tuple(out)
 
 
 def _reference_models() -> list[Path]:

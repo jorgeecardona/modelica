@@ -36,6 +36,10 @@ from modelica.sim.radau import (
 if TYPE_CHECKING:
     from modelica.ir.system import System
 
+# Whole file is slow: it integrates every corpus model with the fused Radau loop. `make test`
+# skips it; CI and `make test-all` run it.
+pytestmark = pytest.mark.slow
+
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 MODELS = sorted((EXAMPLES / "models").glob("*.mo"))
 

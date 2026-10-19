@@ -422,6 +422,7 @@ def _difference(rhs: Callable[[Any], Any], y: Any, np: Any) -> tuple[Any, Any]:
     return (4.0 * near - far) / 3.0, np.abs(near - far) / 3.0
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("model", MODEL_FILES, ids=_ids(MODEL_FILES))
 def test_the_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
     """The emitted derivative, against the crude one, at points a real run visits.
@@ -453,6 +454,7 @@ def test_the_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
     _agrees_with_a_difference_quotient(model, "rhs", "jacobian")
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("model", MODEL_FILES, ids=_ids(MODEL_FILES))
 def test_the_output_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
     """``observe_jacobian`` against a difference quotient of ``observe`` -- the claim for H.
@@ -471,6 +473,7 @@ def test_the_output_jacobian_agrees_with_a_difference_quotient(model: Path) -> N
     _agrees_with_a_difference_quotient(model, "observe", "observe_jacobian")
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("model", MODEL_FILES, ids=_ids(MODEL_FILES))
 def test_the_indicator_jacobian_agrees_with_a_difference_quotient(model: Path) -> None:
     """``indicator_jacobian`` against a difference quotient of ``indicators`` -- ``g_y``.
@@ -660,6 +663,7 @@ def _check_invariants(spec: dict[str, Any], result: Any, np: Any) -> None:
             assert top <= high + slack, f"{label}: rose to {top!r}, ceiling is {high!r}"
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("model", _simulations(), ids=_ids(MODEL_FILES))
 def test_simulates_as_specified(model: Path) -> None:
     """The end of the pipeline: numbers, checked against numbers from somewhere else.

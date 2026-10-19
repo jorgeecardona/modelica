@@ -187,6 +187,7 @@ def _ids(paths: list[Path]) -> list[str]:
     return [path.stem for path in paths]
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("model", MODEL_FILES, ids=_ids(MODEL_FILES))
 def test_the_original_equations_hold_along_the_trajectory(model: Path) -> None:
     """Every equation the modeller wrote, at twenty points of the run, on every corpus model.
