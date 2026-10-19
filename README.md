@@ -14,6 +14,27 @@ inside Python rather than behind a separate compiler.
 > because PyPI's `pymodelica` holds an abandoned Modelon/JModelica.org upload. The import
 > package and the distribution are both `modelica`.
 
+## Why modelica
+
+Python has the two ends of a Modelica toolchain and little of the middle.
+[FMPy](https://github.com/CATIA-Systems/FMPy) and
+[PyFMI](https://github.com/modelon-community/PyFMI) *run* an FMU that some other tool
+compiled. The tools that compile Modelica — **OpenModelica** (and its `OMPython` bridge),
+**Dymola**, **JModelica** — are large programs, and none of them is Python. If you want a
+mature, near-complete Modelica compiler for production, reach for one of those; this is not
+that yet.
+
+So the gap is narrow and specific, and it is two things:
+
+- **Nothing in Python takes Modelica source to a trajectory the way a *hybrid* model needs**
+  — adaptive stiff integration, index reduction, and events the solver stops at.
+- **Nothing treats the model itself as an ordinary Python value** — the flat equations, the
+  incidence structure, the index — that you can read, inspect and change.
+
+That gap is the project. Choose `modelica` when you want Modelica semantics *as a library*:
+to inspect the flat DAE, script the toolchain, or embed a solver in your own Python. Choose
+OpenModelica or Dymola when you need breadth of language coverage today.
+
 ## Install
 
 ```bash
@@ -72,27 +93,6 @@ print(picture.to_mermaid())       # or text for a Markdown page
 print(picture.to_dot())           # or source for Graphviz
 ```
 
-## Why modelica
-
-Python has the two ends of a Modelica toolchain and little of the middle.
-[FMPy](https://github.com/CATIA-Systems/FMPy) and
-[PyFMI](https://github.com/modelon-community/PyFMI) *run* an FMU that some other tool
-compiled. The tools that compile Modelica — **OpenModelica** (and its `OMPython` bridge),
-**Dymola**, **JModelica** — are large programs, and none of them is Python. If you want a
-mature, near-complete Modelica compiler for production, reach for one of those; this is not
-that yet.
-
-So the gap is narrow and specific, and it is two things:
-
-- **Nothing in Python takes Modelica source to a trajectory the way a *hybrid* model needs**
-  — adaptive stiff integration, index reduction, and events the solver stops at.
-- **Nothing treats the model itself as an ordinary Python value** — the flat equations, the
-  incidence structure, the index — that you can read, inspect and change.
-
-That gap is the project. Choose `modelica` when you want Modelica semantics *as a library*:
-to inspect the flat DAE, script the toolchain, or embed a solver in your own Python. Choose
-OpenModelica or Dymola when you need breadth of language coverage today.
-
 ## Key features
 
 - **Two front ends, one IR.** A hand-written lexer and recursive-descent parser carry source
@@ -149,7 +149,14 @@ simulate end to end. The per-model
 | Numerics | index reduction (Pantelides), alias elimination, BLT sorting, adaptive stiff integration (Radau, LSODA), state events, sparse Jacobian | a symplectic integrator |
 | Standards | FMI 3.0 (import and export), SSP 2.0 co-simulation | |
 
-## Development
+## Links
+
+- **Repository:** <https://gitlab.com/cardona-oss/pymodelica>
+- **PyPI:** <https://pypi.org/project/modelica/>
+- **Documentation:** <https://cardona-oss.gitlab.io/pymodelica/>
+- **Changelog:** [`CHANGELOG.md`](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/CHANGELOG.md)
+
+## Contributing
 
 ```bash
 make install-hooks   # once after cloning: pre-commit bumps the version and runs ruff
@@ -162,16 +169,9 @@ holds every task and CI runs one command, `moon run :ci`. See
 [`AGENTS.md`](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/AGENTS.md) for the full build/test/convention detail and
 [`CONTRIBUTING.md`](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/CONTRIBUTING.md) for how to send a change.
 
-## Links
-
-- **Repository:** <https://gitlab.com/cardona-oss/pymodelica>
-- **PyPI:** <https://pypi.org/project/modelica/>
-- **Documentation:** <https://cardona-oss.gitlab.io/pymodelica/>
-- **Changelog:** [`CHANGELOG.md`](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/CHANGELOG.md)
-
 ## License
 
-MIT © Jorge Cardona
+MIT © Jorge Cardona. See [LICENSE](LICENSE).
 
 ## Trademarks
 
@@ -179,5 +179,3 @@ Modelica® is a registered trademark of the [Modelica Association](https://model
 FMI and SSP are also its trademarks. This package is an independent open-source
 implementation, not affiliated with or endorsed by the Modelica Association; the names
 identify the language it reads and the standards it implements.
-</content>
-</invoke>
