@@ -1,0 +1,17 @@
+who: modeller simulating physical networks
+
+needs:
+
+  - id: MO-1
+    text: >
+      When a model uses array variables, for-equations and array bindings, the modeller can simulate it
+      without writing a scalar model by hand.
+    sources:
+      - {kind: secondary, date: 2026-11-07, locator: "https://gitlab.com/cardona-oss/pymodelica/-/work_items/3"}
+
+  - id: MO-2
+    text: >
+      When the modeller simulates a stiff model of about 80 states, they can get one second of
+      simulated time in well under a minute, and the docs say which backend to use.
+    sources:
+      - {kind: secondary, date: 2026-11-07, locator: "https://gitlab.com/cardona-oss/pymodelica/-/work_items/4"}
