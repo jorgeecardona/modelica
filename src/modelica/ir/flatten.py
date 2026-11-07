@@ -476,6 +476,46 @@ def _expand_cat(node: ir.Expr, shapes: Mapping[_Path, tuple[int, ...]]) -> ir.Ex
             return node
 
 
+def _resolve_subscripts(  # noqa: PLR0911 - one case per node type, as its neighbours have
+    node: ir.Expr, values: Mapping[str, float]
+) -> ir.Expr:
+    """A prefixed binding with ``A[i]`` renamed to the element ``A[3]`` it names (#3).
+
+    Equations get this rename while they are prefixed. A binding is prefixed without the
+    parameter values, so its subscripts are resolved here instead. An ``if`` whose condition
+    is a constant is folded first, so the branch that is not taken may hold an index that is
+    out of range (``if i == 1 then 0 else 1 / A[i - 1]``). A subscript that is not a
+    constant is left as it is.
+    """
+
+    def go(inner: ir.Expr) -> ir.Expr:
+        return _resolve_subscripts(inner, values)
+
+    match node:
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            try:
+                taken = evaluate(condition, values)
+            except EvaluationError:
+                return ir.IfExpr(go(condition), go(then), go(otherwise))
+            if isinstance(taken, bool):
+                return go(then) if taken else go(otherwise)
+            return ir.IfExpr(go(condition), go(then), go(otherwise))
+        case ir.Subscript(base=ir.Ref(parts=path), indices=indices) if path:
+            try:
+                resolved = [int(evaluate(go(i), values)) for i in indices]  # type: ignore[arg-type]
+            except (EvaluationError, TypeError, ValueError):
+                return node
+            return ir.Ref((*path[:-1], element(path[-1], resolved)))
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, go(lhs), go(rhs))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, go(operand))
+        case ir.Call(name=name, args=args, named=named):
+            return ir.Call(name, tuple(go(a) for a in args), tuple((k, go(v)) for k, v in named))
+        case _:
+            return node
+
+
 def _call_names(node: ir.Expr) -> set[str]:
     """The names of every function called anywhere in ``node``."""
     match node:
@@ -2610,6 +2650,8 @@ class _Flattener:
             # `parameter Integer M = size(A, 1)` reads a shape, so it is resolved to the literal
             # here, before the value is recorded for a later dimension to use (#3).
             folded_binding = self._constructors(folded_binding)
+        if folded_binding is not None:
+            folded_binding = _resolve_subscripts(folded_binding, self.values)
         binding = (
             _fold_reductions(folded_binding, self.shapes) if folded_binding is not None else None
         )

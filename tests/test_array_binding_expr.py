@@ -101,3 +101,42 @@ def test_size_sets_a_dimension_and_cat_joins_arrays() -> None:
         binding = model[f"B[{i}]"].binding
         assert binding is not None
         assert evaluate(binding, values) == expected
+
+
+NEIGHBOURS = """\
+model T
+  parameter Integer N = 4;
+  final parameter Real A[N] = {i * 1.0 for i in 1:N};
+  final parameter Real L[N] = {if i == 1 then 0 else 1 / A[i - 1] + 1 / A[i] for i in 1:N};
+  final parameter Real R = 2 * A[N];
+  Real p[N](each start = 0, each fixed = true);
+equation
+  for i in 1:N loop
+    der(p[i]) = L[i] + R;
+  end for;
+end T;
+"""
+
+
+def test_binding_subscripts_resolve_and_dead_branches_fold() -> None:
+    """``A[i - 1]`` in a comprehension binding and ``A[N]`` in a scalar one name elements (#3).
+
+    ``L[1]`` takes the ``then`` branch, so its ``A[0]`` is never read.
+    """
+    model = flatten(parse(NEIGHBOURS), "T")
+    values = {f"A[{i}]": float(i) for i in range(1, 5)}
+    expected = {1: 0.0, 2: 1.5, 3: 1 / 2 + 1 / 3, 4: 1 / 3 + 1 / 4}
+    for i, value in expected.items():
+        binding = model[f"L[{i}]"].binding
+        assert binding is not None
+        assert evaluate(binding, values) == pytest.approx(value)
+    r = model["R"].binding
+    assert r is not None
+    assert evaluate(r, values) == pytest.approx(8.0)
+
+
+def test_binding_subscripts_simulate() -> None:
+    """The model reaches emit and integrates: ``p[1](1) = 0 + 8``."""
+    pytest.importorskip("numpy")
+    result = simulate(causalize(flatten(parse(NEIGHBOURS), "T")), stop=1.0)
+    assert result["p[1]"][-1] == pytest.approx(8.0, rel=1e-6)
