@@ -1227,11 +1227,17 @@ def _literals(  # noqa: C901, PLR0911, PLR0912 -- one case per node type, as its
 def _literal_modification(
     mod: ir.Modification, scope: Scope, local: frozenset[str]
 ) -> ir.Modification:
-    """The same rewrite over a modification, which is where ``parameter Mode m = Mode.night`` is."""
+    """The same rewrite over a modification, which is where ``parameter Mode m = Mode.night`` is.
+
+    User function calls in the value are inlined too, as they are in equations, so a binding
+    ``parameter Real b = sq(a)`` reaches emit as an expression and not as a call (#2).
+    """
     if not mod:
         return mod
     return ir.Modification(
-        value=None if mod.value is None else _literals(mod.value, scope, local),
+        value=None
+        if mod.value is None
+        else _inline_calls(_literals(mod.value, scope, local), scope),
         entries={
             name: _literal_modification(entry, scope, local) for name, entry in mod.entries.items()
         },
@@ -3009,6 +3015,46 @@ def _resolve_boolean_when_conditions(
     )
 
 
+def _lower_samples(
+    whens: Sequence[ir.When], taken: set[str]
+) -> tuple[tuple[ir.When, ...], tuple[FlatVariable, ...]]:
+    """Rewrite ``when sample(start, interval)`` as a time event on a hidden discrete variable.
+
+    ``sample`` (specification 3.7.5) is true at ``start + k * interval``. Each branch whose
+    whole condition is a ``sample`` call gets a new discrete variable ``next`` that starts at
+    ``start``. The condition becomes ``time >= next``, and the body gets
+    ``next = pre(next) + interval``. This is the relation form that the event code already
+    handles. A ``sample`` inside a larger condition (``sample(...) or b``) is not rewritten,
+    and emit refuses it as before.
+    """
+    added: list[FlatVariable] = []
+    lowered: list[ir.When] = []
+    for when in whens:
+        branches: list[ir.WhenBranch] = []
+        for branch in when.branches:
+            match branch.condition:
+                case ir.Call(name="sample", args=(start, interval)):
+                    index = len(added) + 1
+                    while f"_sample{index}" in taken:
+                        index += 1
+                    name = f"_sample{index}"
+                    taken.add(name)
+                    added.append(
+                        FlatVariable(name, variability="discrete", start=start, fixed=True)
+                    )
+                    ref = ir.Ref((name,))
+                    advance = ir.Assign(ref, ir.Binary("+", ir.Call("pre", (ref,)), interval))
+                    branches.append(
+                        ir.WhenBranch(
+                            ir.Binary(">=", ir.Ref(("time",)), ref), (*branch.body, advance)
+                        )
+                    )
+                case _:
+                    branches.append(branch)
+        lowered.append(ir.When(tuple(branches)))
+    return tuple(lowered), tuple(added)
+
+
 def flatten(program: ir.Program, model: str) -> FlatModel:
     """Flatten class ``model`` (a dotted name) as found in ``program``."""
     program = _with_prelude(program)
@@ -3022,11 +3068,15 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
     flattener.instantiate(found, scope, (), ir.EMPTY, "continuous")
     flattener.resolve_deferred_ifs()
     flattener.expand_connections()
+    whens, samplers = _lower_samples(
+        _resolve_boolean_when_conditions(flattener.equations, flattener.whens),
+        {variable.name for variable in flattener.variables},
+    )
     return FlatModel(
         name=found.cls.name,
-        variables=tuple(flattener.variables),
+        variables=(*flattener.variables, *samplers),
         equations=tuple(flattener.equations),
-        whens=_resolve_boolean_when_conditions(flattener.equations, flattener.whens),
+        whens=whens,
         asserts=tuple(flattener.asserts),
         initial_equations=tuple(flattener.initial_equations),
     )
