@@ -66,7 +66,7 @@ loaded through `ctypes`, and called with the same knobs as `modelica.sim.simulat
 from modelica.sim import rustsim
 
 run = rustsim.simulate(system, stop=3.0, points=300, tolerance=1e-8)
-run.result["h"]      # the same Result the interpreter returns: states and observed, by name
+run["h"]             # one variable, as run.result["h"] (the Result the interpreter returns)
 run.events           # how many crossings fired
 run.event_list       # each as the interpreter's Event: instant, indicator index, and cause
 run.steps, run.evaluations, run.jacobians
@@ -77,6 +77,11 @@ the runtime is a different hash and a fresh build. `rustc` is needed only when t
 misses. A run the driver stops -- a step below the spacing of numbers, a Newton iteration that
 does not converge, a chattering model -- raises `SimulationError` with the driver's reason,
 as the interpreter would.
+
+Use it for a large or long run. On a 78-state stiff acoustic model with an event per glottal
+period (#4), a 0.05 s run took 5.0 s with `modelica.sim.simulate` and 0.3 s with
+`rustsim.simulate` once the library was cached. The first run of a model also compiles it, which
+took about 4 s there. For a small model or a single short run, the default `simulate` is fine.
 
 For the pieces themselves, `rustsim.program(system)` is the source, and `tests/test_rustgen.py`
 shows the same runtime driven from a `main`.

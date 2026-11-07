@@ -103,6 +103,16 @@ def test_the_library_is_built_once_and_reused(tmp_path: Path) -> None:
 
 
 @needs_rustc
+def test_a_run_reads_like_a_result(tmp_path: Path) -> None:
+    """``run["x"]`` and ``run.time`` give what ``run.result`` gives (#4)."""
+    system, _ = _system("RLCCircuit")
+    run = rustsim.simulate(system, stop=0.1, cache=tmp_path)
+    name = run.result.names[0]
+    assert (run[name] == run.result[name]).all()
+    assert (run.time == run.result.time).all()
+
+
+@needs_rustc
 def test_a_chattering_model_is_reported_not_run_forever(tmp_path: Path) -> None:
     """The driver's chattering status surfaces as the same error the interpreter raises."""
     from test_chattering import SLIDING  # noqa: PLC0415 - the model lives with its own test

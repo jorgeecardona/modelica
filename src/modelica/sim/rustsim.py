@@ -227,6 +227,15 @@ class Run:
     end: float
     """Where the run stopped: the horizon, or earlier when the status said so."""
 
+    def __getitem__(self, name: str) -> NDArray[np.float64]:
+        """One variable's trajectory, as ``Result`` gives it, so ``run["x"]`` works like ``result["x"]``."""
+        return self.result[name]
+
+    @property
+    def time(self) -> NDArray[np.float64]:
+        """The output instants, as ``Result.time``."""
+        return self.result.time
+
 
 def _grid(
     stop: float, times: Sequence[float] | NDArray[np.float64] | None, points: int | None
