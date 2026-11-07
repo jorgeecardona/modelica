@@ -450,6 +450,50 @@ def _unary(op: ir.UnaryOp, operand: ir.Expr) -> ir.Expr:
     return ir.Unary(op, operand)
 
 
+def _expand_cat(node: ir.Expr, shapes: Mapping[_Path, tuple[int, ...]]) -> ir.Expr:
+    """``cat(1, a, b, ...)`` of 1-D parts as one literal array, where every part's length is known.
+
+    A part is an array literal or a reference to a 1-D array in ``shapes``. Anything else (a
+    matrix, a dimension other than 1, a part of unknown length) leaves the call unchanged.
+    """
+    match node:
+        case ir.Call(name="cat", args=(ir.IntLiteral(value=1), *parts)) if parts:
+            elements: list[ir.Expr] = []
+            for part in parts:
+                match part:
+                    case ir.Array(elements=inner):
+                        elements.extend(inner)
+                    case ir.Ref(parts=path) if len(shapes.get(tuple(path), ())) == 1:
+                        (length,) = shapes[tuple(path)]
+                        elements.extend(
+                            ir.Ref((*path[:-1], element(path[-1], (i,))))
+                            for i in range(1, length + 1)
+                        )
+                    case _:
+                        return node
+            return ir.Array(tuple(elements))
+        case _:
+            return node
+
+
+def _call_names(node: ir.Expr) -> set[str]:
+    """The names of every function called anywhere in ``node``."""
+    match node:
+        case ir.Call(name=name, args=args, named=named):
+            found = {name}
+            for argument in (*args, *(value for _, value in named)):
+                found |= _call_names(argument)
+            return found
+        case ir.Binary(lhs=lhs, rhs=rhs):
+            return _call_names(lhs) | _call_names(rhs)
+        case ir.Unary(operand=operand):
+            return _call_names(operand)
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return _call_names(condition) | _call_names(then) | _call_names(otherwise)
+        case _:
+            return set()
+
+
 def _fold(node: ir.Expr | None) -> ir.Expr | None:
     """The same folding, for the places an expression is *not* walked.
 
@@ -2464,6 +2508,13 @@ class _Flattener:
         # Function calls in the binding are inlined first, so a call that returns an array
         # (`A = areas(0.1, N)`) arrives here as the literal array it computes (#2).
         inlined = _literal_modification(component.modification, member.scope, local)
+        if inlined.value is not None and "cat" in _call_names(inlined.value):
+            here_shapes = {
+                key[len(here) :]: shape
+                for key, shape in self.shapes.items()
+                if len(key) > len(here) and key[: len(here)] == here
+            }
+            inlined = replace(inlined, value=_expand_cat(inlined.value, here_shapes))
         shaped = _shape_modification(inlined, tuple(sizes), path, self.values)
         scalar = replace(component, dimensions=(), modification=shaped)
         # A binding that is an expression over whole arrays -- `C = A * dx / k` -- is read out
@@ -2555,6 +2606,10 @@ class _Flattener:
         # never passes through the equation split that folds the reductions in an equation, so
         # without this the call reached the emitter as an untranslated `sum`.
         folded_binding = _fold(total.value)
+        if folded_binding is not None and "size" in _call_names(folded_binding):
+            # `parameter Integer M = size(A, 1)` reads a shape, so it is resolved to the literal
+            # here, before the value is recorded for a later dimension to use (#3).
+            folded_binding = self._constructors(folded_binding)
         binding = (
             _fold_reductions(folded_binding, self.shapes) if folded_binding is not None else None
         )
@@ -2653,7 +2708,7 @@ class _Flattener:
         """One dimension of an array constructor, evaluated against the structural parameters."""
         return _integer(node, self.values, "an array constructor's size")
 
-    def _constructors(self, node: ir.Expr) -> ir.Expr:  # noqa: C901, PLR0911 -- one case per constructor
+    def _constructors(self, node: ir.Expr) -> ir.Expr:  # noqa: C901, PLR0911, PLR0912 -- one case per constructor
         """Expand every array constructor in an expression to its literal array.
 
         The counterpart of :func:`_shape_constructor` for a constructor written in an *equation*
@@ -2700,6 +2755,9 @@ class _Flattener:
                         f" {len(shape)} dimension(s)"
                     )
                 return ir.IntLiteral(shape[index - 1])
+            case ir.Call(name="cat"):
+                built = ir.Call("cat", tuple(self._constructors(a) for a in node.args), node.named)
+                return _expand_cat(built, self.shapes)
             case ir.Call(name="size", args=(array,)):
                 # `size(a)` is the vector of a's dimension lengths, itself a literal array.
                 return ir.Array(

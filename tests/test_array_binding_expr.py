@@ -77,3 +77,27 @@ end W;
     assert result["h[1]"][0] == 0
     assert result["h[1]"][-1] == pytest.approx(3.0)
     assert result["h[2]"][-1] == pytest.approx(4.0)
+
+
+SIZE_CAT = """\
+model S
+  parameter Real A[3] = {1, 2, 3};
+  parameter Integer M = size(A, 1);
+  parameter Real B[M + 1] = cat(1, A, {4});
+  Real x[M](each start = 0, each fixed = true);
+equation
+  der(x) = A;
+end S;
+"""
+
+
+def test_size_sets_a_dimension_and_cat_joins_arrays() -> None:
+    """``M = size(A, 1)`` is 3, and ``cat(1, A, {4})`` gives ``B = {1, 2, 3, 4}`` (#3)."""
+    model = flatten(parse(SIZE_CAT), "S")
+    assert "x[3]" in model
+    assert "x[4]" not in model
+    values = {"A[1]": 1.0, "A[2]": 2.0, "A[3]": 3.0}
+    for i, expected in enumerate((1.0, 2.0, 3.0, 4.0), start=1):
+        binding = model[f"B[{i}]"].binding
+        assert binding is not None
+        assert evaluate(binding, values) == expected
