@@ -29,6 +29,7 @@ not build. They resolve names and merge classes. They produce no equations.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from itertools import pairwise, product
 from typing import TYPE_CHECKING, Final, Literal, NamedTuple
@@ -1363,7 +1364,7 @@ def _inline(found: Found, scope: Scope, call: ir.Call, depth: int) -> ir.Expr:
     # `v_ = ToSpacePhasor(i)`, whose function returns a space phasor and a zero-sequence value, reads
     # the phasor and drops the zero sequence, rather than being refused for having two outputs.
     wanted = outputs[0]
-    result = environment.get(wanted.name)
+    result = environment.get(wanted.name) or _assembled(wanted.name, environment)
     if result is None:
         raise FlattenError(f"function {name!r} never assigns its output {wanted.name!r}")
     # A name the body reads that is not a local -- an enumeration literal, a package constant, the
@@ -1409,7 +1410,7 @@ def _inline_all(found: Found, scope: Scope, call: ir.Call, depth: int) -> dict[s
     local = frozenset(merged.members)
     written: dict[str, ir.Expr] = {}
     for component in outputs:
-        value = environment.get(component.name)
+        value = environment.get(component.name) or _assembled(component.name, environment)
         if value is None:
             raise FlattenError(f"function {name!r} never assigns its output {component.name!r}")
         # As in `_inline`: a package constant or an enumeration literal the body reads is resolved in
@@ -1573,7 +1574,7 @@ def _bind(name: str, inputs: Sequence[ir.Component], call: ir.Call) -> dict[str,
     return environment
 
 
-def _run(
+def _run(  # noqa: PLR0911 - one case per statement form
     statement: ir.Statement, environment: Mapping[str, ir.Expr], where: str
 ) -> dict[str, ir.Expr]:
     """Execute one statement symbolically: an environment in, a new environment out.
@@ -1586,7 +1587,18 @@ def _run(
     """
     match statement:
         case ir.Assign(target=ir.Ref(name=name), value=value):
-            return {**environment, name: _substitute(value, environment)}
+            return {
+                **environment,
+                name: _substitute(_read_elements(value, environment), environment),
+            }
+        case ir.Assign(
+            target=ir.Subscript(base=ir.Ref(parts=(name,)), indices=indices), value=value
+        ):
+            known = _constant_indices(indices, environment)
+            if known is None:
+                return {**environment}
+            computed = _substitute(_read_elements(value, environment), environment)
+            return {**environment, _element_key(name, known): computed}
         case ir.Assign():
             # A subscripted target -- one element of an array, possibly at a run-time index -- names
             # no single variable to fold here; it is refused later, at `_prefix_statement`.
@@ -1604,6 +1616,71 @@ def _run(
                 f"{where} uses {_SPELLING[type(statement)]}, which cannot be turned into an"
                 f" expression; statements here may assign and branch, and nothing else"
             )
+
+
+_PARAMETERS: ContextVar[Mapping[str, float]] = ContextVar("_PARAMETERS", default={})  # noqa: B039
+"""The parameter values known so far, so a loop bound in an inlined function can name one (#2).
+
+Set by `flatten` for the duration of one flattening. Keys are flat dotted names, so only a
+parameter whose name in the call is its flat name (a top-level parameter) is found.
+"""
+
+
+def _element_key(name: str, indices: Sequence[int]) -> str:
+    """The environment key of one element of an array local: ``A[2]``, ``M[1,3]``."""
+    return f"{name}[{','.join(str(i) for i in indices)}]"
+
+
+def _constant_indices(
+    indices: Sequence[ir.Expr], environment: Mapping[str, ir.Expr]
+) -> tuple[int, ...] | None:
+    """The subscripts as integers when they evaluate to constants here, else ``None``."""
+    result: list[int] = []
+    for index in indices:
+        try:
+            value = evaluate(_substitute(index, environment), _PARAMETERS.get())
+        except EvaluationError:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int | float) or value != int(value):
+            return None
+        result.append(int(value))
+    return tuple(result)
+
+
+def _read_elements(  # noqa: PLR0911 - one case per node type, as its neighbours have
+    node: ir.Expr, environment: Mapping[str, ir.Expr]
+) -> ir.Expr:
+    """Replace ``A[k]`` with the value the body assigned to that element, where it did."""
+
+    def go(inner: ir.Expr) -> ir.Expr:
+        return _read_elements(inner, environment)
+
+    match node:
+        case ir.Subscript(base=ir.Ref(parts=(name,)), indices=indices):
+            known = _constant_indices(indices, environment)
+            if known is not None and (key := _element_key(name, known)) in environment:
+                return environment[key]
+            return ir.Subscript(node.base, tuple(go(i) for i in indices))
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, go(lhs), go(rhs))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, go(operand))
+        case ir.Call(name=fname, args=args, named=named):
+            return ir.Call(fname, tuple(go(a) for a in args), tuple((k, go(v)) for k, v in named))
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(go(condition), go(then), go(otherwise))
+        case ir.Array(elements=elements):
+            return ir.Array(tuple(go(e) for e in elements))
+        case _:
+            return node
+
+
+def _assembled(name: str, environment: Mapping[str, ir.Expr]) -> ir.Expr | None:
+    """A 1-D array output built from its assigned elements ``A[1]``, ``A[2]``, ..., or ``None``."""
+    elements: list[ir.Expr] = []
+    while (key := _element_key(name, (len(elements) + 1,))) in environment:
+        elements.append(environment[key])
+    return ir.Array(tuple(elements)) if elements else None
 
 
 _WHILE_LIMIT: Final = 10_000
@@ -1624,7 +1701,9 @@ def _unroll_for(
     The index does not exist after the loop, so its earlier value, if any, comes back.
     """
     what = f"the range of {index!r} in {where}"
-    values = _range_values(over, lambda bound: _substitute(bound, environment), {}, what)
+    values = _range_values(
+        over, lambda bound: _substitute(bound, environment), _PARAMETERS.get(), what
+    )
     result = dict(environment)
     for value in values:
         result[index] = ir.IntLiteral(value)
@@ -1651,7 +1730,7 @@ def _unroll_while(
     result = dict(environment)
     for _ in range(_WHILE_LIMIT):
         try:
-            holds = evaluate(_substitute(condition, result), {})
+            holds = evaluate(_substitute(condition, result), _PARAMETERS.get())
         except EvaluationError:
             raise FlattenError(
                 f"{where} uses a 'while' loop whose condition depends on a variable;"
@@ -2382,7 +2461,10 @@ class _Flattener:
         # An array constructor -- `start = zeros(n)`, `A = identity(n)` -- becomes the literal array
         # of this shape before the element loop reads it, so each element gets its own entry the way
         # it would from a written `{...}` (the whole call reached the emitter untranslated otherwise).
-        shaped = _shape_modification(component.modification, tuple(sizes), path, self.values)
+        # Function calls in the binding are inlined first, so a call that returns an array
+        # (`A = areas(0.1, N)`) arrives here as the literal array it computes (#2).
+        inlined = _literal_modification(component.modification, member.scope, local)
+        shaped = _shape_modification(inlined, tuple(sizes), path, self.values)
         scalar = replace(component, dimensions=(), modification=shaped)
         # A binding that is an expression over whole arrays -- `C = A * dx / k` -- is read out
         # element by element, as an array equation is (#3). The shapes are keyed by flat path,
@@ -3169,9 +3251,13 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
     if found.cls.restriction not in ("model", "block"):
         raise FlattenError(f"{model!r} is a {found.cls.restriction}, not a model")
     flattener = _Flattener(program)
-    flattener.instantiate(found, scope, (), ir.EMPTY, "continuous")
-    flattener.resolve_deferred_ifs()
-    flattener.expand_connections()
+    token = _PARAMETERS.set(flattener.values)
+    try:
+        flattener.instantiate(found, scope, (), ir.EMPTY, "continuous")
+        flattener.resolve_deferred_ifs()
+        flattener.expand_connections()
+    finally:
+        _PARAMETERS.reset(token)
     whens, samplers = _lower_samples(
         _resolve_boolean_when_conditions(flattener.equations, flattener.whens),
         {variable.name for variable in flattener.variables},

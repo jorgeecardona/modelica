@@ -95,3 +95,43 @@ def test_loop_with_a_variable_bound_is_refused() -> None:
     )
     with pytest.raises(FlattenError, match="range"):
         flatten(parse(source), "Q.M")
+
+
+ARRAY_OUT = """\
+package R
+  function areas
+    input Real t;
+    input Integer n;
+    output Real A[n];
+  algorithm
+    for k in 1:n loop
+      A[k] := k * (1 + t);
+    end for;
+  end areas;
+  model M
+    parameter Integer N = 3;
+    parameter Real B[N] = areas(1, N);
+    Real A[N];
+  equation
+    A = areas(time, N);
+  end M;
+end R;
+"""
+
+
+def test_array_output_from_a_loop_with_a_parameter_bound() -> None:
+    """``A[k] := ...`` in a loop over ``1:n``, with ``n`` a model parameter, builds the array (#2)."""
+    from modelica.ir.evaluate import evaluate  # noqa: PLC0415 - only this test needs it
+
+    model = flatten(parse(ARRAY_OUT), "R.M")
+    for k in (1, 2, 3):
+        binding = model[f"B[{k}]"].binding
+        assert binding is not None
+        assert evaluate(binding, {}) == 2 * k
+
+
+def test_array_output_simulates() -> None:
+    """``A[k] = k * (1 + time)`` at every output point."""
+    pytest.importorskip("numpy")
+    result = simulate(causalize(flatten(parse(ARRAY_OUT), "R.M")), stop=1.0)
+    assert result["A[3]"][-1] == pytest.approx(6.0)
