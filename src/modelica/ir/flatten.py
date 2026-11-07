@@ -1593,6 +1593,10 @@ def _run(
             return {**environment}
         case ir.IfStatement(branches=branches, otherwise=otherwise):
             return _merge_branches(branches, otherwise, environment, where)
+        case ir.ForStatement(index=index, over=ir.Range() as over, body=body):
+            return _unroll_for(index, over, body, environment, where)
+        case ir.WhileStatement(condition=condition, body=body):
+            return _unroll_while(condition, body, environment, where)
         case _:
             # Named in Modelica's words rather than the node's: the reader wrote `while`,
             # and `WhileStatement` is this toolchain's business, not theirs.
@@ -1600,6 +1604,63 @@ def _run(
                 f"{where} uses {_SPELLING[type(statement)]}, which cannot be turned into an"
                 f" expression; statements here may assign and branch, and nothing else"
             )
+
+
+_WHILE_LIMIT: Final = 10_000
+"""The most iterations a ``while`` loop may take before flattening refuses it."""
+
+
+def _unroll_for(
+    index: str,
+    over: ir.Range,
+    body: Sequence[ir.Statement],
+    environment: Mapping[str, ir.Expr],
+    where: str,
+) -> dict[str, ir.Expr]:
+    """Run a ``for`` loop once per index value, when its range is known here (#2).
+
+    The bounds are read after the inputs are put in, so ``for j in 1:n`` works when ``n`` is
+    a literal argument or an input default. A bound that is still a variable is refused.
+    The index does not exist after the loop, so its earlier value, if any, comes back.
+    """
+    what = f"the range of {index!r} in {where}"
+    values = _range_values(over, lambda bound: _substitute(bound, environment), {}, what)
+    result = dict(environment)
+    for value in values:
+        result[index] = ir.IntLiteral(value)
+        result = _sequence(body, result, where)
+    if index in environment:
+        result[index] = environment[index]
+    else:
+        result.pop(index, None)
+    return result
+
+
+def _unroll_while(
+    condition: ir.Expr,
+    body: Sequence[ir.Statement],
+    environment: Mapping[str, ir.Expr],
+    where: str,
+) -> dict[str, ir.Expr]:
+    """Run a ``while`` loop while its condition evaluates to a constant ``true`` (#2).
+
+    Only a loop whose condition depends on constants alone (an integer counter, for example)
+    can be unrolled. A condition that reads a variable, or a loop longer than
+    ``_WHILE_LIMIT`` iterations, is refused.
+    """
+    result = dict(environment)
+    for _ in range(_WHILE_LIMIT):
+        try:
+            holds = evaluate(_substitute(condition, result), {})
+        except EvaluationError:
+            raise FlattenError(
+                f"{where} uses a 'while' loop whose condition depends on a variable;"
+                f" only a loop with a constant trip count can be turned into an expression"
+            ) from None
+        if not holds:
+            return result
+        result = _sequence(body, result, where)
+    raise FlattenError(f"{where} runs a 'while' loop more than {_WHILE_LIMIT} times")
 
 
 def _merge_branches(

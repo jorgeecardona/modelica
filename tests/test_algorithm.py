@@ -214,8 +214,8 @@ def test_an_unterminated_loop_names_the_construct() -> None:
 
 
 def test_a_section_of_loops_names_the_form_that_stopped_it() -> None:
-    """`Loops` uses every statement form, and the ones with no expression are refused."""
-    with pytest.raises(FlattenError, match=r"the algorithm section of 'Loops' uses a 'for' loop"):
+    """`Loops` uses every statement form; the ``for`` unrolls (#2), and its ``break`` is refused."""
+    with pytest.raises(FlattenError, match=r"the algorithm section of 'Loops' uses 'break'"):
         flatten(parse(LOOPS), "Loops")
 
 
@@ -350,13 +350,16 @@ def test_a_call_becomes_the_expression_the_body_computes() -> None:
     # default and `hi` as a named argument, and `square(x)` was inlined before either.
 
 
-def _function(body: str, *, header: str = "  input Real u;\n  output Real y;\n") -> str:
-    return f"function f\n{header}algorithm\n{body}end f;\n\nmodel M\n  Real z;\nequation\n  z = f(1.0);\nend M;\n"
+def _function(
+    body: str, *, header: str = "  input Real u;\n  output Real y;\n", argument: str = "1.0"
+) -> str:
+    return (
+        f"function f\n{header}algorithm\n{body}end f;\n\n"
+        f"model M\n  Real z;\nequation\n  z = f({argument});\nend M;\n"
+    )
 
 
 REFUSALS = [
-    ("a 'while' loop", "  y := u;\n  while y < 2.0 loop\n    y := y * 2.0;\n  end while;\n"),
-    ("a 'for' loop", "  y := u;\n  for i in 1:3 loop\n    y := y + i;\n  end for;\n"),
     ("'break'", "  y := u;\n  if y > 0.0 then\n    break;\n  else\n    y := 1.0;\n  end if;\n"),
     ("never assigns its output", "  u := 1.0;\n"),
 ]
@@ -368,6 +371,28 @@ REFUSALS = [
 def test_a_body_that_cannot_be_inlined_says_which_form_stopped_it(what: str, body: str) -> None:
     with pytest.raises(FlattenError, match=what):
         flatten(parse(_function(body)), "M")
+
+
+LOOP_REFUSALS = [
+    (
+        "'while' loop whose condition",
+        "  y := u;\n  while y < 2.0 loop\n    y := y * 2.0;\n  end while;\n",
+    ),
+    ("the range of 'i'", "  y := 0;\n  for i in 1:integer(u) loop\n    y := y + i;\n  end for;\n"),
+]
+
+
+@pytest.mark.parametrize(("what", "body"), LOOP_REFUSALS, ids=["while", "for"])
+def test_a_loop_that_depends_on_a_variable_is_refused(what: str, body: str) -> None:
+    """A loop unrolls only when its trip count is known at flatten time (#2)."""
+    with pytest.raises(FlattenError, match=what):
+        flatten(parse(_function(body, argument="time")), "M")
+
+
+@pytest.mark.parametrize(("what", "body"), LOOP_REFUSALS, ids=["while", "for"])
+def test_a_loop_on_constant_input_unrolls(what: str, body: str) -> None:
+    """The same loops called with the constant ``f(1.0)`` flatten (#2)."""
+    flatten(parse(_function(body)), "M")
 
 
 def test_a_variable_assigned_on_only_one_path_is_refused() -> None:
