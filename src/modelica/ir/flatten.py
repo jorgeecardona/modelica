@@ -2384,7 +2384,24 @@ class _Flattener:
         # it would from a written `{...}` (the whole call reached the emitter untranslated otherwise).
         shaped = _shape_modification(component.modification, tuple(sizes), path, self.values)
         scalar = replace(component, dimensions=(), modification=shaped)
+        # A binding that is an expression over whole arrays -- `C = A * dx / k` -- is read out
+        # element by element, as an array equation is (#3). The shapes are keyed by flat path,
+        # and the binding names arrays relative to the class that declares it.
+        local_shapes = {
+            key[len(here) :]: shape
+            for key, shape in self.shapes.items()
+            if len(key) > len(here) and key[: len(here)] == here
+        }
+        array_binding = False
+        if shaped.value is not None and not isinstance(shaped.value, ir.Array):
+            try:
+                array_binding = _infer_shape(shaped.value, local_shapes) == tuple(sizes)
+            except FlattenError:
+                array_binding = False  # a shape this pass cannot read keeps the old path
         for indices in product(*(range(1, size + 1) for size in sizes)):
+            if array_binding and shaped.value is not None:
+                one = replace(shaped, value=_element(shaped.value, indices, local_shapes))
+                scalar = replace(component, dimensions=(), modification=one)
             self._component(
                 replace(member, component=_element_of(scalar, indices, path)),
                 (*here, element(component.name, indices)),
@@ -2394,6 +2411,26 @@ class _Flattener:
                 writer=writer,
                 inners=inners,
             )
+
+    def _scalar_statements(self, statement: ir.Statement) -> tuple[ir.Statement, ...]:
+        """A ``when`` assignment to a whole array, as one assignment per element (#3).
+
+        ``h = A`` in a ``when`` sets every element of ``h``. Any other statement, and an
+        assignment to a scalar, comes back unchanged.
+        """
+        match statement:
+            case ir.Assign(target=ir.Ref(parts=parts) as target, value=value) if (
+                shape := self.shapes.get(tuple(parts))
+            ):
+                scalars: list[ir.Statement] = []
+                for indices in product(*(range(1, size + 1) for size in shape)):
+                    element_target = _element(target, indices, self.shapes)
+                    if not isinstance(element_target, ir.Ref | ir.Subscript):
+                        return (statement,)
+                    scalars.append(ir.Assign(element_target, _element(value, indices, self.shapes)))
+                return tuple(scalars)
+            case _:
+                return (statement,)
 
     def _leaf(  # noqa: C901, PLR0912 -- one pass laying a scalar variable down, attribute by attribute
         self,
@@ -2701,7 +2738,13 @@ class _Flattener:
                         tuple(
                             ir.WhenBranch(
                                 carry(branch.condition),
-                                tuple(_prefix_statement(s, prefix, local) for s in branch.body),
+                                tuple(
+                                    scalar
+                                    for s in branch.body
+                                    for scalar in self._scalar_statements(
+                                        _prefix_statement(s, prefix, local)
+                                    )
+                                ),
                             )
                             for branch in branches
                         )
