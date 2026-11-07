@@ -223,17 +223,41 @@ class Range:
     step: Expr | None = None
 
 
+def _cached_hash(node: object) -> int:
+    """The node's hash, computed once and stored in its ``_hash`` slot.
+
+    A frozen dataclass rehashes its whole subtree on every call, and emit and causalize put
+    deep expressions in dicts and sets many times. On an 80-state model that recursive
+    hashing took half of the build time (#4).
+    """
+    cached: int = getattr(node, "_hash")  # noqa: B009 - the slot is private to the node classes
+    if cached:
+        return cached
+    fields: tuple[str, ...] = getattr(type(node), "__match_args__")  # noqa: B009
+    computed = hash((type(node), *(getattr(node, name) for name in fields))) or 1
+    object.__setattr__(node, "_hash", computed)
+    return computed
+
+
 @dataclass(frozen=True, slots=True)
 class Binary:
     op: BinaryOp
     lhs: Expr
     rhs: Expr
+    _hash: int = field(default=0, init=False, compare=False, repr=False)
+
+    def __hash__(self) -> int:
+        return _cached_hash(self)
 
 
 @dataclass(frozen=True, slots=True)
 class Unary:
     op: UnaryOp
     operand: Expr
+    _hash: int = field(default=0, init=False, compare=False, repr=False)
+
+    def __hash__(self) -> int:
+        return _cached_hash(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,6 +277,10 @@ class Call:
     wrote survives -- which is what lets ``parse(unparse(x)) == x`` hold over a file full
     of graphical annotations.
     """
+    _hash: int = field(default=0, init=False, compare=False, repr=False)
+
+    def __hash__(self) -> int:
+        return _cached_hash(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,6 +288,10 @@ class IfExpr:
     condition: Expr
     then: Expr
     otherwise: Expr
+    _hash: int = field(default=0, init=False, compare=False, repr=False)
+
+    def __hash__(self) -> int:
+        return _cached_hash(self)
 
 
 type Expr = (
