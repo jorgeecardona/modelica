@@ -19,7 +19,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 from enum import IntEnum
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
+
+import numpy as np
 
 from modelica.ir import nodes as ir
 from modelica.ir.derive import simplify
@@ -787,7 +789,7 @@ def _sign(x: float) -> float:
 
 
 def _mod(a: float, b: float) -> float:
-    r = math.fmod(a, b)
+    r = float(np.fmod(a, b))
     return r + b if r != 0.0 and (r < 0.0) != (b < 0.0) else r
 
 
@@ -799,32 +801,32 @@ def _min(a: float, b: float) -> float:
     return min(b, a)
 
 
-_UNARY: Final[dict[int, Callable[[float], float]]] = {
-    Builtin.ABS: abs,
-    Builtin.ACOS: math.acos,
-    Builtin.ASIN: math.asin,
-    Builtin.ATAN: math.atan,
-    Builtin.CEIL: math.ceil,
-    Builtin.COS: math.cos,
-    Builtin.COSH: math.cosh,
-    Builtin.EXP: math.exp,
-    Builtin.FLOOR: math.floor,
-    Builtin.LOG: math.log,
-    Builtin.LOG10: math.log10,
+_UNARY: Final[dict[int, Callable[[Any], Any]]] = {
+    Builtin.ABS: np.abs,
+    Builtin.ACOS: np.arccos,
+    Builtin.ASIN: np.arcsin,
+    Builtin.ATAN: np.arctan,
+    Builtin.CEIL: np.ceil,
+    Builtin.COS: np.cos,
+    Builtin.COSH: np.cosh,
+    Builtin.EXP: np.exp,
+    Builtin.FLOOR: np.floor,
+    Builtin.LOG: np.log,
+    Builtin.LOG10: np.log10,
     Builtin.SIGN: _sign,
-    Builtin.SIN: math.sin,
-    Builtin.SINH: math.sinh,
-    Builtin.SQRT: math.sqrt,
-    Builtin.TAN: math.tan,
-    Builtin.TANH: math.tanh,
-    Builtin.TRUNC: math.trunc,
+    Builtin.SIN: np.sin,
+    Builtin.SINH: np.sinh,
+    Builtin.SQRT: np.sqrt,
+    Builtin.TAN: np.tan,
+    Builtin.TANH: np.tanh,
+    Builtin.TRUNC: np.trunc,
 }
-_BINARY: Final[dict[int, Callable[[float, float], float]]] = {
-    Builtin.ATAN2: math.atan2,
+_BINARY: Final[dict[int, Callable[[Any, Any], Any]]] = {
+    Builtin.ATAN2: np.arctan2,
     Builtin.MAX: _max,
     Builtin.MIN: _min,
     Builtin.MOD: _mod,
-    Builtin.REM: math.fmod,
+    Builtin.REM: np.fmod,
 }
 
 
@@ -840,7 +842,13 @@ class _Machine:
     out: list[float]
     r: list[float]
 
-    def run(self, function: Function, code: Sequence[Instr]) -> None:  # noqa: C901, PLR0912 - one case per opcode
+    def run(self, function: Function, code: Sequence[Instr]) -> None:
+        # IEEE semantics, as the engine has them: a branch SELECT discards may compute
+        # sqrt(-1) or 1/0, and that must give NaN or inf, not an exception.
+        with np.errstate(all="ignore"):
+            self._run(function, code)
+
+    def _run(self, function: Function, code: Sequence[Instr]) -> None:  # noqa: C901, PLR0912 - one case per opcode
         r, w, out = self.r, self.w, self.out
         for i in code:
             op = i.op
@@ -867,21 +875,21 @@ class _Machine:
             elif op is Op.SELECT:
                 r[i.dst] = r[i.b] if r[i.a] != 0.0 else r[i.c]
             elif op is Op.CALL1:
-                r[i.dst] = float(_UNARY[i.c](r[i.a]))
+                r[i.dst] = float(_UNARY[i.c](np.float64(r[i.a])))
             elif op is Op.CALL2:
-                r[i.dst] = _BINARY[i.c](r[i.a], r[i.b])
+                r[i.dst] = float(_BINARY[i.c](np.float64(r[i.a]), np.float64(r[i.b])))
             elif op is Op.SOLVE:
                 self.solve(i.c, i.a, i.b, i.dst)
             elif op is Op.NEWTON:
                 self.newton(function, function.newton[i.a])
             else:
-                r[i.dst] = _arith(op, r[i.a], r[i.b])
+                r[i.dst] = float(_arith(op, np.float64(r[i.a]), np.float64(r[i.b])))
 
     def solve(self, n: int, matrix: int, right: int, step: int) -> None:
         """Dense LU with partial pivoting, the same steps as ``md_solve``."""
         r = self.r
-        a = r[matrix : matrix + n * n]
-        b = r[right : right + n]
+        a = np.array(r[matrix : matrix + n * n], dtype=np.float64)
+        b = np.array(r[right : right + n], dtype=np.float64)
         for k in range(n):
             pivot = max(range(k, n), key=lambda i: abs(a[i * n + k]))
             if pivot != k:
@@ -896,7 +904,7 @@ class _Machine:
                 b[i] -= factor * b[k]
         for i in reversed(range(n)):
             total = b[i] - sum(a[i * n + j] * r[step + j] for j in range(i + 1, n))
-            r[step + i] = total / a[i * n + i]
+            r[step + i] = float(total / a[i * n + i])
 
     def newton(self, function: Function, block: NewtonBlock) -> None:
         r = self.r
@@ -905,7 +913,7 @@ class _Machine:
             self.run(function, block.body)
             self.solve(n, block.matrix, block.right, block.step)
             for position, unknown in enumerate(block.unknowns):
-                r[unknown] += r[block.step + position]
+                r[unknown] = float(np.float64(r[unknown]) + r[block.step + position])
             if max(abs(r[block.step + k]) for k in range(n)) < TOLERANCE:
                 break
 
@@ -920,7 +928,7 @@ def _arith(op: Op, a: float, b: float) -> float:  # noqa: C901, PLR0911, PLR0912
     if op is Op.DIV:
         return a / b
     if op is Op.POW:
-        return float(a**b)
+        return float(np.power(a, b))
     if op is Op.LT:
         return float(a < b)
     if op is Op.LE:
@@ -1078,3 +1086,31 @@ def encode(program: Program) -> Encoded:
         modes=len(program.rhs),
         events=len(program.transition[0]) if program.transition else 0,
     )
+
+
+def runtime() -> str:
+    """The Radau runtime as ``engine/src/radau.rs`` holds it: `rust_radau`'s text, unchanged.
+
+    The engine compiles the same integrator `rustsim` does. The file is generated so the
+    engine crate builds without Python; ``tests/test_vm.py`` fails when it is out of date, and
+    ``uv run python -c "from modelica.sim import vm; vm.write_runtime()"`` rewrites it.
+    """
+    from modelica.sim.rust_radau import (  # noqa: PLC0415 - only the generator needs the text
+        CONSTANTS,
+        FIRST_STEP,
+        INTEGRATE,
+        LINALG,
+        NEWTON,
+        STEP,
+    )
+
+    header = "// Generated from modelica.sim.rust_radau by vm.write_runtime(). Do not edit.\n"
+    return header + "\n".join([*CONSTANTS, *LINALG, *STEP, *NEWTON, *FIRST_STEP, *INTEGRATE])
+
+
+def write_runtime() -> None:
+    """Rewrite ``engine/src/radau.rs`` from `runtime`."""
+    from pathlib import Path  # noqa: PLC0415 - only the generator writes files
+
+    target = Path(__file__).resolve().parents[3] / "engine" / "src" / "radau.rs"
+    target.write_text(runtime(), encoding="utf-8")

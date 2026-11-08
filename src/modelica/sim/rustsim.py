@@ -24,7 +24,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
 
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
     from modelica.ir.system import System
 
-__all__ = ["Run", "build", "compiler", "program", "simulate"]
+__all__ = ["Run", "build", "compiler", "drive", "program", "simulate"]
 
 #: The C entry point over `md_integrate`. Every pointer comes from a NumPy array the caller
 #: keeps alive for the duration of the call, with its length beside it; a zero length means
@@ -262,8 +262,53 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
     first call for a model and reused after; a status other than success raises
     `SimulationError` with what the driver reported.
     """
-    kernel = build_kernel(system)
     library = build(system, cache)
+    return drive(
+        system,
+        ctypes.CDLL(str(library)).md_run,
+        (),
+        stop=stop,
+        times=times,
+        points=points,
+        tolerance=tolerance,
+        absolute=absolute,
+        parameters=parameters,
+    )
+
+
+#: The ctypes argument types of ``md_run``, after any leading arguments a caller adds.
+_RUN_ARGUMENTS: Final = [
+    ctypes.c_double, ctypes.c_double,
+    ctypes.c_void_p, ctypes.c_size_t,
+    ctypes.c_void_p, ctypes.c_size_t,
+    ctypes.c_void_p, ctypes.c_size_t,
+    ctypes.c_double, ctypes.c_double,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+    ctypes.c_void_p, ctypes.c_size_t,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+    ctypes.c_void_p,
+]  # fmt: skip
+
+
+def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
+    system: System,
+    entry: Any,  # noqa: ANN401 - a ctypes function pointer
+    leading: tuple[Any, ...],
+    *,
+    stop: float,
+    times: Sequence[float] | NDArray[np.float64] | None = None,
+    points: int | None = None,
+    tolerance: float = 1e-6,
+    absolute: float | None = None,
+    parameters: NDArray[np.float64] | None = None,
+) -> Run:
+    """Call an ``md_run``-shaped entry point and read its buffers back into a `Run`.
+
+    ``entry`` is ``md_run`` from a compiled model, or ``md_vm_run`` from the engine with the
+    program handle as ``leading``. Both take the same arrays and return the same status.
+    """
+    kernel = build_kernel(system)
     p, y0, w = kernel.start(0.0, parameters)
     p = np.ascontiguousarray(np.asarray(p, dtype=np.float64))
     y0 = np.ascontiguousarray(np.asarray(y0, dtype=np.float64))
@@ -290,22 +335,10 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
 
     # Every array goes across as its address: the entry point casts each to a slice of the
     # length passed beside it, and the arrays stay alive in this frame for the whole call.
-    lib = ctypes.CDLL(str(library))
-    run = lib.md_run
-    run.restype = ctypes.c_int32
-    run.argtypes = [
-        ctypes.c_double, ctypes.c_double,
-        ctypes.c_void_p, ctypes.c_size_t,
-        ctypes.c_void_p, ctypes.c_size_t,
-        ctypes.c_void_p, ctypes.c_size_t,
-        ctypes.c_double, ctypes.c_double,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
-        ctypes.c_void_p, ctypes.c_size_t,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
-        ctypes.c_void_p,
-    ]  # fmt: skip
-    status = run(
+    entry.restype = ctypes.c_int32
+    entry.argtypes = [*(ctypes.c_void_p for _ in leading), *_RUN_ARGUMENTS]
+    status = entry(
+        *leading,
         0.0, float(stop),
         y0.ctypes.data, n,
         p.ctypes.data, len(p),

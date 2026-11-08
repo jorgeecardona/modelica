@@ -8,10 +8,8 @@ same calls, and skipped when there is no ``rustc``.
 
 from __future__ import annotations
 
-import ctypes
 import functools
 import shutil
-import subprocess
 import tomllib
 import types
 from pathlib import Path
@@ -163,116 +161,119 @@ def test_an_unknown_function_is_refused() -> None:
 # -- the Rust engine ----------------------------------------------------------------------
 
 
-@functools.cache
-def _engine(directory: Path) -> ctypes.CDLL:
-    assert COMPILER is not None
-    library = directory / "libmd_engine.so"
-    subprocess.run(  # noqa: S603 - our own source, our own compiler path
-        [
-            COMPILER,
-            "--edition",
-            "2021",
-            "-O",
-            "--crate-type",
-            "cdylib",
-            "-D",
-            "warnings",
-            str(ROOT / "engine" / "src" / "lib.rs"),
-            "-o",
-            str(library),
-        ],
-        check=True,
-        capture_output=True,
-    )
-    engine = ctypes.CDLL(str(library))
-    engine.md_vm_new.restype = ctypes.c_void_p
-    engine.md_vm_free.argtypes = [ctypes.c_void_p]
-    size, i32p, f64p = (
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_int32),
-        ctypes.POINTER(ctypes.c_double),
-    )
-    engine.md_vm_new.argtypes = [size, f64p, size, i32p, size, i32p, size, i32p, size, i32p, size]
-    engine.md_vm_call.argtypes = [
-        ctypes.c_void_p,
-        size,
-        ctypes.c_int64,
-        ctypes.c_double,
-        f64p,
-        size,
-        f64p,
-        size,
-        f64p,
-        size,
-        f64p,
-        size,
-    ]
-    return engine
-
-
 @pytest.fixture(scope="module")
-def engine(tmp_path_factory: pytest.TempPathFactory) -> ctypes.CDLL:
+def engine(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The engine library, built once for this module into a temporary cache."""
     if COMPILER is None:
         pytest.skip("no rustc on this machine")
-    return _engine(tmp_path_factory.mktemp("engine"))
+    from modelica.sim.engine import library  # noqa: PLC0415 - only the engine tests need it
 
-
-def _pointer(array: Any, kind: Any) -> Any:
-    return array.ctypes.data_as(ctypes.POINTER(kind))
+    return library(tmp_path_factory.mktemp("engine"))
 
 
 @pytest.mark.parametrize("model", _models(), ids=[m.stem for m in _models()])
-def test_the_engine_equals_the_interpreter(engine: ctypes.CDLL, model: Path) -> None:
+def test_the_engine_equals_the_interpreter(engine: Path, model: Path) -> None:
     """The same calls as `test_the_tape_equals_the_interpreter`, run by the Rust engine."""
+    from modelica.sim.engine import load  # noqa: PLC0415 - only the engine tests need it
+
     system = _system(model)
     point = _Point(emit(system))
     program = vm.lower(system)
-    encoded = vm.encode(program)
-    arrays = [
-        np.asarray(encoded.constants, dtype=np.float64),
-        np.asarray(encoded.code, dtype=np.int32),
-        np.asarray(encoded.functions, dtype=np.int32),
-        np.asarray(encoded.newton, dtype=np.int32),
-        np.asarray(encoded.unknowns, dtype=np.int32),
-    ]
-    constants, code, table, newton, unknowns = arrays
-    handle = engine.md_vm_new(
-        encoded.registers,
-        _pointer(constants, ctypes.c_double),
-        len(constants),
-        _pointer(code, ctypes.c_int32),
-        len(code),
-        _pointer(table, ctypes.c_int32),
-        len(table) // 4,
-        _pointer(newton, ctypes.c_int32),
-        len(newton) // 7,
-        _pointer(unknowns, ctypes.c_int32),
-        len(unknowns),
-    )
+    loaded = load(program, engine)
     try:
+        encoded = loaded.encoded
         mode = vm.mode(program, point.w)
         for label, which, event, length, kernel, extra in point.calls():
             expected, expected_w = _reference(point, kernel, extra, length)
-            y, p = point.y.copy(), np.asarray(point.p, dtype=np.float64)
             w, out = point.w.copy(), np.zeros(length)
             then = -1 if event is None else encoded.transition(mode, event)
-            engine.md_vm_call(
-                handle,
-                _index(encoded, which, mode),
-                then,
-                0.0,
-                _pointer(y, ctypes.c_double),
-                len(y),
-                _pointer(p, ctypes.c_double),
-                len(p),
-                _pointer(w, ctypes.c_double),
-                len(w),
-                _pointer(out, ctypes.c_double),
-                length,
-            )
-            np.testing.assert_allclose(
-                out, expected, rtol=_tol(label), atol=_tol(label), err_msg=label
-            )
+            p = np.asarray(point.p, dtype=np.float64)
+            loaded.call(_index(encoded, which, mode), 0.0, point.y.copy(), p, w, out, then)
+            tolerance = _tol(label)
+            np.testing.assert_allclose(out, expected, rtol=tolerance, atol=tolerance, err_msg=label)
             np.testing.assert_allclose(w, expected_w, rtol=1e-12, atol=1e-12, err_msg=label)
     finally:
-        engine.md_vm_free(handle)
+        loaded.close()
+
+
+@pytest.mark.parametrize("model", _models(), ids=[m.stem for m in _models()])
+def test_the_engine_equals_the_tape_at_random_points(engine: Path, model: Path) -> None:
+    """Random states, times, latch bits and every mode: Rust and the Python reference agree.
+
+    The start point never leaves mode 0, never flips a latch, and always converges its Newton
+    blocks; these points do all three, and reach branches a SELECT discards (NaN, inf).
+    """
+    from modelica.sim.engine import load  # noqa: PLC0415 - only the engine tests need it
+
+    system = _system(model)
+    code = emit(system)
+    program = vm.lower(system)
+    loaded = load(program, engine)
+    encoded = loaded.encoded
+    rng = np.random.default_rng(len(model.stem))
+    n, events = len(code.states), len(code.events)
+    point = _Point(code)
+    for _ in range(8):
+        y = point.y + rng.normal(0.0, 1.0, n)
+        t = float(rng.uniform(0.0, 10.0))
+        w = point.w.copy()
+        for trigger in code.events:
+            if trigger.latch is not None:
+                w[trigger.latch] = float(rng.integers(0, 2))
+        for mode in range(encoded.modes):
+            if program.switching is not None:
+                w[program.switching] = float(mode)
+            calls: list[tuple[int, vm.Function, vm.Function | None, int, int]] = [
+                (encoded.rhs(mode), program.rhs[mode], None, -1, n),
+                (encoded.observe(mode), program.observe[mode], None, -1, len(code.observed)),
+                (encoded.jacobian(mode), program.jacobian[mode], None, -1, n * n),
+            ]
+            if events:
+                calls.append((encoded.indicators(mode), program.indicators[mode], None, -1, events))
+                calls.extend(
+                    (
+                        encoded.transition_prefix(mode),
+                        program.transition_prefix[mode],
+                        program.transition[mode][e],
+                        encoded.transition(mode, e),
+                        n,
+                    )
+                    for e in range(events)
+                )
+            for index, function, then, then_index, length in calls:
+                expected, expected_w = [0.0] * length, list(w)
+                vm.evaluate(
+                    program, function, t, list(y), list(point.p), expected_w, expected, then=then
+                )
+                out, got_w = np.zeros(length), w.copy()
+                loaded.call(
+                    index, t, y, np.asarray(point.p, dtype=np.float64), got_w, out, then_index
+                )
+                np.testing.assert_allclose(out, expected, rtol=1e-9, atol=1e-12, equal_nan=True)
+                np.testing.assert_allclose(got_w, expected_w, rtol=1e-9, atol=1e-12, equal_nan=True)
+    loaded.close()
+
+
+_TRAJECTORY_MODELS = ("BouncingBall", "Lorenz", "Pendulum", "PhaseChange", "BumpStop", "TwoTank")
+
+
+@pytest.mark.slow  # compiles each model with rustsim for the comparison
+@pytest.mark.parametrize("name", _TRAJECTORY_MODELS)
+def test_the_engine_integrates_like_rustsim(engine: Path, name: str) -> None:
+    """A whole run: the same Radau runtime on the tape and on compiled code, step for step."""
+    from modelica.sim import engine as native  # noqa: PLC0415 - only the engine tests need it
+    from modelica.sim import rustsim  # noqa: PLC0415
+
+    model = EXAMPLES / "models" / f"{name}.mo"
+    system = _system(model)
+    compiled = rustsim.simulate(system, stop=2.0, points=40)
+    tape = native.simulate(system, stop=2.0, points=40, path=engine)
+    assert tape.event_list == compiled.event_list
+    assert tape.steps == compiled.steps
+    np.testing.assert_allclose(tape.result.values, compiled.result.values, rtol=1e-9, atol=1e-12)
+
+
+def test_the_engine_runtime_is_the_rustsim_runtime() -> None:
+    """``engine/src/radau.rs`` is `rust_radau`'s text; rewrite it with ``vm.write_runtime()``."""
+    written = (ROOT / "engine" / "src" / "radau.rs").read_text(encoding="utf-8")
+    assert written == vm.runtime()

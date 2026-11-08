@@ -4,7 +4,13 @@
 //! This crate has no dependencies, so `rustc --crate-type cdylib` builds it without cargo; the
 //! C entry points below are what `ctypes` calls. The opcode numbers are `vm.Op` and `vm.Builtin`.
 
+use std::cell::Cell;
 use std::slice;
+
+// The Radau IIA runtime `rustsim` compiles, generated from `modelica.sim.rust_radau`. It calls
+// the free functions `rhs`, `jacobian`, `observe`, `indicators` and `transition`, which are
+// defined below over the program `md_vm_run` installed for the current thread.
+include!("radau.rs");
 
 const ITERATIONS: usize = 50;
 const TOLERANCE: f64 = 1e-12;
@@ -30,6 +36,9 @@ struct Function {
 /// A decoded program: owned copies of the arrays `vm.encode` produced.
 pub struct Program {
     registers: usize,
+    modes: usize,
+    events: usize,
+    switching: Option<usize>,
     constants: Vec<f64>,
     code: Vec<i32>,
     functions: Vec<Function>,
@@ -156,7 +165,7 @@ impl Program {
                     f.out[..n].copy_from_slice(f.y);
                 }
                 29 => f.out[..a].fill(0.0),
-                _ => {}
+                _ => unreachable!("opcode {op} is not in vm.Op"),
             }
         }
     }
@@ -173,6 +182,19 @@ impl Program {
                 largest = largest.max(x.abs());
             }
             if largest < TOLERANCE { break; }
+        }
+    }
+
+    /// The mode `w` says is in use, as the emitted picker decides it.
+    fn mode(&self, w: &[f64]) -> usize {
+        match self.switching {
+            None => 0,
+            Some(slot) => {
+                for k in 0..self.modes - 1 {
+                    if w[slot] < k as f64 + 0.5 { return k; }
+                }
+                self.modes - 1
+            }
         }
     }
 
@@ -195,6 +217,9 @@ impl Program {
 #[no_mangle]
 pub unsafe extern "C" fn md_vm_new(
     registers: usize,
+    modes: usize,
+    events: usize,
+    switching: i64,
     constants: *const f64,
     nconstants: usize,
     code: *const i32,
@@ -228,7 +253,8 @@ pub unsafe extern "C" fn md_vm_new(
         }
         decoded.push(Function { code: (start, len), newton: own });
     }
-    Box::into_raw(Box::new(Program { registers, constants, code, functions: decoded }))
+    let switching = if switching < 0 { None } else { Some(switching as usize) };
+    Box::into_raw(Box::new(Program { registers, modes, events, switching, constants, code, functions: decoded }))
 }
 
 /// Run one function. `then < 0` means none. Returns 0.
@@ -267,4 +293,100 @@ pub unsafe extern "C" fn md_vm_call(
 #[no_mangle]
 pub unsafe extern "C" fn md_vm_free(program: *mut Program) {
     if !program.is_null() { drop(Box::from_raw(program)); }
+}
+
+thread_local! {
+    static CURRENT: Cell<*const Program> = const { Cell::new(std::ptr::null()) };
+}
+
+fn current<'a>() -> &'a Program {
+    // Set by `md_vm_run` for the whole of one integration on this thread, and only read inside it.
+    CURRENT.with(|c| unsafe { &*c.get() })
+}
+
+fn rhs(t: f64, y: &[f64], p: &[f64], w: &mut [f64], dy: &mut [f64]) {
+    let m = current();
+    let k = m.mode(w);
+    m.call(k, None, t, y, p, w, dy);
+}
+
+fn observe(t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]) {
+    let m = current();
+    let k = m.mode(w);
+    m.call(m.modes + k, None, t, y, p, w, out);
+}
+
+fn indicators(t: f64, y: &[f64], p: &[f64], w: &mut [f64], z: &mut [f64]) {
+    let m = current();
+    let k = m.mode(w);
+    m.call(2 * m.modes + k, None, t, y, p, w, z);
+}
+
+fn jacobian(t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]) {
+    let m = current();
+    let k = m.mode(w);
+    m.call(4 * m.modes + k, None, t, y, p, w, out);
+}
+
+fn transition(event: usize, t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]) {
+    let m = current();
+    let k = m.mode(w);
+    m.call(3 * m.modes + k, Some(5 * m.modes + k * m.events + event), t, y, p, w, out);
+}
+
+/// Integrate with `program` as the model: the same arguments and result as `rustsim`'s `md_run`.
+///
+/// # Safety
+/// `program` comes from `md_vm_new`; every array is valid for the length beside it.
+#[no_mangle]
+pub unsafe extern "C" fn md_vm_run(
+    program: *const Program,
+    t0: f64,
+    t1: f64,
+    y0: *const f64,
+    n: usize,
+    p: *const f64,
+    np: usize,
+    w: *mut f64,
+    nw: usize,
+    rtol: f64,
+    atol: f64,
+    dirs: *const f64,
+    lat: *const i64,
+    term: *const i64,
+    ne: usize,
+    grid: *const f64,
+    npts: usize,
+    out: *mut f64,
+    obs: *mut f64,
+    nobs: usize,
+    events_out: *mut f64,
+    ev_index_out: *mut f64,
+    nev_out: usize,
+    counters: *mut f64,
+) -> i32 {
+    unsafe fn view<'a, T>(ptr: *const T, len: usize) -> &'a [T] {
+        if len == 0 { &[] } else { slice::from_raw_parts(ptr, len) }
+    }
+    unsafe fn view_mut<'a>(ptr: *mut f64, len: usize) -> &'a mut [f64] {
+        if len == 0 { &mut [] } else { slice::from_raw_parts_mut(ptr, len) }
+    }
+    let previous = CURRENT.with(|c| c.replace(program));
+    let r = md_integrate(
+        t0, t1, view(y0, n), view(p, np), view_mut(w, nw), rtol, atol,
+        view(dirs, ne), view(lat, ne), view(term, ne), view(grid, npts),
+        view_mut(out, npts * n), view_mut(obs, npts * nobs),
+        view_mut(events_out, nev_out), view_mut(ev_index_out, nev_out),
+    );
+    CURRENT.with(|c| c.set(previous));
+    let counters = view_mut(counters, 8);
+    counters[0] = r.0 as f64;
+    counters[1] = r.1 as f64;
+    counters[2] = r.2 as f64;
+    counters[3] = r.3 as f64;
+    counters[4] = r.4 as f64;
+    counters[5] = r.5 as f64;
+    counters[6] = r.6 as f64;
+    counters[7] = r.7;
+    r.0
 }
