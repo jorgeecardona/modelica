@@ -165,3 +165,22 @@ after Milestone 2. The tape format is the input in both cases, so the decision c
 3. Newton blocks, modes and when-transitions. Test: the corpus that `rustsim` passes also passes
    through the VM.
 4. Wheels in CI, and `simulate()` uses the engine by default when it is installed.
+
+## Plan to make the engine the default (2026-11-08, Fable review)
+
+1. Fix the emitter bug: a shared subexpression defined inside a Newton loop is read stale after it.
+2. `Result.backend` says who integrated. Done in 3960b8e.
+3. Measure `steps`, `jacobians` and inner Newton iterations for the engine and `rustsim` on
+   vowel_i at 0.05 s and 0.35 s. Benchmark the cargo build, not the `rustc -O` checkout build.
+4. Variable-length output: every accepted step when there is no grid, both sides of each event,
+   and the start and stop instants. A row count is returned, plus an overflow status; `drive`
+   retries with a bigger buffer.
+5. Start at `start`: `Loaded.start(t, parameters)`, `t0` in `drive`, one grid function.
+6. `sweep` loads the engine once and runs every point on it.
+7. Reuse one register frame per program, and factor without copies.
+8. Cross-build aarch64 Linux and Windows engines in the manylinux job
+   (`MODELICA_ENGINE_LIBRARY` in `hatch_build.py`), plus an arm64 smoke job.
+9. macOS arm64 wheel on `saas-macos-medium-m1`, main only.
+10. Docs: the `simulate` docstring, the engine page, CHANGELOG.
+
+Deferred: `Code` and `Kernel` on the engine, methods other than Radau, Cranelift, macOS x86_64.

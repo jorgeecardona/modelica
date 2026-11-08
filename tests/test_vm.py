@@ -325,3 +325,43 @@ def test_auto_falls_back_to_scipy_without_a_grid() -> None:
 
     system = _system(EXAMPLES / "models" / "RCCircuit.mo")
     assert simulate(system, stop=0.1).backend == "python"
+
+
+def test_a_shared_name_used_after_a_loop_is_defined_again_after_it() -> None:
+    """The value from inside a Newton loop is from before its last step, so it is recomputed."""
+    from modelica.sim.emit import _define  # noqa: PLC0415 # pyright: ignore[reportPrivateUsage]
+
+    lines = [
+        "for _ in range(50):",
+        "    step = f(x) / __s0",
+        "    x = x + step",
+        "w[3] = x",
+        "vx = 1.0 / __s0",
+    ]
+    assert _define(lines, "__s0", "__s0 = 2.0 * x") == [
+        "for _ in range(50):",
+        "    __s0 = 2.0 * x",
+        "    step = f(x) / __s0",
+        "    x = x + step",
+        "w[3] = x",
+        "__s0 = 2.0 * x",
+        "vx = 1.0 / __s0",
+    ]
+
+
+@pytest.mark.parametrize("name", ["Pendulum", "TwoTank"])
+def test_the_emitted_rhs_equals_the_tape_away_from_the_start(name: str) -> None:
+    """At random points near the start, Python and the tape agree after the Newton blocks."""
+    system = _system(EXAMPLES / "models" / f"{name}.mo")
+    point = _Point(emit(system))
+    program = vm.lower(system)
+    mode = vm.mode(program, point.w)
+    rng = np.random.default_rng(7)
+    n = len(point.y)
+    for _ in range(30):
+        y = point.y * (1.0 + rng.uniform(-0.2, 0.2, size=n)) + rng.normal(scale=0.01, size=n)
+        expected = np.zeros(n)
+        point.module.rhs(0.0, y, point.p, point.w.copy(), expected)
+        out = [0.0] * n
+        vm.evaluate(program, program.rhs[mode], 0.0, list(y), list(point.p), list(point.w), out)
+        np.testing.assert_allclose(out, expected, rtol=1e-9, atol=1e-9)

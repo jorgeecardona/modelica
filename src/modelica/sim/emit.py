@@ -203,15 +203,21 @@ def _define(lines: list[str], name: str, definition: str) -> list[str]:
     generated Jacobian.
 
     The indentation is copied from the line it goes in front of, which is what puts a name
-    first used inside a Newton loop inside that loop.
+    first used inside a Newton loop inside that loop. A use after the loop gets the definition
+    again: the value from inside the loop is from before the last Newton step.
     """
     used = re.compile(rf"\b{re.escape(name)}\b")
-    for position, line in enumerate(lines):
-        if not used.search(line):
-            continue
+    out: list[str] = []
+    depth: int | None = None  # the indentation of the definition in force, if any
+    for line in lines:
         pad = line[: len(line) - len(line.lstrip())]
-        return [*lines[:position], f"{pad}{definition}", *lines[position:]]
-    return lines  # pragma: no cover - every name came from an expression that was printed
+        if depth is not None and line.strip() and len(pad) < depth:
+            depth = None  # the block that defined the name has ended
+        if depth is None and used.search(line):
+            out.append(f"{pad}{definition}")
+            depth = len(pad)
+        out.append(line)
+    return out
 
 
 def _identifier(name: str, taken: set[str]) -> str:

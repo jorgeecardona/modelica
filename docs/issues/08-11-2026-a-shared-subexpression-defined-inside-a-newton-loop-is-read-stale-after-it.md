@@ -1,6 +1,6 @@
 ---
 title: A shared subexpression defined inside a Newton loop is read stale after the loop
-status: open
+status: done
 kind: bug
 scope: S
 owner: jorgeecardona
