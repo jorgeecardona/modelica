@@ -68,6 +68,9 @@ pub extern "C" fn md_run(
     ne: usize,
     grid: *const f64,
     npts: usize,
+    every: i32,
+    t_out: *mut f64,
+    cap: usize,
     out: *mut f64,
     obs: *mut f64,
     nobs: usize,
@@ -87,12 +90,13 @@ pub extern "C" fn md_run(
     let lat: &[i64] = if ne == 0 { &[] } else { unsafe { std::slice::from_raw_parts(lat, ne) } };
     let term: &[i64] = if ne == 0 { &[] } else { unsafe { std::slice::from_raw_parts(term, ne) } };
     let grid = unsafe { view(grid, npts) };
-    let out = unsafe { view_mut(out, npts * n) };
-    let obs = unsafe { view_mut(obs, npts * nobs) };
+    let t_out = unsafe { view_mut(t_out, cap) };
+    let out = unsafe { view_mut(out, cap * n) };
+    let obs = unsafe { view_mut(obs, cap * nobs) };
     let events_out = unsafe { view_mut(events_out, nev_out) };
     let ev_index_out = unsafe { view_mut(ev_index_out, nev_out) };
-    let r = md_integrate(t0, t1, y0, p, w, rtol, atol, dirs, lat, term, grid, out, obs, events_out, ev_index_out);
-    let counters = unsafe { view_mut(counters, 8) };
+    let r = md_integrate(t0, t1, y0, p, w, rtol, atol, dirs, lat, term, grid, every != 0, t_out, out, obs, events_out, ev_index_out);
+    let counters = unsafe { view_mut(counters, 9) };
     counters[0] = r.0 as f64;
     counters[1] = r.1 as f64;
     counters[2] = r.2 as f64;
@@ -101,6 +105,7 @@ pub extern "C" fn md_run(
     counters[5] = r.5 as f64;
     counters[6] = r.6 as f64;
     counters[7] = r.7;
+    counters[8] = r.8 as f64;
     r.0
 }
 """
@@ -289,6 +294,7 @@ _RUN_ARGUMENTS: Final = [
     ctypes.c_double, ctypes.c_double,
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
     ctypes.c_void_p, ctypes.c_size_t,
+    ctypes.c_int32, ctypes.c_void_p, ctypes.c_size_t,
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
     ctypes.c_void_p,
@@ -308,16 +314,21 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
     points: int | None = None,
     tolerance: float = 1e-6,
     absolute: float | None = None,
+    every: bool = False,
 ) -> Run:
     """Call an ``md_run``-shaped entry point and read its buffers back into a `Run`.
 
     ``entry`` is ``md_run`` from a compiled model, or ``md_vm_run`` from the engine with the
     program handle as ``leading``. Both take the same arrays and return the same status.
+
+    With ``every`` the rows are what `modelica.sim.simulate` returns: the grid points, the
+    start and stop instants, and both sides of each event; with no ``times`` or ``points``,
+    every accepted step instead of a grid. Without it the rows are the grid points only.
     """
-    p, y0, w = start
+    p, y0, w0 = start
     p = np.ascontiguousarray(np.asarray(p, dtype=np.float64))
     y0 = np.ascontiguousarray(np.asarray(y0, dtype=np.float64))
-    w = np.ascontiguousarray(np.asarray(w, dtype=np.float64))
+    w0 = np.asarray(w0, dtype=np.float64)
     dirs = np.ascontiguousarray([float(e.direction) for e in events], dtype=np.float64)
     lat = np.ascontiguousarray(
         [e.latch if e.latch is not None else -1 for e in events], dtype=np.int64
@@ -325,35 +336,48 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
     # 1 for a crossing whose `when` holds `terminate(...)`, 0 otherwise: the driver stops the
     # run at the first such crossing, the same as `solve.py` breaking its loop there.
     term = np.ascontiguousarray([1 if e.terminates else 0 for e in events], dtype=np.int64)
-    grid = _grid(stop, times, points)
+    if every and times is None and points is None:
+        grid = np.zeros(0, dtype=np.float64)
+    else:
+        grid = _grid(stop, times, points)
     n, nobs = len(y0), len(observed)
-    out = np.zeros(len(grid) * n, dtype=np.float64)
-    obs = np.zeros(len(grid) * nobs, dtype=np.float64)
     # Two generous parallel buffers for the events -- the instant and the index of the indicator
     # that fired -- far more than any well-behaved run needs; the chattering guard stops a runaway
     # before it could overflow. The cause is read from the model, not carried across.
     ev_cap = max(4096, 8 * len(grid))
     ev_out = np.zeros(ev_cap, dtype=np.float64)
     ev_idx = np.zeros(ev_cap, dtype=np.float64)
-    counters = np.zeros(8, dtype=np.float64)
-
-    # Every array goes across as its address: the entry point casts each to a slice of the
-    # length passed beside it, and the arrays stay alive in this frame for the whole call.
+    counters = np.zeros(9, dtype=np.float64)
+    # The rows: exactly the grid without `every`. With it, a guess; the runtime counts the rows
+    # it could not write, and one more run with that many fills them all.
+    cap = max(1, len(grid)) if not every else max(4096, 4 * len(grid) + 64)
     entry.restype = ctypes.c_int32
     entry.argtypes = [*(ctypes.c_void_p for _ in leading), *_RUN_ARGUMENTS]
-    status = entry(
-        *leading,
-        0.0, float(stop),
-        y0.ctypes.data, n,
-        p.ctypes.data, len(p),
-        w.ctypes.data, len(w),
-        float(tolerance), float(tolerance if absolute is None else absolute),
-        dirs.ctypes.data, lat.ctypes.data, term.ctypes.data, len(dirs),
-        grid.ctypes.data, len(grid),
-        out.ctypes.data, obs.ctypes.data, nobs,
-        ev_out.ctypes.data, ev_idx.ctypes.data, ev_cap,
-        counters.ctypes.data,
-    )  # fmt: skip
+    while True:
+        w = np.ascontiguousarray(w0.copy())
+        t_out = np.zeros(cap, dtype=np.float64)
+        out = np.zeros(cap * n, dtype=np.float64)
+        obs = np.zeros(cap * nobs, dtype=np.float64)
+        # Every array goes across as its address: the entry point casts each to a slice of the
+        # length passed beside it, and the arrays stay alive in this frame for the whole call.
+        status = entry(
+            *leading,
+            0.0, float(stop),
+            y0.ctypes.data, n,
+            p.ctypes.data, len(p),
+            w.ctypes.data, len(w),
+            float(tolerance), float(tolerance if absolute is None else absolute),
+            dirs.ctypes.data, lat.ctypes.data, term.ctypes.data, len(dirs),
+            grid.ctypes.data, len(grid),
+            1 if every else 0, t_out.ctypes.data, cap,
+            out.ctypes.data, obs.ctypes.data, nobs,
+            ev_out.ctypes.data, ev_idx.ctypes.data, ev_cap,
+            counters.ctypes.data,
+        )  # fmt: skip
+        rows = int(counters[8])
+        if rows <= cap:
+            break
+        cap = rows
     _TERMINATED = 4  # noqa: N806 - a status code, matching rust_radau's constant
     if status not in (0, _TERMINATED):
         reason = STATUS.get(status, f"status {status}")
@@ -363,15 +387,14 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
     # instant it fired, and the fixed sample grid was filled only that far. Keep the grid
     # points at or before that instant and drop the unwritten tail, so the result ends where
     # the model does, the same truncation `solve.py` gets for free by sampling per segment.
-    kept_points = len(grid)
-    if status == _TERMINATED:
-        kept_points = int(np.count_nonzero(grid <= float(counters[7])))
-        grid = grid[:kept_points]
+    if status == _TERMINATED and not every:
+        rows = int(np.count_nonzero(grid <= float(counters[7])))
+    time = t_out[:rows].copy()
     names = (*system.modes[0].states, *observed)
     values = np.vstack(
         [
-            out.reshape(-1, n)[:kept_points].T,
-            obs.reshape(-1, nobs)[:kept_points].T if nobs else np.empty((0, kept_points)),
+            out.reshape(-1, n)[:rows].T,
+            obs.reshape(-1, nobs)[:rows].T if nobs else np.empty((0, rows)),
         ]
     )
     count = int(counters[6])
@@ -382,7 +405,7 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
         Event(float(ev_out[k]), int(ev_idx[k]), str(events[int(ev_idx[k])])) for k in range(kept)
     )
     return Run(
-        result=Result(system.name, grid, names, values),
+        result=Result(system.name, time, names, values),
         events=count,
         event_times=tuple(event.time for event in event_list),
         event_list=event_list,

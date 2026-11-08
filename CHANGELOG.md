@@ -11,6 +11,9 @@ source of truth and is bumped automatically when shipped source changes.
   same Radau integrator as `rustsim`. The Linux x86_64 wheel carries the engine as
   `modelica/_engine.so`; the pure wheel builds it once with `rustc` on first use. `simulate()` uses the
   engine by default (`backend="auto"`) when it is installed and can run the call, else SciPy.
+- **The engine runs without an output grid, and returns the rows SciPy returns.** With no `times`
+  or `points` it returns every accepted step. With a grid it adds the start, the stop and both
+  sides of each event, as SciPy does.
 - **`Result.backend` says who integrated** (`"engine"` or `"python"`).
 - **A requested output grid returns only the grid.** With `times` or `points`, SciPy no longer
   adds its own steps to the result. The two sides of each event stay.

@@ -211,8 +211,13 @@ def simulate(  # noqa: PLR0913, PLR0917 - the same knobs as `rustsim.simulate`
     absolute: float | None = None,
     parameters: NDArray[np.float64] | None = None,
     path: Path | None = None,
+    *,
+    every: bool = False,
 ) -> Run:
-    """Integrate ``system`` in the engine: lower it to a tape, then run the Radau runtime on it."""
+    """Integrate ``system`` in the engine: lower it to a tape, then run the Radau runtime on it.
+
+    ``every`` returns the rows `modelica.sim.simulate` returns (`rustsim.drive`).
+    """
     program = vm.lower(system)
     loaded = load(program, path)
     try:
@@ -228,6 +233,7 @@ def simulate(  # noqa: PLR0913, PLR0917 - the same knobs as `rustsim.simulate`
             points=points,
             tolerance=tolerance,
             absolute=absolute,
+            every=every,
         )
     finally:
         loaded.close()
@@ -242,6 +248,7 @@ def result(  # noqa: PLR0913 - the knobs of `simulate`
     tolerance: float = 1e-6,
     absolute: float | None = None,
     parameters: NDArray[np.float64] | None = None,
+    path: Path | None = None,
 ) -> Result:
     """The engine's run as `modelica.sim.simulate` returns one: observed rows and the events."""
     run = simulate(
@@ -252,6 +259,8 @@ def result(  # noqa: PLR0913 - the knobs of `simulate`
         tolerance=tolerance,
         absolute=absolute,
         parameters=parameters,
+        path=path,
+        every=True,
     )
     states = len(system.modes[0].states)
     return Result(

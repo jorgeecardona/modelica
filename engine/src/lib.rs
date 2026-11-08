@@ -357,6 +357,9 @@ pub unsafe extern "C" fn md_vm_run(
     ne: usize,
     grid: *const f64,
     npts: usize,
+    every: i32,
+    t_out: *mut f64,
+    cap: usize,
     out: *mut f64,
     obs: *mut f64,
     nobs: usize,
@@ -374,12 +377,12 @@ pub unsafe extern "C" fn md_vm_run(
     let previous = CURRENT.with(|c| c.replace(program));
     let r = md_integrate(
         t0, t1, view(y0, n), view(p, np), view_mut(w, nw), rtol, atol,
-        view(dirs, ne), view(lat, ne), view(term, ne), view(grid, npts),
-        view_mut(out, npts * n), view_mut(obs, npts * nobs),
+        view(dirs, ne), view(lat, ne), view(term, ne), view(grid, npts), every != 0,
+        view_mut(t_out, cap), view_mut(out, cap * n), view_mut(obs, cap * nobs),
         view_mut(events_out, nev_out), view_mut(ev_index_out, nev_out),
     );
     CURRENT.with(|c| c.set(previous));
-    let counters = view_mut(counters, 8);
+    let counters = view_mut(counters, 9);
     counters[0] = r.0 as f64;
     counters[1] = r.1 as f64;
     counters[2] = r.2 as f64;
@@ -388,6 +391,7 @@ pub unsafe extern "C" fn md_vm_run(
     counters[5] = r.5 as f64;
     counters[6] = r.6 as f64;
     counters[7] = r.7;
+    counters[8] = r.8 as f64;
     r.0
 }
 

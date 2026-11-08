@@ -383,6 +383,33 @@ fn md_locate(
     hi
 }
 
+// One output row: the time, the states, and the observed variables at that state. Rows past
+// the buffer are counted and not written, so the caller can size the buffer and run again.
+#[allow(dead_code, clippy::too_many_arguments)]
+fn md_row(
+    rows: &mut usize,
+    t_out: &mut [f64],
+    out: &mut [f64],
+    obs: &mut [f64],
+    t: f64,
+    y: &[f64],
+    p: &[f64],
+    w: &mut [f64],
+) {
+    let n = y.len();
+    let k = *rows;
+    *rows += 1;
+    if k >= t_out.len() {
+        return;
+    }
+    let nobs = obs.len() / t_out.len();
+    t_out[k] = t;
+    out[k * n..(k + 1) * n].copy_from_slice(y);
+    if nobs > 0 {
+        observe(t, y, p, w, &mut obs[k * nobs..(k + 1) * nobs]);
+    }
+}
+
 #[allow(dead_code)]
 fn md_integrate(
     t0: f64,
@@ -396,18 +423,25 @@ fn md_integrate(
     latches: &[i64],
     terminates: &[i64],
     grid: &[f64],
+    every: bool,
+    t_out: &mut [f64],
     out: &mut [f64],
     obs: &mut [f64],
     events_out: &mut [f64],
     ev_index_out: &mut [f64],
-) -> (i32, usize, usize, usize, usize, usize, usize, f64) {
+) -> (i32, usize, usize, usize, usize, usize, usize, f64, usize) {
     let n = y0.len();
+    // `every` adds rows to the grid's: the start and stop instants, both sides of each event,
+    // and with no grid every accepted step. That is what `solve.py` returns. Without it the
+    // rows are exactly the grid points.
+    let steps_out = every && grid.is_empty();
+    let mut rows = 0usize;
+    let mut row_y = vec![0.0f64; n];
     // Observed variables at every grid point, grid.len() by nobs, alongside the states in
     // `out`. Empty `obs` asks for none. A model that switches state sets mid-run makes `out`
     // hard to read -- `y` means one thing before the switch and another after -- while an
     // observed variable means the same in every mode, so this is what a run is compared on.
     let points = grid.len();
-    let nobs = if points > 0 { obs.len() / points } else { 0 };
     let mut y = y0.to_vec();
     let mut t = t0;
     let mut f = vec![0.0f64; n];
@@ -458,9 +492,11 @@ fn md_integrate(
 
     let mut cursor = 0usize;
     while cursor < points && grid[cursor] <= t0 {
-        for q in 0..n { out[cursor * n + q] = y[q]; }
-        if nobs > 0 { observe(grid[cursor], &y, p, w, &mut obs[cursor * nobs..(cursor + 1) * nobs]); }
+        md_row(&mut rows, t_out, out, obs, grid[cursor], &y, p, w);
         cursor += 1;
+    }
+    if every && (rows == 0 || t_out[(rows - 1).min(t_out.len() - 1)] != t0) {
+        md_row(&mut rows, t_out, out, obs, t0, &y, p, w);
     }
 
     let tol = (10.0 * f64::EPSILON / rtol).max((0.03f64).min(rtol.sqrt()));
@@ -625,24 +661,23 @@ fn md_integrate(
             // restart the stepper there: state moved discontinuously, so the old Jacobian, the
             // extrapolation polynomial and the step-size history are all stale.
             let te = t + fired_x * h;
+            // Before the transition, with the workspace as it still is: these points belong to
+            // the segment that is ending, in the state set it ran in.
             while cursor < points && grid[cursor] <= te {
                 let x = (grid[cursor] - t) / h;
                 for q in 0..n {
-                    out[cursor * n + q] =
-                        y[q] + x * (quad[q * 3] + x * (quad[q * 3 + 1] + x * quad[q * 3 + 2]));
+                    row_y[q] = y[q] + x * (quad[q * 3] + x * (quad[q * 3 + 1] + x * quad[q * 3 + 2]));
                 }
-                if nobs > 0 {
-                    // Before the transition, with the workspace as it still is: these points
-                    // belong to the segment that is ending, in the state set it ran in.
-                    let (states, rest) = out.split_at_mut((cursor + 1) * n);
-                    let _ = rest;
-                    observe(grid[cursor], &states[cursor * n..], p, w, &mut obs[cursor * nobs..(cursor + 1) * nobs]);
-                }
+                md_row(&mut rows, t_out, out, obs, grid[cursor], &row_y, p, w);
                 cursor += 1;
             }
             for q in 0..n {
                 ev_y[q] = y[q]
                     + fired_x * (quad[q * 3] + fired_x * (quad[q * 3 + 1] + fired_x * quad[q * 3 + 2]));
+            }
+            // The left side of the event, unless a grid point already sits on it.
+            if every && (rows == 0 || t_out[(rows - 1).min(t_out.len() - 1)] != te) {
+                md_row(&mut rows, t_out, out, obs, te, &ev_y, p, w);
             }
 
             if terminates[fired as usize] != 0 {
@@ -717,6 +752,10 @@ fn md_integrate(
             }
             t = te;
             for q in 0..n { y[q] = ev_y[q]; }
+            // The right side of the event: the state after the transition and the latches.
+            if every {
+                md_row(&mut rows, t_out, out, obs, te, &ev_y, p, w);
+            }
             if chatter > MD_CHATTER {
                 status = CHATTERING;
                 break;
@@ -739,15 +778,13 @@ fn md_integrate(
         while cursor < points && grid[cursor] <= t_new {
             let x = (grid[cursor] - t) / h;
             for q in 0..n {
-                out[cursor * n + q] =
-                    y[q] + x * (quad[q * 3] + x * (quad[q * 3 + 1] + x * quad[q * 3 + 2]));
+                row_y[q] = y[q] + x * (quad[q * 3] + x * (quad[q * 3 + 1] + x * quad[q * 3 + 2]));
             }
-            if nobs > 0 {
-                let (states, rest) = out.split_at_mut((cursor + 1) * n);
-                let _ = rest;
-                observe(grid[cursor], &states[cursor * n..], p, w, &mut obs[cursor * nobs..(cursor + 1) * nobs]);
-            }
+            md_row(&mut rows, t_out, out, obs, grid[cursor], &row_y, p, w);
             cursor += 1;
+        }
+        if steps_out {
+            md_row(&mut rows, t_out, out, obs, t_new, &y_new, p, w);
         }
 
         let safety =
@@ -783,10 +820,19 @@ fn md_integrate(
         for q in 0..n { y[q] = y_new[q]; f[q] = f_new[q]; }
     }
 
-    while cursor < points {
-        for q in 0..n { out[cursor * n + q] = y[q]; }
-        if nobs > 0 { observe(grid[cursor], &y, p, w, &mut obs[cursor * nobs..(cursor + 1) * nobs]); }
-        cursor += 1;
+    if every {
+        // The run ends at `t`: the stop instant, or the instant a terminate() fired. No grid
+        // point past it is written.
+        if status == 0 || status == TERMINATED {
+            if rows == 0 || t_out[(rows - 1).min(t_out.len() - 1)] != t {
+                md_row(&mut rows, t_out, out, obs, t, &y, p, w);
+            }
+        }
+    } else {
+        while cursor < points {
+            md_row(&mut rows, t_out, out, obs, grid[cursor], &y, p, w);
+            cursor += 1;
+        }
     }
-    (status, steps, rejected_total, evaluations, jacobians, factorisations, events_total, t)
+    (status, steps, rejected_total, evaluations, jacobians, factorisations, events_total, t, rows)
 }

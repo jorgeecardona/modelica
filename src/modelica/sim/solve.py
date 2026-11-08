@@ -175,8 +175,8 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     (`modelica.sim.engine`, inside a platform wheel) when it is installed and can run the call,
     else SciPy. ``"python"`` is always SciPy on the emitted Python. ``"engine"`` raises when the
     engine cannot run the call. The engine runs a `System` with ``method="Radau"``, no ``jit``,
-    ``start = 0`` and an output grid. With a grid, SciPy returns the grid instants plus the two
-    sides of each event, never its own steps. The engine returns the grid instants only.
+    ``start = 0``. Both return the same rows: with a grid, the grid instants plus the start, the
+    stop and both sides of each event; with no grid, every accepted step instead.
     """
     if backend != "python":
         ran = _on_engine(
@@ -228,20 +228,11 @@ def _on_engine(  # noqa: PLR0913 - the knobs of `simulate`
     from modelica.ir.system import System as SystemType  # noqa: PLC0415 - runtime check
     from modelica.sim import engine  # noqa: PLC0415 - the engine is optional
 
-    supported = (
-        isinstance(model, SystemType)
-        and method == "Radau"
-        and not jit
-        and start == 0.0
-        and (times is not None or points is not None)
-    )
+    supported = isinstance(model, SystemType) and method == "Radau" and not jit and start == 0.0
     if backend == "auto" and (not supported or engine.installed() is None):
         return None
     if not supported:
-        message = (
-            "backend='engine' runs a System with method='Radau', no jit, start=0 and an output"
-            " grid (times or points)"
-        )
+        message = "backend='engine' runs a System with method='Radau', no jit and start=0"
         raise SimulationError(message)
     assert isinstance(model, SystemType)  # noqa: S101 - narrowed by `supported`
     try:

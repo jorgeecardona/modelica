@@ -301,30 +301,61 @@ def test_the_engine_starts_where_the_interpreter_does(engine: Path, model: Path)
         loaded.close()
 
 
+_GRIDS = {
+    "points": {"points": 41},
+    "times": {"times": np.linspace(0.05, 1.95, 20)},
+    "steps": {},
+}
+
+
+@pytest.mark.parametrize("grid", list(_GRIDS))
 @pytest.mark.parametrize("name", ["BouncingBall", "RCCircuit", "Pendulum"])
-def test_simulate_on_the_engine_agrees_with_scipy(engine: Path, name: str) -> None:
-    """``simulate(..., backend="engine")``: the same variables and events, within tolerance."""
+def test_simulate_on_the_engine_agrees_with_scipy(engine: Path, name: str, grid: str) -> None:
+    """The engine returns the rows SciPy returns: grid, start, stop and both sides of events."""
     from modelica.sim import engine as native  # noqa: PLC0415 - only the engine tests need it
     from modelica.sim.solve import simulate  # noqa: PLC0415
 
     system = _system(EXAMPLES / "models" / f"{name}.mo")
-    times = np.linspace(0.0, 2.0, 21)
-    scipy = simulate(system, stop=2.0, times=times, tolerance=1e-8, backend="python")
-    ran = native.result(system, stop=2.0, times=times, tolerance=1e-8)
+    knobs: dict[str, Any] = {"stop": 2.0, "tolerance": 1e-8, **_GRIDS[grid]}
+    scipy = simulate(system, backend="python", **knobs)
+    ran = native.result(system, path=engine, **knobs)
     assert (scipy.backend, ran.backend) == ("python", "engine")
     assert ran.names == scipy.names
     assert [e.index for e in ran.events] == [e.index for e in scipy.events]
+    assert (ran.time[0], ran.time[-1]) == (scipy.time[0], scipy.time[-1])
+    for event in ran.events:
+        assert np.count_nonzero(np.isclose(ran.time, event.time, rtol=0, atol=1e-12)) >= 2
+    if grid != "steps":
+        assert len(ran.time) == len(scipy.time)
+        np.testing.assert_allclose(ran.time, scipy.time, rtol=0, atol=1e-7)
+    # Compare on the grid only: between events both are smooth, and the event rows sit at
+    # instants the two locate a few 1e-9 apart.
+    sample = np.linspace(0.0, 2.0, 41)
+    for event in ran.events:
+        sample = sample[np.abs(sample - event.time) > 1e-3]
     for variable in ran.names:
-        expected = np.interp(times, scipy.time, scipy[variable])
-        np.testing.assert_allclose(ran[variable], expected, rtol=1e-4, atol=1e-6, err_msg=variable)
+        np.testing.assert_allclose(
+            _between(ran, variable, sample),
+            _between(scipy, variable, sample),
+            rtol=1e-4,
+            atol=1e-6,
+            err_msg=variable,
+        )
 
 
-def test_auto_falls_back_to_scipy_without_a_grid() -> None:
-    """``backend="auto"`` with no output grid runs on SciPy and says so in ``Result.backend``."""
+def _between(result: Any, variable: str, sample: Any) -> Any:
+    """``variable`` at ``sample``, read on the side of each duplicated instant before it."""
+    time = result.time
+    keep = np.concatenate([np.diff(time) > 0, [True]])
+    return np.interp(sample, time[keep], np.asarray(result[variable])[keep])
+
+
+def test_auto_falls_back_to_scipy_for_another_method() -> None:
+    """``backend="auto"`` with a method the engine does not have runs on SciPy, and says so."""
     from modelica.sim.solve import simulate  # noqa: PLC0415
 
     system = _system(EXAMPLES / "models" / "RCCircuit.mo")
-    assert simulate(system, stop=0.1).backend == "python"
+    assert simulate(system, stop=0.1, method="LSODA").backend == "python"
 
 
 def test_a_shared_name_used_after_a_loop_is_defined_again_after_it() -> None:
