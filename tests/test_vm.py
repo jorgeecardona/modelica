@@ -344,6 +344,7 @@ def test_simulate_on_the_engine_agrees_with_scipy(engine: Path, name: str, grid:
             err_msg=variable,
         )
 
+
 def _between(result: Any, variable: str, sample: Any) -> Any:
     """``variable`` at ``sample``, read on the side of each duplicated instant before it."""
     time = result.time
