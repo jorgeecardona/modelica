@@ -328,11 +328,13 @@ def test_simulate_on_the_engine_agrees_with_scipy(engine: Path, name: str, grid:
     if grid != "steps":
         assert len(ran.time) == len(scipy.time)
         np.testing.assert_allclose(ran.time, scipy.time, rtol=0, atol=1e-7)
-    # Compare on the grid only: between events both are smooth, and the event rows sit at
-    # instants the two locate a few 1e-9 apart.
-    sample = np.linspace(0.0, 2.0, 41)
+    # Compare away from the events, which the two locate a few 1e-9 apart. Without a grid,
+    # SciPy is asked for the engine's own step times: interpolating between steps is not exact.
+    sample = np.linspace(0.0, 2.0, 41) if grid != "steps" else np.unique(ran.time)
     for event in ran.events:
         sample = sample[np.abs(sample - event.time) > 1e-3]
+    if grid == "steps":
+        scipy = simulate(system, backend="python", stop=2.0, tolerance=1e-8, times=sample)
     for variable in ran.names:
         np.testing.assert_allclose(
             _between(ran, variable, sample),
@@ -341,7 +343,6 @@ def test_simulate_on_the_engine_agrees_with_scipy(engine: Path, name: str, grid:
             atol=1e-6,
             err_msg=variable,
         )
-
 
 def _between(result: Any, variable: str, sample: Any) -> Any:
     """``variable`` at ``sample``, read on the side of each duplicated instant before it."""
