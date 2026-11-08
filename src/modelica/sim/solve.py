@@ -147,7 +147,7 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     method: str = "Radau",
     jit: bool = False,
     parameters: NDArray[np.float64] | None = None,
-    backend: Literal["auto", "python", "engine"] = "python",
+    backend: Literal["auto", "python", "engine"] = "auto",
 ) -> Result:
     """Integrate ``model`` from ``start`` to ``stop`` and return every variable it has.
 
@@ -171,11 +171,12 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     one. The initial conditions are computed *from* it, so a start value written in terms of
     a parameter follows the override, which is what makes this usable for a sweep.
 
-    ``backend`` picks who integrates. ``"python"`` (the default) is SciPy on the emitted Python.
-    ``"engine"`` is the precompiled engine (`modelica.sim.engine`, inside a platform wheel) and raises when it cannot run the call. ``"auto"`` uses the engine when it is
-    installed and can run the call, else SciPy. The engine runs a `System` with
-    ``method="Radau"``, no ``jit``, ``start = 0`` and an output grid, and it returns only the grid
-    instants: SciPy returns its own steps as well.
+    ``backend`` picks who integrates. ``"auto"`` (the default) uses the precompiled engine
+    (`modelica.sim.engine`, inside a platform wheel) when it is installed and can run the call,
+    else SciPy. ``"python"`` is always SciPy on the emitted Python. ``"engine"`` raises when the
+    engine cannot run the call. The engine runs a `System` with ``method="Radau"``, no ``jit``,
+    ``start = 0`` and an output grid. With a grid, SciPy returns the grid instants plus the two
+    sides of each event, never its own steps. The engine returns the grid instants only.
     """
     if backend != "python":
         ran = _on_engine(
@@ -580,12 +581,15 @@ class _Run:
     def _sample(
         self, segment: _Solution, grid: NDArray[np.float64] | None
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        """The segment's own steps, plus whichever requested times fall inside it."""
+        """The requested times inside the segment, plus its two ends; all steps with no grid.
+
+        The ends stay so an event shows both its left and right value.
+        """
         steps: NDArray[np.float64] = np.asarray(segment.t, dtype=float)
         if grid is None:
             return steps, np.asarray(segment.y, dtype=float)
         inside = grid[(grid >= steps[0]) & (grid <= steps[-1])]
-        times = np.union1d(steps, inside)
+        times = np.union1d(steps[[0, -1]], inside)
         return times, np.asarray(segment.sol(times), dtype=float)
 
     # -- one instant --------------------------------------------------------------------
