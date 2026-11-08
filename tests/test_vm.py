@@ -277,3 +277,40 @@ def test_the_engine_runtime_is_the_rustsim_runtime() -> None:
     """``engine/src/radau.rs`` is `rust_radau`'s text; rewrite it with ``vm.write_runtime()``."""
     written = (ROOT / "engine" / "src" / "radau.rs").read_text(encoding="utf-8")
     assert written == vm.runtime()
+
+
+@pytest.mark.parametrize("model", _models(), ids=[m.stem for m in _models()])
+def test_the_engine_starts_where_the_interpreter_does(engine: Path, model: Path) -> None:
+    """``parameters``, ``initial`` and ``latch`` on the tape give `Kernel.start`'s three vectors."""
+    from modelica.sim.engine import load  # noqa: PLC0415 - only the engine tests need it
+    from modelica.sim.kernel import build  # noqa: PLC0415
+
+    system = _system(model)
+    expected = build(system).start(0.0)
+    loaded = load(vm.lower(system), engine)
+    try:
+        for got, want in zip(loaded.start(), expected, strict=True):
+            np.testing.assert_allclose(got, want, rtol=1e-12, atol=1e-12)
+        p = expected[0] * 1.5
+        overridden = build(system).start(0.0, p)
+        for got, want in zip(loaded.start(p), overridden, strict=True):
+            np.testing.assert_allclose(got, want, rtol=1e-12, atol=1e-12)
+    finally:
+        loaded.close()
+
+
+@pytest.mark.parametrize("name", ["BouncingBall", "RCCircuit", "Pendulum"])
+def test_simulate_on_the_engine_agrees_with_scipy(engine: Path, name: str) -> None:
+    """``simulate(..., backend="engine")``: the same variables and events, within tolerance."""
+    from modelica.sim import engine as native  # noqa: PLC0415 - only the engine tests need it
+    from modelica.sim.solve import simulate  # noqa: PLC0415
+
+    system = _system(EXAMPLES / "models" / f"{name}.mo")
+    times = np.linspace(0.0, 2.0, 21)
+    scipy = simulate(system, stop=2.0, times=times, tolerance=1e-8)
+    ran = native.result(system, stop=2.0, times=times, tolerance=1e-8)
+    assert ran.names == scipy.names
+    assert [e.index for e in ran.events] == [e.index for e in scipy.events]
+    for variable in ran.names:
+        expected = np.interp(times, scipy.time, scipy[variable])
+        np.testing.assert_allclose(ran[variable], expected, rtol=1e-4, atol=1e-6, err_msg=variable)

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import warnings
 from collections import Counter
-from typing import TYPE_CHECKING, Any, Final, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast
 
 import numpy as np
 from scipy.integrate import (  # pyright: ignore[reportMissingTypeStubs]
@@ -29,7 +29,7 @@ from scipy.integrate import (  # pyright: ignore[reportMissingTypeStubs]
 
 from modelica import ir
 from modelica.ir.evaluate import EvaluationError, evaluate
-from modelica.sim.emit import HELD
+from modelica.sim.emit import HELD, EmitError
 from modelica.sim.kernel import Kernel, build
 from modelica.sim.result import Event, Result
 
@@ -147,6 +147,7 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     method: str = "Radau",
     jit: bool = False,
     parameters: NDArray[np.float64] | None = None,
+    backend: Literal["auto", "python", "engine"] = "python",
 ) -> Result:
     """Integrate ``model`` from ``start`` to ``stop`` and return every variable it has.
 
@@ -169,7 +170,31 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     writing into the array by hand leaves a derived parameter holding a value from the old
     one. The initial conditions are computed *from* it, so a start value written in terms of
     a parameter follows the override, which is what makes this usable for a sweep.
+
+    ``backend`` picks who integrates. ``"python"`` (the default) is SciPy on the emitted Python.
+    ``"engine"`` is the precompiled engine (`modelica.sim.engine`, the ``modelica-engine``
+    wheel) and raises when it cannot run the call. ``"auto"`` uses the engine when it is
+    installed and can run the call, else SciPy. The engine runs a `System` with
+    ``method="Radau"``, no ``jit``, ``start = 0`` and an output grid, and it returns only the grid
+    instants: SciPy returns its own steps as well.
     """
+    if backend != "python":
+        ran = _on_engine(
+            model,
+            backend=backend,
+            stop=stop,
+            start=start,
+            tolerance=tolerance,
+            absolute=absolute,
+            times=times,
+            points=points,
+            method=method,
+            jit=jit,
+            parameters=parameters,
+        )
+        if ran is not None:
+            _check_asserts(ran, getattr(model, "asserts", ()))
+            return ran
     # `observed_jacobian=False`: this kernel is internal to the run and nothing here calls
     # `d(observed)/dy`. It is the largest function the emitter writes -- 17 % of the module on
     # a 1000-cell bar -- so a caller who only wants a trajectory should not pay to emit it, to
@@ -183,6 +208,56 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     # so `getattr` leaves those callers unchecked rather than reaching for a field they lack.
     _check_asserts(result, getattr(model, "asserts", ()))
     return result
+
+
+def _on_engine(  # noqa: PLR0913 - the knobs of `simulate`
+    model: System | Code | Kernel,
+    *,
+    backend: str,
+    stop: float,
+    start: float,
+    tolerance: float,
+    absolute: float | None,
+    times: Sequence[float] | NDArray[np.float64] | None,
+    points: int | None,
+    method: str,
+    jit: bool,
+    parameters: NDArray[np.float64] | None,
+) -> Result | None:
+    """The run on the engine, or ``None`` when ``"auto"`` should fall back to SciPy."""
+    from modelica.ir.system import System as SystemType  # noqa: PLC0415 - runtime check
+    from modelica.sim import engine  # noqa: PLC0415 - the engine is optional
+
+    supported = (
+        isinstance(model, SystemType)
+        and method == "Radau"
+        and not jit
+        and start == 0.0
+        and (times is not None or points is not None)
+    )
+    if backend == "auto" and (not supported or engine.installed() is None):
+        return None
+    if not supported:
+        message = (
+            "backend='engine' runs a System with method='Radau', no jit, start=0 and an output"
+            " grid (times or points)"
+        )
+        raise SimulationError(message)
+    assert isinstance(model, SystemType)  # noqa: S101 - narrowed by `supported`
+    try:
+        return engine.result(
+            model,
+            stop=stop,
+            times=times,
+            points=points,
+            tolerance=tolerance,
+            absolute=absolute,
+            parameters=parameters,
+        )
+    except EmitError:
+        if backend == "engine":
+            raise
+        return None
 
 
 def _check_asserts(result: Result, asserts: tuple[ir.Assert, ...]) -> None:

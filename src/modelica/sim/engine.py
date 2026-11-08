@@ -3,14 +3,16 @@
 `modelica.sim.vm` lowers the model to a tape; this module hands the tape to the engine library
 and integrates with the same Radau runtime `rustsim` compiles. The result is `rustsim.Run`.
 
-The engine is one shared library for every model. Until it ships in the wheel, `library` builds
-it once with ``rustc`` from ``engine/src`` and keeps it in the cache directory `rustsim` uses.
+The engine is one shared library for every model. It ships as the ``modelica-engine`` wheel
+(``pip install modelica[engine]``). In a source checkout without the wheel, `library` builds it
+once with ``rustc`` from ``engine/src`` and keeps it in the cache directory `rustsim` uses.
 """
 
 from __future__ import annotations
 
 import ctypes
 import hashlib
+import importlib
 import shutil
 import subprocess
 import tempfile
@@ -21,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from modelica.sim import vm
+from modelica.sim.result import Result
 from modelica.sim.rustsim import (
     _default_cache,  # pyright: ignore[reportPrivateUsage] - the same cache directory
     _suffix,  # pyright: ignore[reportPrivateUsage]
@@ -36,13 +39,32 @@ if TYPE_CHECKING:
     from modelica.ir.system import System
     from modelica.sim.rustsim import Run
 
-__all__ = ["Loaded", "library", "load", "simulate"]
+__all__ = ["Loaded", "installed", "library", "load", "result", "simulate"]
 
 SOURCE = Path(__file__).resolve().parents[3] / "engine" / "src"
 
 
+def installed() -> Path | None:
+    """The library from the ``modelica-engine`` wheel, or ``None`` when it is not installed.
+
+    The wheel's extension module is the engine library itself: its ``__file__`` is what
+    ``ctypes`` opens.
+    """
+    try:
+        native = importlib.import_module("modelica_engine.modelica_engine")
+    except ImportError:
+        return None
+    return Path(str(native.__file__))
+
+
 def library(cache: Path | None = None) -> Path:
-    """The engine's shared library, built once from ``engine/src`` and kept by content hash."""
+    """The engine's shared library: the installed wheel's, else built once from ``engine/src``.
+
+    The build is for a source checkout without the wheel. It is kept by the hash of the
+    sources, so it happens once per change to the engine, never per model.
+    """
+    if cache is None and (wheel := installed()) is not None:
+        return wheel
     sources = sorted(SOURCE.glob("*.rs"))
     digest = hashlib.sha256()
     for source in sources:
@@ -106,6 +128,7 @@ class Loaded:
     engine: ctypes.CDLL
     handle: int
     encoded: vm.Encoded
+    layout: vm.Layout
 
     def close(self) -> None:
         """Free the program. The handle is not valid afterwards."""
@@ -115,6 +138,26 @@ class Loaded:
 
     def __del__(self) -> None:
         self.close()
+
+    def start(
+        self, parameters: NDArray[np.float64] | None = None
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        """The parameter vector, the initial state and a latched workspace, as `Kernel.start`.
+
+        ``parameters`` replaces the vector the model computes; the start values follow it.
+        """
+        layout = self.layout
+        empty = np.zeros(0)
+        p = np.zeros(len(layout.parameters))
+        if parameters is None:
+            self.call(self.encoded.parameters, 0.0, empty, empty, empty, p)
+        else:
+            p[:] = parameters
+        y = np.zeros(len(layout.states))
+        w = np.zeros(layout.workspace)
+        self.call(self.encoded.initial, 0.0, empty, p, w, y)
+        self.call(self.encoded.latch, 0.0, y, p, w, empty)
+        return p, y, w
 
     def call(  # noqa: PLR0913, PLR0917 - the kernel signature
         self,
@@ -160,7 +203,7 @@ def load(program: vm.Program, path: Path | None = None) -> Loaded:
     if not handle:
         message = "the engine refused the program"
         raise SimulationError(message)
-    return Loaded(engine, handle, encoded)
+    return Loaded(engine, handle, encoded, program.layout)
 
 
 def simulate(  # noqa: PLR0913, PLR0917 - the same knobs as `rustsim.simulate`
@@ -174,18 +217,51 @@ def simulate(  # noqa: PLR0913, PLR0917 - the same knobs as `rustsim.simulate`
     path: Path | None = None,
 ) -> Run:
     """Integrate ``system`` in the engine: lower it to a tape, then run the Radau runtime on it."""
-    loaded = load(vm.lower(system), path)
+    program = vm.lower(system)
+    loaded = load(program, path)
     try:
         return drive(
             system,
             loaded.engine.md_vm_run,
             (loaded.handle,),
+            start=loaded.start(parameters),
+            events=program.layout.events,
+            observed=program.layout.observed,
             stop=stop,
             times=times,
             points=points,
             tolerance=tolerance,
             absolute=absolute,
-            parameters=parameters,
         )
     finally:
         loaded.close()
+
+
+def result(  # noqa: PLR0913 - the knobs of `simulate`
+    system: System,
+    *,
+    stop: float,
+    times: Sequence[float] | NDArray[np.float64] | None = None,
+    points: int | None = None,
+    tolerance: float = 1e-6,
+    absolute: float | None = None,
+    parameters: NDArray[np.float64] | None = None,
+) -> Result:
+    """The engine's run as `modelica.sim.simulate` returns one: observed rows and the events."""
+    run = simulate(
+        system,
+        stop,
+        times=times,
+        points=points,
+        tolerance=tolerance,
+        absolute=absolute,
+        parameters=parameters,
+    )
+    states = len(system.modes[0].states)
+    return Result(
+        name=run.result.name,
+        time=run.result.time,
+        names=run.result.names[states:],
+        values=run.result.values[states:],
+        events=run.event_list,
+    )

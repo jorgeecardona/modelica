@@ -31,6 +31,7 @@ from modelica.sim.emit import (
     TOLERANCE,
     EmitError,
     Emitter,
+    Trigger,
     _latched,  # pyright: ignore[reportPrivateUsage] - the same latching rule, not a copy
     _unwrap,  # pyright: ignore[reportPrivateUsage]
     block_jacobian,
@@ -194,6 +195,17 @@ class Function:
 
 
 @dataclass(frozen=True)
+class Layout:
+    """The names and sizes a caller needs around the tapes, as `Code` records them."""
+
+    states: tuple[str, ...]
+    parameters: tuple[str, ...]
+    observed: tuple[str, ...]
+    events: tuple[Trigger, ...]
+    workspace: int
+
+
+@dataclass(frozen=True)
 class Program:
     """Every kernel function of one model, one entry per mode where a model has modes.
 
@@ -213,6 +225,13 @@ class Program:
     transition: tuple[tuple[Function, ...], ...]
     switching: int | None
     """The workspace slot holding the mode, as `Code.switching`."""
+    parameters: Function
+    """Writes the parameter vector into ``out``, as the emitted ``parameters``."""
+    initial: Function
+    """Reads ``p``; writes the initial state into ``out`` and the workspace, as ``initial``."""
+    latch: Function
+    """Sets every latch from the relation's live value, as the emitted ``latch``."""
+    layout: Layout
 
 
 @dataclass
@@ -431,6 +450,72 @@ class _Lowering:
         scope = _Scope([], {}, {}, [])
         body(scope)
         return Function(tuple(scope.code), tuple(scope.newton))
+
+    def parameters(self) -> Function:
+        """The parameter vector, each binding after the ones it reads (`Emitter.ordered`)."""
+
+        def body(scope: _Scope) -> None:
+            for variable in self.emitter.ordered():
+                node = variable.binding if variable.binding is not None else variable.start
+                self.assign(scope, variable.name, node if node is not None else ir.RealLiteral(0.0))
+            for slot, variable in enumerate(self.emitter.system.parameters):
+                source = self.ref(scope, variable.name)
+                scope.code.append(Instr(Op.STORE_OUT, 0, slot, source))
+
+        return self.function(body)
+
+    def initial(self) -> Function:
+        """The start values into ``y`` and the workspace, as `Emitter.initial`."""
+        emitter = self.emitter
+        system = emitter.system
+        constant = {variable.name for variable in system.parameters}
+
+        def start(scope: _Scope, name: str) -> int:
+            return self.expr(scope, system[name].start or ir.RealLiteral(0.0))
+
+        def body(scope: _Scope) -> None:
+            for slot, variable in enumerate(system.parameters):
+                scope.names[variable.name] = self.emit(scope, Op.LOAD_P, slot)
+            for slot, name in enumerate(system.states):
+                scope.code.append(Instr(Op.STORE_OUT, 0, slot, start(scope, name)))
+            for name in emitter.observed:
+                if name in constant:
+                    source = self.ref(scope, name)
+                elif name in system and system[name].start is not None:
+                    source = start(scope, name)
+                else:
+                    source = self.constant(scope, 0.0)
+                scope.code.append(Instr(Op.STORE_W, 0, emitter.slots[name], source))
+            states = {name: slot for slot, name in enumerate(system.states)}
+            for name, value in emitter.conditions():
+                self.assign(scope, name, value)
+                source = self.ref(scope, name)
+                scope.code.append(Instr(Op.STORE_OUT, 0, states[name], source))
+                scope.code.append(Instr(Op.STORE_W, 0, emitter.slots[name], source))
+            if emitter.switching is not None:
+                zero = self.constant(scope, 0.0)
+                scope.code.append(Instr(Op.STORE_W, 0, emitter.switching, zero))
+
+        return self.function(body)
+
+    def latch(self) -> Function:
+        """Each watched relation, read live, into its latch slot (`Emitter.latches`)."""
+        emitter = self.emitter
+
+        def body(scope: _Scope) -> None:
+            if not emitter.watched:
+                return
+            held, emitter.held = emitter.held, {}
+            try:
+                self.unpack(scope, emitter.system.mode)
+                self.blocks(scope, emitter.system.mode)
+            finally:
+                emitter.held = held
+            for position, relation in enumerate(emitter.watched):
+                source = self.value(scope, relation)
+                scope.code.append(Instr(Op.STORE_W, 0, emitter.holding(position), source))
+
+        return self.function(body)
 
     def rhs(self, mode: Mode) -> Function:
         def body(scope: _Scope) -> None:
@@ -774,6 +859,18 @@ def lower(system: System) -> Program:
         transition_prefix=tuple(prefix for prefix, _ in transitions),
         transition=tuple(branches for _, branches in transitions),
         switching=lowering.emitter.switching,
+        parameters=lowering.parameters(),
+        initial=lowering.initial(),
+        latch=lowering.latch(),
+        layout=Layout(
+            states=system.states,
+            parameters=tuple(variable.name for variable in system.parameters),
+            observed=lowering.emitter.observed,
+            events=tuple(event.trigger for event in lowering.emitter.events()),
+            workspace=len(lowering.emitter.observed)
+            + len(lowering.emitter.watched)
+            + (0 if lowering.emitter.switching is None else 1),
+        ),
     )
     pool = sorted(lowering.constants, key=lowering.constants.__getitem__)
     return replace(program, registers=lowering.registers, constants=tuple(pool))
@@ -1030,6 +1127,21 @@ class Encoded:
         """The function index of ``event``'s transition in ``mode``."""
         return 5 * self.modes + mode * self.events + event
 
+    @property
+    def parameters(self) -> int:
+        """The function index of ``parameters``."""
+        return 5 * self.modes + self.modes * self.events
+
+    @property
+    def initial(self) -> int:
+        """The function index of ``initial``."""
+        return self.parameters + 1
+
+    @property
+    def latch(self) -> int:
+        """The function index of ``latch``."""
+        return self.parameters + 2
+
 
 def encode(program: Program) -> Encoded:
     """Pack ``program`` into flat integer and float arrays, in `Encoded`'s layout."""
@@ -1076,6 +1188,8 @@ def encode(program: Program) -> Encoded:
     for branches in program.transition:
         for function in branches:
             add(function)
+    for function in (program.parameters, program.initial, program.latch):
+        add(function)
     return Encoded(
         registers=program.registers,
         constants=program.constants,

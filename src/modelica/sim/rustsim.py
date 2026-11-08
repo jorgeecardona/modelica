@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from modelica.ir.system import System
+    from modelica.sim.emit import Trigger
 
 __all__ = ["Run", "build", "compiler", "drive", "program", "simulate"]
 
@@ -263,16 +264,19 @@ def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `sol
     `SimulationError` with what the driver reported.
     """
     library = build(system, cache)
+    kernel = build_kernel(system)
     return drive(
         system,
         ctypes.CDLL(str(library)).md_run,
         (),
+        start=kernel.start(0.0, parameters),
+        events=kernel.code.events,
+        observed=kernel.code.observed,
         stop=stop,
         times=times,
         points=points,
         tolerance=tolerance,
         absolute=absolute,
-        parameters=parameters,
     )
 
 
@@ -296,24 +300,24 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
     entry: Any,  # noqa: ANN401 - a ctypes function pointer
     leading: tuple[Any, ...],
     *,
+    start: tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]],
+    events: Sequence[Trigger],
+    observed: Sequence[str],
     stop: float,
     times: Sequence[float] | NDArray[np.float64] | None = None,
     points: int | None = None,
     tolerance: float = 1e-6,
     absolute: float | None = None,
-    parameters: NDArray[np.float64] | None = None,
 ) -> Run:
     """Call an ``md_run``-shaped entry point and read its buffers back into a `Run`.
 
     ``entry`` is ``md_run`` from a compiled model, or ``md_vm_run`` from the engine with the
     program handle as ``leading``. Both take the same arrays and return the same status.
     """
-    kernel = build_kernel(system)
-    p, y0, w = kernel.start(0.0, parameters)
+    p, y0, w = start
     p = np.ascontiguousarray(np.asarray(p, dtype=np.float64))
     y0 = np.ascontiguousarray(np.asarray(y0, dtype=np.float64))
     w = np.ascontiguousarray(np.asarray(w, dtype=np.float64))
-    events = kernel.code.events
     dirs = np.ascontiguousarray([float(e.direction) for e in events], dtype=np.float64)
     lat = np.ascontiguousarray(
         [e.latch if e.latch is not None else -1 for e in events], dtype=np.int64
@@ -322,7 +326,7 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
     # run at the first such crossing, the same as `solve.py` breaking its loop there.
     term = np.ascontiguousarray([1 if e.terminates else 0 for e in events], dtype=np.int64)
     grid = _grid(stop, times, points)
-    n, nobs = len(y0), len(kernel.code.observed)
+    n, nobs = len(y0), len(observed)
     out = np.zeros(len(grid) * n, dtype=np.float64)
     obs = np.zeros(len(grid) * nobs, dtype=np.float64)
     # Two generous parallel buffers for the events -- the instant and the index of the indicator
@@ -363,7 +367,7 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
     if status == _TERMINATED:
         kept_points = int(np.count_nonzero(grid <= float(counters[7])))
         grid = grid[:kept_points]
-    names = (*system.modes[0].states, *kernel.code.observed)  # type: ignore[attr-defined]
+    names = (*system.modes[0].states, *observed)
     values = np.vstack(
         [
             out.reshape(-1, n)[:kept_points].T,
