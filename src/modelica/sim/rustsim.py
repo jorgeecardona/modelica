@@ -244,11 +244,14 @@ class Run:
 
 
 def _grid(
-    stop: float, times: Sequence[float] | NDArray[np.float64] | None, points: int | None
+    stop: float,
+    times: Sequence[float] | NDArray[np.float64] | None,
+    points: int | None,
+    t0: float = 0.0,
 ) -> NDArray[np.float64]:
     if times is not None:
         return np.ascontiguousarray(np.asarray(times, dtype=np.float64))
-    return np.linspace(0.0, stop, points or 300)
+    return np.linspace(t0, stop, points or 300)
 
 
 def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `solve.simulate` has
@@ -315,6 +318,7 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
     tolerance: float = 1e-6,
     absolute: float | None = None,
     every: bool = False,
+    t0: float = 0.0,
 ) -> Run:
     """Call an ``md_run``-shaped entry point and read its buffers back into a `Run`.
 
@@ -339,7 +343,7 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
     if every and times is None and points is None:
         grid = np.zeros(0, dtype=np.float64)
     else:
-        grid = _grid(stop, times, points)
+        grid = _grid(stop, times, points, t0)
     n, nobs = len(y0), len(observed)
     # Two generous parallel buffers for the events -- the instant and the index of the indicator
     # that fired -- far more than any well-behaved run needs; the chattering guard stops a runaway
@@ -362,7 +366,7 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
         # length passed beside it, and the arrays stay alive in this frame for the whole call.
         status = entry(
             *leading,
-            0.0, float(stop),
+            float(t0), float(stop),
             y0.ctypes.data, n,
             p.ctypes.data, len(p),
             w.ctypes.data, len(w),

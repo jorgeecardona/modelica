@@ -398,3 +398,28 @@ def test_the_emitted_rhs_equals_the_tape_away_from_the_start(name: str) -> None:
         out = [0.0] * n
         vm.evaluate(program, program.rhs[mode], 0.0, list(y), list(point.p), list(point.w), out)
         np.testing.assert_allclose(out, expected, rtol=1e-9, atol=1e-9)
+
+
+@pytest.mark.parametrize("name", ["Lorenz", "BouncingBall"])
+def test_the_engine_starts_at_start(engine: Path, name: str) -> None:
+    """``start = 1``: the same rows and values as SciPy from that instant."""
+    from modelica.sim import engine as native  # noqa: PLC0415 - only the engine tests need it
+    from modelica.sim.solve import simulate  # noqa: PLC0415
+
+    system = _system(EXAMPLES / "models" / f"{name}.mo")
+    knobs: dict[str, Any] = {"start": 1.0, "stop": 1.5, "tolerance": 1e-9, "points": 21}
+    scipy = simulate(system, backend="python", **knobs)
+    ran = native.result(system, path=engine, **knobs)
+    assert [e.index for e in ran.events] == [e.index for e in scipy.events]
+    np.testing.assert_allclose(ran.time, scipy.time, rtol=0, atol=1e-7)
+    keep = np.ones(len(ran.time), dtype=bool)
+    for event in ran.events:
+        keep &= np.abs(ran.time - event.time) > 1e-3
+    for variable in ran.names:
+        np.testing.assert_allclose(
+            np.asarray(ran[variable])[keep],
+            np.asarray(scipy[variable])[keep],
+            rtol=1e-5,
+            atol=1e-6,
+            err_msg=variable,
+        )

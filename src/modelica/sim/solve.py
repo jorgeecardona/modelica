@@ -174,8 +174,8 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     ``backend`` picks who integrates. ``"auto"`` (the default) uses the precompiled engine
     (`modelica.sim.engine`, inside a platform wheel) when it is installed and can run the call,
     else SciPy. ``"python"`` is always SciPy on the emitted Python. ``"engine"`` raises when the
-    engine cannot run the call. The engine runs a `System` with ``method="Radau"``, no ``jit``,
-    ``start = 0``. Both return the same rows: with a grid, the grid instants plus the start, the
+    engine cannot run the call. The engine runs a `System` with ``method="Radau"`` and no
+    ``jit``. Both return the same rows: with a grid, the grid instants plus the start, the
     stop and both sides of each event; with no grid, every accepted step instead.
     """
     if backend != "python":
@@ -228,11 +228,11 @@ def _on_engine(  # noqa: PLR0913 - the knobs of `simulate`
     from modelica.ir.system import System as SystemType  # noqa: PLC0415 - runtime check
     from modelica.sim import engine  # noqa: PLC0415 - the engine is optional
 
-    supported = isinstance(model, SystemType) and method == "Radau" and not jit and start == 0.0
+    supported = isinstance(model, SystemType) and method == "Radau" and not jit
     if backend == "auto" and (not supported or engine.installed() is None):
         return None
     if not supported:
-        message = "backend='engine' runs a System with method='Radau', no jit and start=0"
+        message = "backend='engine' runs a System with method='Radau' and no jit"
         raise SimulationError(message)
     assert isinstance(model, SystemType)  # noqa: S101 - narrowed by `supported`
     try:
@@ -244,6 +244,7 @@ def _on_engine(  # noqa: PLR0913 - the knobs of `simulate`
             tolerance=tolerance,
             absolute=absolute,
             parameters=parameters,
+            start=start,
         )
     except EmitError:
         if backend == "engine":

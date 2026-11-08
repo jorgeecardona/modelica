@@ -136,23 +136,24 @@ class Loaded:
         self.close()
 
     def start(
-        self, parameters: NDArray[np.float64] | None = None
+        self, parameters: NDArray[np.float64] | None = None, t: float = 0.0
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
         """The parameter vector, the initial state and a latched workspace, as `Kernel.start`.
 
         ``parameters`` replaces the vector the model computes; the start values follow it.
+        ``t`` is the start time: a start value or a latch can read ``time``.
         """
         layout = self.layout
         empty = np.zeros(0)
         p = np.zeros(len(layout.parameters))
         if parameters is None:
-            self.call(self.encoded.parameters, 0.0, empty, empty, empty, p)
+            self.call(self.encoded.parameters, t, empty, empty, empty, p)
         else:
             p[:] = parameters
         y = np.zeros(len(layout.states))
         w = np.zeros(layout.workspace)
-        self.call(self.encoded.initial, 0.0, empty, p, w, y)
-        self.call(self.encoded.latch, 0.0, y, p, w, empty)
+        self.call(self.encoded.initial, t, empty, p, w, y)
+        self.call(self.encoded.latch, t, y, p, w, empty)
         return p, y, w
 
     def call(  # noqa: PLR0913, PLR0917 - the kernel signature
@@ -213,6 +214,7 @@ def simulate(  # noqa: PLR0913, PLR0917 - the same knobs as `rustsim.simulate`
     path: Path | None = None,
     *,
     every: bool = False,
+    start: float = 0.0,
 ) -> Run:
     """Integrate ``system`` in the engine: lower it to a tape, then run the Radau runtime on it.
 
@@ -225,7 +227,7 @@ def simulate(  # noqa: PLR0913, PLR0917 - the same knobs as `rustsim.simulate`
             system,
             loaded.engine.md_vm_run,
             (loaded.handle,),
-            start=loaded.start(parameters),
+            start=loaded.start(parameters, start),
             events=program.layout.events,
             observed=program.layout.observed,
             stop=stop,
@@ -234,6 +236,7 @@ def simulate(  # noqa: PLR0913, PLR0917 - the same knobs as `rustsim.simulate`
             tolerance=tolerance,
             absolute=absolute,
             every=every,
+            t0=start,
         )
     finally:
         loaded.close()
@@ -249,6 +252,7 @@ def result(  # noqa: PLR0913 - the knobs of `simulate`
     absolute: float | None = None,
     parameters: NDArray[np.float64] | None = None,
     path: Path | None = None,
+    start: float = 0.0,
 ) -> Result:
     """The engine's run as `modelica.sim.simulate` returns one: observed rows and the events."""
     run = simulate(
@@ -261,6 +265,7 @@ def result(  # noqa: PLR0913 - the knobs of `simulate`
         parameters=parameters,
         path=path,
         every=True,
+        start=start,
     )
     states = len(system.modes[0].states)
     return Result(

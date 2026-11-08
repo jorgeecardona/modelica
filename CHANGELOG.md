@@ -14,6 +14,7 @@ source of truth and is bumped automatically when shipped source changes.
 - **The engine runs without an output grid, and returns the rows SciPy returns.** With no `times`
   or `points` it returns every accepted step. With a grid it adds the start, the stop and both
   sides of each event, as SciPy does.
+- **The engine runs from any `start` time**, not only from 0.
 - **`Result.backend` says who integrated** (`"engine"` or `"python"`).
 - **A requested output grid returns only the grid.** With `times` or `points`, SciPy no longer
   adds its own steps to the result. The two sides of each event stay.
