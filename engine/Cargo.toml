@@ -2,21 +2,13 @@
 name = "modelica-engine"
 version = "0.1.0"
 edition = "2021"
-description = "The precompiled engine for modelica: runs a model lowered to a register tape"
+description = "The engine inside the modelica wheel: runs a model lowered to a register tape"
 license = "MIT"
 publish = false
 
 [lib]
 name = "modelica_engine"
 crate-type = ["cdylib"]
-
-[features]
-# The Python extension: only a module that says where the shared library is. The engine itself
-# is the C ABI in lib.rs, read through ctypes, so `rustc` alone still builds it for tests.
-python = ["dep:pyo3"]
-
-[dependencies]
-pyo3 = { version = "0.30", features = ["abi3-py312"], optional = true }
 
 [profile.release]
 opt-level = 3

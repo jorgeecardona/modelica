@@ -3,16 +3,16 @@
 `modelica.sim.vm` lowers the model to a tape; this module hands the tape to the engine library
 and integrates with the same Radau runtime `rustsim` compiles. The result is `rustsim.Run`.
 
-The engine is one shared library for every model. It ships as the ``modelica-engine`` wheel
-(``pip install modelica[engine]``). In a source checkout without the wheel, `library` builds it
-once with ``rustc`` from ``engine/src`` and keeps it in the cache directory `rustsim` uses.
+The engine is one shared library for every model. A platform wheel of ``modelica`` carries it as
+``modelica/_engine.<suffix>`` (``hatch_build.py``). With a pure wheel or a source checkout,
+`library` builds it once with ``rustc`` from ``engine/src`` and keeps it in the cache directory
+`rustsim` uses.
 """
 
 from __future__ import annotations
 
 import ctypes
 import hashlib
-import importlib
 import shutil
 import subprocess
 import tempfile
@@ -45,16 +45,12 @@ SOURCE = Path(__file__).resolve().parents[3] / "engine" / "src"
 
 
 def installed() -> Path | None:
-    """The library from the ``modelica-engine`` wheel, or ``None`` when it is not installed.
+    """The engine library inside the installed wheel, or ``None`` for a pure wheel or a checkout.
 
-    The wheel's extension module is the engine library itself: its ``__file__`` is what
-    ``ctypes`` opens.
+    A platform wheel carries it as ``modelica/_engine.<suffix>`` (``hatch_build.py``).
     """
-    try:
-        native = importlib.import_module("modelica_engine.modelica_engine")
-    except ImportError:
-        return None
-    return Path(str(native.__file__))
+    bundled = Path(__file__).resolve().parents[1] / f"_engine{_suffix()}"
+    return bundled if bundled.exists() else None
 
 
 def library(cache: Path | None = None) -> Path:

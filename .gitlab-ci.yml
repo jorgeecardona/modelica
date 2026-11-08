@@ -24,6 +24,10 @@ workflow:
     - if: $CI_COMMIT_BRANCH
 
 ci:
+  # On the default branch the engine wheel is built first and published with the pure one.
+  needs:
+    - job: engine-wheel
+      optional: true
   # OIDC Trusted Publishing: GitLab mints a short-lived id_token; scripts/pypi-publish
   # exchanges it for a one-shot PyPI token. The `pypi` environment matches the PyPI
   # publisher config (it is also recorded on non-publishing runs -- cosmetic only).
@@ -79,6 +83,31 @@ ci:
   artifacts:
     paths:
       - site
+    expire_in: 1 day
+
+# The platform wheel: the same package with the engine (engine/) compiled into it as
+# modelica/_engine.so, tagged py3-none-manylinux_2_28_x86_64 (hatch_build.py). Built in the PyPA
+# manylinux image so the tag is true, then installed and tested. Only on the default branch,
+# where `ci` publishes it next to the pure wheel; branches skip it to save CI minutes.
+engine-wheel:
+  image: quay.io/pypa/manylinux_2_28_x86_64
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  timeout: 20m
+  script:
+    - curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - /opt/python/cp312-cp312/bin/python -m pip install --quiet uv
+    - export PATH="/opt/python/cp312-cp312/bin:$PATH"
+    - MODELICA_ENGINE=1 MODELICA_WHEEL_PLATFORM=manylinux_2_28_x86_64 uv build --wheel --out-dir dist-engine
+    - uv venv --python /opt/python/cp312-cp312/bin/python /tmp/check
+    - VIRTUAL_ENV=/tmp/check uv pip install "$(ls dist-engine/*.whl)[sim]" pytest
+    # Out of the source tree, so the import is the installed wheel and not src/.
+    - cd /tmp && /tmp/check/bin/python -c "from modelica.sim import engine; assert engine.installed(), 'no engine in the wheel'"
+    - cd "$CI_PROJECT_DIR" && /tmp/check/bin/python -m pytest -q -p no:cacheprovider tests/test_vm.py -m "not slow" -k "engine"
+  artifacts:
+    paths:
+      - dist-engine
     expire_in: 1 day
 
 # Publish the docs to GitLab Pages. A job named `pages` whose artifact is public/ is what

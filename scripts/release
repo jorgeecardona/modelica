@@ -27,5 +27,10 @@ then
     exit 0
 fi
 
+# The platform wheel from the engine-wheel job (artifact dist-engine/), when there is one.
+if ls dist-engine/modelica-"$V"-*.whl >/dev/null 2>&1; then
+    cp dist-engine/modelica-"$V"-*.whl dist/
+fi
+
 echo "release: publishing modelica $V to PyPI"
 sh scripts/pypi-publish

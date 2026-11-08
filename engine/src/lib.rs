@@ -391,8 +391,3 @@ pub unsafe extern "C" fn md_vm_run(
     r.0
 }
 
-/// The Python module: importing it loads this library, and its `__file__` is the path `ctypes`
-/// opens. Nothing else is exported to Python.
-#[cfg(feature = "python")]
-#[pyo3::pymodule]
-mod modelica_engine {}

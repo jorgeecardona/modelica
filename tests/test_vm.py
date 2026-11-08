@@ -163,11 +163,13 @@ def test_an_unknown_function_is_refused() -> None:
 
 @pytest.fixture(scope="module")
 def engine(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """The engine library, built once for this module into a temporary cache."""
-    if COMPILER is None:
-        pytest.skip("no rustc on this machine")
-    from modelica.sim.engine import library  # noqa: PLC0415 - only the engine tests need it
+    """The wheel's engine library, else one built once from ``engine/src`` into a temporary cache."""
+    from modelica.sim.engine import installed, library  # noqa: PLC0415 - only the engine tests
 
+    if (bundled := installed()) is not None:
+        return bundled
+    if COMPILER is None:
+        pytest.skip("no engine in this install and no rustc to build one")
     return library(tmp_path_factory.mktemp("engine"))
 
 

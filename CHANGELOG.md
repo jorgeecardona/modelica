@@ -6,6 +6,11 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **A precompiled engine runs a model with no compiler per model.** `simulate(..., backend="engine")`
+  lowers the model to a register tape (`modelica.sim.vm`) and runs it in a Rust engine with the
+  same Radau integrator as `rustsim`. The Linux x86_64 wheel carries the engine as
+  `modelica/_engine.so`; the pure wheel builds it once with `rustc` on first use. The default is
+  still `backend="python"`.
 - **A parameter with no binding takes its `start` value.** The specification lets a parameter stand
   on its `start` attribute (with a tool warning) when nothing binds it, and the machines rely on it:
   a synchronous machine declares `parameter Boolean useDamperCage(start = true)` with no binding and

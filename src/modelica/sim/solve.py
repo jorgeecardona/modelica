@@ -172,8 +172,7 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     a parameter follows the override, which is what makes this usable for a sweep.
 
     ``backend`` picks who integrates. ``"python"`` (the default) is SciPy on the emitted Python.
-    ``"engine"`` is the precompiled engine (`modelica.sim.engine`, the ``modelica-engine``
-    wheel) and raises when it cannot run the call. ``"auto"`` uses the engine when it is
+    ``"engine"`` is the precompiled engine (`modelica.sim.engine`, inside a platform wheel) and raises when it cannot run the call. ``"auto"`` uses the engine when it is
     installed and can run the call, else SciPy. The engine runs a `System` with
     ``method="Radau"``, no ``jit``, ``start = 0`` and an output grid, and it returns only the grid
     instants: SciPy returns its own steps as well.

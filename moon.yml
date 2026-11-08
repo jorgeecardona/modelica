@@ -99,7 +99,7 @@ tasks:
   build:
     command: 'uv build --out-dir dist'
     deps: ['~:test']
-    inputs: ['src/**/*.py', 'pyproject.toml', 'README.md', 'CHANGELOG.md', 'LICENSE']
+    inputs: ['src/**/*.py', 'pyproject.toml', 'hatch_build.py', 'engine/src/**/*', 'README.md', 'CHANGELOG.md', 'LICENSE']
     outputs: ['dist']
 
   # CI-side enforcement of "a src/ change carries a version bump" (the non-bypassable
