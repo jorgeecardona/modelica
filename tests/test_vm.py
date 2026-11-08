@@ -309,10 +309,19 @@ def test_simulate_on_the_engine_agrees_with_scipy(engine: Path, name: str) -> No
 
     system = _system(EXAMPLES / "models" / f"{name}.mo")
     times = np.linspace(0.0, 2.0, 21)
-    scipy = simulate(system, stop=2.0, times=times, tolerance=1e-8)
+    scipy = simulate(system, stop=2.0, times=times, tolerance=1e-8, backend="python")
     ran = native.result(system, stop=2.0, times=times, tolerance=1e-8)
+    assert (scipy.backend, ran.backend) == ("python", "engine")
     assert ran.names == scipy.names
     assert [e.index for e in ran.events] == [e.index for e in scipy.events]
     for variable in ran.names:
         expected = np.interp(times, scipy.time, scipy[variable])
         np.testing.assert_allclose(ran[variable], expected, rtol=1e-4, atol=1e-6, err_msg=variable)
+
+
+def test_auto_falls_back_to_scipy_without_a_grid() -> None:
+    """``backend="auto"`` with no output grid runs on SciPy and says so in ``Result.backend``."""
+    from modelica.sim.solve import simulate  # noqa: PLC0415
+
+    system = _system(EXAMPLES / "models" / "RCCircuit.mo")
+    assert simulate(system, stop=0.1).backend == "python"

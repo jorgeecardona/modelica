@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -51,6 +51,8 @@ class Result:
     """Shape ``(len(names), len(time))`` -- one row per variable, so a row is a slice."""
 
     events: tuple[Event, ...] = field(default_factory=tuple[Event, ...])
+    backend: Literal["python", "engine"] = "python"
+    """Who integrated: ``"engine"`` is the precompiled engine, ``"python"`` is SciPy."""
 
     def write(self, path: str | PathLike[str]) -> None:
         """Write this run as a Dymola-format ``.mat``, which is what the field reads.

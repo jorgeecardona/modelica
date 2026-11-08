@@ -260,4 +260,5 @@ def result(  # noqa: PLR0913 - the knobs of `simulate`
         names=run.result.names[states:],
         values=run.result.values[states:],
         events=run.event_list,
+        backend="engine",
     )
