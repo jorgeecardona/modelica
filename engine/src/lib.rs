@@ -155,6 +155,7 @@ impl Program {
                     let n = f.y.len();
                     f.out[..n].copy_from_slice(f.y);
                 }
+                29 => f.out[..a].fill(0.0),
                 _ => {}
             }
         }

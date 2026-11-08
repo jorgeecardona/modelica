@@ -76,6 +76,7 @@ class Op(IntEnum):
     SOLVE = 26  # dst = first of n x registers, a = first of n*n A registers, b = first of n b
     NEWTON = 27  # a = index into Function.newton
     COPY_Y_OUT = 28  # out[:] = y
+    CLEAR_OUT = 29  # out[:a] = 0
 
 
 class Builtin(IntEnum):
@@ -202,6 +203,8 @@ class Program:
     registers: int
     constants: tuple[float, ...]
     rhs: tuple[Function, ...]
+    jacobian: tuple[Function, ...]
+    """``d rhs / d y``, row-major, built from ``rhs`` by forward mode (`_Tangents`)."""
     observe: tuple[Function, ...]
     indicators: tuple[Function, ...]
     transition_prefix: tuple[Function, ...]
@@ -519,6 +522,233 @@ class _Lowering:
                     scope.code.append(Instr(Op.STORE_W, 0, self.emitter.slots[unknown], source))
 
 
+_LN10: Final = math.log(10.0)
+
+
+@dataclass
+class _Tangents:
+    """Forward mode over a tape: ``d out / d y`` for every state at once, sparse by seed.
+
+    Each register's tangent is a map from a state index to the register holding that partial;
+    a missing index is zero. The primal instructions are kept, and after each one the partials
+    it implies are written. A linear solve differentiates as ``A dx = db - dA x``. A Newton block
+    is re-evaluated once at its converged point and differentiated implicitly: with the unknowns'
+    own partials held at zero, ``b = -F`` gives ``db = -F_v dv``, and ``du = A^-1 db``.
+    """
+
+    lowering: _Lowering
+    width: int
+    code: list[Instr] = field(default_factory=list[Instr])
+    dots: dict[int, dict[int, int]] = field(default_factory=dict[int, dict[int, int]])
+    scope: _Scope = field(default_factory=lambda: _Scope([], {}, {}, []))
+
+    def emit(self, op: Op, a: int, b: int = 0, c: int = 0) -> int:
+        dst = self.lowering.register()
+        self.code.append(Instr(op, dst, a, b, c))
+        return dst
+
+    def constant(self, value: float) -> int:
+        self.scope.code = self.code
+        return self.lowering.constant(self.scope, value)
+
+    def scaled(self, factor: int, tangent: Mapping[int, int]) -> dict[int, int]:
+        return {j: self.emit(Op.MUL, factor, d) for j, d in tangent.items()}
+
+    def combine(self, op: Op, left: Mapping[int, int], right: Mapping[int, int]) -> dict[int, int]:
+        """``left + right`` or ``left - right``, seed by seed."""
+        out: dict[int, int] = {}
+        for j in left.keys() | right.keys():
+            if j in left and j in right:
+                out[j] = self.emit(op, left[j], right[j])
+            elif j in left:
+                out[j] = left[j]
+            else:
+                out[j] = right[j] if op is Op.ADD else self.emit(Op.NEG, right[j])
+        return out
+
+    def function(self, rhs: Function) -> Function:
+        self.code = [Instr(Op.CLEAR_OUT, 0, self.width * self.width)]
+        self.run(rhs, rhs.code)
+        return Function(tuple(self.code), rhs.newton)
+
+    def run(self, function: Function, code: Sequence[Instr]) -> None:
+        for i in code:
+            if i.op is not Op.STORE_OUT:  # out holds the Jacobian here, not ``dy``
+                self.code.append(i)
+            self.step(function, i)
+
+    def step(self, function: Function, i: Instr) -> None:  # noqa: C901, PLR0912 - one case per opcode
+        dots = self.dots
+        op = i.op
+        a, b = dots.get(i.a, {}), dots.get(i.b, {})
+        if op is Op.LOAD_Y:
+            dots[i.dst] = {i.a: self.constant(1.0)}
+        elif op is Op.MOVE:
+            if a:
+                dots[i.dst] = dict(a)
+            else:
+                dots.pop(i.dst, None)
+        elif op is Op.STORE_OUT:
+            for j, d in sorted(dots.get(i.b, {}).items()):
+                self.code.append(Instr(Op.STORE_OUT, 0, i.a * self.width + j, d))
+        elif op in (Op.ADD, Op.SUB):
+            dots[i.dst] = self.combine(op, a, b)
+        elif op is Op.NEG:
+            dots[i.dst] = {j: self.emit(Op.NEG, d) for j, d in a.items()}
+        elif op is Op.MUL:
+            dots[i.dst] = self.combine(Op.ADD, self.scaled(i.b, a), self.scaled(i.a, b))
+        elif op is Op.DIV:
+            # d(a/b) = (da - (a/b) db) / b
+            inner = self.combine(Op.SUB, a, self.scaled(i.dst, b))
+            dots[i.dst] = {j: self.emit(Op.DIV, d, i.b) for j, d in inner.items()}
+        elif op is Op.POW:
+            self.power(i, a, b)
+        elif op is Op.SELECT:
+            self.select(i)
+        elif op is Op.CALL1:
+            self.call1(i, a)
+        elif op is Op.CALL2:
+            self.call2(i, a, b)
+        elif op is Op.SOLVE:
+            self.solve(i.c, i.a, i.b, i.dst)
+        elif op is Op.NEWTON:
+            self.newton(function, function.newton[i.a])
+        else:
+            # Loads of p, w, t, constants, comparisons and logic: no state in their partials.
+            dots.pop(i.dst, None)
+
+    def power(self, i: Instr, a: Mapping[int, int], b: Mapping[int, int]) -> None:
+        out: dict[int, int] = {}
+        if a:
+            # b * a^(b-1) = b * (a^b / a) would divide by zero at a = 0; use pow directly.
+            exponent = self.emit(Op.SUB, i.b, self.constant(1.0))
+            factor = self.emit(Op.MUL, i.b, self.emit(Op.POW, i.a, exponent))
+            out = self.scaled(factor, a)
+        if b:
+            logarithm = self.emit(Op.CALL1, i.a, 0, Builtin.LOG)
+            out = self.combine(Op.ADD, out, self.scaled(self.emit(Op.MUL, i.dst, logarithm), b))
+        self.set(i.dst, out)
+
+    def select(self, i: Instr) -> None:
+        then, otherwise = self.dots.get(i.b, {}), self.dots.get(i.c, {})
+        out: dict[int, int] = {}
+        for j in then.keys() | otherwise.keys():
+            zero = self.constant(0.0)
+            out[j] = self.emit(Op.SELECT, i.a, then.get(j, zero), otherwise.get(j, zero))
+        self.set(i.dst, out)
+
+    def call1(self, i: Instr, a: Mapping[int, int]) -> None:  # noqa: C901, PLR0912 - one rule per builtin
+        if not a:
+            self.set(i.dst, {})
+            return
+        x, y, f = i.a, i.dst, Builtin(i.c)
+        one = self.constant(1.0)
+        if f in (Builtin.CEIL, Builtin.FLOOR, Builtin.SIGN, Builtin.TRUNC):
+            self.set(i.dst, {})
+            return
+        if f is Builtin.ABS:
+            factor = self.emit(Op.CALL1, x, 0, Builtin.SIGN)
+        elif f is Builtin.EXP:
+            factor = y
+        elif f is Builtin.LOG:
+            factor = self.emit(Op.DIV, one, x)
+        elif f is Builtin.LOG10:
+            factor = self.emit(Op.DIV, one, self.emit(Op.MUL, x, self.constant(_LN10)))
+        elif f is Builtin.SIN:
+            factor = self.emit(Op.CALL1, x, 0, Builtin.COS)
+        elif f is Builtin.COS:
+            factor = self.emit(Op.NEG, self.emit(Op.CALL1, x, 0, Builtin.SIN))
+        elif f is Builtin.TAN:
+            factor = self.emit(Op.ADD, one, self.emit(Op.MUL, y, y))
+        elif f is Builtin.SINH:
+            factor = self.emit(Op.CALL1, x, 0, Builtin.COSH)
+        elif f is Builtin.COSH:
+            factor = self.emit(Op.CALL1, x, 0, Builtin.SINH)
+        elif f is Builtin.TANH:
+            factor = self.emit(Op.SUB, one, self.emit(Op.MUL, y, y))
+        elif f is Builtin.SQRT:
+            factor = self.emit(Op.DIV, self.constant(0.5), y)
+        elif f is Builtin.ATAN:
+            factor = self.emit(Op.DIV, one, self.emit(Op.ADD, one, self.emit(Op.MUL, x, x)))
+        else:  # ASIN, ACOS
+            root = self.emit(
+                Op.CALL1, self.emit(Op.SUB, one, self.emit(Op.MUL, x, x)), 0, Builtin.SQRT
+            )
+            factor = self.emit(Op.DIV, one, root)
+            if f is Builtin.ACOS:
+                factor = self.emit(Op.NEG, factor)
+        self.set(i.dst, self.scaled(factor, a))
+
+    def call2(self, i: Instr, a: Mapping[int, int], b: Mapping[int, int]) -> None:
+        f = Builtin(i.c)
+        if f in (Builtin.MAX, Builtin.MIN):
+            pick = self.emit(Op.GT if f is Builtin.MAX else Op.LT, i.a, i.b)
+            zero = self.constant(0.0)
+            out = {
+                j: self.emit(Op.SELECT, pick, a.get(j, zero), b.get(j, zero))
+                for j in a.keys() | b.keys()
+            }
+        elif f is Builtin.ATAN2:
+            # d atan2(a, b) = (b da - a db) / (a^2 + b^2)
+            square = self.emit(Op.ADD, self.emit(Op.MUL, i.a, i.a), self.emit(Op.MUL, i.b, i.b))
+            inner = self.combine(Op.SUB, self.scaled(i.b, a), self.scaled(i.a, b))
+            out = {j: self.emit(Op.DIV, d, square) for j, d in inner.items()}
+        else:  # MOD, REM: a - q b with q piecewise constant
+            rounding = Builtin.FLOOR if f is Builtin.MOD else Builtin.TRUNC
+            quotient = self.emit(Op.CALL1, self.emit(Op.DIV, i.a, i.b), 0, rounding)
+            out = self.combine(Op.SUB, a, self.scaled(quotient, b))
+        self.set(i.dst, out)
+
+    def set(self, register: int, tangent: dict[int, int]) -> None:
+        if tangent:
+            self.dots[register] = tangent
+        else:
+            self.dots.pop(register, None)
+
+    def solve(self, n: int, matrix: int, right: int, step: int) -> None:
+        """``A dx = db - dA x``, one solve per seed that reaches the system."""
+        dots = self.dots
+        seeds: set[int] = set()
+        for register in range(matrix, matrix + n * n):
+            seeds |= dots.get(register, {}).keys()
+        for register in range(right, right + n):
+            seeds |= dots.get(register, {}).keys()
+        for k in range(n):
+            dots.pop(step + k, None)
+        for j in sorted(seeds):
+            column = self.lowering.register(n)
+            for row in range(n):
+                total = dots.get(right + row, {}).get(j, self.constant(0.0))
+                for k in range(n):
+                    entry = dots.get(matrix + row * n + k, {}).get(j)
+                    if entry is not None:
+                        total = self.emit(Op.SUB, total, self.emit(Op.MUL, entry, step + k))
+                self.code.append(Instr(Op.MOVE, column + row, total))
+            partial = self.lowering.register(n)
+            self.code.append(Instr(Op.SOLVE, partial, matrix, column, n))
+            for k in range(n):
+                dots.setdefault(step + k, {})[j] = partial + k
+
+    def newton(self, function: Function, block: NewtonBlock) -> None:
+        for unknown in block.unknowns:
+            self.dots.pop(unknown, None)
+        self.run(function, block.body)
+        n = len(block.unknowns)
+        seeds: set[int] = set()
+        for register in range(block.right, block.right + n):
+            seeds |= self.dots.get(register, {}).keys()
+        for j in sorted(seeds):
+            column = self.lowering.register(n)
+            zero = self.constant(0.0)
+            for row in range(n):
+                source = self.dots.get(block.right + row, {}).get(j, zero)
+                self.code.append(Instr(Op.MOVE, column + row, source))
+            partial = self.lowering.register(n)
+            self.code.append(Instr(Op.SOLVE, partial, block.matrix, column, n))
+            for k, unknown in enumerate(block.unknowns):
+                self.dots.setdefault(unknown, {})[j] = partial + k
+
+
 def lower(system: System) -> Program:
     """Write ``system``'s kernel functions as tapes.
 
@@ -528,10 +758,15 @@ def lower(system: System) -> Program:
     lowering = _Lowering(Emitter(system))
     modes = system.modes
     transitions = [lowering.transition(k, mode) for k, mode in enumerate(modes)]
+    rhs = tuple(lowering.rhs(mode) for mode in modes)
     program = Program(
         registers=0,
         constants=(),
-        rhs=tuple(lowering.rhs(mode) for mode in modes),
+        rhs=rhs,
+        jacobian=tuple(
+            _Tangents(lowering, len(mode.states)).function(f)
+            for mode, f in zip(modes, rhs, strict=True)
+        ),
         observe=tuple(lowering.observe(mode) for mode in modes),
         indicators=tuple(lowering.indicators(k, mode) for k, mode in enumerate(modes)),
         transition_prefix=tuple(prefix for prefix, _ in transitions),
@@ -548,7 +783,7 @@ def lower(system: System) -> Program:
 
 
 def _sign(x: float) -> float:
-    return float((x > 0) - (x < 0))
+    return float(int(x > 0) - int(x < 0))
 
 
 def _mod(a: float, b: float) -> float:
@@ -627,6 +862,8 @@ class _Machine:
                 r[i.dst] = r[i.a]
             elif op is Op.COPY_Y_OUT:
                 out[: len(self.y)] = self.y
+            elif op is Op.CLEAR_OUT:
+                out[: i.a] = [0.0] * i.a
             elif op is Op.SELECT:
                 r[i.dst] = r[i.b] if r[i.a] != 0.0 else r[i.c]
             elif op is Op.CALL1:
@@ -777,9 +1014,13 @@ class Encoded:
         """The function index of the transition prefix in ``mode``."""
         return 3 * self.modes + mode
 
+    def jacobian(self, mode: int) -> int:
+        """The function index of ``jacobian`` in ``mode``."""
+        return 4 * self.modes + mode
+
     def transition(self, mode: int, event: int) -> int:
         """The function index of ``event``'s transition in ``mode``."""
-        return 4 * self.modes + mode * self.events + event
+        return 5 * self.modes + mode * self.events + event
 
 
 def encode(program: Program) -> Encoded:
@@ -814,7 +1055,14 @@ def encode(program: Program) -> Encoded:
             unknowns.extend(block.unknowns)
         functions.extend((start, count, first, len(function.newton)))
 
-    for group in (program.rhs, program.observe, program.indicators, program.transition_prefix):
+    groups = (
+        program.rhs,
+        program.observe,
+        program.indicators,
+        program.transition_prefix,
+        program.jacobian,
+    )
+    for group in groups:
         for function in group:
             add(function)
     for branches in program.transition:

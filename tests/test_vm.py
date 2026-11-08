@@ -76,6 +76,13 @@ class _Point:
         self.module.latch(0.0, self.y, self.p, self.w)
         self.code = code
 
+    def _jacobian(self, t: float, y: Any, p: Any, w: Any, out: Any) -> None:
+        """The emitted ``jacobian`` writes rows; the tape writes the same numbers row-major."""
+        n = len(y)
+        rows = np.zeros((n, n))
+        self.module.jacobian(t, y, p, w, rows)
+        out[:] = rows.reshape(-1)
+
     def calls(self) -> list[tuple[str, int, int | None, int, Kernel, tuple[Any, ...]]]:
         """(label, which, then, length, reference, extra args) for every kernel call checked."""
         code = self.code
@@ -83,6 +90,7 @@ class _Point:
         found: list[tuple[str, int, int | None, int, Kernel, tuple[Any, ...]]] = [
             ("rhs", 0, None, n, self.module.rhs, ()),
             ("observe", 1, None, len(code.observed), self.module.observe, ()),
+            ("jacobian", 4, None, n * n, self._jacobian, ()),
         ]
         if events:
             found.append(("indicators", 2, None, events, self.module.indicators, ()))
@@ -101,10 +109,20 @@ def _reference(
     return out, w
 
 
+def _tol(label: str) -> float:
+    """Exact to rounding, except the Jacobian: forward mode orders the products differently."""
+    return 1e-9 if label == "jacobian" else 1e-12
+
+
 def _index(encoded: vm.Encoded, which: int, mode: int) -> int:
-    return (encoded.rhs, encoded.observe, encoded.indicators, encoded.transition_prefix)[which](
-        mode
+    pick = (
+        encoded.rhs,
+        encoded.observe,
+        encoded.indicators,
+        encoded.transition_prefix,
+        encoded.jacobian,
     )
+    return pick[which](mode)
 
 
 @pytest.mark.parametrize("model", _models(), ids=[m.stem for m in _models()])
@@ -114,7 +132,13 @@ def test_the_tape_equals_the_interpreter(model: Path) -> None:
     point = _Point(emit(system))
     program = vm.lower(system)
     mode = vm.mode(program, point.w)
-    groups = (program.rhs, program.observe, program.indicators, program.transition_prefix)
+    groups = (
+        program.rhs,
+        program.observe,
+        program.indicators,
+        program.transition_prefix,
+        program.jacobian,
+    )
     for label, which, event, length, kernel, extra in point.calls():
         expected, expected_w = _reference(point, kernel, extra, length)
         out, w = [0.0] * length, list(point.w)
@@ -122,7 +146,7 @@ def test_the_tape_equals_the_interpreter(model: Path) -> None:
         vm.evaluate(
             program, groups[which][mode], 0.0, list(point.y), list(point.p), w, out, then=then
         )
-        np.testing.assert_allclose(out, expected, rtol=1e-12, atol=1e-12, err_msg=label)
+        np.testing.assert_allclose(out, expected, rtol=_tol(label), atol=_tol(label), err_msg=label)
         np.testing.assert_allclose(w, expected_w, rtol=1e-12, atol=1e-12, err_msg=label)
 
 
@@ -246,7 +270,9 @@ def test_the_engine_equals_the_interpreter(engine: ctypes.CDLL, model: Path) -> 
                 _pointer(out, ctypes.c_double),
                 length,
             )
-            np.testing.assert_allclose(out, expected, rtol=1e-12, atol=1e-12, err_msg=label)
+            np.testing.assert_allclose(
+                out, expected, rtol=_tol(label), atol=_tol(label), err_msg=label
+            )
             np.testing.assert_allclose(w, expected_w, rtol=1e-12, atol=1e-12, err_msg=label)
     finally:
         engine.md_vm_free(handle)
