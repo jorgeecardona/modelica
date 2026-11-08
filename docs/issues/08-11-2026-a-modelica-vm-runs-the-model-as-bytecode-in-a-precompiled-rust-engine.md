@@ -184,3 +184,17 @@ after Milestone 2. The tape format is the input in both cases, so the decision c
 10. Docs: the `simulate` docstring, the engine page, CHANGELOG.
 
 Deferred: `Code` and `Kernel` on the engine, methods other than Radau, Cranelift, macOS x86_64.
+
+### Step 3: measured on vowel_i (2026-11-09, cargo release build, CPU time)
+
+| stop | path | time | steps | rejected | evaluations | jacobians | factorisations |
+|---|---|---|---|---|---|---|---|
+| 0.05 s | rustsim | 7.1 s | 12963 | 434 | 93523 | 24 | 991 |
+| 0.05 s | engine | 6.7 s | 12963 | 434 | 93523 | 24 | 991 |
+| 0.35 s | rustsim | 26.0 s | 103678 | 2843 | 743138 | 141 | 6515 |
+| 0.35 s | engine | 53.6 s | 103711 | 2856 | 743447 | 141 | 6530 |
+
+The counters agree to 0.03 %, so both paths integrate the same function. The difference is the
+cost per call: about 0.52 ms per step for the engine against 0.25 ms for rustsim on the long
+run. The short rustsim run costs more per step (0.55 ms); the cause is not measured. Step 7
+(one register frame per program, no copies in `solve`) is the fix to try.
