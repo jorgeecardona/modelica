@@ -32,6 +32,8 @@ ci:
       optional: true
     - job: engine-wheel-windows
       optional: true
+    - job: engine-wheel-macos
+      optional: true
   # OIDC Trusted Publishing: GitLab mints a short-lived id_token; scripts/pypi-publish
   # exchanges it for a one-shot PyPI token. The `pypi` environment matches the PyPI
   # publisher config (it is also recorded on non-publishing runs -- cosmetic only).
@@ -152,6 +154,31 @@ engine-wheel-windows:
     - pip install --quiet uv
     - MODELICA_ENGINE_LIBRARY="$DLL" MODELICA_WHEEL_PLATFORM=win_amd64 uv build --wheel --out-dir dist-engine
     - python -m zipfile -l dist-engine/*.whl | grep "modelica/_engine.dll"
+  artifacts:
+    paths:
+      - dist-engine
+    expire_in: 1 day
+
+# The macOS arm64 wheel. A Mac runner costs 6 times a Linux one, so this runs only when the
+# version in src/modelica/__init__.py changes, which is when a release publishes.
+engine-wheel-macos:
+  image: macos-26-xcode-26
+  tags: [saas-macos-medium-m1]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: [src/modelica/__init__.py]
+  timeout: 20m
+  variables:
+    MACOSX_DEPLOYMENT_TARGET: "11.0"
+  script:
+    - curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+    - export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - MODELICA_ENGINE=1 MODELICA_WHEEL_PLATFORM=macosx_11_0_arm64 uv build --wheel --out-dir dist-engine
+    - uv venv --python 3.12 /tmp/check
+    - VIRTUAL_ENV=/tmp/check uv pip install "$(ls dist-engine/*.whl)[sim]" pytest
+    - cd /tmp && /tmp/check/bin/python -c "from modelica.sim import engine; assert engine.installed(), 'no engine in the wheel'"
+    - cd "$CI_PROJECT_DIR" && /tmp/check/bin/python -m pytest -q -p no:cacheprovider tests/test_vm.py -m "not slow" -k "engine"
   artifacts:
     paths:
       - dist-engine

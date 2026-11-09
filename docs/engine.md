@@ -14,7 +14,7 @@ runs on your machine. This page says when the engine runs, how to check, and how
 In every other case it uses SciPy. `backend="python"` always uses SciPy. `backend="engine"`
 raises a `SimulationError` when the engine cannot run the call.
 
-Platform wheels exist for Linux x86_64, Linux aarch64 and Windows x86_64. On other platforms,
+Platform wheels exist for Linux x86_64, Linux aarch64, Windows x86_64 and macOS arm64. On other platforms,
 `pip install modelica` installs the pure wheel, and `simulate()` uses SciPy.
 
 ## Check which one ran

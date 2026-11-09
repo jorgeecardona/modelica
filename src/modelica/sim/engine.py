@@ -4,7 +4,8 @@
 and integrates with the same Radau runtime `rustsim` compiles. The result is `rustsim.Run`.
 
 The engine is one shared library for every model. A platform wheel of ``modelica`` carries it as
-``modelica/_engine.<suffix>`` (``hatch_build.py``). With a pure wheel or a source checkout,
+``modelica/_engine.<suffix>`` (``hatch_build.py``): Linux x86_64 and aarch64, Windows x86_64 and
+macOS arm64. With a pure wheel or a source checkout,
 `library` builds it once with ``rustc`` from ``engine/src`` and keeps it in the cache directory
 `rustsim` uses.
 """
