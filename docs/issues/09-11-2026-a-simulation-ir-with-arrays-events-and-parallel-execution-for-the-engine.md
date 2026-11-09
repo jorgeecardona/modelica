@@ -210,3 +210,25 @@ compressed one that colouring would give. A 0.05 s vowel_i run:
 The Jacobian is about 0.03% of the run. Colouring stays useful only for a Jacobian made by
 finite differences, which the engine does not do. The run time is now in `rhs`: step 5 (array
 opcodes) is where the next gain is.
+
+### Fable review 2: scalar tape first (2026-11-09)
+
+vowel_i is written as unrolled scalars (`p1..p20`, `u2..u20`), so step 4 does not touch it. Its
+`rhs` is not array-shaped; it repeats work:
+
+- 1104 of 1827 instructions read only `time` and constants, including all 244 `sin` calls.
+- Radau calls `rhs` about 40 times per step at about 4 distinct times.
+- The register file is 17010 values (136 KB) for 1827 instructions, 3 to 4 times the L1 cache.
+- 80 `MOVE` and 156 `NEG` can go: `a + (-b)` equals `a - b` bit for bit.
+
+New order, before steps 4 and 5:
+
+1. Time-only hoisting: each function starts with the instructions that read only `time` and
+   constants; the engine skips them when `t` equals the last call's `t`. Bit-identical.
+2. Register compaction: reuse function-local registers so the file fits in L1. Measure cycles,
+   not instructions.
+3. Peephole: copy propagation for `MOVE`, `NEG` folded into `ADD` and `SUB`.
+
+Steps 4 and 5 stay, measured on TorusHeat, HeatBar, WaveString and FisherKPP. Rerolling scalar
+runs into array ops is rejected: it recovers at the tape what step 4 keeps at the source, and
+244 `sin` calls with different constants would still be 244 calls.
