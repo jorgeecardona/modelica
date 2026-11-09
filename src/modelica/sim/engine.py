@@ -26,9 +26,13 @@ import numpy as np
 from modelica.sim import vm
 from modelica.sim.result import Result
 from modelica.sim.rustsim import (
+    _RUN_ARGUMENTS,  # pyright: ignore[reportPrivateUsage] - the same entry point arguments
     _default_cache,  # pyright: ignore[reportPrivateUsage] - the same cache directory
     _suffix,  # pyright: ignore[reportPrivateUsage]
+    assemble,
     drive,
+    rows_for,
+    triggers,
 )
 from modelica.sim.solve import SimulationError
 
@@ -110,6 +114,10 @@ def _open(path: Path) -> ctypes.CDLL:
         pointer, size, pointer, size, pointer, size, pointer, size, pointer, size,
     ]  # fmt: skip
     engine.md_vm_free.argtypes = [pointer]
+    engine.md_vm_run_many.restype = None
+    engine.md_vm_run_many.argtypes = [
+        pointer, size, size, *_RUN_ARGUMENTS[:-1], pointer, pointer,
+    ]  # fmt: skip
     engine.md_vm_call.restype = ctypes.c_int32
     engine.md_vm_call.argtypes = [
         pointer, size, ctypes.c_int64, ctypes.c_double,
@@ -248,10 +256,27 @@ def _runs(  # noqa: PLR0913 - the knobs of `simulate`
     every: bool,
     start: float,
 ) -> list[Run]:
-    """One run per parameter vector, from one lowered and loaded program."""
+    """One run per parameter vector, from one lowered and loaded program.
+
+    Several vectors run in parallel, one thread per core (`_parallel`).
+    """
     program = vm.lower(system)
     loaded = load(program, path)
     try:
+        if len(vectors) > 1:
+            return _parallel(
+                system,
+                loaded,
+                program,
+                [loaded.start(parameters, start) for parameters in vectors],
+                stop=stop,
+                times=times,
+                points=points,
+                tolerance=tolerance,
+                absolute=absolute,
+                every=every,
+                t0=start,
+            )
         return [
             drive(
                 system,
@@ -272,6 +297,91 @@ def _runs(  # noqa: PLR0913 - the knobs of `simulate`
         ]
     finally:
         loaded.close()
+
+
+def _parallel(  # noqa: PLR0913 - the knobs of `simulate`
+    system: System,
+    loaded: Loaded,
+    program: vm.Program,
+    starts: list[tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]],
+    *,
+    stop: float,
+    times: Sequence[float] | NDArray[np.float64] | None,
+    points: int | None,
+    tolerance: float,
+    absolute: float | None,
+    every: bool,
+    t0: float,
+    threads: int = 0,
+) -> list[Run]:
+    """Every start integrated at once by ``md_vm_run_many``, one thread per core by default.
+
+    A run that needs more rows than the first guess runs again on its own, through `drive`.
+    """
+    events, observed = program.layout.events, program.layout.observed
+    dirs, lat, term = triggers(events)
+    grid, cap, ev_cap = rows_for(stop, times, points, t0, every=every)
+    count = len(starts)
+    p = np.ascontiguousarray(np.stack([s[0] for s in starts]), dtype=np.float64)
+    y0 = np.ascontiguousarray(np.stack([s[1] for s in starts]), dtype=np.float64)
+    w = np.ascontiguousarray(np.stack([s[2] for s in starts]), dtype=np.float64)
+    n, nobs = y0.shape[1], len(observed)
+    t_out = np.zeros((count, cap), dtype=np.float64)
+    out = np.zeros((count, cap * n), dtype=np.float64)
+    obs = np.zeros((count, cap * nobs), dtype=np.float64)
+    ev_out = np.zeros((count, ev_cap), dtype=np.float64)
+    ev_idx = np.zeros((count, ev_cap), dtype=np.float64)
+    counters = np.zeros((count, 9), dtype=np.float64)
+    status = np.zeros(count, dtype=np.int32)
+    loaded.engine.md_vm_run_many(
+        loaded.handle, threads, count,
+        float(t0), float(stop),
+        y0.ctypes.data, n,
+        p.ctypes.data, p.shape[1],
+        w.ctypes.data, w.shape[1],
+        float(tolerance), float(tolerance if absolute is None else absolute),
+        dirs.ctypes.data, lat.ctypes.data, term.ctypes.data, len(dirs),
+        grid.ctypes.data, len(grid),
+        1 if every else 0, t_out.ctypes.data, cap,
+        out.ctypes.data, obs.ctypes.data, nobs,
+        ev_out.ctypes.data, ev_idx.ctypes.data, ev_cap,
+        counters.ctypes.data, status.ctypes.data,
+    )  # fmt: skip
+    runs: list[Run] = []
+    for k, begin in enumerate(starts):
+        if counters[k, 8] > cap:
+            runs.append(
+                drive(
+                    system,
+                    loaded.engine.md_vm_run,
+                    (loaded.handle,),
+                    start=begin,
+                    events=events,
+                    observed=observed,
+                    stop=stop,
+                    times=times,
+                    points=points,
+                    tolerance=tolerance,
+                    absolute=absolute,
+                    every=every,
+                    t0=t0,
+                )
+            )
+            continue
+        runs.append(
+            assemble(
+                system,
+                status=int(status[k]),
+                counters=counters[k],
+                rows=(t_out[k], out[k], obs[k]),
+                found=(ev_out[k], ev_idx[k]),
+                events=events,
+                observed=observed,
+                grid=grid,
+                every=every,
+            )
+        )
+    return runs
 
 
 def results(  # noqa: PLR0913 - the knobs of `simulate`

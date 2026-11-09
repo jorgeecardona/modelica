@@ -156,3 +156,17 @@ Deferred: PDE operators, multirate integration, parallel LU, BDF, any JIT.
 Traps: a second causalizer for arrays (extend `causalize.py` instead); an array path that skips
 the `Emitter`; `x[i+1]` at the last cell must be a lowering error, not a wrap; a versioned flat
 buffer format for the FFI.
+
+### Step 1 done: parallel runs (2026-11-09)
+
+`md_vm_run_many` integrates many parameter vectors at once, one thread per core, each thread on
+its own copy of the program. `engine.results` (and so `sweep`) uses it for more than one vector.
+Each thread sets its own thread-local program pointer, so `md_integrate` did not change.
+
+16 vowel_i runs over 0.02 s, wall clock, 16 logical cores:
+
+| threads | 1 | 4 | 8 | 16 |
+|---|---|---|---|---|
+| time | 27.0 s | 7.2 s | 4.9 s | 4.65 s |
+
+Test: 16 vectors in parallel give bit-identical results to 16 single runs.

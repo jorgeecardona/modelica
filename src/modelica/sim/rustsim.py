@@ -42,7 +42,17 @@ if TYPE_CHECKING:
     from modelica.ir.system import System
     from modelica.sim.emit import Trigger
 
-__all__ = ["Run", "build", "compiler", "drive", "program", "simulate"]
+__all__ = [
+    "Run",
+    "assemble",
+    "build",
+    "compiler",
+    "drive",
+    "program",
+    "rows_for",
+    "simulate",
+    "triggers",
+]
 
 #: The C entry point over `md_integrate`. Every pointer comes from a NumPy array the caller
 #: keeps alive for the duration of the call, with its length beside it; a zero length means
@@ -304,6 +314,97 @@ _RUN_ARGUMENTS: Final = [
 ]  # fmt: skip
 
 
+def triggers(
+    events: Sequence[Trigger],
+) -> tuple[NDArray[np.float64], NDArray[np.int64], NDArray[np.int64]]:
+    """The direction, latch slot and terminate flag of each crossing, as the runtime takes them."""
+    dirs = np.ascontiguousarray([float(e.direction) for e in events], dtype=np.float64)
+    lat = np.ascontiguousarray(
+        [e.latch if e.latch is not None else -1 for e in events], dtype=np.int64
+    )
+    # 1 for a crossing whose `when` holds `terminate(...)`, 0 otherwise: the driver stops the
+    # run at the first such crossing, the same as `solve.py` breaking its loop there.
+    term = np.ascontiguousarray([1 if e.terminates else 0 for e in events], dtype=np.int64)
+    return dirs, lat, term
+
+
+def rows_for(
+    stop: float,
+    times: Sequence[float] | NDArray[np.float64] | None,
+    points: int | None,
+    t0: float,
+    *,
+    every: bool,
+) -> tuple[NDArray[np.float64], int, int]:
+    """The output grid, a first guess at the row capacity, and the event capacity (`drive`)."""
+    if every and times is None and points is None:
+        grid = np.zeros(0, dtype=np.float64)
+    else:
+        grid = _grid(stop, times, points, t0)
+    cap = max(1, len(grid)) if not every else max(4096, 4 * len(grid) + 64)
+    return grid, cap, max(4096, 8 * len(grid))
+
+
+def assemble(  # noqa: PLR0913 - what one run wrote
+    system: System,
+    *,
+    status: int,
+    counters: NDArray[np.float64],
+    rows: tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]],
+    found: tuple[NDArray[np.float64], NDArray[np.float64]],
+    events: Sequence[Trigger],
+    observed: Sequence[str],
+    grid: NDArray[np.float64],
+    every: bool,
+) -> Run:
+    """Read one run's buffers into a `Run`; raise `SimulationError` on a failed status."""
+    t_out, out, obs = rows
+    ev_out, ev_idx = found
+    ev_cap = len(ev_out)
+    n = len(out) // max(1, len(t_out))
+    nobs = len(observed)
+    rows_written = int(counters[8])
+    _TERMINATED = 4  # noqa: N806 - a status code, matching rust_radau's constant
+    if status not in (0, _TERMINATED):
+        reason = STATUS.get(status, f"status {status}")
+        message = f"{system.name}: the Rust run stopped at t = {counters[7]:.12g}: {reason}"
+        raise SimulationError(message)
+    # A terminate() is a clean early stop, not a failure: the run is defined only up to the
+    # instant it fired, and the fixed sample grid was filled only that far. Keep the grid
+    # points at or before that instant and drop the unwritten tail, so the result ends where
+    # the model does, the same truncation `solve.py` gets for free by sampling per segment.
+    rows_written = min(rows_written, len(t_out))
+    if status == _TERMINATED and not every:
+        rows_written = int(np.count_nonzero(grid <= float(counters[7])))
+    time = t_out[:rows_written].copy()
+    names = (*system.modes[0].states, *observed)
+    values = np.vstack(
+        [
+            out.reshape(-1, n)[:rows_written].T,
+            obs.reshape(-1, nobs)[:rows_written].T if nobs else np.empty((0, rows_written)),
+        ]
+    )
+    count = int(counters[6])
+    kept = min(count, ev_cap)
+    # The full events, as the interpreter reports them: the instant and index come back over the
+    # FFI, the cause `str(...)` is read from the model's own indicator list by that index.
+    event_list = tuple(
+        Event(float(ev_out[k]), int(ev_idx[k]), str(events[int(ev_idx[k])])) for k in range(kept)
+    )
+    return Run(
+        result=Result(system.name, time, names, values),
+        events=count,
+        event_times=tuple(event.time for event in event_list),
+        event_list=event_list,
+        steps=int(counters[1]),
+        rejected=int(counters[2]),
+        evaluations=int(counters[3]),
+        jacobians=int(counters[4]),
+        factorisations=int(counters[5]),
+        end=float(counters[7]),
+    )
+
+
 def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
     system: System,
     entry: Any,  # noqa: ANN401 - a ctypes function pointer
@@ -333,28 +434,15 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
     p = np.ascontiguousarray(np.asarray(p, dtype=np.float64))
     y0 = np.ascontiguousarray(np.asarray(y0, dtype=np.float64))
     w0 = np.asarray(w0, dtype=np.float64)
-    dirs = np.ascontiguousarray([float(e.direction) for e in events], dtype=np.float64)
-    lat = np.ascontiguousarray(
-        [e.latch if e.latch is not None else -1 for e in events], dtype=np.int64
-    )
-    # 1 for a crossing whose `when` holds `terminate(...)`, 0 otherwise: the driver stops the
-    # run at the first such crossing, the same as `solve.py` breaking its loop there.
-    term = np.ascontiguousarray([1 if e.terminates else 0 for e in events], dtype=np.int64)
-    if every and times is None and points is None:
-        grid = np.zeros(0, dtype=np.float64)
-    else:
-        grid = _grid(stop, times, points, t0)
+    dirs, lat, term = triggers(events)
+    # The rows: exactly the grid without `every`. With it, a guess; the runtime counts the rows
+    # it could not write, and one more run with that many fills them all. The two event buffers
+    # are far more than a well-behaved run needs; the chattering guard stops a runaway first.
+    grid, cap, ev_cap = rows_for(stop, times, points, t0, every=every)
     n, nobs = len(y0), len(observed)
-    # Two generous parallel buffers for the events -- the instant and the index of the indicator
-    # that fired -- far more than any well-behaved run needs; the chattering guard stops a runaway
-    # before it could overflow. The cause is read from the model, not carried across.
-    ev_cap = max(4096, 8 * len(grid))
     ev_out = np.zeros(ev_cap, dtype=np.float64)
     ev_idx = np.zeros(ev_cap, dtype=np.float64)
     counters = np.zeros(9, dtype=np.float64)
-    # The rows: exactly the grid without `every`. With it, a guess; the runtime counts the rows
-    # it could not write, and one more run with that many fills them all.
-    cap = max(1, len(grid)) if not every else max(4096, 4 * len(grid) + 64)
     entry.restype = ctypes.c_int32
     entry.argtypes = [*(ctypes.c_void_p for _ in leading), *_RUN_ARGUMENTS]
     while True:
@@ -382,41 +470,14 @@ def drive(  # noqa: PLR0913 - the knobs of `simulate`, plus the entry point
         if rows <= cap:
             break
         cap = rows
-    _TERMINATED = 4  # noqa: N806 - a status code, matching rust_radau's constant
-    if status not in (0, _TERMINATED):
-        reason = STATUS.get(status, f"status {status}")
-        message = f"{system.name}: the Rust run stopped at t = {counters[7]:.12g}: {reason}"
-        raise SimulationError(message)
-    # A terminate() is a clean early stop, not a failure: the run is defined only up to the
-    # instant it fired, and the fixed sample grid was filled only that far. Keep the grid
-    # points at or before that instant and drop the unwritten tail, so the result ends where
-    # the model does, the same truncation `solve.py` gets for free by sampling per segment.
-    if status == _TERMINATED and not every:
-        rows = int(np.count_nonzero(grid <= float(counters[7])))
-    time = t_out[:rows].copy()
-    names = (*system.modes[0].states, *observed)
-    values = np.vstack(
-        [
-            out.reshape(-1, n)[:rows].T,
-            obs.reshape(-1, nobs)[:rows].T if nobs else np.empty((0, rows)),
-        ]
-    )
-    count = int(counters[6])
-    kept = min(count, ev_cap)
-    # The full events, as the interpreter reports them: the instant and index come back over the
-    # FFI, the cause `str(...)` is read from the model's own indicator list by that index.
-    event_list = tuple(
-        Event(float(ev_out[k]), int(ev_idx[k]), str(events[int(ev_idx[k])])) for k in range(kept)
-    )
-    return Run(
-        result=Result(system.name, time, names, values),
-        events=count,
-        event_times=tuple(event.time for event in event_list),
-        event_list=event_list,
-        steps=int(counters[1]),
-        rejected=int(counters[2]),
-        evaluations=int(counters[3]),
-        jacobians=int(counters[4]),
-        factorisations=int(counters[5]),
-        end=float(counters[7]),
+    return assemble(
+        system,
+        status=status,
+        counters=counters,
+        rows=(t_out, out, obs),
+        found=(ev_out, ev_idx),
+        events=events,
+        observed=observed,
+        grid=grid,
+        every=every,
     )

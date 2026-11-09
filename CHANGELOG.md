@@ -11,6 +11,8 @@ source of truth and is bumped automatically when shipped source changes.
   same Radau integrator as `rustsim`. The Linux x86_64 wheel carries the engine as
   `modelica/_engine.so`; the pure wheel builds it once with `rustc` on first use. `simulate()` uses the
   engine by default (`backend="auto"`) when it is installed and can run the call, else SciPy.
+- **A sweep on the engine uses every core.** 16 vowel_i runs take 4.7 s instead of 27 s on 16
+  logical cores, with the same results bit for bit.
 - **The engine runs about a quarter fewer instructions.** The tape folds constant subexpressions
   and keeps constants in registers set once, as compiled code does.
 - **The engine runs without an output grid, and returns the rows SciPy returns.** With no `times`

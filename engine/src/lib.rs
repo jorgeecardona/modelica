@@ -19,6 +19,7 @@ const FUNCTION: usize = 4;
 const NEWTON: usize = 7;
 
 /// One Newton block: indices into the program's arrays, as `vm.NewtonBlock`.
+#[derive(Clone)]
 struct Newton {
     unknowns: Vec<usize>,
     body: (usize, usize),
@@ -28,12 +29,14 @@ struct Newton {
 }
 
 /// One function: a range of instructions and the Newton blocks its `NEWTON` opcodes name.
+#[derive(Clone)]
 struct Function {
     code: (usize, usize),
     newton: Vec<Newton>,
 }
 
 /// A decoded program: owned copies of the arrays `vm.encode` produced.
+#[derive(Clone)]
 pub struct Program {
     modes: usize,
     events: usize,
@@ -46,6 +49,7 @@ pub struct Program {
 
 /// Memory one call works in, kept between calls so a call allocates nothing: the register
 /// file, and the copies of `A` and `b` that `solve` factors.
+#[derive(Clone)]
 struct Scratch {
     r: Vec<f64>,
     a: Vec<f64>,
@@ -459,3 +463,108 @@ pub unsafe extern "C" fn md_vm_run(
     r.0
 }
 
+
+/// Run `points` integrations of `program` at once, one thread per core (`threads = 0`) or
+/// `threads` threads. Point `k` reads and writes the `k`-th block of every stacked array; the
+/// shared arrays (`dirs`, `lat`, `term`, `grid`) are the same for every point. `status[k]` is
+/// point `k`'s status and `counters[9 k..9 k + 9]` its counters, as `md_vm_run` returns them.
+///
+/// Each thread runs on its own copy of the program, so the register file is never shared.
+///
+/// # Safety
+/// `program` comes from `md_vm_new`; every array is valid for `points` blocks of the length
+/// given beside it.
+#[no_mangle]
+pub unsafe extern "C" fn md_vm_run_many(
+    program: *const Program,
+    threads: usize,
+    points: usize,
+    t0: f64,
+    t1: f64,
+    y0: *const f64,
+    n: usize,
+    p: *const f64,
+    np: usize,
+    w: *mut f64,
+    nw: usize,
+    rtol: f64,
+    atol: f64,
+    dirs: *const f64,
+    lat: *const i64,
+    term: *const i64,
+    ne: usize,
+    grid: *const f64,
+    npts: usize,
+    every: i32,
+    t_out: *mut f64,
+    cap: usize,
+    out: *mut f64,
+    obs: *mut f64,
+    nobs: usize,
+    events_out: *mut f64,
+    ev_index_out: *mut f64,
+    nev_out: usize,
+    counters: *mut f64,
+    status: *mut i32,
+) {
+    unsafe fn view<'a, T>(ptr: *const T, len: usize) -> &'a [T] {
+        if len == 0 { &[] } else { slice::from_raw_parts(ptr, len) }
+    }
+    unsafe fn view_mut<'a, T>(ptr: *mut T, len: usize) -> &'a mut [T] {
+        if len == 0 { &mut [] } else { slice::from_raw_parts_mut(ptr, len) }
+    }
+    let threads = if threads == 0 {
+        std::thread::available_parallelism().map_or(1, |k| k.get())
+    } else {
+        threads
+    }
+    .min(points.max(1));
+    // Raw pointers are not `Send`; the addresses are, and each point's block is disjoint.
+    let addr = |x: *const f64| x as usize;
+    let (y0, p, w) = (addr(y0), addr(p), w as usize);
+    let (dirs, lat, term, grid) = (addr(dirs), lat as usize, term as usize, addr(grid));
+    let (t_out, out, obs) = (t_out as usize, out as usize, obs as usize);
+    let (events_out, ev_index_out) = (events_out as usize, ev_index_out as usize);
+    let (counters, status) = (counters as usize, status as usize);
+    // Cloned here, not in the threads: the register file sits in a `RefCell`, which a thread
+    // may own but not share.
+    let copies: Vec<Program> = (0..threads).map(|_| (*program).clone()).collect();
+    std::thread::scope(|scope| {
+        for (first, local) in copies.into_iter().enumerate() {
+            scope.spawn(move || {
+                let previous = CURRENT.with(|c| c.replace(&local));
+                let mut k = first;
+                while k < points {
+                    let r = md_integrate(
+                        t0, t1,
+                        view((y0 as *const f64).add(k * n), n),
+                        view((p as *const f64).add(k * np), np),
+                        view_mut((w as *mut f64).add(k * nw), nw),
+                        rtol, atol,
+                        view(dirs as *const f64, ne), view(lat as *const i64, ne),
+                        view(term as *const i64, ne), view(grid as *const f64, npts),
+                        every != 0,
+                        view_mut((t_out as *mut f64).add(k * cap), cap),
+                        view_mut((out as *mut f64).add(k * cap * n), cap * n),
+                        view_mut((obs as *mut f64).add(k * cap * nobs), cap * nobs),
+                        view_mut((events_out as *mut f64).add(k * nev_out), nev_out),
+                        view_mut((ev_index_out as *mut f64).add(k * nev_out), nev_out),
+                    );
+                    let c = view_mut((counters as *mut f64).add(9 * k), 9);
+                    c[0] = r.0 as f64;
+                    c[1] = r.1 as f64;
+                    c[2] = r.2 as f64;
+                    c[3] = r.3 as f64;
+                    c[4] = r.4 as f64;
+                    c[5] = r.5 as f64;
+                    c[6] = r.6 as f64;
+                    c[7] = r.7;
+                    c[8] = r.8 as f64;
+                    *(status as *mut i32).add(k) = r.0;
+                    k += threads;
+                }
+                CURRENT.with(|c| c.set(previous));
+            });
+        }
+    });
+}

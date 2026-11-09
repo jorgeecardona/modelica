@@ -470,3 +470,21 @@ def test_the_engine_refuses_a_register_out_of_range(engine: Path) -> None:
     clipped = replace(program, registers=len(program.constants) + 1)
     with pytest.raises(SimulationError, match="refused"):
         native.load(clipped, engine)
+
+
+@pytest.mark.parametrize("name", ["RCCircuit", "BouncingBall"])
+def test_parallel_runs_equal_single_runs(engine: Path, name: str) -> None:
+    """16 parameter vectors on all cores give exactly what 16 runs one at a time give."""
+    from modelica.sim import engine as native  # noqa: PLC0415
+    from modelica.sim.sweep import vector  # noqa: PLC0415
+
+    system = _system(EXAMPLES / "models" / f"{name}.mo")
+    base = vector(system)
+    vectors = [base * (1.0 + 0.05 * k) for k in range(16)]
+    knobs: dict[str, Any] = {"stop": 2.0, "tolerance": 1e-8, "points": 21, "path": engine}
+    together = native.results(system, vectors, **knobs)
+    for p, mine in zip(vectors, together, strict=True):
+        (alone,) = native.results(system, [p], **knobs)
+        np.testing.assert_array_equal(mine.time, alone.time)
+        np.testing.assert_array_equal(mine.values, alone.values)
+        assert mine.events == alone.events
