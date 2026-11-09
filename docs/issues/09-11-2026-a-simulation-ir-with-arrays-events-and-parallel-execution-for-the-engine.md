@@ -419,5 +419,10 @@ machine, second run). A 0.5 s run on the engine took 3.6 s before this change, 1
 General sparse LU waits for unstructured meshes (step 9 on).
 
 Step 4 commit 6 (`ArrayBlock` in the C and Rust emitters) is deferred: those backends compile
-generated code, and the engine is the default. Next: `initial` (15152 instructions here) and the
-jacobian's scalar `out` stores.
+generated code, and the engine is the default.
+
+`rhs` and `observe` now share each `ArrayBlock`'s subscripts at every cell (`_Lowering.cells`),
+so `at_cell` runs 12500 times on the 50 x 50 grid, not 25000. `vm.lower` there is now 1.6 to
+1.9 s; the rest is `_fold`, `_compact` and `_peephole` over the 15000-instruction `initial` and
+jacobian. Next: initial conditions given by a `for` loop as array opcodes (they are explicit
+assignments, not an `ArrayBlock`, so this needs the loop kept through `Emitter.conditions`).

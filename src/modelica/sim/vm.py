@@ -277,6 +277,10 @@ class _Lowering:
     emitter: Emitter
     registers: int = 0
     constants: dict[float, int] = field(default_factory=dict[float, int])
+    cells: dict[tuple[int, ir.Expr], tuple[ir.Expr, ...]] = field(
+        default_factory=dict[tuple[int, ir.Expr], tuple[ir.Expr, ...]]
+    )
+    """A subscript of an `ArrayBlock` at each cell, by the block's first index and the node."""
 
     def register(self, count: int = 1) -> int:
         first = self.registers
@@ -436,10 +440,13 @@ class _Lowering:
             dst = self.register(n)
             match node:
                 case ir.Subscript():
+                    key = (array.first, node)
+                    if key not in self.cells:  # `rhs` and `observe` gather the same cells
+                        self.cells[key] = tuple(
+                            at_cell(node, cell, shapes, constants) for cell in cells
+                        )
                     offset = len(scope.tables)
-                    scope.tables.extend(
-                        self.value(scope, at_cell(node, cell, shapes, constants)) for cell in cells
-                    )
+                    scope.tables.extend(self.value(scope, cell) for cell in self.cells[key])
                     scope.code.append(Instr(Op.VGATHER, dst, offset, 0, n))
                 case ir.Binary(op=op, lhs=lhs, rhs=rhs):
                     left, right = go(lhs), go(rhs)
