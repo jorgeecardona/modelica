@@ -13,6 +13,7 @@ demand, so they are properties here rather than fields filled in by a pass.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from functools import cached_property
 from typing import TYPE_CHECKING, Literal
@@ -20,7 +21,7 @@ from typing import TYPE_CHECKING, Literal
 from modelica.ir import nodes as ir
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
 __all__ = ["BaseType", "FlatModel", "FlatVariable"]
 
@@ -72,14 +73,123 @@ def _der_targets(node: ir.Expr) -> Iterator[str]:
             return
 
 
+class CellError(ValueError):
+    """An array equation reads an element outside its array at some cell."""
+
+
+@dataclass(frozen=True)
+class IndexSet:
+    """A loop index and its inclusive integer range, step 1: ``for i in start:stop``."""
+
+    name: str
+    start: int
+    stop: int
+
+    def __len__(self) -> int:
+        return max(0, self.stop - self.start + 1)
+
+
+@dataclass(frozen=True)
+class ArrayEquation:
+    """One equation written once over index sets, as a ``for`` loop writes it.
+
+    ``equation`` is the body with each index a ``Ref`` to its name and each array read an
+    ``ir.Subscript`` on the array's flat name. ``shapes`` gives the size of every array it
+    subscripts. `scalarize` writes one scalar equation per cell, the outer index slowest, the
+    order a ``for`` loop unrolls in.
+    """
+
+    indices: tuple[IndexSet, ...]
+    equation: ir.Equal
+    shapes: tuple[tuple[str, tuple[int, ...]], ...]
+
+    def cells(self) -> Iterator[dict[str, int]]:
+        """Every combination of index values, outer index slowest."""
+        names = [index.name for index in self.indices]
+        ranges = [range(index.start, index.stop + 1) for index in self.indices]
+        for values in itertools.product(*ranges):
+            yield dict(zip(names, values, strict=True))
+
+    def scalarize(self) -> tuple[ir.Equal, ...]:
+        """One scalar equation per cell. Raises `CellError` for a read outside its array.
+
+        An index the source wraps itself (``mod(i - 2, n) + 1``) is evaluated like any other
+        expression, so a periodic stencil needs no special case, and ``x[i + 1]`` at the last
+        cell is an error instead of a silent wrap.
+        """
+        shapes = dict(self.shapes)
+        return tuple(
+            ir.Equal(
+                _at(self.equation.lhs, cell, shapes),
+                _at(self.equation.rhs, cell, shapes),
+                self.equation.span,
+            )
+            for cell in self.cells()
+        )
+
+
+def _integer(node: ir.Expr, cell: Mapping[str, int]) -> int:  # noqa: PLR0911 - one case per node
+    """The integer value of an index expression at ``cell``."""
+    match node:
+        case ir.IntLiteral(value=value):
+            return value
+        case ir.Ref() if node.name in cell:
+            return cell[node.name]
+        case ir.Unary(op="-", operand=operand):
+            return -_integer(operand, cell)
+        case ir.Binary(op="+", lhs=lhs, rhs=rhs):
+            return _integer(lhs, cell) + _integer(rhs, cell)
+        case ir.Binary(op="-", lhs=lhs, rhs=rhs):
+            return _integer(lhs, cell) - _integer(rhs, cell)
+        case ir.Binary(op="*", lhs=lhs, rhs=rhs):
+            return _integer(lhs, cell) * _integer(rhs, cell)
+        case ir.Call(name="mod", args=(a, b)):
+            return _integer(a, cell) % _integer(b, cell)
+        case ir.Call(name="div", args=(a, b)):
+            return int(_integer(a, cell) / _integer(b, cell))
+        case _:
+            message = f"an array index must be an integer expression of the loop indices: {node}"
+            raise CellError(message)
+
+
+def _at(node: ir.Expr, cell: Mapping[str, int], shapes: Mapping[str, tuple[int, ...]]) -> ir.Expr:  # noqa: PLR0911 - one case per node
+    """``node`` at ``cell``: indices replaced by their values, subscripts by element names."""
+    match node:
+        case ir.Subscript(base=base, indices=indices):
+            at = tuple(_integer(index, cell) for index in indices)
+            shape = shapes[base.name]
+            if len(at) != len(shape) or not all(
+                1 <= k <= n for k, n in zip(at, shape, strict=True)
+            ):
+                where = ", ".join(f"{name} = {value}" for name, value in cell.items())
+                message = f"{base.name}[{', '.join(map(str, at))}] is outside {shape} at {where}"
+                raise CellError(message)
+            return ir.Ref((f"{base.name}[{', '.join(map(str, at))}]",), base.span)
+        case ir.Ref() if node.name in cell:
+            return ir.IntLiteral(cell[node.name])
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, _at(lhs, cell, shapes), _at(rhs, cell, shapes))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _at(operand, cell, shapes))
+        case ir.Call(name=name, args=args, named=named):
+            return ir.Call(name, tuple(_at(a, cell, shapes) for a in args), named)
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(
+                _at(condition, cell, shapes), _at(then, cell, shapes), _at(otherwise, cell, shapes)
+            )
+        case _:
+            return node
+
+
 @dataclass(frozen=True)
 class FlatModel:
     """A model flattened to scalars: the input to causalization and simulation."""
 
     name: str
     variables: tuple[FlatVariable, ...]
-    equations: tuple[ir.Equal, ...]
-    """The continuous equations, ``connect()`` already expanded."""
+    listing: tuple[ir.Equal | ArrayEquation, ...]
+    """The continuous equations in source order, ``connect()`` already expanded; a ``for``
+    loop over an ``Equal`` body may stay one `ArrayEquation`."""
     whens: tuple[ir.When, ...] = ()
     """Event clauses, kept apart from the continuous part they interrupt."""
     asserts: tuple[ir.Assert, ...] = ()
@@ -88,6 +198,17 @@ class FlatModel:
     Apart from the equations because they bind nothing: an assert is a diagnostic on the
     solution, not a constraint that shapes it."""
     initial_equations: tuple[ir.Equal, ...] = ()
+
+    @cached_property
+    def equations(self) -> tuple[ir.Equal, ...]:
+        """`listing` with every `ArrayEquation` written out, cell by cell, in place."""
+        out: list[ir.Equal] = []
+        for item in self.listing:
+            if isinstance(item, ArrayEquation):
+                out.extend(item.scalarize())
+            else:
+                out.append(item)
+        return tuple(out)
 
     def __getitem__(self, name: str) -> FlatVariable:
         try:
