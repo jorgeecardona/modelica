@@ -410,4 +410,14 @@ scatter gives each cell register its partials back as scalars. The rules mirror 
 operand for operand, so the values are the same bits. It falls back to a scalar lowering
 (`_Scalar`) when two patterns name one state in one cell, or for `VCALL1` of a value with
 partials. `rhs` is now lowered once. TorusHeat jacobian: 1090 to 414 instructions (320 are the
-scalar `out` stores). Next: step 4 commit 6, `ArrayBlock` in the C and Rust emitters.
+scalar `out` stores).
+
+`observe` uses the array opcodes too, and `_fuse` runs on it. On the 50 x 50 TorusHeat (2500
+states) `observe` went from 22506 to 21 instructions and `vm.lower` from 4.1 s to 1.7 s (one
+machine, second run). A 0.5 s run on the engine took 3.6 s before this change, 1.0 s of it in
+`drive`; the banded LU handles 2500 states, so step 7's test already passes for a periodic grid.
+General sparse LU waits for unstructured meshes (step 9 on).
+
+Step 4 commit 6 (`ArrayBlock` in the C and Rust emitters) is deferred: those backends compile
+generated code, and the engine is the default. Next: `initial` (15152 instructions here) and the
+jacobian's scalar `out` stores.

@@ -82,7 +82,8 @@ loop index used as a value, or a loop whose first or last block is not the body 
 | 8 x 8 (TorusHeat) | 513 instructions | 18 |
 
 The 18 include one `VLOAD_Y` for all states and one `VSTORE_OUT` for all outputs: `_fuse` writes
-runs of adjacent loads and stores as one instruction, last of all passes.
+runs of adjacent loads and stores as one instruction, last of all passes. `observe` is written
+the same way.
 
 The jacobian is built from the same array `rhs`. A run's partials are runs keyed by the state
 each cell differentiates by. A gather regroups the cells' scalar partials into new gather

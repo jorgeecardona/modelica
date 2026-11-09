@@ -6,6 +6,7 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- The observe tape uses array opcodes too; on a 50 x 50 TorusHeat it is 21 instructions, down from 22506, and lowering takes 1.7 s instead of 4.1 s.
 - The Jacobian tape is built from the array opcodes, not from a second scalar lowering; TorusHeat Jacobian is 414 instructions, down from 1090.
 - The engine loads and stores runs of states with one instruction; TorusHeat `rhs` is 18 instructions, down from 144.
 - **`pip install modelica` is enough to simulate.** NumPy and SciPy are now plain dependencies;

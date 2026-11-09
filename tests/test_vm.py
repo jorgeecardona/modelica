@@ -710,6 +710,9 @@ def test_an_array_block_runs_as_array_opcodes_with_the_same_bits(
     assert vm.Op.LOAD_Y not in ops
     assert vm.Op.STORE_OUT not in ops
     assert len(arrays.rhs[0].code) < len(scalar.rhs[0].code) // 10
+    observe = [i.op for i in arrays.observe[0].code]
+    assert vm.Op.VGATHER in observe
+    assert len(observe) < len(scalar.observe[0].code) // 10
     jacobian = [i.op for i in arrays.jacobian[0].code]
     assert vm.Op.VGATHER in jacobian  # built from the runs, not a scalar lowering
     assert len(jacobian) < len(scalar.jacobian[0].code) // 2

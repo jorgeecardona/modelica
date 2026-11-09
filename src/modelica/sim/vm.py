@@ -93,7 +93,7 @@ class Op(IntEnum):
     VDIV = 37
     VNEG = 38  # dst[k] = -a[k], k < c
     VCALL1 = 39  # dst[k] = builtin c of a[k], k < b
-    # Written only by `_fuse`, after every pass that reads register sets.
+    # Written only by `_fuse` (in ``rhs`` and ``observe``), after every pass that reads registers.
     VLOAD_Y = 40  # dst[k] = y[a + k], k < c
     VSTORE_OUT = 41  # out[a + k] = b[k], k < c
 
@@ -613,12 +613,12 @@ class _Lowering:
 
         return self.function(body)
 
-    def observe(self, mode: Mode) -> Function:
+    def observe(self, mode: Mode, *, arrays: bool = False) -> Function:
         emitter = self.emitter
 
         def body(scope: _Scope) -> None:
             self.unpack(scope, mode)
-            self.blocks(scope, mode)
+            self.blocks(scope, mode, arrays=arrays)
             for name, node in emitter.system.aliases.items():
                 self.assign(scope, name, node)
             for slot, name in enumerate(emitter.observed):
@@ -1108,7 +1108,7 @@ def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program
         constants=(),
         rhs=rhs,
         jacobian=tuple(_jacobian(lowering, mode, f) for mode, f in zip(modes, rhs, strict=True)),
-        observe=tuple(lowering.observe(mode) for mode in modes),
+        observe=tuple(lowering.observe(mode, arrays=arrays) for mode in modes),
         indicators=tuple(lowering.indicators(k, mode) for k, mode in enumerate(modes)),
         transition_prefix=tuple(prefix for prefix, _ in transitions),
         transition=tuple(branches for _, branches in transitions),
@@ -1142,7 +1142,11 @@ def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program
         )
     program, base = _compact(program, lowering.registers)
     if arrays:
-        program = replace(program, rhs=tuple(_fuse(f) for f in program.rhs))
+        program = replace(
+            program,
+            rhs=tuple(_fuse(f) for f in program.rhs),
+            observe=tuple(_fuse(f) for f in program.observe),
+        )
     return replace(program, registers=base + len(pool), constants=tuple(pool))
 
 
@@ -1163,7 +1167,7 @@ def _fuse(function: Function) -> Function:
 
     A run is instructions next to each other whose ``y`` or ``out`` slot and register both go up
     by one. It runs last, so no pass that reads register sets sees the vector forms. Newton
-    bodies are left as they are.
+    bodies are left as they are. Only ``rhs`` and ``observe`` are fused.
     """
     code: list[Instr] = []
     for i in function.code:
