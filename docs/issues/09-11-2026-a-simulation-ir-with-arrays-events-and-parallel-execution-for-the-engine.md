@@ -282,3 +282,29 @@ Flattening grows faster than linearly. Every stage handles one scalar per cell, 
 grid (step 7's test) would spend most of its time before the engine starts. Step 4 (index sets
 survive flattening) and step 5 (array opcodes) shrink this work by the grid size, not the run.
 Step 4 is therefore measured on front-end time, not on engine instructions.
+
+### Fable review 3: the step 4 design (2026-11-09)
+
+Keep a `for` loop as an `ArrayEquation` in `FlatModel` (not a side list), with
+`FlatModel.scalarize()` giving today's equations in today's order. Consumers call `scalarize()`
+at entry, so nothing breaks while the array path grows.
+
+- Data: `IndexSet(name, start, stop)`, `ArrayEquation(indices, lhs, rhs, span)`, and a
+  `Gather(source, table)` of flat element positions per read, one per cell.
+- Stencils are not classified. Every index expression is evaluated at every cell and range
+  checked: `mod(i - 2, n) + 1` gives the periodic table, `x[i + 1]` at the last cell is an
+  error naming the cell.
+- Causalize stays one causalizer: structure (matching, Tarjan) per cell, symbols per loop. When
+  every cell of a loop is a 1x1 block solved for the same pattern, `_blocks` emits one
+  `ArrayBlock`; otherwise the whole loop stays scalar. `scalar_blocks(mode)` is the one fallback.
+- Only `Equal` bodies over constant unit-step ranges; everything else unrolls eagerly as today.
+  Initial equations unroll eagerly.
+
+Commits: (1) `_affine` stops at a third unknown; (2) the data model and `scalarize()`; (3)
+`flatten` emits `ArrayEquation`; (4) `ArrayBlock` in `_blocks`; (5) array opcodes in `vm` and
+the engine; (6) `ArrayBlock` in the C and Rust emitters. Expected front end on the 32 x 32
+grid: 7.1 s today, about 1.3 s after (5).
+
+Commit 1 done: `_affine` stops once a third unknown has a non-zero coefficient, instead of
+differentiating every unknown first. Same result in every case. Causalize on the 32 x 32 grid:
+1.74 s to 0.53 s.

@@ -318,7 +318,7 @@ class _Elimination:
         return {self.victim: self.replacement, **dict(self.extra)}
 
 
-def _affine(work: _Work, equation: ir.Equal) -> _Affine | None:
+def _affine(work: _Work, equation: ir.Equal) -> _Affine | None:  # noqa: PLR0911 - one exit per way to give up
     """Read ``equation`` as an affine relation between at most two unknowns, or give up.
 
     The gradient with respect to the unknowns has to be free of unknowns -- that is what
@@ -343,7 +343,11 @@ def _affine(work: _Work, equation: ir.Equal) -> _Affine | None:
             continue
         unknowns.append(name)
         coefficients.append(coefficient)
-    if not unknowns or len(unknowns) > 2:  # noqa: PLR2004 - two is the alias case
+        # A third unknown already rules the equation out: stop before differentiating the
+        # rest, which on a grid model is most of the work.
+        if len(unknowns) > 2:  # noqa: PLR2004 - two is the alias case
+            return None
+    if not unknowns:
         return None
     offset = simplify(substitute(expression, dict.fromkeys(appearing, ZERO)))
     if any(work.is_unknown(name) for name in names(offset)):
