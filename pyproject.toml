@@ -1,6 +1,6 @@
 [project]
-# modelica — a pure-Python Modelica/FMI/SSP toolchain: parse Modelica, flatten it to a
-# DAE, simulate it, and interoperate with the two Modelica Association exchange standards
+# modelica — a Modelica/FMI/SSP toolchain for Python: parse Modelica, flatten it to a
+# DAE, simulate it (on a precompiled Rust engine where the wheel has one, else SciPy), and interoperate with the two Modelica Association exchange standards
 # (FMI 3.0 for single components, SSP 2.0 for systems of them).
 #
 # The distribution name is `modelica`, not `pymodelica`: PyPI's `pymodelica` is held by an
@@ -8,7 +8,7 @@
 # historical name; the import package matches the distribution.
 name = "modelica"
 dynamic = ["version"]  # the single source of truth is __version__ in src/modelica/__init__.py (see [tool.hatch.version])
-description = "Pure-Python Modelica toolchain: parse, flatten, simulate, and exchange via FMI 3.0 and SSP 2.0"
+description = "Modelica toolchain for Python: parse, flatten, simulate on a precompiled engine, and exchange via FMI 3.0 and SSP 2.0"
 readme = "README.md"
 # 3.12+, no compatibility shims: this is a full rewrite of a 2010 Python 2 codebase, and
 # the modelling layer leans on the modern typing surface (Self, StrEnum, exception groups

@@ -5,10 +5,15 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/modelica.svg)](https://pypi.org/project/modelica/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/LICENSE)
 
-A Modelica toolchain in pure Python: parse `.mo` source, flatten it to a DAE, simulate it,
-and draw it, with **FMI 3.0** and **SSP 2.0** support. Every stage is an ordinary Python
-value you can read and change. For engineers and researchers who want Modelica semantics
-inside Python rather than behind a separate compiler.
+A Modelica toolchain for Python: parse `.mo` source, flatten it to a DAE, simulate it, and
+draw it, with **FMI 3.0** and **SSP 2.0** support. Every stage up to simulation is an
+ordinary Python value you can read and change. For engineers and researchers who want
+Modelica semantics inside Python rather than behind a separate compiler.
+
+Simulation runs on a precompiled engine: a virtual machine written in Rust that ships in the
+platform wheels (Linux x86_64 and arm64, Windows, macOS arm64) and interprets the model as
+bytecode. Nothing is compiled per model. Where no engine wheel exists, the pure-Python wheel
+simulates with SciPy instead. See [the engine](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/docs/engine.md).
 
 > **Install name is `modelica`.** The git repository keeps its older name, `pymodelica`,
 > because PyPI's `pymodelica` holds an abandoned Modelon/JModelica.org upload. The import

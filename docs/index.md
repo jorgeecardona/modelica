@@ -1,7 +1,12 @@
 # modelica
 
-A Modelica toolchain written only in Python. It reads Modelica source, flattens it to a
-DAE, simulates it, and draws it. It exchanges models through **FMI 3.0** and **SSP 2.0**.
+A Modelica toolchain for Python. It reads Modelica source, flattens it to a DAE, simulates
+it, and draws it. It exchanges models through **FMI 3.0** and **SSP 2.0**.
+
+The front end (parser, flattener, causalization) is Python. Simulation runs on a
+[precompiled engine](engine.md): a virtual machine in Rust that ships in the platform wheels
+and interprets the model as bytecode, with nothing compiled per model. Without an engine
+wheel, simulation uses SciPy.
 
 ```bash
 pip install modelica          # the core: parse, model structure, diagrams. No dependencies.

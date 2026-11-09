@@ -1,4 +1,4 @@
-"""Pure-Python Modelica toolchain: parse, flatten, simulate, exchange.
+"""Modelica toolchain for Python: parse, flatten, simulate, exchange.
 
 The package is layered, and each layer is usable without the ones above it:
 
@@ -21,6 +21,6 @@ standards it implements. This is an independent open-source implementation, not
 affiliated with or endorsed by the Modelica Association.
 """
 
-__version__ = "0.0.237"
+__version__ = "0.0.238"
 
 __all__ = ["__version__"]

@@ -71,7 +71,11 @@ quietly become the poor relation.
 
 ## Performance: where the time goes
 
-The goal is a Python engine that stands next to LSODA, DASSL, RADAU5 and CVODE. That is
+The default simulation path is now the [precompiled engine](engine-vm.md): a Rust virtual
+machine that runs Radau and interprets the model as bytecode. This section explains the SciPy
+path, which remains the fallback where no engine is installed.
+
+The goal was a Python engine that stands next to LSODA, DASSL, RADAU5 and CVODE. That is
 possible, because a stiff solver spends almost none of its time in the parts written in
 Python.
 
