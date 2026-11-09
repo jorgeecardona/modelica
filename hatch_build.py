@@ -11,6 +11,9 @@ Environment:
 - ``MODELICA_ENGINE=1`` fails the build when ``cargo`` is missing.
 - ``MODELICA_WHEEL_PLATFORM`` sets the platform tag, for example ``manylinux_2_28_x86_64`` in a
   manylinux image. The default is the build machine's (``linux_x86_64``).
+- ``MODELICA_ENGINE_LIBRARY`` is a library built elsewhere, for example cross-compiled for
+  Windows. It goes in the wheel as it is, and ``cargo`` does not run. Set the platform tag with
+  it.
 """
 
 from __future__ import annotations
@@ -38,9 +41,20 @@ class EngineHook(BuildHookInterface):  # pyright: ignore[reportMissingTypeArgume
         if self.target_name != "wheel" or version == "editable":
             return
         wanted = os.environ.get("MODELICA_ENGINE", "")
-        cargo = shutil.which("cargo")
         if wanted == "0":
             return
+        prebuilt = os.environ.get("MODELICA_ENGINE_LIBRARY")
+        if prebuilt:
+            library = Path(prebuilt).resolve()
+            tag = os.environ.get("MODELICA_WHEEL_PLATFORM")
+            if not tag:
+                message = "MODELICA_ENGINE_LIBRARY needs MODELICA_WHEEL_PLATFORM"
+                raise RuntimeError(message)
+            build_data["force_include"][str(library)] = f"modelica/_engine{library.suffix}"
+            build_data["pure_python"] = False
+            build_data["tag"] = f"py3-none-{tag}"
+            return
+        cargo = shutil.which("cargo")
         if cargo is None:
             if wanted == "1":
                 message = "MODELICA_ENGINE=1 but there is no cargo on PATH"

@@ -28,6 +28,10 @@ ci:
   needs:
     - job: engine-wheel
       optional: true
+    - job: engine-wheel-arm64
+      optional: true
+    - job: engine-wheel-windows
+      optional: true
   # OIDC Trusted Publishing: GitLab mints a short-lived id_token; scripts/pypi-publish
   # exchanges it for a one-shot PyPI token. The `pypi` environment matches the PyPI
   # publisher config (it is also recorded on non-publishing runs -- cosmetic only).
@@ -105,6 +109,49 @@ engine-wheel:
     # Out of the source tree, so the import is the installed wheel and not src/.
     - cd /tmp && /tmp/check/bin/python -c "from modelica.sim import engine; assert engine.installed(), 'no engine in the wheel'"
     - cd "$CI_PROJECT_DIR" && /tmp/check/bin/python -m pytest -q -p no:cacheprovider tests/test_vm.py -m "not slow" -k "engine"
+  artifacts:
+    paths:
+      - dist-engine
+    expire_in: 1 day
+
+# The same wheel for Linux aarch64, built natively on GitLab's arm64 runner (cost factor 1).
+engine-wheel-arm64:
+  extends: engine-wheel
+  image: quay.io/pypa/manylinux_2_28_aarch64
+  tags: [saas-linux-small-arm64]
+  variables:
+    MODELICA_WHEEL_PLATFORM: manylinux_2_28_aarch64
+  script:
+    - curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - /opt/python/cp312-cp312/bin/python -m pip install --quiet uv
+    - export PATH="/opt/python/cp312-cp312/bin:$PATH"
+    - MODELICA_ENGINE=1 uv build --wheel --out-dir dist-engine
+    - uv venv --python /opt/python/cp312-cp312/bin/python /tmp/check
+    - VIRTUAL_ENV=/tmp/check uv pip install "$(ls dist-engine/*.whl)[sim]" pytest
+    - cd /tmp && /tmp/check/bin/python -c "from modelica.sim import engine; assert engine.installed(), 'no engine in the wheel'"
+    - cd "$CI_PROJECT_DIR" && /tmp/check/bin/python -m pytest -q -p no:cacheprovider tests/test_vm.py -m "not slow" -k "engine"
+
+# The Windows wheel: the engine cross-compiled with mingw-w64 on Linux, then packed with
+# MODELICA_ENGINE_LIBRARY. The engine does not link Python, so no Windows Python is needed.
+# Not run on Windows here; the objdump line shows which DLLs it imports.
+engine-wheel-windows:
+  image: python:3.12-slim-bookworm
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  timeout: 20m
+  script:
+    - apt-get update -qq && apt-get install -y -qq curl gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 >/dev/null
+    - curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --target x86_64-pc-windows-gnu
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - cargo build --release --locked --target x86_64-pc-windows-gnu --manifest-path engine/Cargo.toml
+    - export DLL=engine/target/x86_64-pc-windows-gnu/release/modelica_engine.dll
+    - x86_64-w64-mingw32-objdump -p "$DLL" | grep "DLL Name"
+    - "! x86_64-w64-mingw32-objdump -p \"$DLL\" | grep -iE 'libgcc|libwinpthread|libstdc'"
+    - x86_64-w64-mingw32-objdump -p "$DLL" | grep -q md_vm_run
+    - pip install --quiet uv
+    - MODELICA_ENGINE_LIBRARY="$DLL" MODELICA_WHEEL_PLATFORM=win_amd64 uv build --wheel --out-dir dist-engine
+    - python -m zipfile -l dist-engine/*.whl | grep "modelica/_engine.dll"
   artifacts:
     paths:
       - dist-engine
