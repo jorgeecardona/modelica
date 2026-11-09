@@ -151,7 +151,36 @@ Each step has a test, and every existing model lowers as before when all index s
 7. General sparse LU. Test: a 2-D heat grid of 2500 states runs.
 8. Array ops split across threads above a threshold. Test: equal to one thread bit for bit.
 
-Deferred: PDE operators, multirate integration, parallel LU, BDF, any JIT.
+Then finite volume and finite element models, after step 8. The data layout follows OpenFOAM
+([research note](09-11-2026-what-the-engine-can-take-from-openfoam-for-finite-volume-pdes.md));
+the mesh and the matrices are data, nothing is compiled.
+
+9. Face-list opcodes: `GATHER_FACES` and `SCATTER_ADD` over shipped `owner` and `neighbour`
+   arrays, and `LDU_AMUL` (`y = A x` with `diag` per cell, `lower` and `upper` per face). Test:
+   `LDU_AMUL` on a random mesh equals a dense product within 1e-14; a 1-D finite-volume heat
+   bar written with face lists equals HeatBar written with `for` loops.
+10. A mesh front end in Python: read points, faces, `owner`, `neighbour` and named boundary
+    patches (OpenFOAM `polyMesh` or Gmsh), compute face areas and cell volumes, and write the
+    arrays a program ships. Test: a structured box mesh gives the same arrays as its grid.
+11. Boundary patches as named face ranges with a rule (fixed value, fixed gradient, zero
+    gradient), applied by opcodes, never by generated code. Test: heat conduction on a 2-D
+    box with two fixed-temperature walls reaches the analytic linear profile within 1e-8.
+12. The Jacobian in LDU form, its pattern fixed per mesh and only its values refilled each
+    factorisation. Iterative solvers in the engine: PCG with DIC for symmetric systems,
+    BiCGStab with DILU otherwise, used inside Radau's Newton step above a size threshold.
+    Test: a 100 x 100 finite-volume heat grid runs and equals banded LU within 1e-8.
+13. Radau with a mass matrix, `M y' = f(t, y)`, factoring `mu/h M - J`. Test: a lumped-mass
+    model gives the same result as `y' = M^-1 f`; a singular `M` (an algebraic row) runs as a
+    DAE of index 1.
+14. Finite elements: element-to-node gather tables, element stiffness and mass assembled in
+    Python once per mesh into CSR, `SPMV` in the engine. Test: 2-D heat on a triangle mesh
+    converges at second order in the mesh size against an analytic solution.
+
+Rules for 9 to 14: the sparse pattern is built once per mesh, no allocation inside the time
+loop, an unknown scheme or boundary rule is an error (never a compile), and Radau stays the one
+integrator (no PISO or SIMPLE splitting).
+
+Deferred: multirate integration, parallel LU, BDF, multigrid (GAMG), any JIT.
 
 Traps: a second causalizer for arrays (extend `causalize.py` instead); an array path that skips
 the `Emitter`; `x[i+1]` at the last cell must be a lowering error, not a wrap; a versioned flat
