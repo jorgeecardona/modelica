@@ -6,6 +6,9 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **Large array models flatten and causalize faster.** A `for` loop's equations are processed
+  once instead of once per cell. On a 32 x 32 heat grid, flattening goes from 1.07 s to 0.19 s and
+  causalization from 1.74 s to 0.53 s.
 - **The engine computes time-only work once per time.** It caches what depends only on `time`
   for the last four times. vowel_i needs 16% fewer instructions, with bit-identical results.
 - **The engine factors in a banded state order.** It reorders the states so the Radau matrix is

@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Final, Literal, NamedTuple
 
 from modelica.ir import nodes as ir
 from modelica.ir.evaluate import EvaluationError, at, evaluate
-from modelica.ir.flat import BaseType, FlatModel, FlatVariable
+from modelica.ir.flat import BaseType, CellError, FlatModel, FlatVariable, at_cell, element
 from modelica.ir.rewrite import names, substitute
 
 if TYPE_CHECKING:
@@ -550,16 +550,6 @@ def _fold(node: ir.Expr | None) -> ir.Expr | None:
             return node
 
 
-def element(name: str, indices: Sequence[int]) -> str:
-    """The scalar name of one element: ``T`` and ``(3,)`` give ``T[3]``.
-
-    Public because three places have to agree on it -- the declaration that creates the
-    variable, the subscript that reads it, and anything later that wants to recognise an
-    element by its name. A second spelling of this would be a bug nobody could see.
-    """
-    return f"{name}[{', '.join(str(i) for i in indices)}]"
-
-
 MATRIX_RANK: Final = 2  # a matrix is two-dimensional; `transpose` swaps its two indices
 
 # The dotted elementwise operators become their plain sibling once an element is read out: the
@@ -903,7 +893,7 @@ def _slice(
     return build(0, ())
 
 
-def _prefix_expr(  # noqa: C901, PLR0911, PLR0913 -- one case per node type, one flag per rule
+def _prefix_expr(  # noqa: C901, PLR0911, PLR0912, PLR0913 -- one case per node type, one flag per rule
     node: ir.Expr,
     prefix: _Path,
     local: frozenset[str],
@@ -938,7 +928,17 @@ def _prefix_expr(  # noqa: C901, PLR0911, PLR0913 -- one case per node type, one
                 # array literal (one level per range dimension), which the equation split then reads
                 # element by element like any other array. `i[1:m] = zeros(m)` is m scalar equations.
                 return _slice(path, indices, go, values)
-            resolved = [_integer(go(i), values, f"the subscript of {base.name!r}") for i in indices]
+            try:
+                resolved = [
+                    _integer(go(i), values, f"the subscript of {base.name!r}") for i in indices
+                ]
+            except FlattenError:
+                # An index that reads a loop index left local (`_unroll_once`) stays symbolic:
+                # `at_cell` names the element once the index has a value.
+                carried = tuple(go(i) for i in indices)
+                if any(set(names(i)) & local for i in carried):
+                    return ir.Subscript(ir.Ref(path), carried)
+                raise
             return ir.Ref((*path[:-1], element(path[-1], resolved)))
         case ir.Comprehension():
             if values is None:
@@ -2972,6 +2972,10 @@ class _Flattener:
         start, stop, step = bounds
         if step == 0:
             raise FlattenError(f"the range of 'for {index}' steps by zero")
+        if self._unroll_once(
+            loop, (start, stop, step), prefix, local, scope, outer, initial=initial
+        ):
+            return
         for value in range(start, stop + (1 if step > 0 else -1), step):
             replacement = {index: ir.IntLiteral(value)}
             for inner in loop.body:
@@ -2983,6 +2987,124 @@ class _Flattener:
                     outer=outer,
                     initial=initial,
                 )
+
+    def _unroll_once(  # noqa: PLR0913, PLR0917 -- everything `_unroll` has
+        self,
+        loop: ir.ForEquation,
+        bounds: tuple[int, int, int],
+        prefix: _Path,
+        local: frozenset[str],
+        scope: Scope,
+        outer: Mapping[str, _Path] | None,
+        *,
+        initial: bool = False,
+    ) -> bool:
+        """Write ``loop`` with each body equation carried once, not once per cell.
+
+        For a loop (nested loops included) whose bodies hold only ``a = b`` equations over
+        constant ranges: each equation is carried with the indices left as local names, and each
+        cell then only fills in index values and element names (`at_cell`). The first and last
+        cells are also written the eager way and must come out the same. Returns False, having
+        written nothing, whenever any of that does not hold; `_unroll` then unrolls as before.
+        """
+        plan = self._loop_plan(loop, bounds, prefix, local)
+        if plan is None:
+            return False
+        indices, cells = plan
+        try:
+            inner = local | frozenset(indices)
+            templates = {
+                id(equation): (
+                    self._carry(equation.lhs, prefix, inner, scope, outer),
+                    self._carry(equation.rhs, prefix, inner, scope, outer),
+                )
+                for equation in {id(e): e for _, e in cells}.values()
+            }
+            shapes = {".".join(path): shape for path, shape in self.shapes.items()}
+            constants = {
+                name: int(value) for name, value in self.values.items() if float(value).is_integer()
+            }
+            written = [
+                ir.Equal(
+                    at_cell(templates[id(equation)][0], cell, shapes, constants),
+                    at_cell(templates[id(equation)][1], cell, shapes, constants),
+                    equation.span,
+                )
+                for cell, equation in cells
+            ]
+        except (FlattenError, CellError, EvaluationError, KeyError, TypeError, ValueError):
+            return False
+        for k in {0, len(cells) - 1}:
+            cell, equation = cells[k]
+            values = {name: ir.IntLiteral(v) for name, v in cell.items()}
+            sink = self.initial_equations if initial else self.equations
+            size = len(sink)
+            self._equation(
+                _substitute_equation(equation, values),
+                prefix,
+                local,
+                scope=scope,
+                outer=outer,
+                initial=initial,
+            )
+            eager = sink[size:]
+            del sink[size:]
+            if eager != [written[k]]:
+                return False
+        (self.initial_equations if initial else self.equations).extend(written)
+        return True
+
+    def _loop_plan(  # noqa: C901 -- one walk over the nesting
+        self,
+        loop: ir.ForEquation,
+        bounds: tuple[int, int, int],
+        prefix: _Path,
+        local: frozenset[str],
+    ) -> tuple[list[str], list[tuple[dict[str, int], ir.Equal]]] | None:
+        """Every (cell, body equation) of ``loop`` in unroll order, or None.
+
+        None when a body holds another kind of equation, a step is not 1, or an inner range is
+        not constant.
+        """
+        indices: list[str] = []
+        cells: list[tuple[dict[str, int], ir.Equal]] = []
+
+        def walk(node: ir.ForEquation, span: tuple[int, int, int], cell: dict[str, int]) -> bool:
+            start, stop, step = span
+            if step != 1 or node.index in cell:
+                return False
+            if node.index not in indices:
+                indices.append(node.index)
+            for value in range(start, stop + 1):
+                here = {**cell, node.index: value}
+                for item in node.body:
+                    if isinstance(item, ir.Equal):
+                        cells.append((here, item))
+                    elif isinstance(item, ir.ForEquation) and isinstance(item.over, ir.Range):
+                        over = item.over
+                        parts = (over.start, over.stop, over.step or ir.IntLiteral(1))
+                        if any(set(names(part)) & set(here) for part in parts):
+                            return False
+                        try:
+                            inner = tuple(
+                                _integer(
+                                    _prefix_expr(part, prefix, local, values=self.values),
+                                    self.values,
+                                    f"the range of 'for {item.index}'",
+                                )
+                                for part in parts
+                            )
+                        except FlattenError:
+                            return False
+                        if not walk(item, (inner[0], inner[1], inner[2]), here):
+                            return False
+                    else:
+                        return False
+            return True
+
+        if not walk(loop, bounds, {}) or not cells:
+            return None
+        return indices, cells
 
     def _if_equation(  # noqa: PLR0913 -- everything `_equation` needs, plus the equation
         self,

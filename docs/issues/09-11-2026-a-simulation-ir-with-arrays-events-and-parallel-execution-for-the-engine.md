@@ -314,3 +314,15 @@ renamed the `FlatModel.equations` field to `listing` and made `equations` a prop
 `dataclasses.replace(model, equations=...)`, which users and the docs call, so `equations` stays
 the field. Commit 3 must carry loops beside it without breaking `replace`. Tests: a periodic stencil and a 2-D loop
 scalarize in loop order; `x[i + 1]` past the last cell raises `CellError` naming the cell.
+
+Commit 3 done: `_unroll_once` in `flatten.py` carries each body equation of a `for` loop once,
+with the loop indices left as local names, and fills in each cell with `flat.at_cell`. It covers
+nested loops over `a = b` bodies with constant unit-step ranges, initial equations included.
+`_prefix_expr` leaves a subscript that reads a loop index symbolic. The first and last cells are
+also written the eager way and must match; otherwise, or on any error, the loop unrolls as
+before. `element()` moved to `flat.py` so the element name has one spelling.
+
+The loops still come out as scalar equations: this commit makes flattening cheaper, it does not
+yet keep `ArrayEquation` in `FlatModel`. Flatten on the 32 x 32 grid: 1.07 s to 0.19 s (process
+time, best of 3). Front end at n = 32 now: flatten 0.19 s, causalize 0.53 s, `vm.lower` 1.86 s.
+Test: all 61 examples flatten to the same `FlatModel` with and without the fast path.

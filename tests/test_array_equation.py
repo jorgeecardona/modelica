@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 import pytest
 
+from modelica.ir import flatten as flattening
 from modelica.ir import nodes as ir
 from modelica.ir.flat import ArrayEquation, CellError, IndexSet
+from modelica.ir.flatten import FlattenError
+from modelica.lang import parse
+from modelica.sim import flatten
 
 
 def _ref(name: str) -> ir.Ref:
@@ -65,3 +72,54 @@ def test_a_read_past_the_last_cell_is_an_error_not_a_wrap() -> None:
     )
     with pytest.raises(CellError, match=r"x\[4\] is outside \(3,\) at i = 3"):
         equation.scalarize()
+
+
+_EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+
+
+def _sources(model: Path) -> list[ir.Program]:
+    spec = tomllib.loads(model.with_suffix(".toml").read_text(encoding="utf-8"))
+    library = _EXAMPLES / "library"
+    out = [parse((library / f"{name}.mo").read_text(encoding="utf-8")) for name in spec["requires"]]
+    out.append(parse(model.read_text(encoding="utf-8")))
+    return out
+
+
+def _never(*_: object, **__: object) -> bool:
+    return False
+
+
+@pytest.mark.parametrize(
+    "model", sorted((_EXAMPLES / "models").glob("*.mo")), ids=lambda path: path.stem
+)
+def test_carrying_a_loop_once_flattens_like_unrolling_it(
+    model: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every example flattens to the same model with and without `_unroll_once`."""
+    sources = _sources(model)
+    try:
+        once = flatten(sources, model.stem)
+    except FlattenError:
+        pytest.skip("the example does not flatten")
+    monkeypatch.setattr(flattening._Flattener, "_unroll_once", _never)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    assert flatten(sources, model.stem) == once
+
+
+def test_a_loop_index_named_like_a_component_reads_the_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``for i`` in a model with a parameter ``i`` reads the loop index, as unrolling does."""
+    source = """
+model Shadow
+  parameter Integer i = 2;
+  Real x[3](each start = 1, each fixed = true);
+equation
+  for i in 1:3 loop
+    der(x[i]) = -i * x[i];
+  end for;
+end Shadow;
+"""
+    once = flatten([parse(source)], "Shadow")
+    monkeypatch.setattr(flattening._Flattener, "_unroll_once", _never)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    assert flatten([parse(source)], "Shadow") == once
+    assert len(once.equations) == 3

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Literal
 from modelica.ir import nodes as ir
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator, Mapping, Sequence
 
 __all__ = ["BaseType", "FlatModel", "FlatVariable"]
 
@@ -73,6 +73,16 @@ def _der_targets(node: ir.Expr) -> Iterator[str]:
             return
 
 
+def element(name: str, indices: Sequence[int]) -> str:
+    """The scalar name of one element: ``T`` and ``(3,)`` give ``T[3]``.
+
+    Public because three places have to agree on it -- the declaration that creates the
+    variable, the subscript that reads it, and anything later that wants to recognise an
+    element by its name. A second spelling of this would be a bug nobody could see.
+    """
+    return f"{name}[{', '.join(str(i) for i in indices)}]"
+
+
 class CellError(ValueError):
     """An array equation reads an element outside its array at some cell."""
 
@@ -120,8 +130,8 @@ class ArrayEquation:
         shapes = dict(self.shapes)
         return tuple(
             ir.Equal(
-                _at(self.equation.lhs, cell, shapes),
-                _at(self.equation.rhs, cell, shapes),
+                at_cell(self.equation.lhs, cell, shapes),
+                at_cell(self.equation.rhs, cell, shapes),
                 self.equation.span,
             )
             for cell in self.cells()
@@ -152,30 +162,47 @@ def _integer(node: ir.Expr, cell: Mapping[str, int]) -> int:  # noqa: PLR0911 - 
             raise CellError(message)
 
 
-def _at(node: ir.Expr, cell: Mapping[str, int], shapes: Mapping[str, tuple[int, ...]]) -> ir.Expr:  # noqa: PLR0911 - one case per node
-    """``node`` at ``cell``: indices replaced by their values, subscripts by element names."""
+def at_cell(  # noqa: PLR0911 - one case per node
+    node: ir.Expr,
+    cell: Mapping[str, int],
+    shapes: Mapping[str, tuple[int, ...]],
+    constants: Mapping[str, int] | None = None,
+) -> ir.Expr:
+    """``node`` at ``cell``: indices replaced by their values, subscripts by element names.
+
+    ``constants`` gives integer parameters an index may read (``n`` in ``mod(i, n)``); they are
+    used inside indices only. Raises `CellError` for a read outside its array or an index it
+    cannot evaluate.
+    """
+    known = cell if not constants else {**constants, **cell}
+
+    def go(inner: ir.Expr) -> ir.Expr:
+        return at_cell(inner, cell, shapes, constants)
+
     match node:
         case ir.Subscript(base=base, indices=indices):
-            at = tuple(_integer(index, cell) for index in indices)
-            shape = shapes[base.name]
+            at = tuple(_integer(index, known) for index in indices)
+            shape = shapes[".".join(base.parts)]
             if len(at) != len(shape) or not all(
                 1 <= k <= n for k, n in zip(at, shape, strict=True)
             ):
                 where = ", ".join(f"{name} = {value}" for name, value in cell.items())
                 message = f"{base.name}[{', '.join(map(str, at))}] is outside {shape} at {where}"
                 raise CellError(message)
-            return ir.Ref((f"{base.name}[{', '.join(map(str, at))}]",), base.span)
+            return ir.Ref((*base.parts[:-1], element(base.parts[-1], at)), base.span)
         case ir.Ref() if node.name in cell:
             return ir.IntLiteral(cell[node.name])
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
-            return ir.Binary(op, _at(lhs, cell, shapes), _at(rhs, cell, shapes))
+            return ir.Binary(op, go(lhs), go(rhs))
         case ir.Unary(op=op, operand=operand):
-            return ir.Unary(op, _at(operand, cell, shapes))
+            return ir.Unary(op, go(operand))
         case ir.Call(name=name, args=args, named=named):
-            return ir.Call(name, tuple(_at(a, cell, shapes) for a in args), named)
+            return ir.Call(name, tuple(go(a) for a in args), named)
         case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
             return ir.IfExpr(
-                _at(condition, cell, shapes), _at(then, cell, shapes), _at(otherwise, cell, shapes)
+                go(condition),
+                go(then),
+                go(otherwise),
             )
         case _:
             return node
