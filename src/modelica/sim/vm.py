@@ -232,6 +232,9 @@ class Program:
     latch: Function
     """Sets every latch from the relation's live value, as the emitted ``latch``."""
     layout: Layout
+    order: tuple[int, ...] = ()
+    """The state order Radau factors its matrices in, `bandwidth_order` of the first mode.
+    Empty for the natural order."""
 
 
 @dataclass
@@ -836,6 +839,59 @@ class _Tangents:
                 self.dots.setdefault(unknown, {})[j] = partial + k
 
 
+def _bandwidth(sparsity: Sequence[Sequence[int]], position: Sequence[int]) -> int:
+    """The larger of the lower and upper bandwidth with state ``k`` at row ``position[k]``."""
+    return max(
+        (abs(position[i] - position[j]) for i, row in enumerate(sparsity) for j in row),
+        default=0,
+    )
+
+
+def _neighbours(sparsity: Sequence[Sequence[int]]) -> list[set[int]]:
+    """Each state's neighbours in the Jacobian made symmetric, the diagonal left out."""
+    neighbours: list[set[int]] = [set() for _ in sparsity]
+    for i, row in enumerate(sparsity):
+        for j in row:
+            if i != j:
+                neighbours[i].add(j)
+                neighbours[j].add(i)
+    return neighbours
+
+
+def bandwidth_order(sparsity: Sequence[Sequence[int]]) -> tuple[int, ...]:
+    """A state order that makes the Jacobian banded: reverse Cuthill-McKee, or ``()``.
+
+    Breadth-first from a state with the fewest neighbours, neighbours visited by ascending
+    degree, the whole order reversed; every connected part in turn. Returns ``()`` when the
+    natural order is as narrow, so a model that is banded already is factored as before.
+    """
+    n = len(sparsity)
+    neighbours = _neighbours(sparsity)
+    order: list[int] = []
+    seen = [False] * n
+    for root in sorted(range(n), key=lambda k: len(neighbours[k])):
+        if seen[root]:
+            continue
+        seen[root] = True
+        queue = [root]
+        head = 0
+        while head < len(queue):
+            k = queue[head]
+            head += 1
+            for j in sorted(neighbours[k], key=lambda m: (len(neighbours[m]), m)):
+                if not seen[j]:
+                    seen[j] = True
+                    queue.append(j)
+        order.extend(queue)
+    order.reverse()
+    position = [0] * n
+    for row, k in enumerate(order):
+        position[k] = row
+    if _bandwidth(sparsity, position) >= _bandwidth(sparsity, range(n)):
+        return ()
+    return tuple(order)
+
+
 def lower(system: System) -> Program:
     """Write ``system``'s kernel functions as tapes.
 
@@ -872,6 +928,7 @@ def lower(system: System) -> Program:
             + (0 if lowering.emitter.switching is None else 1),
         ),
     )
+    program = replace(program, order=bandwidth_order(system.modes[0].sparsity))
     program = _fold(program, lowering.constants)
     pool = sorted(lowering.constants, key=lowering.constants.__getitem__)
     program = _preload(program, lowering.registers)

@@ -170,3 +170,29 @@ Each thread sets its own thread-local program pointer, so `md_integrate` did not
 | time | 27.0 s | 7.2 s | 4.9 s | 4.65 s |
 
 Test: 16 vectors in parallel give bit-identical results to 16 single runs.
+
+### Step 2 done: banded LU in Radau (2026-11-09)
+
+`vm.lower` picks a state order with reverse Cuthill-McKee on `Mode.sparsity`
+(`vm.bandwidth_order`) and the engine stores it with `md_vm_order`. Radau builds `mu/h I - J`
+in that order. The LU finds the band in the matrix it is given and its loops stop at the band.
+Row swaps move only the part right of the pivot column, as LAPACK's `gbtrf` does, so the solve
+stays inside the band too.
+
+- vowel_i: 78 states, bandwidth 75 in the natural order, 4 in the new order.
+- Only 158 of 2337 steps factor. Most of the gain is in the solves, which run every Newton
+  iteration.
+- rustsim does not pass an order, so it factors as before.
+
+User instructions for a 0.05 s vowel_i run (`perf stat`, minus a stop=0 run):
+
+| | instructions |
+|---|---|
+| engine, natural order | 16.1e9 |
+| engine, banded order | 7.2e9 |
+| rustsim (compiled) | 11.2e9 |
+
+Tests: any state order (the reversed one) gives the natural order's trajectory within 1e-9;
+a chain with bandwidth n/2 gets bandwidth 1; an order that is not a permutation is refused.
+vowel_i over 0.01 s: same steps and factorisations, largest difference 1.2e-4 on values up to
+3.4e6 (4e-11 relative).

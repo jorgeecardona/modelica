@@ -114,6 +114,8 @@ def _open(path: Path) -> ctypes.CDLL:
         pointer, size, pointer, size, pointer, size, pointer, size, pointer, size,
     ]  # fmt: skip
     engine.md_vm_free.argtypes = [pointer]
+    engine.md_vm_order.restype = ctypes.c_int32
+    engine.md_vm_order.argtypes = [pointer, pointer, size]
     engine.md_vm_run_many.restype = None
     engine.md_vm_run_many.argtypes = [
         pointer, size, size, *_RUN_ARGUMENTS[:-1], pointer, pointer,
@@ -209,6 +211,12 @@ def load(program: vm.Program, path: Path | None = None) -> Loaded:
     if not handle:
         message = "the engine refused the program"
         raise SimulationError(message)
+    if program.order:
+        order = np.ascontiguousarray(program.order, dtype=np.uint64)
+        if engine.md_vm_order(handle, order.ctypes.data, len(order)) != 0:
+            engine.md_vm_free(handle)
+            message = "the engine refused the state order"
+            raise SimulationError(message)
     return Loaded(engine, handle, encoded, program.layout)
 
 

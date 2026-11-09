@@ -6,6 +6,8 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **The engine factors in a banded state order.** It reorders the states so the Radau matrix is
+  banded and skips the zeros outside the band. vowel_i needs less than half the instructions.
 - **A precompiled engine runs a model with no compiler per model.** `simulate(..., backend="engine")`
   lowers the model to a register tape (`modelica.sim.vm`) and runs it in a Rust engine with the
   same Radau integrator as `rustsim`. The Linux x86_64 wheel carries the engine as

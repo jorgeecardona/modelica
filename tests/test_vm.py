@@ -8,7 +8,9 @@ same calls, and skipped when there is no ``rustc``.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
+import itertools
 import shutil
 import tomllib
 import types
@@ -488,3 +490,47 @@ def test_parallel_runs_equal_single_runs(engine: Path, name: str) -> None:
         np.testing.assert_array_equal(mine.time, alone.time)
         np.testing.assert_array_equal(mine.values, alone.values)
         assert mine.events == alone.events
+
+
+@pytest.mark.parametrize("name", ["Lorenz", "TwoTank", "Pendulum"])
+def test_any_state_order_integrates_the_same(
+    engine: Path, name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Radau factored in the reversed state order gives the natural order's trajectory."""
+    from modelica.sim import engine as native  # noqa: PLC0415
+
+    system = _system(EXAMPLES / "models" / f"{name}.mo")
+    knobs: dict[str, Any] = {"stop": 2.0, "tolerance": 1e-8, "points": 21, "path": engine}
+    monkeypatch.setattr(vm, "bandwidth_order", lambda _: ())
+    natural = native.simulate(system, **knobs).result
+    n = len(system.states)
+    monkeypatch.setattr(vm, "bandwidth_order", lambda _: tuple(reversed(range(n))))
+    assert vm.lower(system).order == tuple(reversed(range(n)))
+    reordered = native.simulate(system, **knobs).result
+    np.testing.assert_array_equal(natural.time, reordered.time)
+    np.testing.assert_allclose(reordered.values, natural.values, rtol=1e-9, atol=1e-12)
+
+
+def test_a_chain_gets_a_banded_order() -> None:
+    """A chain numbered 0, 2, 4, ..., 1, 3, 5 has bandwidth n/2; the order brings it to 1."""
+    n = 20
+    chain = [*range(0, n, 2), *range(n - 1, 0, -2)]
+    sparsity: list[list[int]] = [[] for _ in range(n)]
+    for a, b in itertools.pairwise(chain):
+        sparsity[a].append(b)
+        sparsity[b].append(a)
+    order = vm.bandwidth_order(sparsity)
+    position = {k: row for row, k in enumerate(order)}
+    assert sorted(order) == list(range(n))
+    assert max(abs(position[i] - position[j]) for i in range(n) for j in sparsity[i]) == 1
+    assert vm.bandwidth_order([[0, 1], [0, 1, 2], [1, 2]]) == ()
+
+
+def test_the_engine_refuses_an_order_that_is_not_a_permutation(engine: Path) -> None:
+    """A repeated state in the order is refused when the program loads."""
+    from modelica.sim import engine as native  # noqa: PLC0415
+    from modelica.sim.solve import SimulationError  # noqa: PLC0415
+
+    program = vm.lower(_system(EXAMPLES / "models" / "Lorenz.mo"))
+    with pytest.raises(SimulationError, match="state order"):
+        native.load(dataclasses.replace(program, order=(0, 0, 1)), engine)

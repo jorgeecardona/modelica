@@ -105,7 +105,7 @@ pub extern "C" fn md_run(
     let obs = unsafe { view_mut(obs, cap * nobs) };
     let events_out = unsafe { view_mut(events_out, nev_out) };
     let ev_index_out = unsafe { view_mut(ev_index_out, nev_out) };
-    let r = md_integrate(t0, t1, y0, p, w, rtol, atol, dirs, lat, term, grid, every != 0, t_out, out, obs, events_out, ev_index_out);
+    let r = md_integrate(t0, t1, y0, p, w, rtol, atol, dirs, lat, term, grid, &[], every != 0, t_out, out, obs, events_out, ev_index_out);
     let counters = unsafe { view_mut(counters, 9) };
     counters[0] = r.0 as f64;
     counters[1] = r.1 as f64;

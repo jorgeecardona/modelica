@@ -45,6 +45,9 @@ pub struct Program {
     code: Vec<i32>,
     functions: Vec<Function>,
     scratch: RefCell<Scratch>,
+    /// The state order Radau factors its matrices in (empty: the natural order), set by
+    /// `md_vm_order`. A good order makes `mu/h I - J` banded.
+    order: Vec<usize>,
 }
 
 /// Memory one call works in, kept between calls so a call allocates nothing: the register
@@ -322,7 +325,26 @@ pub unsafe extern "C" fn md_vm_new(
     Box::into_raw(Box::new(Program {
         modes, events, switching, constants, code, functions: decoded,
         scratch: RefCell::new(Scratch { r: preloaded, a: Vec::new(), b: Vec::new() }),
+        order: Vec::new(),
     }))
+}
+
+/// Set the state order Radau factors in: `order[i]` is the state at row and column `i`.
+/// Returns 0, or -1 (and changes nothing) when `order` is not a permutation of `0..n`.
+///
+/// # Safety
+/// `program` comes from `md_vm_new`; `order` is valid for `n` values.
+#[no_mangle]
+pub unsafe extern "C" fn md_vm_order(program: *mut Program, order: *const u64, n: usize) -> i32 {
+    let given = if n == 0 { &[][..] } else { slice::from_raw_parts(order, n) };
+    let mut seen = vec![false; n];
+    for &k in given {
+        let k = k as usize;
+        if k >= n || seen[k] { return -1; }
+        seen[k] = true;
+    }
+    (*program).order = given.iter().map(|&k| k as usize).collect();
+    0
 }
 
 /// Run one function. `then < 0` means none. Returns 0.
@@ -445,7 +467,7 @@ pub unsafe extern "C" fn md_vm_run(
     let previous = CURRENT.with(|c| c.replace(program));
     let r = md_integrate(
         t0, t1, view(y0, n), view(p, np), view_mut(w, nw), rtol, atol,
-        view(dirs, ne), view(lat, ne), view(term, ne), view(grid, npts), every != 0,
+        view(dirs, ne), view(lat, ne), view(term, ne), view(grid, npts), &(*program).order, every != 0,
         view_mut(t_out, cap), view_mut(out, cap * n), view_mut(obs, cap * nobs),
         view_mut(events_out, nev_out), view_mut(ev_index_out, nev_out),
     );
@@ -542,7 +564,7 @@ pub unsafe extern "C" fn md_vm_run_many(
                         view_mut((w as *mut f64).add(k * nw), nw),
                         rtol, atol,
                         view(dirs as *const f64, ne), view(lat as *const i64, ne),
-                        view(term as *const i64, ne), view(grid as *const f64, npts),
+                        view(term as *const i64, ne), view(grid as *const f64, npts), &local.order,
                         every != 0,
                         view_mut((t_out as *mut f64).add(k * cap), cap),
                         view_mut((out as *mut f64).add(k * cap * n), cap * n),

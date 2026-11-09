@@ -12,47 +12,76 @@ const MD_HELD: f64 = 0.5;
 const MD_STANDSTILL: f64 = 1e-4;
 const MD_CHATTER: usize = 100;
 
+// The lower and upper bandwidth of an n-by-n matrix stored as m(i, j): the largest i - j
+// and j - i with a nonzero entry. Partial pivoting keeps L inside the lower band and U
+// inside lower + upper, so the factorisation loops stop there and skip only zeros.
+#[allow(dead_code)]
+fn md_band(n: usize, m: impl Fn(usize, usize) -> bool) -> (usize, usize) {
+    let mut lower = 0;
+    let mut upper = 0;
+    for i in 0..n {
+        for j in 0..n {
+            if m(i, j) {
+                if i > j { lower = lower.max(i - j); } else { upper = upper.max(j - i); }
+            }
+        }
+    }
+    (lower, upper)
+}
+
 // Real LU with partial pivoting: overwrite a with its factors, record the pivots in piv.
-// False when a column is exactly zero (a singular matrix).
+// False when a column is exactly zero (a singular matrix). The loops stay inside the band
+// md_band finds, so a banded matrix costs n * lower * (lower + upper), not n^3 / 3.
 #[allow(dead_code)]
 fn md_lu_factor(n: usize, a: &mut [f64], piv: &mut [usize]) -> bool {
+    let (lower, upper) = md_band(n, |i, j| a[i * n + j] != 0.0);
+    if piv.len() >= n + 2 { piv[n] = lower; piv[n + 1] = lower + upper; }
     for k in 0..n {
+        let last = n.min(k + lower + 1);
+        let right = n.min(k + lower + upper + 1);
         let mut big = 0.0;
         let mut row = k;
-        for i in k..n {
+        for i in k..last {
             let size = a[i * n + k].abs();
             if size > big { big = size; row = i; }
         }
         piv[k] = row;
         if big == 0.0 { return false; }
         if row != k {
-            for j in 0..n { a.swap(k * n + j, row * n + j); }
+            for j in k..right { a.swap(k * n + j, row * n + j); }
         }
         let pivot = a[k * n + k];
-        for i in (k + 1)..n {
+        for i in (k + 1)..last {
             let share = a[i * n + k] / pivot;
             a[i * n + k] = share;
             if share != 0.0 {
-                for j in (k + 1)..n { a[i * n + j] -= share * a[k * n + j]; }
+                for j in (k + 1)..right { a[i * n + j] -= share * a[k * n + j]; }
             }
         }
     }
     true
 }
 
-// Forward and back substitution against a factorisation, in place on b. Every pivot swap
-// first, then the substitution -- see radau.py's _solve for why interleaving is wrong.
+// The band a factorisation recorded after its pivots (lower, lower + upper), or the full
+// matrix when piv has no room for it.
+#[allow(dead_code)]
+fn md_piv_band(n: usize, piv: &[usize]) -> (usize, usize) {
+    if piv.len() >= n + 2 { (piv[n], piv[n + 1]) } else { (n, n) }
+}
+
+// Forward and back substitution against a factorisation, in place on b. The factorisation
+// swaps rows only from the pivot column right (LAPACK's banded gbtrf), so the multipliers
+// of column k stay in rows k + 1 to k + lower and swap k is applied just before step k.
 #[allow(dead_code)]
 fn md_lu_solve(n: usize, a: &[f64], piv: &[usize], b: &mut [f64]) {
+    let (lower, width) = md_piv_band(n, piv);
     for k in 0..n {
         let row = piv[k];
         if row != k { b.swap(k, row); }
-    }
-    for k in 0..n {
-        for i in (k + 1)..n { b[i] -= a[i * n + k] * b[k]; }
+        for i in (k + 1)..n.min(k + lower + 1) { b[i] -= a[i * n + k] * b[k]; }
     }
     for k in (0..n).rev() {
-        for j in (k + 1)..n { b[k] -= a[k * n + j] * b[j]; }
+        for j in (k + 1)..n.min(k + width + 1) { b[k] -= a[k * n + j] * b[j]; }
         b[k] /= a[k * n + k];
     }
 }
@@ -61,17 +90,21 @@ fn md_lu_solve(n: usize, a: &[f64], piv: &[usize], b: &mut [f64]) {
 // pair of f64. Pivots by squared magnitude. Same structure as md_lu_factor.
 #[allow(dead_code)]
 fn md_clu_factor(n: usize, ar: &mut [f64], ai: &mut [f64], piv: &mut [usize]) -> bool {
+    let (lower, upper) = md_band(n, |i, j| ar[i * n + j] != 0.0 || ai[i * n + j] != 0.0);
+    if piv.len() >= n + 2 { piv[n] = lower; piv[n + 1] = lower + upper; }
     for k in 0..n {
+        let last = n.min(k + lower + 1);
+        let right = n.min(k + lower + upper + 1);
         let mut big = 0.0;
         let mut row = k;
-        for i in k..n {
+        for i in k..last {
             let size = ar[i * n + k] * ar[i * n + k] + ai[i * n + k] * ai[i * n + k];
             if size > big { big = size; row = i; }
         }
         piv[k] = row;
         if big == 0.0 { return false; }
         if row != k {
-            for j in 0..n {
+            for j in k..right {
                 ar.swap(k * n + j, row * n + j);
                 ai.swap(k * n + j, row * n + j);
             }
@@ -79,7 +112,7 @@ fn md_clu_factor(n: usize, ar: &mut [f64], ai: &mut [f64], piv: &mut [usize]) ->
         let pr = ar[k * n + k];
         let pi = ai[k * n + k];
         let den = pr * pr + pi * pi;
-        for i in (k + 1)..n {
+        for i in (k + 1)..last {
             // share = a[i][k] / a[k][k]
             let nr = ar[i * n + k];
             let ni = ai[i * n + k];
@@ -88,7 +121,7 @@ fn md_clu_factor(n: usize, ar: &mut [f64], ai: &mut [f64], piv: &mut [usize]) ->
             ar[i * n + k] = sr;
             ai[i * n + k] = si;
             if sr != 0.0 || si != 0.0 {
-                for j in (k + 1)..n {
+                for j in (k + 1)..right {
                     // a[i][j] -= share * a[k][j]
                     let akr = ar[k * n + j];
                     let aki = ai[k * n + j];
@@ -104,12 +137,11 @@ fn md_clu_factor(n: usize, ar: &mut [f64], ai: &mut [f64], piv: &mut [usize]) ->
 // Complex forward and back substitution against a factorisation, in place on (br, bi).
 #[allow(dead_code)]
 fn md_clu_solve(n: usize, ar: &[f64], ai: &[f64], piv: &[usize], br: &mut [f64], bi: &mut [f64]) {
+    let (lower, width) = md_piv_band(n, piv);
     for k in 0..n {
         let row = piv[k];
         if row != k { br.swap(k, row); bi.swap(k, row); }
-    }
-    for k in 0..n {
-        for i in (k + 1)..n {
+        for i in (k + 1)..n.min(k + lower + 1) {
             // b[i] -= a[i][k] * b[k]
             let akr = ar[i * n + k];
             let aki = ai[i * n + k];
@@ -120,7 +152,7 @@ fn md_clu_solve(n: usize, ar: &[f64], ai: &[f64], piv: &[usize], br: &mut [f64],
         }
     }
     for k in (0..n).rev() {
-        for j in (k + 1)..n {
+        for j in (k + 1)..n.min(k + width + 1) {
             // b[k] -= a[k][j] * b[j]
             let akr = ar[k * n + j];
             let aki = ai[k * n + j];
@@ -138,6 +170,28 @@ fn md_clu_solve(n: usize, ar: &[f64], ai: &[f64], piv: &[usize], br: &mut [f64],
         br[k] = (nr * dr + ni * di) / den;
         bi[k] = (ni * dr - nr * di) / den;
     }
+}
+
+// md_lu_solve on a matrix factored in the state order `order` (empty: the natural order):
+// b is permuted into that order, solved, and permuted back, through `tmp`.
+#[allow(dead_code)]
+fn md_lu_solve_in(n: usize, a: &[f64], piv: &[usize], order: &[usize], b: &mut [f64], tmp: &mut [f64]) {
+    if order.is_empty() { md_lu_solve(n, a, piv, b); return; }
+    for q in 0..n { tmp[q] = b[order[q]]; }
+    md_lu_solve(n, a, piv, tmp);
+    for q in 0..n { b[order[q]] = tmp[q]; }
+}
+
+// md_clu_solve in the state order `order`, as md_lu_solve_in.
+#[allow(dead_code)]
+fn md_clu_solve_in(
+    n: usize, ar: &[f64], ai: &[f64], piv: &[usize], order: &[usize],
+    br: &mut [f64], bi: &mut [f64], tr: &mut [f64], ti: &mut [f64],
+) {
+    if order.is_empty() { md_clu_solve(n, ar, ai, piv, br, bi); return; }
+    for q in 0..n { tr[q] = br[order[q]]; ti[q] = bi[order[q]]; }
+    md_clu_solve(n, ar, ai, piv, tr, ti);
+    for q in 0..n { br[order[q]] = tr[q]; bi[order[q]] = ti[q]; }
 }
 
 const MAX_FACTOR: f64 = 10.0;
@@ -172,6 +226,8 @@ fn md_predict(h: f64, h_old: f64, error: f64, error_old: f64) -> f64 {
 }
 
 // Build mu/h*I - J for the real and complex eigenvalues and factor both. radau.py:432.
+// With a nonempty `order` the matrices are built with rows and columns in that state
+// order, which the caller picks to make them banded; solve them with md_lu_solve_in.
 #[allow(dead_code)]
 fn md_factor_pair(
     n: usize,
@@ -182,14 +238,17 @@ fn md_factor_pair(
     acr: &mut [f64],
     aci: &mut [f64],
     pc: &mut [usize],
+    order: &[usize],
 ) -> bool {
     let mu_real = MD_MU_REAL / h;
     let mu_complex_r = MD_MU_COMPLEX_R / h;
     let mu_complex_i = MD_MU_COMPLEX_I / h;
     for i in 0..n {
         for j in 0..n {
-            ar[i * n + j] = -jac[i * n + j];
-            acr[i * n + j] = -jac[i * n + j];
+            // Row i and column j of the matrix in `order` are state order[i] and order[j].
+            let e = if order.is_empty() { jac[i * n + j] } else { jac[order[i] * n + order[j]] };
+            ar[i * n + j] = -e;
+            acr[i * n + j] = -e;
             aci[i * n + j] = 0.0;
         }
         ar[i * n + i] += mu_real;
@@ -216,6 +275,7 @@ fn md_newton(
     acr: &[f64],
     aci: &[f64],
     pc: &[usize],
+    order: &[usize],
 ) -> (bool, usize, f64, usize) {
     let n = y.len();
     let mu_real = MD_MU_REAL / h;
@@ -228,6 +288,8 @@ fn md_newton(
     let mut br = vec![0.0f64; n];
     let mut bcr = vec![0.0f64; n];
     let mut bci = vec![0.0f64; n];
+    let mut tr = vec![0.0f64; n];
+    let mut ti = vec![0.0f64; n];
     // wm[i] = sum_j MD_TI[i][j] * z[j]
     for i in 0..3 {
         for q in 0..n {
@@ -264,8 +326,8 @@ fn md_newton(
             bcr[q] = imag_r - (mu_complex_r * wm[n + q] - mu_complex_i * wm[2 * n + q]);
             bci[q] = imag_i - (mu_complex_r * wm[2 * n + q] + mu_complex_i * wm[n + q]);
         }
-        md_lu_solve(n, ar, pr, &mut br);
-        md_clu_solve(n, acr, aci, pc, &mut bcr, &mut bci);
+        md_lu_solve_in(n, ar, pr, order, &mut br, &mut tr);
+        md_clu_solve_in(n, acr, aci, pc, order, &mut bcr, &mut bci, &mut tr, &mut ti);
         for q in 0..n {
             dw[q] = br[q];
             dw[n + q] = bcr[q];
@@ -423,6 +485,7 @@ fn md_integrate(
     latches: &[i64],
     terminates: &[i64],
     grid: &[f64],
+    order: &[usize],
     every: bool,
     t_out: &mut [f64],
     out: &mut [f64],
@@ -431,6 +494,8 @@ fn md_integrate(
     ev_index_out: &mut [f64],
 ) -> (i32, usize, usize, usize, usize, usize, usize, f64, usize) {
     let n = y0.len();
+    // An order for another state count (a mode with other states) is ignored.
+    let order = if order.len() == n { order } else { &[][..] };
     // `every` adds rows to the grid's: the start and stop instants, both sides of each event,
     // and with no grid every accepted step. That is what `solve.py` returns. Without it the
     // rows are exactly the grid points.
@@ -456,8 +521,10 @@ fn md_integrate(
     let mut ar = vec![0.0f64; n * n];
     let mut acr = vec![0.0f64; n * n];
     let mut aci = vec![0.0f64; n * n];
-    let mut pr = vec![0usize; n];
-    let mut pc = vec![0usize; n];
+    // Two slots past the pivots hold the band md_lu_factor found, for md_lu_solve.
+    let mut pr = vec![0usize; n + 2];
+    let mut pc = vec![0usize; n + 2];
+    let mut solve_tmp = vec![0.0f64; n];
     let mut factored = false;
     let mut factorisations = 0usize;
 
@@ -550,7 +617,7 @@ fn md_integrate(
             let mut converged = false;
             while !converged {
                 if !factored {
-                    if !md_factor_pair(n, &jac, h, &mut ar, &mut pr, &mut acr, &mut aci, &mut pc) {
+                    if !md_factor_pair(n, &jac, h, &mut ar, &mut pr, &mut acr, &mut aci, &mut pc, order) {
                         status = NO_CONVERGENCE;
                         break;
                     }
@@ -558,7 +625,7 @@ fn md_integrate(
                     factorisations += 1;
                 }
                 let result =
-                    md_newton(t, &y, h, p, w, &mut z, &scale, tol, &ar, &pr, &acr, &aci, &pc);
+                    md_newton(t, &y, h, p, w, &mut z, &scale, tol, &ar, &pr, &acr, &aci, &pc, order);
                 converged = result.0;
                 iterations = result.1;
                 rate = result.2;
@@ -585,7 +652,7 @@ fn md_integrate(
                 combined[q] = f[q] + (MD_E[0] * z[q] + MD_E[1] * z[n + q] + MD_E[2] * z[2 * n + q]) / h;
                 error[q] = combined[q];
             }
-            md_lu_solve(n, &ar, &pr, &mut error);
+            md_lu_solve_in(n, &ar, &pr, order, &mut error, &mut solve_tmp);
             for q in 0..n { scale[q] = atol + rtol * y[q].abs().max(y_new[q].abs()); }
             for q in 0..n { scaled[q] = error[q] / scale[q]; }
             error_norm = md_norm(&scaled);
@@ -597,7 +664,7 @@ fn md_integrate(
                 rhs(t, &y_new, p, w, &mut f_new);
                 evaluations += 1;
                 for q in 0..n { error[q] = f_new[q] + combined[q] - f[q]; }
-                md_lu_solve(n, &ar, &pr, &mut error);
+                md_lu_solve_in(n, &ar, &pr, order, &mut error, &mut solve_tmp);
                 for q in 0..n { scaled[q] = error[q] / scale[q]; }
                 error_norm = md_norm(&scaled);
                 for q in 0..n { y_new[q] = y[q] + z[2 * n + q]; }
