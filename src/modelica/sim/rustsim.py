@@ -380,7 +380,7 @@ def assemble(  # noqa: PLR0913 - what one run wrote
     names = (*system.modes[0].states, *observed)
     values = np.vstack(
         [
-            out.reshape(-1, n)[:rows_written].T,
+            out.reshape(-1, n)[:rows_written].T if n else np.empty((0, rows_written)),
             obs.reshape(-1, nobs)[:rows_written].T if nobs else np.empty((0, rows_written)),
         ]
     )

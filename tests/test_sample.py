@@ -77,3 +77,28 @@ def test_a_sample_is_a_time_event_at_its_exact_instant(
             instant += interval
     assert sorted(event.time for event in result.events) == sorted(expected)
     assert result["x"][-1] == pytest.approx(np.exp(-1.0), rel=1e-5)
+
+
+STEP = """\
+model Step
+  discrete Real a(start = 0, fixed = true);
+equation
+  when time >= 0.01 then
+    a = 1;
+  end when;
+end Step;
+"""
+
+
+@pytest.mark.parametrize(("source", "name"), [(PULSE, "Pulse"), (STEP, "Step")])
+def test_a_model_with_no_states_runs_on_the_engine(source: str, name: str) -> None:
+    """A model with only discrete unknowns gives the same events on the engine as on SciPy."""
+    from modelica.sim.engine import installed  # noqa: PLC0415 - only this test needs it
+
+    if installed() is None and shutil.which("rustc") is None:
+        pytest.skip("no engine in this install and no rustc to build one")
+    system = causalize(flatten(parse(source), name))
+    runs = [simulate(system, stop=0.05, backend=backend) for backend in ("python", "engine")]
+    times = [[event.time for event in run.events] for run in runs]
+    np.testing.assert_allclose(times[1], times[0], rtol=0, atol=1e-12)
+    assert times[0]

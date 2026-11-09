@@ -211,6 +211,8 @@ const TERMINATED: i32 = 4;
 // Scaled root-mean-square norm: sqrt(mean(x*x)). radau.py:273.
 #[allow(dead_code)]
 fn md_norm(x: &[f64]) -> f64 {
+    // A model with no states has nothing to measure: zero, not 0 / 0.
+    if x.is_empty() { return 0.0; }
     let mut s = 0.0;
     for &v in x { s += v * v; }
     (s / x.len() as f64).sqrt()
@@ -278,6 +280,8 @@ fn md_newton(
     order: &[usize],
 ) -> (bool, usize, f64, usize) {
     let n = y.len();
+    // No states: nothing to solve, and the rate below would be 0 / 0.
+    if n == 0 { return (true, 1, 0.0, 0); }
     let mu_real = MD_MU_REAL / h;
     let mu_complex_r = MD_MU_COMPLEX_R / h;
     let mu_complex_i = MD_MU_COMPLEX_I / h;
