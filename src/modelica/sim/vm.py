@@ -1211,6 +1211,8 @@ def _hoist(function: Function, base: int) -> Function:
     engine skips the part before ``HOIST`` when ``t`` is the one of the function's last call.
     """
     code = function.code
+    if not any(i.op is Op.TIME for i in code):
+        return function
     written: dict[int, int] = {}
     for i in code:
         for r in _writes(i, function):
@@ -1311,10 +1313,15 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
         return size + (r - base) if r >= base else number[r]
 
     def instr(i: Instr) -> Instr:
-        fields = register_fields(i)
+        fields = _FIELDS.get(i.op)
+        if not fields:
+            return i
         return Instr(
             i.op,
-            *(at(getattr(i, n)) if n in fields else getattr(i, n) for n in ("dst", "a", "b", "c")),
+            at(i.dst) if "dst" in fields else i.dst,
+            at(i.a) if "a" in fields else i.a,
+            at(i.b) if "b" in fields else i.b,
+            at(i.c) if "c" in fields else i.c,
         )
 
     def move(function: Function) -> Function:

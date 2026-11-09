@@ -326,3 +326,8 @@ The loops still come out as scalar equations: this commit makes flattening cheap
 yet keep `ArrayEquation` in `FlatModel`. Flatten on the 32 x 32 grid: 1.07 s to 0.19 s (process
 time, best of 3). Front end at n = 32 now: flatten 0.19 s, causalize 0.53 s, `vm.lower` 1.86 s.
 Test: all 61 examples flatten to the same `FlatModel` with and without the fast path.
+
+`vm.lower` on the 32 x 32 grid, best of 3 process time: 1.00 s to 0.85 s. `_hoist` returns at
+once for a function with no `TIME`, and `_compact` rewrites instructions with direct field
+access. (The 1.86 s quoted above was one wall-clock run.) Front end at n = 32, best of 3:
+flatten 0.19 s, causalize 0.53 s, `vm.lower` 0.85 s.
