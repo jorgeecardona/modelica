@@ -198,3 +198,10 @@ The counters agree to 0.03 %, so both paths integrate the same function. The dif
 cost per call: about 0.52 ms per step for the engine against 0.25 ms for rustsim on the long
 run. The short rustsim run costs more per step (0.55 ms); the cause is not measured. Step 7
 (one register frame per program, no copies in `solve`) is the fix to try.
+
+### Step 7: one register file per program (2026-11-09)
+
+A call no longer allocates its register file or the `solve` copies; the program keeps them.
+vowel_i over 0.05 s, cargo release build, CPU time: engine 6.7 s before, 4.7 s after, the same
+12963 steps. rustsim took 8.3 s in the same session, so the machine was noisy; repeat on a quiet
+machine before quoting a ratio.

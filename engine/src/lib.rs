@@ -4,7 +4,7 @@
 //! This crate has no dependencies, so `rustc --crate-type cdylib` builds it without cargo; the
 //! C entry points below are what `ctypes` calls. The opcode numbers are `vm.Op` and `vm.Builtin`.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::slice;
 
 // The Radau IIA runtime `rustsim` compiles, generated from `modelica.sim.rust_radau`. It calls
@@ -35,13 +35,21 @@ struct Function {
 
 /// A decoded program: owned copies of the arrays `vm.encode` produced.
 pub struct Program {
-    registers: usize,
     modes: usize,
     events: usize,
     switching: Option<usize>,
     constants: Vec<f64>,
     code: Vec<i32>,
     functions: Vec<Function>,
+    scratch: RefCell<Scratch>,
+}
+
+/// Memory one call works in, kept between calls so a call allocates nothing: the register
+/// file, and the copies of `A` and `b` that `solve` factors.
+struct Scratch {
+    r: Vec<f64>,
+    a: Vec<f64>,
+    b: Vec<f64>,
 }
 
 /// The inputs and outputs of one call.
@@ -51,7 +59,9 @@ struct Frame<'a> {
     p: &'a [f64],
     w: &'a mut [f64],
     out: &'a mut [f64],
-    r: Vec<f64>,
+    r: &'a mut [f64],
+    a: &'a mut Vec<f64>,
+    b: &'a mut Vec<f64>,
 }
 
 fn md_min(a: f64, b: f64) -> f64 { if a < b { a } else { b } }
@@ -99,9 +109,11 @@ fn binary(builtin: i32, a: f64, b: f64) -> f64 {
 }
 
 /// Dense LU with partial pivoting on a copy of `A` and `b`, as `md_solve` in `dialect.RUST`.
-fn solve(r: &mut [f64], n: usize, matrix: usize, right: usize, step: usize) {
-    let mut a = r[matrix..matrix + n * n].to_vec();
-    let mut b = r[right..right + n].to_vec();
+fn solve(r: &mut [f64], a: &mut Vec<f64>, b: &mut Vec<f64>, n: usize, matrix: usize, right: usize, step: usize) {
+    a.clear();
+    a.extend_from_slice(&r[matrix..matrix + n * n]);
+    b.clear();
+    b.extend_from_slice(&r[right..right + n]);
     for k in 0..n {
         let mut pivot = k;
         for i in (k + 1)..n {
@@ -130,7 +142,7 @@ impl Program {
         let code = &self.code[range.0 * INSTR..(range.0 + range.1) * INSTR];
         for i in code.chunks_exact(INSTR) {
             let (op, dst, a, b, c) = (i[0], i[1] as usize, i[2] as usize, i[3] as usize, i[4]);
-            let r = &mut f.r;
+            let r = &mut *f.r;
             match op {
                 0 => r[dst] = self.constants[a],
                 1 => r[dst] = f.t,
@@ -158,7 +170,7 @@ impl Program {
                 23 => r[dst] = unary(c, r[a]),
                 24 => r[dst] = binary(c, r[a], r[b]),
                 25 => r[dst] = if r[a] != 0.0 { r[b] } else { r[c as usize] },
-                26 => solve(r, c as usize, a, b, dst),
+                26 => solve(r, f.a, f.b, c as usize, a, b, dst),
                 27 => self.newton(function, &function.newton[a], f),
                 28 => {
                     let n = f.y.len();
@@ -174,7 +186,7 @@ impl Program {
         let n = block.unknowns.len();
         for _ in 0..ITERATIONS {
             self.run(function, block.body, f);
-            solve(&mut f.r, n, block.matrix, block.right, block.step);
+            solve(f.r, f.a, f.b, n, block.matrix, block.right, block.step);
             let mut largest: f64 = 0.0;
             for (k, &u) in block.unknowns.iter().enumerate() {
                 let x = f.r[block.step + k];
@@ -200,7 +212,9 @@ impl Program {
 
     /// Run function `index`, then `then` if it names one: the event loop's `transition`.
     pub fn call(&self, index: usize, then: Option<usize>, t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]) {
-        let mut frame = Frame { t, y, p, w, out, r: vec![0.0; self.registers] };
+        let mut scratch = self.scratch.borrow_mut();
+        let Scratch { r, a, b } = &mut *scratch;
+        let mut frame = Frame { t, y, p, w, out, r, a, b };
         let first = &self.functions[index];
         self.run(first, first.code, &mut frame);
         if let Some(k) = then {
@@ -254,7 +268,10 @@ pub unsafe extern "C" fn md_vm_new(
         decoded.push(Function { code: (start, len), newton: own });
     }
     let switching = if switching < 0 { None } else { Some(switching as usize) };
-    Box::into_raw(Box::new(Program { registers, modes, events, switching, constants, code, functions: decoded }))
+    Box::into_raw(Box::new(Program {
+        modes, events, switching, constants, code, functions: decoded,
+        scratch: RefCell::new(Scratch { r: vec![0.0; registers], a: Vec::new(), b: Vec::new() }),
+    }))
 }
 
 /// Run one function. `then < 0` means none. Returns 0.
