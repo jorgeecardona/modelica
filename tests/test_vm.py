@@ -541,3 +541,55 @@ def test_the_engine_refuses_an_order_that_is_not_a_permutation(engine: Path) -> 
     program = vm.lower(_system(EXAMPLES / "models" / "Lorenz.mo"))
     with pytest.raises(SimulationError, match="state order"):
         native.load(dataclasses.replace(program, order=(0, 0, 1)), engine)
+
+
+_DRIVEN = """
+model Driven
+  Real x(start = 1, fixed = true);
+  Real v(start = 0, fixed = true);
+  Real noise = sin(3 * time) + 0.5 * sin(7 * time + 0.3 * sin(2 * time)) + cos(5 * time) ^ 2;
+equation
+  der(x) = v;
+  der(v) = -4 * x - 0.1 * v * abs(v) + noise;
+  when x < -0.5 then
+    reinit(v, -0.8 * pre(v));
+  end when;
+end Driven;
+"""
+
+
+def _driven() -> System:
+    flatten = pytest.importorskip("modelica.sim").flatten
+    return causalize(flatten([parse(_DRIVEN)], "Driven"))
+
+
+def test_time_only_work_moves_before_hoist() -> None:
+    """The noise reads only ``time``: it moves ahead of `Op.HOIST`, the states stay after it."""
+    function = vm.lower(_driven()).rhs[0]
+    ops = [i.op for i in function.code]
+    split = ops.index(vm.Op.HOIST)
+    assert vm.Op.CALL1 in ops[:split]
+    assert vm.Op.LOAD_Y not in ops[:split]
+    assert vm.Op.LOAD_Y in ops[split:]
+    assert vm.Op.HOIST not in [i.op for i in vm.lower(_driven(), hoist=False).rhs[0].code]
+
+
+def test_hoisting_changes_no_result(engine: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The engine's cache of time-only values gives the run without it, bit for bit."""
+    from modelica.sim import engine as native  # noqa: PLC0415
+
+    system = _driven()
+    knobs: dict[str, Any] = {"stop": 6.0, "tolerance": 1e-8, "points": 61, "path": engine}
+    first = native.simulate(system, **knobs)
+    real = vm.lower
+
+    def plain(system: System, *, hoist: bool = True) -> vm.Program:
+        del hoist
+        return real(system, hoist=False)
+
+    monkeypatch.setattr(vm, "lower", plain)
+    second = native.simulate(system, **knobs)
+    assert first.events == second.events == 2
+    assert first.event_times == second.event_times
+    np.testing.assert_array_equal(first.result.time, second.result.time)
+    np.testing.assert_array_equal(first.result.values, second.result.values)

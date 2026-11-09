@@ -232,3 +232,19 @@ New order, before steps 4 and 5:
 Steps 4 and 5 stay, measured on TorusHeat, HeatBar, WaveString and FisherKPP. Rerolling scalar
 runs into array ops is rejected: it recovers at the tape what step 4 keeps at the source, and
 244 `sin` calls with different constants would still be 244 calls.
+
+### Time-only hoisting done (2026-11-09)
+
+`vm._hoist` moves the instructions that read only `time` and constants to the front of `rhs`,
+`jacobian`, `observe` and `indicators`, followed by a new `Op.HOIST`. On vowel_i 1105 of 1828
+`rhs` instructions move, all 244 `sin` calls among them.
+
+A cache of one `t` hit almost never: Radau calls `rhs` at its three stage times in turn. The
+engine keeps 4 slots per function instead. A slot saves only the moved registers that the rest
+of the function reads, and a hit copies them back, so another function that writes the same
+registers (the jacobian repeats the rhs's instructions) does no harm.
+
+0.05 s vowel_i, user instructions minus a stop=0 run: 7.46e9 without, 6.26e9 with (16% less).
+Bit-identical. The gain is smaller than estimated because `rhs` is now about a quarter of the
+run; Newton and the linear algebra are most of the rest. No corpus model has enough time-only
+work to be hoisted; a test model with time-driven noise and a state event checks the result.

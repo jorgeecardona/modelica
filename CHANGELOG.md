@@ -6,6 +6,8 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **The engine computes time-only work once per time.** It caches what depends only on `time`
+  for the last four times. vowel_i needs 16% fewer instructions, with bit-identical results.
 - **The engine factors in a banded state order.** It reorders the states so the Radau matrix is
   banded and skips the zeros outside the band. vowel_i needs less than half the instructions.
 - **A precompiled engine runs a model with no compiler per model.** `simulate(..., backend="engine")`

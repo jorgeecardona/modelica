@@ -80,6 +80,7 @@ class Op(IntEnum):
     NEWTON = 27  # a = index into Function.newton
     COPY_Y_OUT = 28  # out[:] = y
     CLEAR_OUT = 29  # out[:a] = 0
+    HOIST = 30  # no operands: what comes before reads only time and constants (`_hoist`)
 
 
 class Builtin(IntEnum):
@@ -892,8 +893,10 @@ def bandwidth_order(sparsity: Sequence[Sequence[int]]) -> tuple[int, ...]:
     return tuple(order)
 
 
-def lower(system: System) -> Program:
+def lower(system: System, *, hoist: bool = True) -> Program:
     """Write ``system``'s kernel functions as tapes.
+
+    ``hoist=False`` leaves out `_hoist`, so a test can check it changes no result.
 
     Raises `EmitError` for what the tape cannot express yet, with the emitter's message where
     the emitter would refuse too.
@@ -932,6 +935,16 @@ def lower(system: System) -> Program:
     program = _fold(program, lowering.constants)
     pool = sorted(lowering.constants, key=lowering.constants.__getitem__)
     program = _preload(program, lowering.registers)
+    if hoist:
+        # Only what the integrator calls many times at one `t`: the others run once per event.
+        base = lowering.registers
+        program = replace(
+            program,
+            rhs=tuple(_hoist(f, base) for f in program.rhs),
+            jacobian=tuple(_hoist(f, base) for f in program.jacobian),
+            observe=tuple(_hoist(f, base) for f in program.observe),
+            indicators=tuple(_hoist(f, base) for f in program.indicators),
+        )
     return replace(program, registers=lowering.registers + len(pool), constants=tuple(pool))
 
 
@@ -1169,6 +1182,62 @@ def _preload(program: Program, base: int) -> Program:  # noqa: C901 - one walk p
     )
 
 
+def _writes(i: Instr, function: Function) -> list[int]:
+    """The registers ``i`` writes, ranges included; a ``NEWTON``'s body counts as its own."""
+    if i.op in _REMOVABLE:
+        return [i.dst]
+    if i.op is Op.SOLVE:
+        return list(range(i.dst, i.dst + i.c))
+    if i.op is Op.NEWTON:
+        block = function.newton[i.a]
+        inner = [r for j in block.body for r in _writes(j, function)]
+        return [*block.unknowns, *range(block.step, block.step + len(block.unknowns)), *inner]
+    return []
+
+
+#: Fewer time-only instructions than this and a function is left as it is: the skip would save
+#: less than the `HOIST` dispatch costs.
+_HOIST_AT_LEAST: Final = 4
+
+
+def _hoist(function: Function, base: int) -> Function:
+    """``function`` with its time-only instructions first, then `Op.HOIST`, then the rest.
+
+    An instruction moves when it is ``TIME``, ``CONST``, or pure with every operand a preloaded
+    constant (a register at ``base`` or above) or the result of one that moved; when nothing
+    else in the function writes its register; and when nothing reads that register before it.
+    Then the order of what moved, and of what stayed, is unchanged, and so is every result. The
+    engine skips the part before ``HOIST`` when ``t`` is the one of the function's last call.
+    """
+    code = function.code
+    written: dict[int, int] = {}
+    for i in code:
+        for r in _writes(i, function):
+            written[r] = written.get(r, 0) + 1
+    first_read: dict[int, int] = {}
+    for position, i in enumerate(code):
+        reads = _reads(i, function)
+        if i.op is Op.NEWTON:
+            reads += [r for j in function.newton[i.a].body for r in _reads(j, function)]
+        for r in reads:
+            first_read.setdefault(r, position)
+    moved: set[int] = set()
+    before: list[Instr] = []
+    after: list[Instr] = []
+    for position, i in enumerate(code):
+        timely = i.op in (Op.TIME, Op.CONST) or (
+            i.op in _PURE and all(r >= base or r in moved for r in _operands(i))
+        )
+        if timely and written[i.dst] == 1 and first_read.get(i.dst, position + 1) > position:
+            moved.add(i.dst)
+            before.append(i)
+        else:
+            after.append(i)
+    if sum(i.op in _PURE for i in before) < _HOIST_AT_LEAST:
+        return function
+    return Function((*before, Instr(Op.HOIST, 0), *after), function.newton)
+
+
 def _fold(program: Program, pool: dict[float, int]) -> Program:
     """Fold constant subexpressions, then drop instructions whose result nothing reads.
 
@@ -1296,6 +1365,8 @@ class _Machine:
                 out[: len(self.y)] = self.y
             elif op is Op.CLEAR_OUT:
                 out[: i.a] = [0.0] * i.a
+            elif op is Op.HOIST:
+                pass
             elif op is Op.SELECT:
                 r[i.dst] = r[i.b] if r[i.a] != 0.0 else r[i.c]
             elif op is Op.CALL1:

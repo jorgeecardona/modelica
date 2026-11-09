@@ -33,6 +33,11 @@ struct Newton {
 struct Function {
     code: (usize, usize),
     newton: Vec<Newton>,
+    /// Where `HOIST` is in `code`, counted from its start: everything before it reads only
+    /// `time` and constants. Skipped when a cache slot holds the call's `t`.
+    hoist: Option<usize>,
+    /// The registers written before `HOIST` and read after it: what a cache slot saves.
+    live: Vec<usize>,
 }
 
 /// A decoded program: owned copies of the arrays `vm.encode` produced.
@@ -57,6 +62,21 @@ struct Scratch {
     r: Vec<f64>,
     a: Vec<f64>,
     b: Vec<f64>,
+    /// Per function, the time-only values of the last `SLOTS` distinct `t` (`Slots`).
+    cache: Vec<Slots>,
+}
+
+/// How many distinct `t` a function remembers. Radau calls `rhs` at three stage times in turn,
+/// then at the step's start for the error estimate: four.
+const SLOTS: usize = 4;
+
+/// One function's cache: slot `k` holds `live` at time `t[k]` (NaN: empty) in
+/// `values[k * live.len()..]`. `next` is the slot the next miss replaces.
+#[derive(Clone)]
+struct Slots {
+    t: [f64; SLOTS],
+    values: Vec<f64>,
+    next: usize,
 }
 
 /// The inputs and outputs of one call.
@@ -162,7 +182,7 @@ fn valid(code: &[i32], range: (usize, usize), registers: usize, constants: usize
             25 => fits(dst) && fits(a) && fits(b) && fits(c),
             26 => span(a, c * c) && span(b, c) && span(dst, c),
             27 => a >= 0 && (a as usize) < blocks,
-            28 | 29 => true,
+            28 | 29 | 30 => true,
             _ => false,
         }
     })
@@ -212,6 +232,7 @@ impl Program {
                     f.out[..n].copy_from_slice(f.y);
                 }
                 29 => f.out[..a].fill(0.0),
+                30 => {}
                 _ => unreachable!("opcode {op} is not in vm.Op"),
             }
         }
@@ -248,15 +269,97 @@ impl Program {
     /// Run function `index`, then `then` if it names one: the event loop's `transition`.
     pub fn call(&self, index: usize, then: Option<usize>, t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]) {
         let mut scratch = self.scratch.borrow_mut();
-        let Scratch { r, a, b } = &mut *scratch;
+        let Scratch { r, a, b, cache } = &mut *scratch;
         let mut frame = Frame { t, y, p, w, out, r, a, b };
-        let first = &self.functions[index];
-        self.run(first, first.code, &mut frame);
+        self.enter(index, cache, &mut frame);
         if let Some(k) = then {
-            let second = &self.functions[k];
-            self.run(second, second.code, &mut frame);
+            self.enter(k, cache, &mut frame);
         }
     }
+
+    /// Run function `index`. When a cache slot holds `t`, put its values back and start after
+    /// `HOIST`; otherwise run all of it and save the values in a slot.
+    fn enter(&self, index: usize, cache: &mut [Slots], f: &mut Frame) {
+        let function = &self.functions[index];
+        let Some(split) = function.hoist else {
+            self.run(function, function.code, f);
+            return;
+        };
+        let n = function.live.len();
+        let slots = &mut cache[index];
+        if let Some(k) = slots.t.iter().position(|&t| t == f.t) {
+            for (q, &reg) in function.live.iter().enumerate() {
+                f.r[reg] = slots.values[k * n + q];
+            }
+            self.run(function, (function.code.0 + split + 1, function.code.1 - split - 1), f);
+            return;
+        }
+        self.run(function, (function.code.0, split), f);
+        let k = slots.next;
+        slots.next = (k + 1) % SLOTS;
+        slots.t[k] = f.t;
+        for (q, &reg) in function.live.iter().enumerate() {
+            slots.values[k * n + q] = f.r[reg];
+        }
+        self.run(function, (function.code.0 + split + 1, function.code.1 - split - 1), f);
+    }
+}
+
+/// The registers the instructions in `code[range]` write, a solve's and a Newton block's too.
+fn writes(code: &[i32], range: (usize, usize), function: &Function, out: &mut Vec<usize>) {
+    for i in code[range.0 * INSTR..(range.0 + range.1) * INSTR].chunks_exact(INSTR) {
+        let (op, dst, a, c) = (i[0], i[1] as usize, i[2] as usize, i[4] as usize);
+        match op {
+            0..=4 | 7..=25 => out.push(dst),
+            26 => out.extend(dst..dst + c),
+            27 => {
+                let block = &function.newton[a];
+                out.extend(&block.unknowns);
+                out.extend(block.step..block.step + block.unknowns.len());
+                writes(code, block.body, function, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The registers the instructions in `code[range]` read, a solve's and a Newton block's too.
+fn reads(code: &[i32], range: (usize, usize), function: &Function, out: &mut Vec<usize>) {
+    for i in code[range.0 * INSTR..(range.0 + range.1) * INSTR].chunks_exact(INSTR) {
+        let (op, a, b, c) = (i[0], i[2] as usize, i[3] as usize, i[4] as usize);
+        match op {
+            5 | 6 => out.push(b),
+            7 | 21 | 22 | 23 => out.push(a),
+            8..=20 | 24 => out.extend([a, b]),
+            25 => out.extend([a, b, c]),
+            26 => {
+                out.extend(a..a + c * c);
+                out.extend(b..b + c);
+            }
+            27 => {
+                let block = &function.newton[a];
+                let n = block.unknowns.len();
+                out.extend(&block.unknowns);
+                out.extend(block.matrix..block.matrix + n * n);
+                out.extend(block.right..block.right + n);
+                reads(code, block.body, function, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The registers written before `split` in `function` and read after it.
+fn live(code: &[i32], function: &Function, split: usize) -> Vec<usize> {
+    let mut before = Vec::new();
+    writes(code, (function.code.0, split), function, &mut before);
+    let mut after = Vec::new();
+    reads(code, (function.code.0 + split + 1, function.code.1 - split - 1), function, &mut after);
+    let after: std::collections::HashSet<usize> = after.into_iter().collect();
+    let mut out: Vec<usize> = before.into_iter().filter(|r| after.contains(r)).collect();
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 /// Decode the arrays from `vm.encode`. Returns null on a malformed table.
@@ -313,8 +416,18 @@ pub unsafe extern "C" fn md_vm_new(
         if !valid(&code, (start, len), registers, constants.len(), count) {
             return std::ptr::null_mut();
         }
-        decoded.push(Function { code: (start, len), newton: own });
+        let hoist = code[start * INSTR..(start + len) * INSTR]
+            .chunks_exact(INSTR)
+            .position(|i| i[0] == 30);
+        let mut function = Function { code: (start, len), newton: own, hoist, live: Vec::new() };
+        if let Some(split) = hoist {
+            function.live = live(&code, &function, split);
+        }
+        decoded.push(function);
     }
+    let cache = decoded.iter().map(|f| Slots {
+        t: [f64::NAN; SLOTS], values: vec![0.0; SLOTS * f.live.len()], next: 0,
+    }).collect();
     let switching = if switching < 0 { None } else { Some(switching as usize) };
     // The last registers hold the constants (`vm._preload`); nothing writes them after this.
     if constants.len() > registers {
@@ -324,7 +437,9 @@ pub unsafe extern "C" fn md_vm_new(
     preloaded[registers - constants.len()..].copy_from_slice(&constants);
     Box::into_raw(Box::new(Program {
         modes, events, switching, constants, code, functions: decoded,
-        scratch: RefCell::new(Scratch { r: preloaded, a: Vec::new(), b: Vec::new() }),
+        scratch: RefCell::new(Scratch {
+            r: preloaded, a: Vec::new(), b: Vec::new(), cache,
+        }),
         order: Vec::new(),
     }))
 }
