@@ -6,6 +6,7 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- The engine has a scatter-add opcode, and `vm.ldu_amul` writes an LDU matrix-vector product over a mesh's faces as array opcodes.
 - A model with no states (only discrete variables) runs on the engine; it stopped at t = 0 before.
 - `when sample(start, interval)` is a time event: the integrator steps to each sample instant exactly, with no root search, on SciPy and on the engine.
 - The observe tape uses array opcodes too; on a 50 x 50 TorusHeat it is 21 instructions, down from 22506, and lowering takes 1.7 s instead of 4.1 s.

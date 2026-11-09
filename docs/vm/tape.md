@@ -107,6 +107,7 @@ The array opcodes work on *runs*: `n` consecutive registers from a first one.
 | `VADD`, `VSUB`, `VMUL`, `VDIV` | `dst[k] = a[k] op b[k]`, `k < c` |
 | `VNEG` | `dst[k] = -a[k]`, `k < c` |
 | `VCALL1` | `dst[k] = f(a[k])`, `k < b`, `c` names `f` |
+| `VSCATTER_ADD` | `r[tables[a + k]] += b[k]`, `k < c`, in order; a table may name one register twice |
 | `VLOAD_Y` | `dst[k] = y[a + k]`, `k < c`; written only by `_fuse`, in `rhs` |
 | `VSTORE_OUT` | `out[a + k] = b[k]`, `k < c`; written only by `_fuse`, in `rhs` |
 

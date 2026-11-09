@@ -93,6 +93,7 @@ class Op(IntEnum):
     VDIV = 37
     VNEG = 38  # dst[k] = -a[k], k < c
     VCALL1 = 39  # dst[k] = builtin c of a[k], k < b
+    VSCATTER_ADD = 42  # r[tables[a + k]] += b[k], k < c, in order (a table may repeat)
     # Written only by `_fuse` (in ``rhs`` and ``observe``), after every pass that reads registers.
     VLOAD_Y = 40  # dst[k] = y[a + k], k < c
     VSTORE_OUT = 41  # out[a + k] = b[k], k < c
@@ -805,6 +806,8 @@ class _Tangents:
         out: _Runs
         if i.op is Op.VGATHER:
             out = self.gather([self.dots.get(r, {}) for r in self.tables[i.a : i.a + n]])
+        elif i.op is Op.VSCATTER_ADD:
+            raise _Scalar
         elif i.op is Op.VSCATTER:
             for k, target in enumerate(self.tables[i.a : i.a + n]):
                 cell = {key[k]: run + k for key, run in self.runs.get(i.b, {}).items()}
@@ -1167,6 +1170,57 @@ def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program
     return replace(program, registers=base + len(pool), constants=tuple(pool))
 
 
+@dataclass(frozen=True, slots=True)
+class Faces:
+    """A mesh's face addressing, as OpenFOAM's ``lduAddressing`` holds it.
+
+    Face ``f`` joins cell ``owner[f]`` to cell ``neighbour[f]``. Matrix coefficients sit in
+    runs of registers: ``diag`` per cell, ``upper`` and ``lower`` per face, where ``upper[f]``
+    multiplies the neighbour's value in the owner's row and ``lower[f]`` the owner's value in
+    the neighbour's row.
+    """
+
+    cells: int
+    owner: tuple[int, ...]
+    neighbour: tuple[int, ...]
+
+
+def ldu_amul(  # noqa: PLR0913, PLR0917 - the operands of OpenFOAM's ``Amul``
+    faces: Faces,
+    y: int,
+    x: int,
+    diag: int,
+    upper: int,
+    lower: int,
+    tables: list[int],
+    register: Callable[[int], int],
+) -> list[Instr]:
+    """Instructions for ``y = A x`` with ``A`` in LDU form over ``faces`` (step 9).
+
+    ``y``, ``x`` and ``diag`` are runs of ``faces.cells`` registers; ``upper`` and ``lower`` are
+    runs of one register per face. ``register(n)`` gives the first of ``n`` fresh registers,
+    and the gather and scatter tables are appended to ``tables``. Seven array instructions, the
+    loop OpenFOAM's ``lduMatrix::Amul`` runs: ``y = diag x``, then per face
+    ``y[owner] += upper x[neighbour]`` and ``y[neighbour] += lower x[owner]``, in face order.
+    """
+    n, count = faces.cells, len(faces.owner)
+    code = [Instr(Op.VMUL, y, diag, x, n)]
+    for coefficient, read, write in (
+        (upper, faces.neighbour, faces.owner),
+        (lower, faces.owner, faces.neighbour),
+    ):
+        gathered = register(count)
+        offset = len(tables)
+        tables.extend(x + cell for cell in read)
+        code.append(Instr(Op.VGATHER, gathered, offset, 0, count))
+        product = register(count)
+        code.append(Instr(Op.VMUL, product, coefficient, gathered, count))
+        offset = len(tables)
+        tables.extend(y + cell for cell in write)
+        code.append(Instr(Op.VSCATTER_ADD, 0, offset, product, count))
+    return code
+
+
 def _jacobian(lowering: _Lowering, mode: Mode, rhs: Function) -> Function:
     """``mode``'s Jacobian tape from ``rhs``, array opcodes and all.
 
@@ -1373,6 +1427,8 @@ def _array_reads(i: Instr, tables: Sequence[int]) -> list[int]:
         return list(tables[i.a : i.a + n])
     if op is Op.VSCATTER:
         return list(range(i.b, i.b + n))
+    if op is Op.VSCATTER_ADD:
+        return [*range(i.b, i.b + n), *tables[i.a : i.a + n]]
     if op is Op.VBROADCAST:
         return [i.a]
     if op in (Op.VNEG, Op.VCALL1):
@@ -1384,7 +1440,7 @@ def _array_runs(i: Instr) -> tuple[int, ...]:
     """The first registers of the runs an array opcode reads or writes."""
     if i.op is Op.VGATHER:
         return (i.dst,)
-    if i.op is Op.VSCATTER:
+    if i.op in (Op.VSCATTER, Op.VSCATTER_ADD):
         return (i.b,)
     if i.op is Op.VBROADCAST:
         return (i.dst,)
@@ -1395,7 +1451,7 @@ def _array_runs(i: Instr) -> tuple[int, ...]:
 
 def _array_writes(i: Instr, tables: Sequence[int]) -> list[int]:
     """The registers an array opcode writes."""
-    if i.op is Op.VSCATTER:
+    if i.op in (Op.VSCATTER, Op.VSCATTER_ADD):
         return list(tables[i.a : i.a + i.c])
     return list(range(i.dst, i.dst + (i.b if i.op is Op.VCALL1 else i.c)))
 
@@ -1404,7 +1460,15 @@ def _array_writes(i: Instr, tables: Sequence[int]) -> list[int]:
 _VECTOR_TO_SCALAR: Final = {Op.VADD: Op.ADD, Op.VSUB: Op.SUB, Op.VMUL: Op.MUL, Op.VDIV: Op.DIV}
 _SCALAR_OF: Final = _VECTOR_TO_SCALAR
 _ARRAY: Final = frozenset(
-    {Op.VGATHER, Op.VSCATTER, Op.VBROADCAST, Op.VNEG, Op.VCALL1, *_VECTOR_TO_SCALAR}
+    {
+        Op.VGATHER,
+        Op.VSCATTER,
+        Op.VSCATTER_ADD,
+        Op.VBROADCAST,
+        Op.VNEG,
+        Op.VCALL1,
+        *_VECTOR_TO_SCALAR,
+    }
 )
 
 
@@ -1617,6 +1681,7 @@ _FIELDS: Final = {
     Op.SOLVE: ("dst", "a", "b"),
     Op.VGATHER: ("dst",),
     Op.VSCATTER: ("b",),
+    Op.VSCATTER_ADD: ("b",),
     Op.VBROADCAST: ("dst", "a"),
     Op.VADD: ("dst", "a", "b"),
     Op.VSUB: ("dst", "a", "b"),
@@ -1682,7 +1747,7 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
             for i in code:
                 for name in register_fields(i):
                     touch(getattr(i, name))
-                if i.op in (Op.VGATHER, Op.VSCATTER):
+                if i.op in (Op.VGATHER, Op.VSCATTER, Op.VSCATTER_ADD):
                     for r in function.tables[i.a : i.a + i.c]:
                         touch(r)
         for block in function.newton:
@@ -1890,6 +1955,8 @@ class _Machine:
                 r[i.dst + k] = r[tables[i.a + k]]
             elif op is Op.VSCATTER:
                 r[tables[i.a + k]] = r[i.b + k]
+            elif op is Op.VSCATTER_ADD:
+                r[tables[i.a + k]] += r[i.b + k]
             elif op is Op.VBROADCAST:
                 r[i.dst + k] = r[i.a]
             elif op is Op.VNEG:
@@ -2127,7 +2194,7 @@ def encode(program: Program) -> Encoded:
         # sit in `unknowns` from ``tables`` on.
         start = len(code) // 5
         for i in instrs:
-            a = i.a + tables if i.op in (Op.VGATHER, Op.VSCATTER) else i.a
+            a = i.a + tables if i.op in (Op.VGATHER, Op.VSCATTER, Op.VSCATTER_ADD) else i.a
             code.extend((int(i.op), i.dst, a, i.b, i.c))
         return start, len(instrs)
 
@@ -2239,6 +2306,8 @@ def _line(i: Instr, program: Program, tables: Sequence[int]) -> str:  # noqa: C9
         return f"{run(i.dst, i.c)} = gather r{list(tables[i.a : i.a + i.c])}"
     if op is Op.VSCATTER:
         return f"scatter {run(i.b, i.c)} into r{list(tables[i.a : i.a + i.c])}"
+    if op is Op.VSCATTER_ADD:
+        return f"scatter-add {run(i.b, i.c)} into r{list(tables[i.a : i.a + i.c])}"
     if op is Op.VBROADCAST:
         return f"{run(i.dst, i.c)} = {reg(i.a)}"
     if op is Op.VNEG:

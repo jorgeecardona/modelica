@@ -757,3 +757,52 @@ def test_a_jacobian_built_from_array_opcodes_has_the_scalar_bits() -> None:
         results.append(out)
     assert any(results[0])
     assert results[0] == results[1]
+
+
+def _mesh(cells: int, count: int, seed: int) -> vm.Faces:
+    """A random mesh: ``count`` faces, each joining two different cells, owner below neighbour."""
+    rng = np.random.default_rng(seed)
+    pairs = [sorted(rng.choice(cells, size=2, replace=False).tolist()) for _ in range(count)]
+    return vm.Faces(cells, tuple(a for a, _ in pairs), tuple(b for _, b in pairs))
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_ldu_amul_equals_the_dense_product(engine: Path, seed: int) -> None:
+    """`vm.ldu_amul` on a random mesh gives ``A x`` within 1e-14, in Python and in the engine."""
+    from modelica.sim.engine import load  # noqa: PLC0415
+
+    faces = _mesh(20, 45, seed)
+    n, count = faces.cells, len(faces.owner)
+    rng = np.random.default_rng(seed + 10)
+    x, diag = rng.standard_normal(n), rng.standard_normal(n)
+    upper, lower = rng.standard_normal(count), rng.standard_normal(count)
+    dense = np.diag(diag)
+    for f, (o, c) in enumerate(zip(faces.owner, faces.neighbour, strict=True)):
+        dense[o, c] += upper[f]
+        dense[c, o] += lower[f]
+    p = np.concatenate([x, diag, upper, lower])
+
+    base = vm.lower(_system(EXAMPLES / "models" / "Lorenz.mo"))
+    s = base.registers
+    fresh = [s]
+
+    def register(size: int) -> int:
+        first = fresh[0]
+        fresh[0] += size
+        return first
+
+    xs, ds, us, ls, ys = (register(k) for k in (n, n, count, count, n))
+    tables: list[int] = []
+    code = [vm.Instr(vm.Op.LOAD_P, xs + k, k) for k in range(len(p))]
+    code += vm.ldu_amul(faces, ys, xs, ds, us, ls, tables, register)
+    code += [vm.Instr(vm.Op.STORE_OUT, 0, k, ys + k) for k in range(n)]
+    function = vm.Function(tuple(code), (), tuple(tables))
+    program = dataclasses.replace(base, registers=fresh[0] + len(base.constants), rhs=(function,))
+    expected = [0.0] * n
+    vm.evaluate(program, function, 0.0, [0.0] * 3, list(p), [], expected)
+    np.testing.assert_allclose(expected, dense @ x, rtol=0, atol=1e-14)
+    loaded = load(program, engine)
+    out = np.zeros(n)
+    loaded.call(loaded.encoded.rhs(0), 0.0, np.zeros(3), p, np.zeros(0), out)
+    loaded.close()
+    np.testing.assert_array_equal(out, expected)

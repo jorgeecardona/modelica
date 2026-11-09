@@ -457,3 +457,13 @@ SciPy. A sample fires at `pre(next) + interval` exactly on both backends, and tw
 meet at one instant both fire. Test: `tests/test_sample.py`. A model with no states does not
 run on the engine (the step size falls to zero at t = 0); that was so before this change, and it
 is filed. Next: 6b waits for steps 9 to 11, so step 9 (face-list opcodes) is next.
+
+Step 9 commit 1 done: `VSCATTER_ADD` (opcode 42, `r[tables[a + k]] += b[k]` in order) and
+`vm.ldu_amul`, which writes `y = A x` for an LDU matrix over `vm.Faces` (`owner`, `neighbour`)
+as seven array instructions: `VMUL` for the diagonal, then for `upper` and `lower` a `VGATHER`,
+a `VMUL` and a `VSCATTER_ADD`. The plan named `GATHER_FACES` and `LDU_AMUL` as opcodes;
+`GATHER_FACES` is `VGATHER` with the face table, and `LDU_AMUL` needs more operands than one
+instruction holds, so both are compositions. Test: on three random meshes the product equals the
+dense one within 1e-14, and the engine gives the same bits as `vm.evaluate`. The jacobian of a
+`VSCATTER_ADD` falls back to scalar (`_Scalar`). Next: a 1-D finite-volume heat bar written with
+face lists equals HeatBar.

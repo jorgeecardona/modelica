@@ -202,6 +202,7 @@ fn valid(code: &[i32], range: (usize, usize), registers: usize, constants: usize
             38 => span(dst, c) && span(a, c),
             39 => span(dst, b) && span(a, b),
             40 => span(dst, c) && a >= 0,
+            42 => span(b, c) && table(a, c),
             41 => span(b, c) && a >= 0,
             _ => false,
         }
@@ -275,6 +276,12 @@ impl Program {
                 37 => for k in 0..c as usize { set(dst + k, get(a + k) / get(b + k)); },
                 38 => for k in 0..c as usize { set(dst + k, -get(a + k)); },
                 39 => for k in 0..b { set(dst + k, unary(c, get(a + k))); },
+                42 => {
+                    for k in 0..c as usize {
+                        let t = self.tables[a + k];
+                        set(t, get(t) + get(b + k));
+                    }
+                }
                 40 => f.r[dst..dst + c as usize].copy_from_slice(&f.y[a..a + c as usize]),
                 41 => f.out[a..a + c as usize].copy_from_slice(&f.r[b..b + c as usize]),
                 _ => unreachable!("opcode {op} is not in vm.Op"),
@@ -356,7 +363,7 @@ fn writes(code: &[i32], range: (usize, usize), function: &Function, tables: &[i3
         match op {
             0..=4 | 7..=25 => out.push(dst),
             31 | 33..=38 => out.extend(dst..dst + c),
-            32 => out.extend(tables[a..a + c].iter().map(|&r| r as usize)),
+            32 | 42 => out.extend(tables[a..a + c].iter().map(|&r| r as usize)),
             39 => out.extend(dst..dst + b),
             40 => out.extend(dst..dst + c),
             26 => out.extend(dst..dst + c),
@@ -386,6 +393,10 @@ fn reads(code: &[i32], range: (usize, usize), function: &Function, tables: &[i32
             38 => out.extend(a..a + c),
             39 => out.extend(a..a + b),
             41 => out.extend(b..b + c),
+            42 => {
+                out.extend(b..b + c);
+                out.extend(tables[a..a + c].iter().map(|&r| r as usize));
+            }
             5 | 6 => out.push(b),
             7 | 21 | 22 | 23 => out.push(a),
             8..=20 | 24 => out.extend([a, b]),
