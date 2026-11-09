@@ -426,3 +426,27 @@ so `at_cell` runs 12500 times on the 50 x 50 grid, not 25000. `vm.lower` there i
 1.9 s; the rest is `_fold`, `_compact` and `_peephole` over the 15000-instruction `initial` and
 jacobian. Next: initial conditions given by a `for` loop as array opcodes (they are explicit
 assignments, not an `ArrayBlock`, so this needs the loop kept through `Emitter.conditions`).
+
+### Fable review 4: step 6 splits in two (2026-11-09)
+
+Step 6 is two steps. The event-node half is already there: `emit.Trigger` is the event node and
+`Mode` is the state set, so new dataclasses that nothing reads would only rename them.
+
+6a, now: time events. `_lower_samples` turns `when sample(s, i)` into `time >= _sampleN`, and
+both backends cut the step and search for the root of `time - next`. A time event steps to
+`next` exactly and fires with no root search. Data: `Trigger.at`, the `w` slot of the next time.
+No new opcode. The driver takes `t_next = min(w[at])`, limits the step to it, sets `t = t_next`
+(never `t + h`), fires through the existing transition, and restarts Radau. Time events do not
+count toward `MD_CHATTER`. At one instant, state events are located first, then time events.
+Test: the sample corpus within 1e-9 of today, event times `start + k * interval` on both
+backends.
+
+6b, after steps 9 to 11: a minimal clocked path (Modelica 3.3 chapter 16). `Clock(interval)`,
+`Clock(count, resolution)`, `sample(u, c)`, `hold(x)`, `previous(x)`, one clock per partition.
+`flat.Clock`, `flat.ClockedPartition`, `system.Partition` causalized by the same `_blocks`, and
+two workspace slot ranges per partition (previous, held). One `Program.partitions` tape per
+partition; no new opcode. Refused: inferred `Clock()`, `subSample`, `superSample`,
+`shiftSample`, `interval()`, boolean and solver clocks, two clocks in one partition. Five
+commits: flatten, causalize, emitter with SciPy tick, `vm.lower` with engine, each with a test.
+
+Step 7 is met for grids by the banded LU. Next: 6a commit 1.
