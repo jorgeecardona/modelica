@@ -423,3 +423,21 @@ def test_the_engine_starts_at_start(engine: Path, name: str) -> None:
             atol=1e-6,
             err_msg=variable,
         )
+
+
+def test_a_sweep_runs_on_the_engine_like_scipy(engine: Path) -> None:
+    """``sweep(..., backend="engine")`` gives each point the values SciPy gives it."""
+    from modelica.sim.sweep import grid, sweep  # noqa: PLC0415
+
+    del engine  # the fixture skips without a Rust compiler; the sweep finds its own library
+    system = _system(EXAMPLES / "models" / "RCCircuit.mo")
+    points = grid(**{"r.R": [0.5, 1.0, 2.0]})
+    knobs: dict[str, Any] = {"stop": 1.0, "points": 11, "tolerance": 1e-9}
+    on_engine = sweep(system, points, backend="engine", **knobs)
+    on_scipy = sweep(system, points, backend="python", **knobs)
+    assert {r.backend for r in on_engine} == {"engine"}
+    assert {r.backend for r in on_scipy} == {"python"}
+    for mine, theirs in zip(on_engine, on_scipy, strict=True):
+        for name in mine.names:
+            np.testing.assert_allclose(mine[name], theirs[name], rtol=1e-6, atol=1e-8)
+    assert not np.allclose(on_engine[0]["c.v"], on_engine[2]["c.v"])

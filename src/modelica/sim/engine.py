@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from modelica.ir.system import System
     from modelica.sim.rustsim import Run
 
-__all__ = ["Loaded", "installed", "library", "load", "result", "simulate"]
+__all__ = ["Loaded", "installed", "library", "load", "result", "results", "simulate"]
 
 SOURCE = Path(__file__).resolve().parents[3] / "engine" / "src"
 
@@ -220,26 +220,100 @@ def simulate(  # noqa: PLR0913, PLR0917 - the same knobs as `rustsim.simulate`
 
     ``every`` returns the rows `modelica.sim.simulate` returns (`rustsim.drive`).
     """
+    return _runs(
+        system,
+        [parameters],
+        stop=stop,
+        times=times,
+        points=points,
+        tolerance=tolerance,
+        absolute=absolute,
+        path=path,
+        every=every,
+        start=start,
+    )[0]
+
+
+def _runs(  # noqa: PLR0913 - the knobs of `simulate`
+    system: System,
+    vectors: Sequence[NDArray[np.float64] | None],
+    *,
+    stop: float,
+    times: Sequence[float] | NDArray[np.float64] | None,
+    points: int | None,
+    tolerance: float,
+    absolute: float | None,
+    path: Path | None,
+    every: bool,
+    start: float,
+) -> list[Run]:
+    """One run per parameter vector, from one lowered and loaded program."""
     program = vm.lower(system)
     loaded = load(program, path)
     try:
-        return drive(
-            system,
-            loaded.engine.md_vm_run,
-            (loaded.handle,),
-            start=loaded.start(parameters, start),
-            events=program.layout.events,
-            observed=program.layout.observed,
-            stop=stop,
-            times=times,
-            points=points,
-            tolerance=tolerance,
-            absolute=absolute,
-            every=every,
-            t0=start,
-        )
+        return [
+            drive(
+                system,
+                loaded.engine.md_vm_run,
+                (loaded.handle,),
+                start=loaded.start(parameters, start),
+                events=program.layout.events,
+                observed=program.layout.observed,
+                stop=stop,
+                times=times,
+                points=points,
+                tolerance=tolerance,
+                absolute=absolute,
+                every=every,
+                t0=start,
+            )
+            for parameters in vectors
+        ]
     finally:
         loaded.close()
+
+
+def results(  # noqa: PLR0913 - the knobs of `simulate`
+    system: System,
+    vectors: Sequence[NDArray[np.float64] | None],
+    *,
+    stop: float,
+    times: Sequence[float] | NDArray[np.float64] | None = None,
+    points: int | None = None,
+    tolerance: float = 1e-6,
+    absolute: float | None = None,
+    path: Path | None = None,
+    start: float = 0.0,
+) -> tuple[Result, ...]:
+    """One `Result` per parameter vector, as `modelica.sim.simulate` returns it.
+
+    The model is lowered and loaded once; only the parameter vector changes between runs.
+    ``None`` is the vector the model computes.
+    """
+    runs = _runs(
+        system,
+        vectors,
+        stop=stop,
+        times=times,
+        points=points,
+        tolerance=tolerance,
+        absolute=absolute,
+        path=path,
+        every=True,
+        start=start,
+    )
+    states = len(system.modes[0].states)
+    return tuple(
+        Result(
+            name=run.result.name,
+            time=run.result.time,
+            names=run.result.names[states:],
+            values=run.result.values[states:],
+            events=run.event_list,
+            backend="engine",
+        )
+        for run in runs
+    )
 
 
 def result(  # noqa: PLR0913 - the knobs of `simulate`
@@ -255,24 +329,14 @@ def result(  # noqa: PLR0913 - the knobs of `simulate`
     start: float = 0.0,
 ) -> Result:
     """The engine's run as `modelica.sim.simulate` returns one: observed rows and the events."""
-    run = simulate(
+    return results(
         system,
-        stop,
+        [parameters],
+        stop=stop,
         times=times,
         points=points,
         tolerance=tolerance,
         absolute=absolute,
-        parameters=parameters,
         path=path,
-        every=True,
         start=start,
-    )
-    states = len(system.modes[0].states)
-    return Result(
-        name=run.result.name,
-        time=run.result.time,
-        names=run.result.names[states:],
-        values=run.result.values[states:],
-        events=run.event_list,
-        backend="engine",
-    )
+    )[0]

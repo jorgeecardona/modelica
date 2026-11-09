@@ -30,9 +30,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modelica.sim.emit import settings
+from modelica.sim.emit import EmitError, settings
 from modelica.sim.kernel import build
-from modelica.sim.solve import simulate
+from modelica.sim.solve import SimulationError, simulate
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -93,9 +93,55 @@ def sweep(
     the compile mode `docs/ideas/backends.md:66` calls "leave them as an argument so that one
     compiled artefact serves a whole sweep", and it is the default one.
 
+    ``backend`` picks who integrates, as in `modelica.sim.simulate`. With the engine, the model
+    is lowered and loaded once and every point runs on that program.
+
     Single-threaded, in order, no shared state between points: each gets its own parameter,
-    state and workspace arrays from `simulate`. That is what a caller who wants to put a pool
+    state and workspace arrays. That is what a caller who wants to put a pool
     or a device behind this needs to be able to assume.
     """
-    kernel = build(system, jit=bool(options.pop("jit", False)))
-    return tuple(simulate(kernel, parameters=vector(system, point), **options) for point in over)
+    jit = bool(options.pop("jit", False))
+    backend = options.pop("backend", "auto")
+    vectors = [vector(system, point) for point in over]
+    ran = _on_engine(system, vectors, backend=backend, jit=jit, options=options)
+    if ran is not None:
+        return ran
+    kernel = build(system, jit=jit)
+    return tuple(simulate(kernel, parameters=p, backend="python", **options) for p in vectors)
+
+
+#: The `simulate` knobs the engine takes. A sweep with any other runs on SciPy.
+_ENGINE_KNOBS = frozenset({"stop", "times", "points", "tolerance", "absolute", "start", "method"})
+
+
+def _on_engine(
+    system: System,
+    vectors: list[NDArray[np.float64]],
+    *,
+    backend: str,
+    jit: bool,
+    options: dict[str, Any],
+) -> tuple[Result, ...] | None:
+    """Every point on the engine, loaded once; ``None`` when ``"auto"`` falls back to SciPy.
+
+    The same rule as `modelica.sim.simulate`: ``"engine"`` raises where ``"auto"`` falls back.
+    """
+    from modelica.sim import engine  # noqa: PLC0415 - the engine is optional
+
+    if backend == "python":
+        return None
+    supported = (
+        not jit and options.get("method", "Radau") == "Radau" and set(options) <= _ENGINE_KNOBS
+    )
+    if backend == "auto" and (not supported or engine.installed() is None):
+        return None
+    if not supported:
+        message = "backend='engine' sweeps with method='Radau', no jit and the engine's knobs"
+        raise SimulationError(message)
+    knobs = {key: value for key, value in options.items() if key != "method"}
+    try:
+        return engine.results(system, vectors, **knobs)
+    except EmitError:
+        if backend == "engine":
+            raise
+        return None
