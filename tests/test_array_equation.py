@@ -135,3 +135,39 @@ end Shadow;
     monkeypatch.setattr(flattening._Flattener, "_unroll_once", _never)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
     assert flatten([parse(source)], "Shadow") == dataclasses.replace(once, loops=())
     assert len(once.equations) == 3
+
+
+def test_torusheat_causalizes_its_loop_to_one_array_block() -> None:
+    """The 64 cells are 64 explicit 1x1 blocks in cell order, and the mode says so."""
+    from modelica.ir.causalize import causalize  # noqa: PLC0415
+
+    model = flatten(_sources(_EXAMPLES / "models" / "TorusHeat.mo"), "TorusHeat")
+    (mode,) = causalize(model).modes
+    (array,) = mode.arrays
+    assert len(array) == 64
+    run = mode.blocks[array.first : array.first + len(array)]
+    assert [block.unknowns for block in run] == [
+        (f"der_T[{i}, {j}]",) for i in range(1, 9) for j in range(1, 9)
+    ]
+
+
+def test_an_alias_leaves_no_array_block() -> None:
+    """With an alias eliminated, positions no longer line up, so no run is claimed."""
+    from modelica.ir.causalize import causalize  # noqa: PLC0415
+
+    source = """
+model Aliased
+  Real x[3](each start = 1, each fixed = true);
+  Real y;
+  Real z;
+equation
+  for i in 1:3 loop
+    der(x[i]) = -x[i];
+  end for;
+  y = z;
+  z = time;
+end Aliased;
+"""
+    model = flatten([parse(source)], "Aliased")
+    assert model.loops
+    assert causalize(model).modes[0].arrays == ()

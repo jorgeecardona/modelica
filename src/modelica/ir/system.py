@@ -10,6 +10,7 @@ produces it lives in :mod:`modelica.ir.causalize`.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from modelica.ir import nodes as ir
-    from modelica.ir.flat import FlatVariable
+    from modelica.ir.flat import ArrayEquation, FlatVariable
 
 __all__ = ["Block", "FrozenMap", "Mode", "System"]
 
@@ -134,6 +135,22 @@ class Block:
 
 
 @dataclass(frozen=True)
+class ArrayBlock:
+    """A run of 1x1 blocks that one ``for`` loop wrote, one per cell, in cell order.
+
+    ``Mode.blocks[first:first + len(self)]`` are the scalar blocks; ``equation`` is the loop
+    they came from. A later stage may evaluate the run as one array operation; the scalar
+    blocks stay the truth.
+    """
+
+    first: int
+    equation: ArrayEquation
+
+    def __len__(self) -> int:
+        return math.prod(len(index) for index in self.equation.indices)
+
+
+@dataclass(frozen=True)
 class Mode:
     """One admissible state selection, and the computation that follows from it.
 
@@ -154,6 +171,8 @@ class Mode:
     derivative: Mapping[str, str]
     blocks: tuple[Block, ...]
     pivot: ir.Expr | None = None
+    arrays: tuple[ArrayBlock, ...] = ()
+    """Runs of `blocks` that came from one ``for`` loop (`ArrayBlock`)."""
 
     @cached_property
     def sparsity(self) -> tuple[tuple[int, ...], ...]:

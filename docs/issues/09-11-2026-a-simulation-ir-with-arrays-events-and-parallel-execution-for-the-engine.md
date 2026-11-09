@@ -337,3 +337,10 @@ a `Loop(first, ArrayEquation)`, beside the unchanged scalar `equations`. `ArrayE
 the integer constants its indices read (`n`). `flatten` keeps a loop only when the final
 equations still hold its cells at both ends, and `Loop.matches` lets a later stage check the
 same after a `dataclasses.replace`. TorusHeat has one loop: `i, j` over `1:8`.
+
+Commit 4b done: `Mode.arrays` holds an `ArrayBlock(first, equation)` for each loop whose cells
+became a run of explicit 1x1 blocks in cell order (`causalize._array_blocks`). `Mode.blocks` is
+unchanged, so every consumer still reads scalar blocks. Conservative for now: only when no
+alias was eliminated, nothing was differentiated, and the model has one mode, because only then
+does a work equation keep its flat position. TorusHeat: one `ArrayBlock` over blocks 0 to 63.
+Next is commit 5: `vm.lower` writes an `ArrayBlock` as array opcodes.

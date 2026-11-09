@@ -51,7 +51,7 @@ from modelica.ir.derive import (
 )
 from modelica.ir.flat import FlatVariable
 from modelica.ir.rewrite import contains, isolated, names, residual, solve_for, substitute
-from modelica.ir.system import Block, Mode, System
+from modelica.ir.system import ArrayBlock, Block, Mode, System
 from modelica.lang.unparse import unparse_equation
 
 if TYPE_CHECKING:
@@ -1082,6 +1082,26 @@ def _when(when: ir.When, work: _Work) -> ir.When:
     )
 
 
+def _array_blocks(flat: FlatModel, work: _Work, mode: Mode) -> tuple[ArrayBlock, ...]:
+    """The loops of ``flat`` whose cells became a run of explicit 1x1 blocks, in cell order."""
+    position = {id(equation): index for index, equation in enumerate(work.equations)}
+    block_of: dict[int, int] = {}
+    for k, block in enumerate(mode.blocks):
+        if len(block.equations) == 1 and block.assignment is not None and not block.torn:
+            block_of[position[id(block.equations[0])]] = k
+    found: list[ArrayBlock] = []
+    for loop in flat.loops:
+        if not loop.matches(flat.equations):
+            continue
+        cells = range(loop.first, loop.first + len(ArrayBlock(0, loop.equation)))
+        first = block_of.get(loop.first)
+        if first is not None and all(
+            block_of.get(cell) == first + offset for offset, cell in enumerate(cells)
+        ):
+            found.append(ArrayBlock(first, loop.equation))
+    return tuple(found)
+
+
 def causalize(flat: FlatModel) -> System:
     """Arrange a flat model into states and a sorted sequence of blocks.
 
@@ -1094,10 +1114,15 @@ def causalize(flat: FlatModel) -> System:
     _reduce_index(work)
     matched = _match(work)
     states = _states(work, matched)
+    modes = _modes(work, matched, states)
+    if len(modes) == 1 and len(work.equations) == len(flat.equations) and not work.aliases:
+        # Equation `k` of the work is still flat equation `k`: no alias went, nothing was
+        # differentiated. Only then can a loop's cells be found among the blocks by position.
+        modes = (replace(modes[0], arrays=_array_blocks(flat, work, modes[0])),)
     return System(
         name=flat.name,
         variables=tuple(sorted(work.variables.values(), key=lambda v: work.order[v.name])),
-        modes=_modes(work, matched, states),
+        modes=modes,
         index=1 + max(work.depth.values(), default=0),
         aliases=dict(work.aliases),
         whens=tuple(_when(when, work) for when in flat.whens),
