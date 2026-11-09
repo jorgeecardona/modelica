@@ -418,8 +418,8 @@ machine, second run). A 0.5 s run on the engine took 3.6 s before this change, 1
 `drive`; the banded LU handles 2500 states, so step 7's test already passes for a periodic grid.
 General sparse LU waits for unstructured meshes (step 9 on).
 
-Step 4 commit 6 (`ArrayBlock` in the C and Rust emitters) is deferred: those backends compile
-generated code, and the engine is the default.
+Step 4 commit 6 (`ArrayBlock` in the C and Rust emitters) is dropped: this plan covers only the
+VM (`vm.lower` and the engine). Backends that compile generated code are out of scope.
 
 `rhs` and `observe` now share each `ArrayBlock`'s subscripts at every cell (`_Lowering.cells`),
 so `at_cell` runs 12500 times on the 50 x 50 grid, not 25000. `vm.lower` there is now 1.6 to
