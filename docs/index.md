@@ -9,9 +9,10 @@ and interprets the model as bytecode, with nothing compiled per model. Without a
 wheel, simulation uses SciPy.
 
 ```bash
-pip install modelica          # the core: parse, model structure, diagrams. No dependencies.
-pip install "modelica[sim]"   # adds numpy and scipy, and therefore simulation
+pip install modelica
 ```
+
+One install covers parsing, diagrams, FMI and SSP, and simulation. It brings NumPy and SciPy.
 
 !!! warning "Pre-alpha"
     This is a full rewrite of a prototype from 2010, and it is not finished. The API is not
@@ -82,7 +83,7 @@ The `.ipynb` pages read their models from `examples/`, so you need a checkout to
 
 ```bash
 git clone https://gitlab.com/jorgeecardona/pymodelica && cd pymodelica
-pip install "modelica[sim]" matplotlib ipywidgets
+pip install modelica matplotlib ipywidgets
 jupyter lab docs/notebooks/
 ```
 

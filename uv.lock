@@ -1144,6 +1144,10 @@ wheels = [
 [[package]]
 name = "modelica"
 source = { editable = "." }
+dependencies = [
+    { name = "numpy" },
+    { name = "scipy" },
+]
 
 [package.optional-dependencies]
 docs = [
@@ -1154,10 +1158,6 @@ docs = [
     { name = "mkdocs" },
     { name = "mkdocs-jupyter" },
     { name = "mkdocs-material" },
-]
-sim = [
-    { name = "numpy" },
-    { name = "scipy" },
 ]
 sundials = [
     { name = "scikit-sundae" },
@@ -1189,9 +1189,9 @@ requires-dist = [
     { name = "mkdocs-jupyter", marker = "extra == 'docs'", specifier = ">=0.25" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
     { name = "musil", marker = "extra == 'verify'", specifier = ">=0.7" },
-    { name = "numpy", marker = "extra == 'sim'", specifier = ">=2.0" },
+    { name = "numpy", specifier = ">=2.0" },
     { name = "scikit-sundae", marker = "extra == 'sundials'", specifier = ">=1.0" },
-    { name = "scipy", marker = "extra == 'sim'", specifier = ">=1.13" },
+    { name = "scipy", specifier = ">=1.13" },
 ]
 provides-extras = ["docs", "sim", "sundials", "verify"]
 

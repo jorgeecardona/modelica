@@ -43,9 +43,11 @@ OpenModelica or Dymola when you need breadth of language coverage today.
 ## Install
 
 ```bash
-pip install modelica          # core: parse, model structure, diagrams. No dependencies.
-pip install "modelica[sim]"   # adds numpy and scipy, and with them simulation
+pip install modelica
 ```
+
+That is all: parsing, diagrams, FMI and SSP, and simulation on the engine. It brings NumPy and
+SciPy.
 
 **Status: pre-alpha.** A full rewrite of a 2010 Python 2 experiment; no code of it is left,
 only the goal. Python 3.12 or later.
@@ -56,7 +58,7 @@ From Modelica source to a trajectory in four values. Each line is a stage you ca
 
 ```python
 from modelica.lang import parse
-from modelica.sim import flatten, causalize, simulate   # needs the sim extra: pip install "modelica[sim]"
+from modelica.sim import flatten, causalize, simulate
 
 source = """
 model NewtonCooling "A hot object cooling toward ambient"

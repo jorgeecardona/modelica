@@ -6,6 +6,8 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- **`pip install modelica` is enough to simulate.** NumPy and SciPy are now plain dependencies;
+  `modelica[sim]` still installs and adds nothing.
 - **Large array models flatten and causalize faster.** A `for` loop's equations are processed
   once instead of once per cell. On a 32 x 32 heat grid, flattening goes from 1.07 s to 0.19 s and
   causalization from 1.74 s to 0.53 s.

@@ -42,17 +42,16 @@ classifiers = [
     "Topic :: Scientific/Engineering",
     "Typing :: Typed",
 ]
-# Deliberately dependency-free at the core. The parser is hand-written (no pyparsing —
-# that was the 2010 design and it could not carry error positions), the FMI/SSP layers
-# read XML from the stdlib, and numeric backends arrive as extras so `import modelica`
-# stays cheap for tooling that only reads model structure.
-dependencies = []
+# One `pip install modelica` simulates. NumPy carries every array the engine and the
+# results use; SciPy is the fallback integrator where no engine wheel exists. The parser,
+# the IR and the FMI/SSP layers still import neither, so `import modelica.lang` stays cheap.
+dependencies = ["numpy>=2.0", "scipy>=1.13"]
 
 [project.optional-dependencies]
-# Numerics for the simulation layer. scipy covers ODE + the algebraic solves; the SUNDIALS
-# IDA binding for real (index-1) DAEs is a separate extra because it needs a compiled
-# SUNDIALS and must not be a hard requirement of `pip install modelica`.
-sim = ["numpy>=2.0", "scipy>=1.13"]
+# Kept so `pip install "modelica[sim]"` and `uv sync --extra sim` still work: NumPy and SciPy
+# are plain dependencies now. The SUNDIALS IDA binding for real (index-1) DAEs stays an extra
+# because it needs a compiled SUNDIALS.
+sim = []
 sundials = ["scikit-sundae>=1.0"]
 # Model-checking the discrete half of a model (`modelica.verify`). An extra rather than a
 # dev-only tool because "does this model's event iteration converge?" is a question about

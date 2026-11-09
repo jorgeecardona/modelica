@@ -203,7 +203,7 @@ This is the interesting layer, and the whole project stands on it.
 `Problem` is the interface every backend consumes. It is an explicit ODE where
 causalization achieved one, and a residual DAE otherwise. There are two backends.
 
-* **SciPy** (the `sim` extra) uses `solve_ivp` for the ODE form, plus root finding for the
+* **SciPy** (a plain dependency) uses `solve_ivp` for the ODE form, plus root finding for the
   algebraic blocks. It is the default, because it installs everywhere.
 * **SUNDIALS IDA**, through [scikit-SUNDAE](https://github.com/NREL/scikit-sundae) (the
   `sundials` extra), gives real index-1 DAE integration with consistent initialization. It
