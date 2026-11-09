@@ -806,3 +806,71 @@ def test_ldu_amul_equals_the_dense_product(engine: Path, seed: int) -> None:
     loaded.call(loaded.encoded.rhs(0), 0.0, np.zeros(3), p, np.zeros(0), out)
     loaded.close()
     np.testing.assert_array_equal(out, expected)
+
+
+def _face_rhs(program: vm.Program, n: int) -> tuple[vm.Function, int]:
+    """HeatBar's ``rhs`` as a finite-volume tape, and the register file size it needs.
+
+    ``der(T) = A T + b``, with ``A T`` from `vm.ldu_amul`. Faces join cell ``i`` to ``i + 1``. Each face conducts with coefficient ``a``, so
+    ``upper = lower = a`` and ``diag = -a`` per face of the cell. The held left end adds one
+    more ``-a`` to cell 1 and the source ``a * T_left``; the right end is insulated.
+    """
+    op, instr = vm.Op, vm.Instr
+    fresh = [program.registers]
+
+    def register(size: int = 1) -> int:
+        first = fresh[0]
+        fresh[0] += size
+        return first
+
+    slots = {name: k for k, name in enumerate(program.layout.parameters)}
+    faces = vm.Faces(n, tuple(range(n - 1)), tuple(range(1, n)))
+    a, hot = register(), register()
+    code = [instr(op.LOAD_P, a, slots["a"]), instr(op.LOAD_P, hot, slots["T_left"])]
+    minus = register()
+    twice = register()
+    code += [instr(op.NEG, minus, a), instr(op.ADD, twice, minus, minus)]
+    xs, ds, us, ls, ys, out = (register(k) for k in (n, n, n - 1, n - 1, n, n))
+    code += [instr(op.LOAD_Y, xs + k, k) for k in range(n)]
+    code += [instr(op.MOVE, ds + k, twice) for k in range(n - 1)]
+    code += [instr(op.MOVE, ds + n - 1, minus)]
+    code += [instr(op.MOVE, us + f, a) for f in range(n - 1)]
+    code += [instr(op.MOVE, ls + f, a) for f in range(n - 1)]
+    tables: list[int] = []
+    code += vm.ldu_amul(faces, ys, xs, ds, us, ls, tables, register)
+    source = register()
+    code += [instr(op.MUL, source, a, hot), instr(op.ADD, out, ys, source)]
+    code += [instr(op.STORE_OUT, 0, 0, out)]
+    code += [instr(op.STORE_OUT, 0, k, ys + k) for k in range(1, n)]
+    return vm.Function(tuple(code), (), tuple(tables)), fresh[0]
+
+
+def test_a_heat_bar_written_with_face_lists_equals_heat_bar(
+    engine: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HeatBar with its ``rhs`` as an LDU product over faces runs as the ``for`` loop does."""
+    from modelica.sim import engine as native  # noqa: PLC0415
+
+    system = _system(EXAMPLES / "models" / "HeatBar.mo")
+    knobs: dict[str, Any] = {"stop": 40.0, "tolerance": 1e-10, "points": 21, "path": engine}
+    loops = native.simulate(system, **knobs).result
+    real = vm.lower
+
+    def faces(system: System, **options: Any) -> vm.Program:
+        program = real(system, **options)
+        function, used = _face_rhs(program, len(system.states))
+        # The constants sit at the top of the register file. The new registers go past the
+        # old file, so the pool is padded down over them to keep each constant where the
+        # other tapes read it, and repeated at the new top.
+        pool = program.constants
+        padding = (0.0,) * (used - program.registers)
+        return dataclasses.replace(
+            program,
+            rhs=(function,),
+            registers=used + len(pool),
+            constants=(*pool, *padding, *pool),
+        )
+
+    monkeypatch.setattr(vm, "lower", faces)
+    lists = native.simulate(system, **knobs).result
+    np.testing.assert_allclose(lists.values, loops.values, rtol=1e-12, atol=1e-10)

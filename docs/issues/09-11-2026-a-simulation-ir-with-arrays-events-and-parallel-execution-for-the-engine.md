@@ -465,5 +465,11 @@ a `VMUL` and a `VSCATTER_ADD`. The plan named `GATHER_FACES` and `LDU_AMUL` as o
 `GATHER_FACES` is `VGATHER` with the face table, and `LDU_AMUL` needs more operands than one
 instruction holds, so both are compositions. Test: on three random meshes the product equals the
 dense one within 1e-14, and the engine gives the same bits as `vm.evaluate`. The jacobian of a
-`VSCATTER_ADD` falls back to scalar (`_Scalar`). Next: a 1-D finite-volume heat bar written with
-face lists equals HeatBar.
+`VSCATTER_ADD` falls back to scalar (`_Scalar`).
+
+Step 9 done: HeatBar with its `rhs` replaced by a face-list tape (`der(T) = A T + b`, `A T`
+from `vm.ldu_amul` over 7 faces, the held end as one more `-a` on cell 1 and the source
+`a * T_left`) runs on the engine to the same trajectory as the `for`-loop HeatBar, within
+1e-12 relative over 40 s. Test: `test_a_heat_bar_written_with_face_lists_equals_heat_bar`. The
+tape is written by hand in the test; step 10 (a mesh front end) is what writes it from a mesh.
+Next: step 10.
