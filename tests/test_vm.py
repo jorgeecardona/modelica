@@ -457,3 +457,16 @@ def test_a_constant_subexpression_leaves_no_instruction() -> None:
     out = [0.0]
     vm.evaluate(program, program.rhs[0], 0.0, [1.0], [], [0.0] * 8, out)
     assert out[0] == pytest.approx(np.sin(2.0) * 3.0, rel=1e-15)
+
+
+def test_the_engine_refuses_a_register_out_of_range(engine: Path) -> None:
+    """The engine reads registers without bounds checks, so it checks them when it loads."""
+    from dataclasses import replace  # noqa: PLC0415
+
+    from modelica.sim import engine as native  # noqa: PLC0415
+    from modelica.sim.solve import SimulationError  # noqa: PLC0415
+
+    program = vm.lower(_system(EXAMPLES / "models" / "RCCircuit.mo"))
+    clipped = replace(program, registers=len(program.constants) + 1)
+    with pytest.raises(SimulationError, match="refused"):
+        native.load(clipped, engine)

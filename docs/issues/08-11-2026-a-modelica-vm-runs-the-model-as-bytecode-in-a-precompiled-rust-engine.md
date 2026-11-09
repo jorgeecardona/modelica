@@ -227,3 +227,9 @@ loads.
 Instruction counts are from `perf stat -e instructions:u`, minus the same process with no run,
 so the setup is not counted. The machine was too noisy for wall-clock numbers. Lowering takes
 0.86 s instead of 0.62 s.
+
+### Speed: registers checked once, at load (2026-11-09)
+
+`md_vm_new` checks every register an instruction names against the register count and refuses
+the program otherwise; `Program::run` then reads registers without bounds checks. vowel_i,
+0.05 s run: 15.7e9 to 14.6e9 user instructions (rustsim 11.2e9).

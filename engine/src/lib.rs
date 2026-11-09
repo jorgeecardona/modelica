@@ -137,40 +137,68 @@ fn solve(r: &mut [f64], a: &mut Vec<f64>, b: &mut Vec<f64>, n: usize, matrix: us
     }
 }
 
+/// Whether every register an instruction in `code[range]` names is below `registers`, every
+/// constant index is in the pool and every `NEWTON` names a block of its function. `run` reads
+/// registers without bounds checks on the strength of this.
+fn valid(code: &[i32], range: (usize, usize), registers: usize, constants: usize, blocks: usize) -> bool {
+    let Some(slice) = code.get(range.0 * INSTR..(range.0 + range.1) * INSTR) else { return false };
+    let fits = |x: i64| x >= 0 && (x as usize) < registers;
+    let span = |start: i64, n: i64| start >= 0 && n >= 0 && (start + n) as usize <= registers;
+    slice.chunks_exact(INSTR).all(|i| {
+        let (op, dst, a, b, c) = (i[0], i[1] as i64, i[2] as i64, i[3] as i64, i[4] as i64);
+        match op {
+            0 => fits(dst) && a >= 0 && (a as usize) < constants,
+            1..=4 => fits(dst),
+            5 | 6 => fits(b),
+            7 | 21 | 22 | 23 => fits(dst) && fits(a),
+            8..=20 | 24 => fits(dst) && fits(a) && fits(b),
+            25 => fits(dst) && fits(a) && fits(b) && fits(c),
+            26 => span(a, c * c) && span(b, c) && span(dst, c),
+            27 => a >= 0 && (a as usize) < blocks,
+            28 | 29 => true,
+            _ => false,
+        }
+    })
+}
+
 impl Program {
     fn run(&self, function: &Function, range: (usize, usize), f: &mut Frame) {
         let code = &self.code[range.0 * INSTR..(range.0 + range.1) * INSTR];
         for i in code.chunks_exact(INSTR) {
             let (op, dst, a, b, c) = (i[0], i[1] as usize, i[2] as usize, i[3] as usize, i[4]);
-            let r = &mut *f.r;
+            // SAFETY: `valid` checked every register below against the length of `f.r`, which
+            // is the program's register count (`Scratch::r`).
+            let reg = f.r.as_mut_ptr();
+            let get = |k: usize| unsafe { *reg.add(k) };
+            let set = |k: usize, v: f64| unsafe { *reg.add(k) = v };
             match op {
-                0 => r[dst] = self.constants[a],
-                1 => r[dst] = f.t,
-                2 => r[dst] = f.y[a],
-                3 => r[dst] = f.p[a],
-                4 => r[dst] = f.w[a],
-                5 => f.out[a] = r[b],
-                6 => f.w[a] = r[b],
-                7 => r[dst] = r[a],
-                8 => r[dst] = r[a] + r[b],
-                9 => r[dst] = r[a] - r[b],
-                10 => r[dst] = r[a] * r[b],
-                11 => r[dst] = r[a] / r[b],
-                12 => r[dst] = r[a].powf(r[b]),
-                13 => r[dst] = truth(r[a] < r[b]),
-                14 => r[dst] = truth(r[a] <= r[b]),
-                15 => r[dst] = truth(r[a] > r[b]),
-                16 => r[dst] = truth(r[a] >= r[b]),
-                17 => r[dst] = truth(r[a] == r[b]),
-                18 => r[dst] = truth(r[a] != r[b]),
-                19 => r[dst] = truth(r[a] != 0.0 && r[b] != 0.0),
-                20 => r[dst] = truth(r[a] != 0.0 || r[b] != 0.0),
-                21 => r[dst] = -r[a],
-                22 => r[dst] = truth(r[a] == 0.0),
-                23 => r[dst] = unary(c, r[a]),
-                24 => r[dst] = binary(c, r[a], r[b]),
-                25 => r[dst] = if r[a] != 0.0 { r[b] } else { r[c as usize] },
-                26 => solve(r, f.a, f.b, c as usize, a, b, dst),
+                0 => set(dst, self.constants[a]),
+                1 => set(dst, f.t),
+                2 => set(dst, f.y[a]),
+                3 => set(dst, f.p[a]),
+                4 => set(dst, f.w[a]),
+                5 => f.out[a] = get(b),
+                6 => f.w[a] = get(b),
+                7 => set(dst, get(a)),
+                8 => set(dst, get(a) + get(b)),
+                9 => set(dst, get(a) - get(b)),
+                10 => set(dst, get(a) * get(b)),
+                11 => set(dst, get(a) / get(b)),
+                12 => set(dst, get(a).powf(get(b))),
+                13 => set(dst, truth(get(a) < get(b))),
+                14 => set(dst, truth(get(a) <= get(b))),
+                15 => set(dst, truth(get(a) > get(b))),
+                16 => set(dst, truth(get(a) >= get(b))),
+                17 => set(dst, truth(get(a) == get(b))),
+                18 => set(dst, truth(get(a) != get(b))),
+                19 => set(dst, truth(get(a) != 0.0 && get(b) != 0.0)),
+                20 => set(dst, truth(get(a) != 0.0 || get(b) != 0.0)),
+                21 => set(dst, -get(a)),
+                22 => set(dst, truth(get(a) == 0.0)),
+                23 => set(dst, unary(c, get(a))),
+                24 => set(dst, binary(c, get(a), get(b))),
+                25 => set(dst, if get(a) != 0.0 { get(b) } else { get(c as usize) }),
+                26 => solve(f.r, f.a, f.b, c as usize, a, b, dst),
                 27 => self.newton(function, &function.newton[a], f),
                 28 => {
                     let n = f.y.len();
@@ -257,13 +285,26 @@ pub unsafe extern "C" fn md_vm_new(
         let mut own = Vec::with_capacity(count);
         for b in blocks.get(first * NEWTON..(first + count) * NEWTON).unwrap_or(&[]).chunks_exact(NEWTON) {
             let (us, un) = (b[0] as usize, b[1] as usize);
-            own.push(Newton {
-                unknowns: unknowns[us..us + un].iter().map(|&u| u as usize).collect(),
+            let Some(names) = unknowns.get(us..us + un) else { return std::ptr::null_mut() };
+            let block = Newton {
+                unknowns: names.iter().map(|&u| u as usize).collect(),
                 body: (b[2] as usize, b[3] as usize),
                 matrix: b[4] as usize,
                 right: b[5] as usize,
                 step: b[6] as usize,
-            });
+            };
+            let n = block.unknowns.len();
+            let inside = block.unknowns.iter().all(|&u| u < registers)
+                && block.matrix + n * n <= registers
+                && block.right + n <= registers
+                && block.step + n <= registers;
+            if !inside || !valid(&code, block.body, registers, constants.len(), count) {
+                return std::ptr::null_mut();
+            }
+            own.push(block);
+        }
+        if !valid(&code, (start, len), registers, constants.len(), count) {
+            return std::ptr::null_mut();
         }
         decoded.push(Function { code: (start, len), newton: own });
     }
