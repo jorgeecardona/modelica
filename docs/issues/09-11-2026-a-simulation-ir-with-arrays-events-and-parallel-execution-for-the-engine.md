@@ -248,3 +248,13 @@ registers (the jacobian repeats the rhs's instructions) does no harm.
 Bit-identical. The gain is smaller than estimated because `rhs` is now about a quarter of the
 run; Newton and the linear algebra are most of the rest. No corpus model has enough time-only
 work to be hoisted; a test model with time-driven noise and a state event checks the result.
+
+### Register compaction done (2026-11-09)
+
+`vm._compact` numbers the registers in the order `rhs`, `jacobian`, `indicators`, `observe` and
+the rest first use them. Ranges a solve or a Newton block reads move as one. No register is
+reused, so results are bit-identical.
+
+vowel_i: 17010 registers before, 5054 after; `rhs` uses registers 0 to 1748 plus constants.
+0.05 s run over 3 repeats: L1 data misses 241e6 before, 230e6 after; cycles change by less than
+the noise (15.63e9 against 15.52e9, whole process). A small gain; it stays because it is free.

@@ -945,7 +945,8 @@ def lower(system: System, *, hoist: bool = True) -> Program:
             observe=tuple(_hoist(f, base) for f in program.observe),
             indicators=tuple(_hoist(f, base) for f in program.indicators),
         )
-    return replace(program, registers=lowering.registers + len(pool), constants=tuple(pool))
+    program, base = _compact(program, lowering.registers)
+    return replace(program, registers=base + len(pool), constants=tuple(pool))
 
 
 # --------------------------------------------------------------------------------------
@@ -1236,6 +1237,113 @@ def _hoist(function: Function, base: int) -> Function:
     if sum(i.op in _PURE for i in before) < _HOIST_AT_LEAST:
         return function
     return Function((*before, Instr(Op.HOIST, 0), *after), function.newton)
+
+
+#: The fields that name a register, by opcode; a range's first register too (`register_fields`).
+_FIELDS: Final = {
+    **dict.fromkeys((Op.CONST, Op.TIME, Op.LOAD_Y, Op.LOAD_P, Op.LOAD_W), ("dst",)),
+    **dict.fromkeys((Op.STORE_OUT, Op.STORE_W), ("b",)),
+    **dict.fromkeys(_PURE, ("dst", "a", "b")),
+    **dict.fromkeys((Op.MOVE, Op.NEG, Op.NOT, Op.CALL1), ("dst", "a")),
+    Op.SELECT: ("dst", "a", "b", "c"),
+    Op.SOLVE: ("dst", "a", "b"),
+}
+
+
+def register_fields(i: Instr) -> tuple[str, ...]:
+    """Which of ``dst``, ``a``, ``b``, ``c`` name a register in ``i``; a range's first one too."""
+    return _FIELDS.get(i.op, ())
+
+
+def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901, PLR0912 - one walk
+    """``program`` with its registers numbered in the order the functions first use them.
+
+    `rhs` comes first, then the other functions the integrator calls, so what one `rhs` call
+    touches sits together in memory instead of spread over every function's registers. A range
+    a solve or a Newton block reads as one (and any range overlapping it) moves as one, so it
+    stays contiguous. The constants stay last. Nothing is reused: every register keeps its own
+    number, so no result changes. Returns the program and its first constant register.
+    """
+    functions = [
+        *program.rhs, *program.jacobian, *program.indicators, *program.observe,
+        *program.transition_prefix, *(f for branches in program.transition for f in branches),
+        program.parameters, program.initial, program.latch,
+    ]  # fmt: skip
+    spans: list[tuple[int, int]] = []
+    for function in functions:
+        for code in (function.code, *(block.body for block in function.newton)):
+            for i in code:
+                if i.op is Op.SOLVE:
+                    spans += [(i.a, i.c * i.c), (i.b, i.c), (i.dst, i.c)]
+        for block in function.newton:
+            n = len(block.unknowns)
+            spans += [(block.matrix, n * n), (block.right, n), (block.step, n)]
+    merged: list[list[int]] = []
+    for start, size in sorted((s, n) for s, n in spans if n > 0):
+        if merged and start < merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], start + size)
+        else:
+            merged.append([start, start + size])
+    group = {r: (first, last) for first, last in merged for r in range(first, last)}
+    number: dict[int, int] = {}
+
+    def touch(r: int) -> None:
+        if r >= base or r in number:
+            return
+        if r in group:
+            first, last = group[r]
+            for k in range(first, last):
+                number.setdefault(k, len(number))
+        else:
+            number[r] = len(number)
+
+    for function in functions:
+        for code in (function.code, *(block.body for block in function.newton)):
+            for i in code:
+                for name in register_fields(i):
+                    touch(getattr(i, name))
+        for block in function.newton:
+            for r in (*block.unknowns, block.matrix, block.right, block.step):
+                touch(r)
+    size = len(number)
+
+    def at(r: int) -> int:
+        return size + (r - base) if r >= base else number[r]
+
+    def instr(i: Instr) -> Instr:
+        fields = register_fields(i)
+        return Instr(
+            i.op,
+            *(at(getattr(i, n)) if n in fields else getattr(i, n) for n in ("dst", "a", "b", "c")),
+        )
+
+    def move(function: Function) -> Function:
+        newton = tuple(
+            replace(
+                block,
+                unknowns=tuple(at(r) for r in block.unknowns),
+                body=tuple(instr(i) for i in block.body),
+                matrix=at(block.matrix),
+                right=at(block.right),
+                step=at(block.step),
+            )
+            for block in function.newton
+        )
+        return Function(tuple(instr(i) for i in function.code), newton)
+
+    compacted = replace(
+        program,
+        rhs=tuple(move(f) for f in program.rhs),
+        jacobian=tuple(move(f) for f in program.jacobian),
+        observe=tuple(move(f) for f in program.observe),
+        indicators=tuple(move(f) for f in program.indicators),
+        transition_prefix=tuple(move(f) for f in program.transition_prefix),
+        transition=tuple(tuple(move(f) for f in branches) for branches in program.transition),
+        parameters=move(program.parameters),
+        initial=move(program.initial),
+        latch=move(program.latch),
+    )
+    return compacted, size
 
 
 def _fold(program: Program, pool: dict[float, int]) -> Program:

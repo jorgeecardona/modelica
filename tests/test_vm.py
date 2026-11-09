@@ -593,3 +593,24 @@ def test_hoisting_changes_no_result(engine: Path, monkeypatch: pytest.MonkeyPatc
     assert first.event_times == second.event_times
     np.testing.assert_array_equal(first.result.time, second.result.time)
     np.testing.assert_array_equal(first.result.values, second.result.values)
+
+
+def test_compaction_puts_rhs_registers_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After `_compact` the rhs reads and writes the lowest registers, and none is lost."""
+    system = _system(EXAMPLES / "models" / "TorusHeat.mo")
+    compact = vm.lower(system)
+
+    def spread_out(program: vm.Program, base: int) -> tuple[vm.Program, int]:
+        return program, base
+
+    monkeypatch.setattr(vm, "_compact", spread_out)
+    spread = vm.lower(system)
+    assert compact.registers < spread.registers
+    base = compact.registers - len(compact.constants)
+    used = {
+        getattr(i, name)
+        for i in compact.rhs[0].code
+        for name in vm.register_fields(i)
+        if getattr(i, name) < base
+    }
+    assert used == set(range(len(used)))
