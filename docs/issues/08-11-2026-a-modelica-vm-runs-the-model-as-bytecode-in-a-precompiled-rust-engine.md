@@ -210,3 +210,20 @@ machine before quoting a ratio.
 
 Steps 1 to 8 and 10 are done. Step 9 (macOS) waits on a decision about CI minutes: a Mac
 runner costs 6 times a Linux one, and every push to main is a release.
+
+### Speed: constant folding and preloaded constants (2026-11-09)
+
+On vowel_i, 1155 of the 2992 `rhs` instructions read only constants, and 683 were constant
+loads. Compiled Rust folds both. The lowering now folds constant subexpressions, drops
+instructions nothing reads, and keeps every constant in a fixed register set when the program
+loads.
+
+| | rhs | jacobian | user instructions, 0.05 s run |
+|---|---|---|---|
+| before | 2992 | 4043 | 21.1e9 |
+| after | 1827 | 1984 | 15.7e9 |
+| rustsim | | | 11.2e9 |
+
+Instruction counts are from `perf stat -e instructions:u`, minus the same process with no run,
+so the setup is not counted. The machine was too noisy for wall-clock numbers. Lowering takes
+0.86 s instead of 0.62 s.

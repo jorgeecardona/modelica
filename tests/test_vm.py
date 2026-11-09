@@ -441,3 +441,19 @@ def test_a_sweep_runs_on_the_engine_like_scipy(engine: Path) -> None:
         for name in mine.names:
             np.testing.assert_allclose(mine[name], theirs[name], rtol=1e-6, atol=1e-8)
     assert not np.allclose(on_engine[0]["c.v"], on_engine[2]["c.v"])
+
+
+def test_a_constant_subexpression_leaves_no_instruction() -> None:
+    """``sin(2.0) * 3.0`` is one preloaded constant: no call, no constant load, one multiply."""
+    from modelica.sim import flatten  # noqa: PLC0415
+
+    source = "model Fold Real x(start = 1); equation der(x) = sin(2.0) * 3.0 * x; end Fold;"
+    system = causalize(flatten([parse(source)], "Fold"))
+    program = vm.lower(system)
+    ops = [i.op for i in program.rhs[0].code]
+    assert vm.Op.CALL1 not in ops
+    assert vm.Op.CONST not in ops
+    assert ops.count(vm.Op.MUL) == 1
+    out = [0.0]
+    vm.evaluate(program, program.rhs[0], 0.0, [1.0], [], [0.0] * 8, out)
+    assert out[0] == pytest.approx(np.sin(2.0) * 3.0, rel=1e-15)

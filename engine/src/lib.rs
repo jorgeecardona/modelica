@@ -268,9 +268,15 @@ pub unsafe extern "C" fn md_vm_new(
         decoded.push(Function { code: (start, len), newton: own });
     }
     let switching = if switching < 0 { None } else { Some(switching as usize) };
+    // The last registers hold the constants (`vm._preload`); nothing writes them after this.
+    if constants.len() > registers {
+        return std::ptr::null_mut();
+    }
+    let mut preloaded = vec![0.0; registers];
+    preloaded[registers - constants.len()..].copy_from_slice(&constants);
     Box::into_raw(Box::new(Program {
         modes, events, switching, constants, code, functions: decoded,
-        scratch: RefCell::new(Scratch { r: vec![0.0; registers], a: Vec::new(), b: Vec::new() }),
+        scratch: RefCell::new(Scratch { r: preloaded, a: Vec::new(), b: Vec::new() }),
     }))
 }
 

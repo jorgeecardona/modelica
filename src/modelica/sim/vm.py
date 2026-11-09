@@ -872,8 +872,278 @@ def lower(system: System) -> Program:
             + (0 if lowering.emitter.switching is None else 1),
         ),
     )
+    program = _fold(program, lowering.constants)
     pool = sorted(lowering.constants, key=lowering.constants.__getitem__)
-    return replace(program, registers=lowering.registers, constants=tuple(pool))
+    program = _preload(program, lowering.registers)
+    return replace(program, registers=lowering.registers + len(pool), constants=tuple(pool))
+
+
+# --------------------------------------------------------------------------------------
+# Constant folding
+# --------------------------------------------------------------------------------------
+
+#: Instructions that write ``dst`` from their register operands and nothing else.
+_PURE: Final = frozenset(
+    {
+        Op.MOVE, Op.ADD, Op.SUB, Op.MUL, Op.DIV, Op.POW,
+        Op.LT, Op.LE, Op.GT, Op.GE, Op.EQ, Op.NE, Op.AND, Op.OR,
+        Op.NEG, Op.NOT, Op.CALL1, Op.CALL2, Op.SELECT,
+    }
+)  # fmt: skip
+#: Instructions that write ``dst`` and can go when nothing reads it.
+_REMOVABLE: Final = _PURE | {Op.CONST, Op.TIME, Op.LOAD_Y, Op.LOAD_P, Op.LOAD_W}
+
+
+def _operands(i: Instr) -> tuple[int, ...]:
+    """The registers a pure instruction reads."""
+    if i.op in (Op.MOVE, Op.NEG, Op.NOT, Op.CALL1):
+        return (i.a,)
+    if i.op is Op.SELECT:
+        return (i.a, i.b, i.c)
+    return (i.a, i.b)
+
+
+def _apply(i: Instr, values: Mapping[int, float]) -> float:
+    """What the pure instruction ``i`` computes from ``values``, as `evaluate` computes it."""
+    with np.errstate(all="ignore"):
+        if i.op is Op.MOVE:
+            return values[i.a]
+        if i.op is Op.SELECT:
+            return values[i.b] if values[i.a] != 0.0 else values[i.c]
+        if i.op is Op.CALL1:
+            return float(_UNARY[i.c](np.float64(values[i.a])))
+        if i.op is Op.CALL2:
+            return float(_BINARY[i.c](np.float64(values[i.a]), np.float64(values[i.b])))
+        b = values[i.b] if i.op not in (Op.NEG, Op.NOT) else 0.0
+        return float(_arith(i.op, np.float64(values[i.a]), np.float64(b)))
+
+
+def _fold_code(  # noqa: C901, PLR0912 - one case per kind of instruction
+    code: Sequence[Instr],
+    known: dict[int, float],
+    pool: dict[float, int],
+    blocks: Sequence[NewtonBlock],
+    bodies: list[tuple[Instr, ...]],
+) -> tuple[Instr, ...]:
+    """``code`` with every instruction whose operands are all constants made a constant.
+
+    ``known`` maps a register to its constant value and grows as the code runs. A value that
+    is NaN or -0.0 stays computed: the pool is keyed by value, and those two do not round-trip
+    through a dict key.
+    """
+    values = {index: value for value, index in pool.items()}
+    out: list[Instr] = []
+    for i in code:
+        if i.op is Op.CONST:
+            known[i.dst] = values[i.a]
+        elif i.op is Op.SELECT and i.a in known:
+            chosen = i.b if known[i.a] != 0.0 else i.c
+            i = Instr(Op.MOVE, i.dst, chosen)  # noqa: PLW2901 - the instruction it becomes
+            if chosen in known:
+                known[i.dst] = known[chosen]
+            else:
+                known.pop(i.dst, None)
+        elif i.op in _PURE and all(r in known for r in _operands(i)):
+            value = _apply(i, known)
+            if value == value and not (value == 0.0 and np.signbit(value)):  # noqa: PLR0124 - NaN test
+                if value not in pool:
+                    pool[value] = len(pool)
+                    values[pool[value]] = value
+                i = Instr(Op.CONST, i.dst, pool[value])  # noqa: PLW2901
+                known[i.dst] = value
+            else:
+                known.pop(i.dst, None)
+        elif i.op is Op.SOLVE:
+            for k in range(i.c):
+                known.pop(i.dst + k, None)
+        elif i.op is Op.NEWTON:
+            block = blocks[i.a]
+            n = len(block.unknowns)
+            inner = dict(known)
+            for register in (*block.unknowns, *range(block.step, block.step + n)):
+                inner.pop(register, None)
+                known.pop(register, None)
+            bodies[i.a] = _fold_code(block.body, inner, pool, blocks, bodies)
+        elif i.op in _REMOVABLE:
+            known.pop(i.dst, None)
+        out.append(i)
+    return tuple(out)
+
+
+def _fold_function(function: Function, pool: dict[float, int]) -> Function:
+    bodies = [block.body for block in function.newton]
+    code = _fold_code(function.code, {}, pool, function.newton, bodies)
+    newton = tuple(
+        replace(block, body=body) for block, body in zip(function.newton, bodies, strict=True)
+    )
+    return Function(code, newton)
+
+
+def _reads(i: Instr, function: Function) -> list[int]:
+    """The registers ``i`` reads, ranges included."""
+    if i.op in _PURE:
+        return list(_operands(i))
+    if i.op in (Op.STORE_OUT, Op.STORE_W):
+        return [i.b]
+    if i.op is Op.SOLVE:
+        return [*range(i.a, i.a + i.c * i.c), *range(i.b, i.b + i.c)]
+    if i.op is Op.NEWTON:
+        block = function.newton[i.a]
+        n = len(block.unknowns)
+        return [
+            *block.unknowns,
+            *range(block.matrix, block.matrix + n * n),
+            *range(block.right, block.right + n),
+        ]
+    return []
+
+
+def _prune(functions: Sequence[Function]) -> list[Function]:  # noqa: C901 - count, drop, rebuild
+    """``functions`` without the instructions whose result nothing reads, transitively.
+
+    One pass: count the reads of every register, drop a removable instruction whose register
+    has none, and take its own reads off the count.
+    """
+    places: list[tuple[Sequence[Instr], Function]] = []
+    for function in functions:
+        places.append((function.code, function))
+        places.extend((block.body, function) for block in function.newton)
+    reads: dict[int, int] = {}
+    writers: dict[int, list[tuple[int, int]]] = {}
+    for where, (code, function) in enumerate(places):
+        for position, i in enumerate(code):
+            for r in _reads(i, function):
+                reads[r] = reads.get(r, 0) + 1
+            if i.op in _REMOVABLE:
+                writers.setdefault(i.dst, []).append((where, position))
+    dead: set[tuple[int, int]] = set()
+    queue = [spot for r, spots in writers.items() if not reads.get(r) for spot in spots]
+    while queue:
+        spot = queue.pop()
+        if spot in dead:
+            continue
+        dead.add(spot)
+        code, function = places[spot[0]]
+        for r in _reads(code[spot[1]], function):
+            reads[r] -= 1
+            if not reads[r]:
+                queue.extend(writers.get(r, ()))
+    kept = [
+        tuple(i for position, i in enumerate(code) if (where, position) not in dead)
+        for where, (code, _) in enumerate(places)
+    ]
+    out: list[Function] = []
+    cursor = 0
+    for function in functions:
+        code = kept[cursor]
+        bodies = kept[cursor + 1 : cursor + 1 + len(function.newton)]
+        cursor += 1 + len(function.newton)
+        newton = tuple(
+            replace(block, body=body) for block, body in zip(function.newton, bodies, strict=True)
+        )
+        out.append(Function(code, newton))
+    return out
+
+
+def _rewrite(i: Instr, alias: Mapping[int, int]) -> Instr:
+    """``i`` reading ``alias[r]`` wherever it read a register ``r`` in ``alias``."""
+    if i.op in (Op.MOVE, Op.NEG, Op.NOT, Op.CALL1):
+        return Instr(i.op, i.dst, alias.get(i.a, i.a), i.b, i.c)
+    if i.op is Op.SELECT:
+        return Instr(i.op, i.dst, *(alias.get(r, r) for r in (i.a, i.b, i.c)))
+    if i.op in _PURE:
+        return Instr(i.op, i.dst, alias.get(i.a, i.a), alias.get(i.b, i.b), i.c)
+    if i.op in (Op.STORE_OUT, Op.STORE_W):
+        return Instr(i.op, i.dst, i.a, alias.get(i.b, i.b), i.c)
+    return i
+
+
+def _preload(program: Program, base: int) -> Program:  # noqa: C901 - one walk per kind of code
+    """Constant ``k`` lives in register ``base + k``, set once when the program loads.
+
+    Every ``CONST`` whose register is read only as a single operand goes, and its readers read
+    the preloaded register. A ``CONST`` into a solve's matrix or right-hand side stays: those are
+    read as a contiguous range.
+    """
+    functions = [
+        *program.rhs, *program.jacobian, *program.observe, *program.indicators,
+        *program.transition_prefix, *(f for branches in program.transition for f in branches),
+        program.parameters, program.initial, program.latch,
+    ]  # fmt: skip
+    ranged: set[int] = set()
+    for function in functions:
+        for i in function.code:
+            if i.op is Op.SOLVE:
+                ranged.update(range(i.a, i.a + i.c * i.c))
+                ranged.update(range(i.b, i.b + i.c))
+        for block in function.newton:
+            n = len(block.unknowns)
+            ranged.update(range(block.matrix, block.matrix + n * n))
+            ranged.update(range(block.right, block.right + n))
+    alias: dict[int, int] = {}
+    for function in functions:
+        for code in (function.code, *(block.body for block in function.newton)):
+            for i in code:
+                if i.op is Op.CONST and i.dst not in ranged:
+                    alias[i.dst] = base + i.a
+
+    def move(function: Function) -> Function:
+        def code(instructions: Sequence[Instr]) -> tuple[Instr, ...]:
+            return tuple(
+                _rewrite(i, alias)
+                for i in instructions
+                if not (i.op is Op.CONST and i.dst in alias)
+            )
+
+        newton = tuple(replace(block, body=code(block.body)) for block in function.newton)
+        return Function(code(function.code), newton)
+
+    return replace(
+        program,
+        rhs=tuple(move(f) for f in program.rhs),
+        jacobian=tuple(move(f) for f in program.jacobian),
+        observe=tuple(move(f) for f in program.observe),
+        indicators=tuple(move(f) for f in program.indicators),
+        transition_prefix=tuple(move(f) for f in program.transition_prefix),
+        transition=tuple(tuple(move(f) for f in branches) for branches in program.transition),
+        parameters=move(program.parameters),
+        initial=move(program.initial),
+        latch=move(program.latch),
+    )
+
+
+def _fold(program: Program, pool: dict[float, int]) -> Program:
+    """Fold constant subexpressions, then drop instructions whose result nothing reads.
+
+    Compiled Rust gets both from LLVM. On the tape they are dispatches: on vowel_i a third of
+    ``rhs`` reads only constants. Registers stay where they are, so a `transition` branch still
+    reads what its prefix wrote.
+    """
+
+    def every(fn: Callable[[Function], Function], p: Program) -> Program:
+        return replace(
+            p,
+            rhs=tuple(fn(f) for f in p.rhs),
+            jacobian=tuple(fn(f) for f in p.jacobian),
+            observe=tuple(fn(f) for f in p.observe),
+            indicators=tuple(fn(f) for f in p.indicators),
+            transition_prefix=tuple(fn(f) for f in p.transition_prefix),
+            transition=tuple(tuple(fn(f) for f in branches) for branches in p.transition),
+            parameters=fn(p.parameters),
+            initial=fn(p.initial),
+            latch=fn(p.latch),
+        )
+
+    def functions(p: Program) -> list[Function]:
+        return [
+            *p.rhs, *p.jacobian, *p.observe, *p.indicators, *p.transition_prefix,
+            *(f for branches in p.transition for f in branches),
+            p.parameters, p.initial, p.latch,
+        ]  # fmt: skip
+
+    program = every(lambda f: _fold_function(f, pool), program)
+    pruned = iter(_prune(functions(program)))
+    return every(lambda _: next(pruned), program)
 
 
 # --------------------------------------------------------------------------------------
@@ -1062,7 +1332,10 @@ def evaluate(  # noqa: PLR0913, PLR0917 - the kernel signature
     then: Function | None = None,
 ) -> None:
     """Run ``function`` (and then ``then``, for a transition) in Python; writes ``out`` and ``w``."""
-    machine = _Machine(program, t, y, p, w, out, [0.0] * program.registers)
+    registers = [0.0] * program.registers
+    base = program.registers - len(program.constants)
+    registers[base:] = program.constants
+    machine = _Machine(program, t, y, p, w, out, registers)
     machine.run(function, function.code)
     if then is not None:
         machine.run(then, then.code)
