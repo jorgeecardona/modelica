@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import tomllib
 from pathlib import Path
 
@@ -102,7 +103,18 @@ def test_carrying_a_loop_once_flattens_like_unrolling_it(
     except FlattenError:
         pytest.skip("the example does not flatten")
     monkeypatch.setattr(flattening._Flattener, "_unroll_once", _never)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
-    assert flatten(sources, model.stem) == once
+    assert flatten(sources, model.stem) == dataclasses.replace(once, loops=())
+
+
+def test_torusheat_keeps_its_loop_and_a_stale_loop_does_not_match() -> None:
+    """The grid loop is kept with its range and its ``n``; reversed equations no longer match."""
+    model = flatten(_sources(_EXAMPLES / "models" / "TorusHeat.mo"), "TorusHeat")
+    (loop,) = model.loops
+    assert loop.equation.indices == (IndexSet("i", 1, 8), IndexSet("j", 1, 8))
+    assert loop.equation.constants == (("n", 8),)
+    assert loop.equation.scalarize() == model.equations[loop.first : loop.first + 64]
+    assert loop.matches(model.equations)
+    assert not loop.matches(tuple(reversed(model.equations)))
 
 
 def test_a_loop_index_named_like_a_component_reads_the_index(
@@ -121,5 +133,5 @@ end Shadow;
 """
     once = flatten([parse(source)], "Shadow")
     monkeypatch.setattr(flattening._Flattener, "_unroll_once", _never)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
-    assert flatten([parse(source)], "Shadow") == once
+    assert flatten([parse(source)], "Shadow") == dataclasses.replace(once, loops=())
     assert len(once.equations) == 3

@@ -29,6 +29,7 @@ not build. They resolve names and merge classes. They produce no equations.
 
 from __future__ import annotations
 
+import math
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from itertools import pairwise, product
@@ -36,11 +37,21 @@ from typing import TYPE_CHECKING, Final, Literal, NamedTuple
 
 from modelica.ir import nodes as ir
 from modelica.ir.evaluate import EvaluationError, at, evaluate
-from modelica.ir.flat import BaseType, CellError, FlatModel, FlatVariable, at_cell, element
+from modelica.ir.flat import (
+    ArrayEquation,
+    BaseType,
+    CellError,
+    FlatModel,
+    FlatVariable,
+    IndexSet,
+    Loop,
+    at_cell,
+    element,
+)
 from modelica.ir.rewrite import names, substitute
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
 __all__ = [
     "Effective",
@@ -891,6 +902,26 @@ def _slice(
         return build(dim + 1, (*fixed, _integer(resolve(index), values, what)))
 
     return build(0, ())
+
+
+def _subscripts(node: ir.Expr) -> Iterator[ir.Subscript]:
+    """Every ``Subscript`` inside ``node``."""
+    match node:
+        case ir.Subscript():
+            yield node
+        case ir.Binary(lhs=lhs, rhs=rhs):
+            yield from _subscripts(lhs)
+            yield from _subscripts(rhs)
+        case ir.Unary(operand=operand):
+            yield from _subscripts(operand)
+        case ir.Call(args=args):
+            for arg in args:
+                yield from _subscripts(arg)
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            for part in (condition, then, otherwise):
+                yield from _subscripts(part)
+        case _:
+            return
 
 
 def _prefix_expr(  # noqa: C901, PLR0911, PLR0912, PLR0913 -- one case per node type, one flag per rule
@@ -2207,6 +2238,7 @@ class _Flattener:
     whens: list[ir.When] = field(default_factory=list[ir.When])
     asserts: list[ir.Assert] = field(default_factory=list[ir.Assert])
     initial_equations: list[ir.Equal] = field(default_factory=list[ir.Equal])
+    loops: list[Loop] = field(default_factory=list[Loop])
     connections: _Connections = field(default_factory=_Connections)
     connectors: dict[_Path, Found] = field(default_factory=dict[_Path, "Found"])
     disabled: set[_Path] = field(default_factory=set[_Path])
@@ -3051,8 +3083,41 @@ class _Flattener:
             del sink[size:]
             if eager != [written[k]]:
                 return False
+        if not initial and len(templates) == 1:
+            self._keep_loop(indices, cells, templates, shapes, constants)
         (self.initial_equations if initial else self.equations).extend(written)
         return True
+
+    def _keep_loop(
+        self,
+        indices: list[str],
+        cells: list[tuple[dict[str, int], ir.Equal]],
+        templates: Mapping[int, tuple[ir.Expr, ir.Expr]],
+        shapes: Mapping[str, tuple[int, ...]],
+        constants: Mapping[str, int],
+    ) -> None:
+        """Record a one-equation loop over a full rectangle of cells as a `Loop`."""
+        sets = tuple(
+            IndexSet(name, min(c[name] for c, _ in cells), max(c[name] for c, _ in cells))
+            for name in indices
+        )
+        if math.prod(len(s) for s in sets) != len(cells):
+            return
+        (left, right), equation = next(iter(templates.values())), cells[0][1]
+        subscripts = [node for side in (left, right) for node in _subscripts(side)]
+        read = {".".join(node.base.parts) for node in subscripts}
+        used = {name for node in subscripts for i in node.indices for name in names(i)}
+        self.loops.append(
+            Loop(
+                len(self.equations),
+                ArrayEquation(
+                    sets,
+                    ir.Equal(left, right, equation.span),
+                    tuple((name, shapes[name]) for name in sorted(read)),
+                    tuple((name, constants[name]) for name in sorted(used) if name in constants),
+                ),
+            )
+        )
 
     def _loop_plan(  # noqa: C901 -- one walk over the nesting
         self,
@@ -3484,10 +3549,12 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
         _resolve_boolean_when_conditions(flattener.equations, flattener.whens),
         {variable.name for variable in flattener.variables},
     )
+    equations = tuple(flattener.equations)
     return FlatModel(
+        loops=tuple(loop for loop in flattener.loops if loop.matches(equations)),
         name=found.cls.name,
         variables=(*flattener.variables, *samplers),
-        equations=tuple(flattener.equations),
+        equations=equations,
         whens=whens,
         asserts=tuple(flattener.asserts),
         initial_equations=tuple(flattener.initial_equations),

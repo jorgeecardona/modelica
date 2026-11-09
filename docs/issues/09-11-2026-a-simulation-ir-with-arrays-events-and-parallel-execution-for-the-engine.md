@@ -331,3 +331,9 @@ Test: all 61 examples flatten to the same `FlatModel` with and without the fast 
 once for a function with no `TIME`, and `_compact` rewrites instructions with direct field
 access. (The 1.86 s quoted above was one wall-clock run.) Front end at n = 32, best of 3:
 flatten 0.19 s, causalize 0.53 s, `vm.lower` 0.85 s.
+
+Commit 4a done: `FlatModel.loops` keeps each one-equation `for` loop the fast path flattened, as
+a `Loop(first, ArrayEquation)`, beside the unchanged scalar `equations`. `ArrayEquation` carries
+the integer constants its indices read (`n`). `flatten` keeps a loop only when the final
+equations still hold its cells at both ends, and `Loop.matches` lets a later stage check the
+same after a `dataclasses.replace`. TorusHeat has one loop: `i, j` over `1:8`.

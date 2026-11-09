@@ -112,6 +112,8 @@ class ArrayEquation:
     indices: tuple[IndexSet, ...]
     equation: ir.Equal
     shapes: tuple[tuple[str, tuple[int, ...]], ...]
+    constants: tuple[tuple[str, int], ...] = ()
+    """Integer parameters an index reads, ``n`` in ``mod(i, n)``, with their values."""
 
     def cells(self) -> Iterator[dict[str, int]]:
         """Every combination of index values, outer index slowest."""
@@ -127,11 +129,11 @@ class ArrayEquation:
         expression, so a periodic stencil needs no special case, and ``x[i + 1]`` at the last
         cell is an error instead of a silent wrap.
         """
-        shapes = dict(self.shapes)
+        shapes, constants = dict(self.shapes), dict(self.constants)
         return tuple(
             ir.Equal(
-                at_cell(self.equation.lhs, cell, shapes),
-                at_cell(self.equation.rhs, cell, shapes),
+                at_cell(self.equation.lhs, cell, shapes, constants),
+                at_cell(self.equation.rhs, cell, shapes, constants),
                 self.equation.span,
             )
             for cell in self.cells()
@@ -209,6 +211,35 @@ def at_cell(  # noqa: PLR0911 - one case per node
 
 
 @dataclass(frozen=True)
+class Loop:
+    """Where one `ArrayEquation` sits in `FlatModel.equations`.
+
+    Its cells, in order, from ``first``. Later stages may treat those equations as one; the
+    scalar ones stay the truth.
+    """
+
+    first: int
+    equation: ArrayEquation
+
+    def matches(self, equations: Sequence[ir.Equal]) -> bool:
+        """Whether ``equations`` still hold this loop's cells at its ends.
+
+        A cheap check that a ``dataclasses.replace`` of the equations, or a later stage that
+        moved them, has not left the loop pointing at something else.
+        """
+        try:
+            cells = self.equation.scalarize()
+        except CellError:
+            return False
+        last = self.first + len(cells) - 1
+        return (
+            last < len(equations)
+            and equations[self.first] == cells[0]
+            and equations[last] == cells[-1]
+        )
+
+
+@dataclass(frozen=True)
 class FlatModel:
     """A model flattened to scalars: the input to causalization and simulation."""
 
@@ -224,6 +255,8 @@ class FlatModel:
     Apart from the equations because they bind nothing: an assert is a diagnostic on the
     solution, not a constraint that shapes it."""
     initial_equations: tuple[ir.Equal, ...] = ()
+    loops: tuple[Loop, ...] = ()
+    """The ``for`` loops `equations` came from, where flattening kept them (`Loop`)."""
 
     def __getitem__(self, name: str) -> FlatVariable:
         try:
