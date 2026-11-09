@@ -94,6 +94,7 @@ nav:
   - Examples: examples.md
   - Finding where two tiers disagree: diverging.md
   - The precompiled engine: engine.md
+  - The engine's virtual machine: engine-vm.md
   - The Rust backend, today: rust-backend.md
   - Notebooks:
       - Every model in the corpus: notebooks/gallery.ipynb

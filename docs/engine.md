@@ -53,14 +53,14 @@ on it.
 
 ## How it works
 
-`modelica.sim.vm` lowers the model to a register tape: one list of three-address instructions
-for each of `rhs`, `observe`, `indicators`, `transition` and `jacobian`. The engine
-(`engine/src/lib.rs`) runs the tape inside the same Radau integrator and event loop as the
-[Rust backend](rust-backend.md). The design is in
-`docs/issues/08-11-2026-a-modelica-vm-runs-the-model-as-bytecode-in-a-precompiled-rust-engine.md`.
+`modelica.sim.vm` lowers the model to a register tape, and the engine (`engine/src/lib.rs`) runs
+the tape inside the same Radau integrator and event loop as the [Rust backend](rust-backend.md).
+The tape format, the lowering passes and the run-time caches are in
+[The engine's virtual machine](engine-vm.md).
 
-On the 80-state vowel_i model, the engine takes the same steps as the compiled Rust backend and
-costs about 1.5 to 2 times more per step.
+On the 78-state vowel_i model the engine now uses fewer instructions than the compiled Rust
+backend: 6.3e9 against 11.2e9 for a 0.05 s run. Several parameter vectors run in parallel, one
+thread per core.
 
 ## From a source checkout
 
