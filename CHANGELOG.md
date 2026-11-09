@@ -6,6 +6,7 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `modelica.sim.fv` writes heat conduction on a mesh as an engine tape, with fixed-value, fixed-gradient and zero-gradient boundary patches applied by array opcodes.
 - `modelica.sim.mesh` holds a finite-volume mesh in OpenFOAM's polyMesh layout, builds a structured box, computes face areas and cell volumes, and reads and writes ASCII polyMesh files.
 - The engine has a scatter-add opcode, and `vm.ldu_amul` writes an LDU matrix-vector product over a mesh's faces as array opcodes.
 - A model with no states (only discrete variables) runs on the engine; it stopped at t = 0 before.

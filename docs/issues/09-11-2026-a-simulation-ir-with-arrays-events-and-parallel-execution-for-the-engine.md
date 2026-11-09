@@ -479,5 +479,15 @@ faces, `owner`, `neighbour`, `Patch` ranges); `Mesh.addressing()` gives the `vm.
 cell volumes and centres from pyramids, as OpenFOAM builds them. `mesh.box(shape, size)` writes
 a structured box, and `read_polymesh` and `write_polymesh` handle the ASCII files. Tests: a
 box's addressing equals its grid's adjacency in upper-triangular order, every cell has volume
-`dx dy dz` and is closed, and a mesh reads back as written. Gmsh is not read yet. Next: step 11,
-boundary patches with a rule (fixed value, fixed gradient, zero gradient) applied by opcodes.
+`dx dy dz` and is closed, and a mesh reads back as written. Gmsh is not read yet.
+
+Step 11 done: `modelica.sim.fv`. `laplacian(mesh, k)` gives the LDU coefficients
+(`k |S| / |d|` per internal face, orthogonal meshes only) and one coefficient per boundary
+face. `fv.heat(mesh, k, rules, register)` writes `V dT/dt = k laplacian(T)` as a tape:
+`vm.ldu_amul` for the internal faces, then per patch a rule applied by array opcodes.
+`FixedValue` gathers the cells' values, subtracts them from the broadcast wall value, multiplies
+by the coefficients and scatter-adds; `FixedGradient` scatter-adds `k |S| g`; `ZeroGradient`
+writes nothing. Every number comes from `p`, so a wall value is a parameter. A patch without a
+rule is an error. Tests: on a 10 x 4 box with walls at 100 and 20 (or 100 and a gradient of
+-80) the steady state is `100 - 80 x` at the cell centres within 1e-8, and the engine gives the
+same bits as `vm.evaluate`. Next: step 12, the Jacobian in LDU form and iterative solvers.
