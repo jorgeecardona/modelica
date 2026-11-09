@@ -81,6 +81,17 @@ class Op(IntEnum):
     COPY_Y_OUT = 28  # out[:] = y
     CLEAR_OUT = 29  # out[:a] = 0
     HOIST = 30  # no operands: what comes before reads only time and constants (`_hoist`)
+    # Array opcodes over runs of ``n`` consecutive registers (`_ARRAY`). A table is a run of
+    # register numbers in `Program.tables`, named by its offset.
+    VGATHER = 31  # dst[k] = r[tables[a + k]], k < c
+    VSCATTER = 32  # r[tables[a + k]] = b[k], k < c
+    VBROADCAST = 33  # dst[k] = r[a], k < c
+    VADD = 34  # dst[k] = a[k] + b[k], k < c
+    VSUB = 35
+    VMUL = 36
+    VDIV = 37
+    VNEG = 38  # dst[k] = -a[k], k < c
+    VCALL1 = 39  # dst[k] = builtin c of a[k], k < b
 
 
 class Builtin(IntEnum):
@@ -193,6 +204,8 @@ class Function:
 
     code: tuple[Instr, ...]
     newton: tuple[NewtonBlock, ...] = ()
+    tables: tuple[int, ...] = ()
+    """Register numbers that ``VGATHER`` and ``VSCATTER`` read through, by offset."""
 
 
 @dataclass(frozen=True)
@@ -1047,11 +1060,54 @@ def _fold_function(function: Function, pool: dict[float, int]) -> Function:
     newton = tuple(
         replace(block, body=body) for block, body in zip(function.newton, bodies, strict=True)
     )
-    return Function(code, newton)
+    return Function(code, newton, function.tables)
+
+
+def _array_reads(i: Instr, tables: Sequence[int]) -> list[int]:
+    """The registers an array opcode reads."""
+    op, n = i.op, (i.b if i.op is Op.VCALL1 else i.c)
+    if op is Op.VGATHER:
+        return list(tables[i.a : i.a + n])
+    if op is Op.VSCATTER:
+        return list(range(i.b, i.b + n))
+    if op is Op.VBROADCAST:
+        return [i.a]
+    if op in (Op.VNEG, Op.VCALL1):
+        return list(range(i.a, i.a + n))
+    return [*range(i.a, i.a + n), *range(i.b, i.b + n)]
+
+
+def _array_runs(i: Instr) -> tuple[int, ...]:
+    """The first registers of the runs an array opcode reads or writes."""
+    if i.op is Op.VGATHER:
+        return (i.dst,)
+    if i.op is Op.VSCATTER:
+        return (i.b,)
+    if i.op is Op.VBROADCAST:
+        return (i.dst,)
+    if i.op in (Op.VNEG, Op.VCALL1):
+        return (i.dst, i.a)
+    return (i.dst, i.a, i.b)
+
+
+def _array_writes(i: Instr, tables: Sequence[int]) -> list[int]:
+    """The registers an array opcode writes."""
+    if i.op is Op.VSCATTER:
+        return list(tables[i.a : i.a + i.c])
+    return list(range(i.dst, i.dst + (i.b if i.op is Op.VCALL1 else i.c)))
+
+
+#: The array opcodes, and the scalar opcode each elementwise one applies.
+_VECTOR_TO_SCALAR: Final = {Op.VADD: Op.ADD, Op.VSUB: Op.SUB, Op.VMUL: Op.MUL, Op.VDIV: Op.DIV}
+_ARRAY: Final = frozenset(
+    {Op.VGATHER, Op.VSCATTER, Op.VBROADCAST, Op.VNEG, Op.VCALL1, *_VECTOR_TO_SCALAR}
+)
 
 
 def _reads(i: Instr, function: Function) -> list[int]:
     """The registers ``i`` reads, ranges included."""
+    if i.op in _ARRAY:
+        return _array_reads(i, function.tables)
     if i.op in _PURE:
         return list(_operands(i))
     if i.op in (Op.STORE_OUT, Op.STORE_W):
@@ -1112,7 +1168,7 @@ def _prune(functions: Sequence[Function]) -> list[Function]:  # noqa: C901 - cou
         newton = tuple(
             replace(block, body=body) for block, body in zip(function.newton, bodies, strict=True)
         )
-        out.append(Function(code, newton))
+        out.append(Function(code, newton, function.tables))
     return out
 
 
@@ -1147,6 +1203,10 @@ def _preload(program: Program, base: int) -> Program:  # noqa: C901 - one walk p
             if i.op is Op.SOLVE:
                 ranged.update(range(i.a, i.a + i.c * i.c))
                 ranged.update(range(i.b, i.b + i.c))
+            elif i.op in _ARRAY:
+                # An array opcode reads its operands as runs or through a table, never through
+                # a rewritten scalar operand, so a constant it reads keeps its register.
+                ranged.update(_array_reads(i, function.tables))
         for block in function.newton:
             n = len(block.unknowns)
             ranged.update(range(block.matrix, block.matrix + n * n))
@@ -1167,7 +1227,7 @@ def _preload(program: Program, base: int) -> Program:  # noqa: C901 - one walk p
             )
 
         newton = tuple(replace(block, body=code(block.body)) for block in function.newton)
-        return Function(code(function.code), newton)
+        return Function(code(function.code), newton, function.tables)
 
     return replace(
         program,
@@ -1185,6 +1245,8 @@ def _preload(program: Program, base: int) -> Program:  # noqa: C901 - one walk p
 
 def _writes(i: Instr, function: Function) -> list[int]:
     """The registers ``i`` writes, ranges included; a ``NEWTON``'s body counts as its own."""
+    if i.op in _ARRAY:
+        return _array_writes(i, function.tables)
     if i.op in _REMOVABLE:
         return [i.dst]
     if i.op is Op.SOLVE:
@@ -1238,7 +1300,7 @@ def _hoist(function: Function, base: int) -> Function:
             after.append(i)
     if sum(i.op in _PURE for i in before) < _HOIST_AT_LEAST:
         return function
-    return Function((*before, Instr(Op.HOIST, 0), *after), function.newton)
+    return Function((*before, Instr(Op.HOIST, 0), *after), function.newton, function.tables)
 
 
 #: The fields that name a register, by opcode; a range's first register too (`register_fields`).
@@ -1249,6 +1311,15 @@ _FIELDS: Final = {
     **dict.fromkeys((Op.MOVE, Op.NEG, Op.NOT, Op.CALL1), ("dst", "a")),
     Op.SELECT: ("dst", "a", "b", "c"),
     Op.SOLVE: ("dst", "a", "b"),
+    Op.VGATHER: ("dst",),
+    Op.VSCATTER: ("b",),
+    Op.VBROADCAST: ("dst", "a"),
+    Op.VADD: ("dst", "a", "b"),
+    Op.VSUB: ("dst", "a", "b"),
+    Op.VMUL: ("dst", "a", "b"),
+    Op.VDIV: ("dst", "a", "b"),
+    Op.VNEG: ("dst", "a"),
+    Op.VCALL1: ("dst", "a"),
 }
 
 
@@ -1277,6 +1348,9 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
             for i in code:
                 if i.op is Op.SOLVE:
                     spans += [(i.a, i.c * i.c), (i.b, i.c), (i.dst, i.c)]
+                elif i.op in _ARRAY:
+                    n = i.b if i.op is Op.VCALL1 else i.c
+                    spans += [(start, n) for start in _array_runs(i)]
         for block in function.newton:
             n = len(block.unknowns)
             spans += [(block.matrix, n * n), (block.right, n), (block.step, n)]
@@ -1304,9 +1378,14 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
             for i in code:
                 for name in register_fields(i):
                     touch(getattr(i, name))
+                if i.op in (Op.VGATHER, Op.VSCATTER):
+                    for r in function.tables[i.a : i.a + i.c]:
+                        touch(r)
         for block in function.newton:
             for r in (*block.unknowns, block.matrix, block.right, block.step):
                 touch(r)
+        for r in function.tables:
+            touch(r)
     size = len(number)
 
     def at(r: int) -> int:
@@ -1336,7 +1415,11 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
             )
             for block in function.newton
         )
-        return Function(tuple(instr(i) for i in function.code), newton)
+        return Function(
+            tuple(instr(i) for i in function.code),
+            newton,
+            tuple(at(r) for r in function.tables),
+        )
 
     compacted = replace(
         program,
@@ -1394,7 +1477,7 @@ def _peephole(function: Function) -> Function:
         elif i.op is Op.NEG and settled(i.dst, i.a, position):
             negated[i.dst] = i.a
         code.append(i)
-    return Function(tuple(code), function.newton)
+    return Function(tuple(code), function.newton, function.tables)
 
 
 def _fold(program: Program, pool: dict[float, int]) -> Program:
@@ -1494,6 +1577,25 @@ class _Machine:
     out: list[float]
     r: list[float]
 
+    def _array(self, i: Instr, tables: Sequence[int]) -> None:
+        """One array opcode, element by element, as the engine runs it."""
+        r, op = self.r, i.op
+        n = i.b if op is Op.VCALL1 else i.c
+        for k in range(n):
+            if op is Op.VGATHER:
+                r[i.dst + k] = r[tables[i.a + k]]
+            elif op is Op.VSCATTER:
+                r[tables[i.a + k]] = r[i.b + k]
+            elif op is Op.VBROADCAST:
+                r[i.dst + k] = r[i.a]
+            elif op is Op.VNEG:
+                r[i.dst + k] = -r[i.a + k]
+            elif op is Op.VCALL1:
+                r[i.dst + k] = float(_UNARY[i.c](np.float64(r[i.a + k])))
+            else:
+                scalar = _VECTOR_TO_SCALAR[op]
+                r[i.dst + k] = float(_arith(scalar, np.float64(r[i.a + k]), np.float64(r[i.b + k])))
+
     def run(self, function: Function, code: Sequence[Instr]) -> None:
         # IEEE semantics, as the engine has them: a branch SELECT discards may compute
         # sqrt(-1) or 1/0, and that must give NaN or inf, not an exception.
@@ -1526,6 +1628,8 @@ class _Machine:
                 out[: i.a] = [0.0] * i.a
             elif op is Op.HOIST:
                 pass
+            elif op in _ARRAY:
+                self._array(i, function.tables)
             elif op is Op.SELECT:
                 r[i.dst] = r[i.b] if r[i.a] != 0.0 else r[i.c]
             elif op is Op.CALL1:
@@ -1710,17 +1814,22 @@ def encode(program: Program) -> Encoded:
     newton: list[int] = []
     unknowns: list[int] = []
 
-    def put(instrs: Sequence[Instr]) -> tuple[int, int]:
+    def put(instrs: Sequence[Instr], tables: int = 0) -> tuple[int, int]:
+        # A gather or scatter names its table by offset in the function's `tables`, which
+        # sit in `unknowns` from ``tables`` on.
         start = len(code) // 5
         for i in instrs:
-            code.extend((int(i.op), i.dst, i.a, i.b, i.c))
+            a = i.a + tables if i.op in (Op.VGATHER, Op.VSCATTER) else i.a
+            code.extend((int(i.op), i.dst, a, i.b, i.c))
         return start, len(instrs)
 
     def add(function: Function) -> None:
-        start, count = put(function.code)
+        tables = len(unknowns)
+        unknowns.extend(function.tables)
+        start, count = put(function.code, tables)
         first = len(newton) // 7
         for block in function.newton:
-            body, length = put(block.body)
+            body, length = put(block.body, tables)
             newton.extend(
                 (
                     len(unknowns),

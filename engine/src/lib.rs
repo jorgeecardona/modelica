@@ -53,6 +53,8 @@ pub struct Program {
     /// The state order Radau factors its matrices in (empty: the natural order), set by
     /// `md_vm_order`. A good order makes `mu/h I - J` banded.
     order: Vec<usize>,
+    /// The gather tables (`vm.Function.tables`, every function's in one pool): register numbers.
+    tables: Vec<usize>,
 }
 
 /// Memory one call works in, kept between calls so a call allocates nothing: the register
@@ -167,10 +169,18 @@ fn solve(r: &mut [f64], a: &mut Vec<f64>, b: &mut Vec<f64>, n: usize, matrix: us
 /// Whether every register an instruction in `code[range]` names is below `registers`, every
 /// constant index is in the pool and every `NEWTON` names a block of its function. `run` reads
 /// registers without bounds checks on the strength of this.
-fn valid(code: &[i32], range: (usize, usize), registers: usize, constants: usize, blocks: usize) -> bool {
+fn valid(code: &[i32], range: (usize, usize), registers: usize, constants: usize, blocks: usize, tables: &[i32]) -> bool {
     let Some(slice) = code.get(range.0 * INSTR..(range.0 + range.1) * INSTR) else { return false };
     let fits = |x: i64| x >= 0 && (x as usize) < registers;
     let span = |start: i64, n: i64| start >= 0 && n >= 0 && (start + n) as usize <= registers;
+    // A table is `n` register numbers in the pool from `start`, every one a register.
+    let table = |start: i64, n: i64| {
+        start >= 0
+            && n >= 0
+            && tables
+                .get(start as usize..(start + n) as usize)
+                .is_some_and(|t| t.iter().all(|&r| fits(r as i64)))
+    };
     slice.chunks_exact(INSTR).all(|i| {
         let (op, dst, a, b, c) = (i[0], i[1] as i64, i[2] as i64, i[3] as i64, i[4] as i64);
         match op {
@@ -183,6 +193,12 @@ fn valid(code: &[i32], range: (usize, usize), registers: usize, constants: usize
             26 => span(a, c * c) && span(b, c) && span(dst, c),
             27 => a >= 0 && (a as usize) < blocks,
             28 | 29 | 30 => true,
+            31 => span(dst, c) && table(a, c),
+            32 => span(b, c) && table(a, c),
+            33 => span(dst, c) && fits(a),
+            34..=37 => span(dst, c) && span(a, c) && span(b, c),
+            38 => span(dst, c) && span(a, c),
+            39 => span(dst, b) && span(a, b),
             _ => false,
         }
     })
@@ -233,6 +249,28 @@ impl Program {
                 }
                 29 => f.out[..a].fill(0.0),
                 30 => {}
+                31 => {
+                    for k in 0..c as usize {
+                        set(dst + k, get(self.tables[a + k]));
+                    }
+                }
+                32 => {
+                    for k in 0..c as usize {
+                        set(self.tables[a + k], get(b + k));
+                    }
+                }
+                33 => {
+                    let v = get(a);
+                    for k in 0..c as usize {
+                        set(dst + k, v);
+                    }
+                }
+                34 => for k in 0..c as usize { set(dst + k, get(a + k) + get(b + k)); },
+                35 => for k in 0..c as usize { set(dst + k, get(a + k) - get(b + k)); },
+                36 => for k in 0..c as usize { set(dst + k, get(a + k) * get(b + k)); },
+                37 => for k in 0..c as usize { set(dst + k, get(a + k) / get(b + k)); },
+                38 => for k in 0..c as usize { set(dst + k, -get(a + k)); },
+                39 => for k in 0..b { set(dst + k, unary(c, get(a + k))); },
                 _ => unreachable!("opcode {op} is not in vm.Op"),
             }
         }
@@ -306,17 +344,20 @@ impl Program {
 }
 
 /// The registers the instructions in `code[range]` write, a solve's and a Newton block's too.
-fn writes(code: &[i32], range: (usize, usize), function: &Function, out: &mut Vec<usize>) {
+fn writes(code: &[i32], range: (usize, usize), function: &Function, tables: &[i32], out: &mut Vec<usize>) {
     for i in code[range.0 * INSTR..(range.0 + range.1) * INSTR].chunks_exact(INSTR) {
-        let (op, dst, a, c) = (i[0], i[1] as usize, i[2] as usize, i[4] as usize);
+        let (op, dst, a, b, c) = (i[0], i[1] as usize, i[2] as usize, i[3] as usize, i[4] as usize);
         match op {
             0..=4 | 7..=25 => out.push(dst),
+            31 | 33..=38 => out.extend(dst..dst + c),
+            32 => out.extend(tables[a..a + c].iter().map(|&r| r as usize)),
+            39 => out.extend(dst..dst + b),
             26 => out.extend(dst..dst + c),
             27 => {
                 let block = &function.newton[a];
                 out.extend(&block.unknowns);
                 out.extend(block.step..block.step + block.unknowns.len());
-                writes(code, block.body, function, out);
+                writes(code, block.body, function, tables, out);
             }
             _ => {}
         }
@@ -324,10 +365,19 @@ fn writes(code: &[i32], range: (usize, usize), function: &Function, out: &mut Ve
 }
 
 /// The registers the instructions in `code[range]` read, a solve's and a Newton block's too.
-fn reads(code: &[i32], range: (usize, usize), function: &Function, out: &mut Vec<usize>) {
+fn reads(code: &[i32], range: (usize, usize), function: &Function, tables: &[i32], out: &mut Vec<usize>) {
     for i in code[range.0 * INSTR..(range.0 + range.1) * INSTR].chunks_exact(INSTR) {
         let (op, a, b, c) = (i[0], i[2] as usize, i[3] as usize, i[4] as usize);
         match op {
+            31 => out.extend(tables[a..a + c].iter().map(|&r| r as usize)),
+            32 => out.extend(b..b + c),
+            33 => out.push(a),
+            34..=37 => {
+                out.extend(a..a + c);
+                out.extend(b..b + c);
+            }
+            38 => out.extend(a..a + c),
+            39 => out.extend(a..a + b),
             5 | 6 => out.push(b),
             7 | 21 | 22 | 23 => out.push(a),
             8..=20 | 24 => out.extend([a, b]),
@@ -342,7 +392,7 @@ fn reads(code: &[i32], range: (usize, usize), function: &Function, out: &mut Vec
                 out.extend(&block.unknowns);
                 out.extend(block.matrix..block.matrix + n * n);
                 out.extend(block.right..block.right + n);
-                reads(code, block.body, function, out);
+                reads(code, block.body, function, tables, out);
             }
             _ => {}
         }
@@ -350,11 +400,11 @@ fn reads(code: &[i32], range: (usize, usize), function: &Function, out: &mut Vec
 }
 
 /// The registers written before `split` in `function` and read after it.
-fn live(code: &[i32], function: &Function, split: usize) -> Vec<usize> {
+fn live(code: &[i32], function: &Function, split: usize, tables: &[i32]) -> Vec<usize> {
     let mut before = Vec::new();
-    writes(code, (function.code.0, split), function, &mut before);
+    writes(code, (function.code.0, split), function, tables, &mut before);
     let mut after = Vec::new();
-    reads(code, (function.code.0 + split + 1, function.code.1 - split - 1), function, &mut after);
+    reads(code, (function.code.0 + split + 1, function.code.1 - split - 1), function, tables, &mut after);
     let after: std::collections::HashSet<usize> = after.into_iter().collect();
     let mut out: Vec<usize> = before.into_iter().filter(|r| after.contains(r)).collect();
     out.sort_unstable();
@@ -408,12 +458,12 @@ pub unsafe extern "C" fn md_vm_new(
                 && block.matrix + n * n <= registers
                 && block.right + n <= registers
                 && block.step + n <= registers;
-            if !inside || !valid(&code, block.body, registers, constants.len(), count) {
+            if !inside || !valid(&code, block.body, registers, constants.len(), count, unknowns) {
                 return std::ptr::null_mut();
             }
             own.push(block);
         }
-        if !valid(&code, (start, len), registers, constants.len(), count) {
+        if !valid(&code, (start, len), registers, constants.len(), count, unknowns) {
             return std::ptr::null_mut();
         }
         let hoist = code[start * INSTR..(start + len) * INSTR]
@@ -421,7 +471,7 @@ pub unsafe extern "C" fn md_vm_new(
             .position(|i| i[0] == 30);
         let mut function = Function { code: (start, len), newton: own, hoist, live: Vec::new() };
         if let Some(split) = hoist {
-            function.live = live(&code, &function, split);
+            function.live = live(&code, &function, split, unknowns);
         }
         decoded.push(function);
     }
@@ -441,6 +491,7 @@ pub unsafe extern "C" fn md_vm_new(
             r: preloaded, a: Vec::new(), b: Vec::new(), cache,
         }),
         order: Vec::new(),
+        tables: unknowns.iter().map(|&r| r as usize).collect(),
     }))
 }
 

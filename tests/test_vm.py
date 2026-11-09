@@ -634,3 +634,62 @@ def test_the_peephole_reads_copies_through_and_folds_negations() -> None:
     (kept,) = vm._prune([folded])  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
     assert op.MOVE not in [i.op for i in kept.code]
     assert op.NEG not in [i.op for i in kept.code]
+
+
+def _array_program() -> tuple[vm.Program, vm.Function]:
+    """Lorenz's program with a hand-written ``rhs`` that uses every array opcode once."""
+    op, instr = vm.Op, vm.Instr
+    program = vm.lower(_system(EXAMPLES / "models" / "Lorenz.mo"))
+    # 64 fresh registers past the old file; the constants move up past them.
+    s = program.registers
+    program = dataclasses.replace(
+        program, registers=program.registers + 64 + len(program.constants)
+    )
+    code = (
+        instr(op.LOAD_Y, s + 0, 0),
+        instr(op.LOAD_Y, s + 1, 1),
+        instr(op.LOAD_Y, s + 2, 2),
+        instr(op.VGATHER, s + 10, 0, 0, 3),  # reversed y
+        instr(op.VBROADCAST, s + 20, s + 0, 0, 3),  # y0, three times
+        instr(op.VMUL, s + 30, s + 10, s + 20, 3),
+        instr(op.VSUB, s + 33, s + 30, s + 10, 3),
+        instr(op.VADD, s + 36, s + 33, s + 10, 3),
+        instr(op.VDIV, s + 40, s + 36, s + 20, 3),
+        instr(op.VNEG, s + 43, s + 40, 0, 3),
+        instr(op.VCALL1, s + 46, s + 43, 3, int(vm.Builtin.SIN)),
+        instr(op.VSCATTER, 0, 3, s + 46, 3),  # into s + 50, 51, 52, through table 3
+        *(instr(op.STORE_OUT, 0, k, s + 50 + k) for k in range(3)),
+    )
+    tables = (s + 2, s + 1, s + 0, s + 50, s + 51, s + 52)
+    return program, vm.Function(code, (), tables)
+
+
+def test_array_opcodes_run_the_same_in_the_engine_and_in_python(engine: Path) -> None:
+    """Each array opcode, element by element, as `vm.evaluate` and the engine run it."""
+    from modelica.sim.engine import load  # noqa: PLC0415
+
+    program, function = _array_program()
+    program = dataclasses.replace(program, rhs=(function,))
+    y = [0.7, -1.3, 2.1]
+    expected = [0.0] * 3
+    vm.evaluate(program, function, 0.0, y, [10.0, 28.0, 8.0 / 3.0], [], expected)
+    x = np.array(y)[::-1]
+    np.testing.assert_allclose(expected, np.sin(-((x * y[0] - x + x) / y[0])), rtol=1e-15)
+    loaded = load(program, engine)
+    out = np.zeros(3)
+    loaded.call(
+        loaded.encoded.rhs(0), 0.0, np.array(y), np.array([10.0, 28.0, 8.0 / 3.0]), np.zeros(0), out
+    )
+    loaded.close()
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_the_engine_refuses_a_table_that_names_no_register(engine: Path) -> None:
+    """A gather table entry past the register file is refused when the program loads."""
+    from modelica.sim.engine import load  # noqa: PLC0415
+    from modelica.sim.solve import SimulationError  # noqa: PLC0415
+
+    program, function = _array_program()
+    bad = dataclasses.replace(function, tables=(program.registers + 5, *function.tables[1:]))
+    with pytest.raises(SimulationError, match="refused"):
+        load(dataclasses.replace(program, rhs=(bad,)), engine)

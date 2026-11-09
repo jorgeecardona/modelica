@@ -50,6 +50,8 @@ blocks. Operands are register numbers unless the opcode says otherwise.
 | `SOLVE` | dense LU with partial pivoting over contiguous registers (not Radau's banded LU) |
 | `NEWTON` | body, solve, add the step; stop when `max abs(step) < 1e-12` or after 50 rounds |
 | `HOIST` | marker: everything before it reads only `time` and constants |
+| `VGATHER`, `VSCATTER` | copy registers named in the function's `tables` into or out of a run |
+| `VBROADCAST`, `VADD`, `VSUB`, `VMUL`, `VDIV`, `VNEG`, `VCALL1` | elementwise over runs of `n` consecutive registers |
 
 The constants live in the last registers. The engine sets them once at load time, so the tape
 has no `CONST` instruction for a constant read as a single operand.
@@ -122,6 +124,8 @@ flowchart TD
 - `code`: 5 integers per instruction (`op, dst, a, b, c`).
 - `functions`: 4 per function (first instruction, count, first Newton block, block count).
 - `newton`: 7 per block (first unknown, count, body start, body length, matrix, right, step).
+- `unknowns`: the Newton blocks' unknowns and every function's gather `tables`; a `VGATHER` or
+  `VSCATTER` names its table by offset in this array.
 - `constants`: the float pool, loaded into the last registers.
 
 Function index order: `rhs` per mode, `observe`, `indicators`, `transition_prefix`,
@@ -138,6 +142,8 @@ Change all of these together. The engine matches raw numbers, so the two sides a
 4. `_Machine._run`: the Python evaluator the tests compare the engine with.
 5. `lib.rs`: `valid` (else `md_vm_new` refuses the program), `Program::run`, and `reads` and
    `writes` (else the time cache saves the wrong registers).
+6. For an array opcode also `_array_reads`, `_array_writes`, `_array_runs` and `_FIELDS`, so
+   `_compact` keeps its runs contiguous and renumbers its table.
 
 ## Speed
 

@@ -373,3 +373,13 @@ unchanged, so every consumer still reads scalar blocks. Conservative for now: on
 alias was eliminated, nothing was differentiated, and the model has one mode, because only then
 does a work equation keep its flat position. TorusHeat: one `ArrayBlock` over blocks 0 to 63.
 Next is commit 5: `vm.lower` writes an `ArrayBlock` as array opcodes.
+
+Commit 5a done: array opcodes in `vm` and the engine. `VGATHER` and `VSCATTER` copy through a
+gather table (`Function.tables`, shipped in the `unknowns` array so `md_vm_new` keeps its
+signature); `VBROADCAST`, `VADD`, `VSUB`, `VMUL`, `VDIV`, `VNEG`, `VCALL1` work elementwise over
+runs of consecutive registers. `md_vm_new` checks every run and every table entry. The passes
+keep tables, treat runs as ranges (`_compact` moves a run as one and renumbers tables) and leave
+the opcodes alone otherwise. Nothing lowers to them yet. Tests: a hand-written `rhs` that uses
+each opcode gives the same output in the engine and in `vm.evaluate`, and matches NumPy; a
+table entry past the register file is refused. Next, 5b: `vm.lower` writes an `ArrayBlock` with
+them.
