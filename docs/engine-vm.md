@@ -8,14 +8,29 @@ lowering passes, and what the engine does at run time. Read it before you change
 The engine is built once and ships in the wheel. A model arrives as data (a tape) and the engine
 interprets it. Nothing is compiled when a simulation runs.
 
+The engine's Radau code (`engine/src/radau.rs`) is generated from `rust_radau.py` by
+`vm.write_runtime()`. Edit the Python strings, then regenerate; `tests/test_vm.py` fails on a
+stale copy.
+
 ## The pipeline
+
+```mermaid
+flowchart LR
+    S[System] -->|vm.lower| P[Program: tapes]
+    P -->|vm.encode| E[flat arrays]
+    E -->|md_vm_new, md_vm_order| L[loaded program]
+    L -->|md_vm_run| R1[one run]
+    L -->|md_vm_run_many| R2[one run per core]
+```
 
 1. `vm.lower(system)` turns a causalized `System` into a `vm.Program`.
 2. `vm.encode(program)` packs it into flat integer and float arrays.
 3. `engine.load` passes the arrays to `md_vm_new`, which checks every register and constant
-   index and refuses a bad program. `md_vm_order` sets the state order.
-4. `md_vm_run` integrates one parameter vector. `md_vm_run_many` integrates many, one thread
-   per core, each thread on its own copy of the program.
+   index and refuses a bad program. `md_vm_order` hands over `Program.order` (from
+   `bandwidth_order` on mode 0) and refuses a list that is not a permutation.
+4. `md_vm_run` integrates one parameter vector. `md_vm_run_many` integrates many on `threads`
+   threads (0: one per core, never more than the number of vectors), each on its own clone of
+   the program.
 
 ## The tape
 
@@ -32,8 +47,8 @@ blocks. Operands are register numbers unless the opcode says otherwise.
 | `MOVE`, `ADD` ... `POW`, `NEG`, `NOT`, comparisons, `AND`, `OR` | arithmetic and logic |
 | `CALL1`, `CALL2` | a builtin (`c` names it: `sin`, `exp`, `atan2`, ...) |
 | `SELECT` | `dst = a != 0 ? b : c` |
-| `SOLVE` | a dense linear system over contiguous registers |
-| `NEWTON` | run a Newton block until its step is below `1e-12` |
+| `SOLVE` | dense LU with partial pivoting over contiguous registers (not Radau's banded LU) |
+| `NEWTON` | body, solve, add the step; stop when `max abs(step) < 1e-12` or after 50 rounds |
 | `HOIST` | marker: everything before it reads only `time` and constants |
 
 The constants live in the last registers. The engine sets them once at load time, so the tape
@@ -43,44 +58,105 @@ has no `CONST` instruction for a constant read as a single operand.
 
 `vm.lower` runs these passes in order. Each one keeps every result bit for bit.
 
-| Pass | What it does | vowel_i `rhs` |
-|---|---|---|
-| `_fold` | evaluates constant subexpressions and drops dead instructions (`_prune`) | a third of the tape |
-| `_peephole` | reads `MOVE` copies through; `x + (-y)` becomes `x - y` | 1828 to 1748 instructions |
-| `_preload` | constants read from their fixed registers | no `CONST` left |
-| `_hoist` | moves time-only work before `HOIST` | 1105 instructions moved |
-| `_compact` | numbers registers in the order `rhs` first uses them | 17010 to 5054 registers |
+| Pass | What it does |
+|---|---|
+| `_fold` | folds constant subexpressions; `_peephole` reads `MOVE` copies through and turns `x + (-y)` into `x - y` (not in a function with Newton blocks); `_prune` drops what nothing reads |
+| `_preload` | constants are read from their fixed registers, with no `CONST` instruction |
+| `_hoist` | in `rhs`, `jacobian`, `observe` and `indicators`: moves the instructions that read only `time` and constants before a `HOIST` marker, when there are at least 4 |
+| `_compact` | numbers registers in the order `rhs` first uses them |
+
+Every pass keeps these invariants:
+
+- A register number never holds a second value. `_compact` renumbers; it does not reuse.
+- A range that a `SOLVE` or a Newton block reads stays contiguous and moves as one.
+- A `transition` branch keeps reading the registers its `transition_prefix` wrote.
+- `_peephole` and `_hoist` touch only registers written once in the function.
+
+What the passes do to the `rhs` tape of some example models:
+
+| Model | States | `rhs` instructions before, after | Registers before, after |
+|---|---|---|---|
+| RCCircuit | 1 | 17, 14 | 76, 40 |
+| BouncingBall | 2 | 8, 5 | 36, 20 |
+| RLCCircuit | 2 | 25, 20 | 101, 52 |
+| DCMotor | 3 | 45, 31 | 199, 102 |
+| TorusHeat | 64 | 579, 513 | 1778, 1318 |
+
+`_hoist` pays on a model with many terms that depend on `time` alone, such as a signal source
+built from many sines. No example model reaches the threshold of 4, so none has a `HOIST`.
 
 `bandwidth_order` picks the state order Radau factors in (reverse Cuthill-McKee on
-`Mode.sparsity`). On vowel_i the bandwidth drops from 75 to 4.
+`Mode.sparsity`). On WaveString the bandwidth drops from 9 to 2, on TorusHeat from 56 to 15.
 
-The `jacobian` tape is built from `rhs` by forward mode (`_Tangents`). It keeps one partial per
-structural non-zero, so it is already sparse.
+The `jacobian` tape is built from `rhs` by forward mode (`_Tangents`). It computes one partial per
+structural non-zero and writes them into a dense row-major `n x n` output, zeroed by one
+`CLEAR_OUT`.
 
 ## At run time
 
+One call of a function with a `HOIST` (`Program::enter`):
+
+```mermaid
+flowchart TD
+    C[rhs at time t] --> Q{a cache slot holds t?}
+    Q -->|yes| B[copy the saved values back]
+    Q -->|no| H[run the code before HOIST]
+    H --> V[save its values in a slot]
+    B --> T[run the code after HOIST]
+    V --> T
+```
+
 - `Program::run` reads registers without bounds checks. `md_vm_new` checked them all.
-- Each function keeps 4 cache slots of the time-only values it last computed, keyed by `t`. Radau
-  calls `rhs` at its three stage times in turn, then at the step start. On a hit the engine
-  copies the saved values back and starts after `HOIST`.
+- A function with a `HOIST` keeps 4 cache slots of its time-only values, keyed by exact `t`
+  equality and replaced in turn. Radau calls `rhs` at its three stage times in turn, then at the
+  step start. A slot saves only the registers the code after `HOIST` reads.
 - Radau builds `mu/h I - J` in the state order. The LU finds the band in the matrix and its
   loops stop there. Row swaps move only the part right of the pivot, as LAPACK's `gbtrf` does.
 - The register file and the solve buffers live in a `Scratch` per program copy, so a call
   allocates nothing and threads share nothing.
 
-## Cost on vowel_i
+## Encoding
 
-A 0.05 s run, user instructions counted with `perf stat`, minus a run with `stop=0`:
+`vm.encode` writes four arrays, which `md_vm_new` reads with fixed row widths (`lib.rs`):
 
-| Version | Instructions |
-|---|---|
-| first engine | 21.1e9 |
-| folding, preloaded constants, unchecked registers | 14.6e9 |
-| banded state order | 7.2e9 |
-| time-only cache | 6.3e9 |
-| compiled Rust backend (`rustsim`), for comparison | 11.2e9 |
+- `code`: 5 integers per instruction (`op, dst, a, b, c`).
+- `functions`: 4 per function (first instruction, count, first Newton block, block count).
+- `newton`: 7 per block (first unknown, count, body start, body length, matrix, right, step).
+- `constants`: the float pool, loaded into the last registers.
 
-16 vowel_i runs over 0.02 s on 16 logical cores take 4.65 s, against 27.0 s on one thread.
+Function index order: `rhs` per mode, `observe`, `indicators`, `transition_prefix`,
+`jacobian`, then every `transition` branch, then `parameters`, `initial`, `latch`.
+
+## Adding an opcode
+
+Change all of these together. The engine matches raw numbers, so the two sides agree by hand.
+
+1. `vm.Op`: the number. Add it to `_PURE` or `_REMOVABLE` when it writes `dst` from registers
+   only, and to `_FIELDS` with the fields that name registers.
+2. `vm.py`: `_operands`, `_apply`, `_reads`, `_writes`, ranges included.
+3. `_Tangents.step`: its derivative rule. Without it the jacobian is wrong, with no error.
+4. `_Machine._run`: the Python evaluator the tests compare the engine with.
+5. `lib.rs`: `valid` (else `md_vm_new` refuses the program), `Program::run`, and `reads` and
+   `writes` (else the time cache saves the wrong registers).
+
+## Speed
+
+Time for one run of each example over its own `stop` and tolerance, on one core:
+
+| Model | SciPy (`backend="python"`) | Engine |
+|---|---|---|
+| RLCCircuit | 0.41 s | 0.01 s |
+| DCMotor | 0.87 s | 0.01 s |
+| BouncingBall (6 events) | 0.03 s | under 0.01 s |
+| Thermostat (33 events) | 0.69 s | 0.01 s |
+| VanDerPol | 79.8 s | 0.21 s |
+| TorusHeat (64 states) | 0.42 s | 0.11 s |
+
+16 VanDerPol runs at different parameters take 0.57 s one after the other and 0.08 s with
+`md_vm_run_many` on 16 logical cores.
+
+Measured at version 0.0.231 on Linux x86_64 with 16 logical cores: process time for one run,
+wall time for the 16 runs. The pass table above is from `vm.lower` at the same version.
 
 ## Where the design is
 

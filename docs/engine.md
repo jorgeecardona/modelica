@@ -58,8 +58,8 @@ the tape inside the same Radau integrator and event loop as the [Rust backend](r
 The tape format, the lowering passes and the run-time caches are in
 [The engine's virtual machine](engine-vm.md).
 
-On the 78-state vowel_i model the engine now uses fewer instructions than the compiled Rust
-backend: 6.3e9 against 11.2e9 for a 0.05 s run. Several parameter vectors run in parallel, one
+VanDerPol takes 0.21 s on the engine against 79.8 s on SciPy, and RLCCircuit 0.01 s against
+0.41 s (version 0.0.231, one core). Several parameter vectors run in parallel, by default one
 thread per core.
 
 ## From a source checkout
