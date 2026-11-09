@@ -614,3 +614,23 @@ def test_compaction_puts_rhs_registers_first(monkeypatch: pytest.MonkeyPatch) ->
         if getattr(i, name) < base
     }
     assert used == set(range(len(used)))
+
+
+def test_the_peephole_reads_copies_through_and_folds_negations() -> None:
+    """``MOVE`` readers read the source; ``x + (-y)`` is ``x - y``; ``x - (-y)`` is ``x + y``."""
+    op, instr = vm.Op, vm.Instr
+    code = (
+        instr(op.LOAD_Y, 0, 0),
+        instr(op.LOAD_Y, 1, 1),
+        instr(op.MOVE, 2, 0),
+        instr(op.NEG, 3, 1),
+        instr(op.ADD, 4, 2, 3),
+        instr(op.SUB, 5, 4, 3),
+        instr(op.STORE_OUT, 0, 0, 5),
+    )
+    folded = vm._peephole(vm.Function(code))  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+    assert folded.code[4] == instr(op.SUB, 4, 0, 1)
+    assert folded.code[5] == instr(op.ADD, 5, 4, 1)
+    (kept,) = vm._prune([folded])  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+    assert op.MOVE not in [i.op for i in kept.code]
+    assert op.NEG not in [i.op for i in kept.code]

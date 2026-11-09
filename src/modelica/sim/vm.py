@@ -1346,6 +1346,50 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
     return compacted, size
 
 
+def _unnegate(i: Instr, negated: Mapping[int, int]) -> Instr:
+    """``i`` with an operand ``-s`` of ``ADD`` or the subtrahend ``-s`` of ``SUB`` read as ``s``."""
+    if i.op is Op.ADD and i.b in negated:
+        return Instr(Op.SUB, i.dst, i.a, negated[i.b])
+    if i.op is Op.ADD and i.a in negated:
+        return Instr(Op.SUB, i.dst, i.b, negated[i.a])
+    if i.op is Op.SUB and i.b in negated:
+        return Instr(Op.ADD, i.dst, i.a, negated[i.b])
+    return i
+
+
+def _peephole(function: Function) -> Function:
+    """``function`` with copies read through and negations folded into ``ADD`` and ``SUB``.
+
+    After ``MOVE d, s`` later instructions read ``s`` for ``d``; after ``NEG d, s``,
+    ``x + d`` and ``d + x`` become ``x - s`` and ``x - d`` becomes ``x + s``. Each is exact in
+    IEEE arithmetic. Only when ``d`` is written once and ``s`` is not written after the copy, so
+    both hold one value for the rest of the call. `_prune` then drops the ``MOVE`` and ``NEG``
+    nothing reads. A function with Newton blocks is left as it is: its bodies run many times.
+    """
+    if function.newton:
+        return function
+    written: dict[int, list[int]] = {}
+    for position, i in enumerate(function.code):
+        for r in _writes(i, function):
+            written.setdefault(r, []).append(position)
+
+    def settled(dst: int, source: int, position: int) -> bool:
+        writes = written.get(source, [])
+        return len(written[dst]) == 1 and len(writes) <= 1 and all(w < position for w in writes)
+
+    alias: dict[int, int] = {}
+    negated: dict[int, int] = {}
+    code: list[Instr] = []
+    for position, original in enumerate(function.code):
+        i = _unnegate(_rewrite(original, alias), negated)
+        if i.op is Op.MOVE and settled(i.dst, i.a, position):
+            alias[i.dst] = i.a
+        elif i.op is Op.NEG and settled(i.dst, i.a, position):
+            negated[i.dst] = i.a
+        code.append(i)
+    return Function(tuple(code), function.newton)
+
+
 def _fold(program: Program, pool: dict[float, int]) -> Program:
     """Fold constant subexpressions, then drop instructions whose result nothing reads.
 
@@ -1375,7 +1419,7 @@ def _fold(program: Program, pool: dict[float, int]) -> Program:
             p.parameters, p.initial, p.latch,
         ]  # fmt: skip
 
-    program = every(lambda f: _fold_function(f, pool), program)
+    program = every(lambda f: _peephole(_fold_function(f, pool)), program)
     pruned = iter(_prune(functions(program)))
     return every(lambda _: next(pruned), program)
 

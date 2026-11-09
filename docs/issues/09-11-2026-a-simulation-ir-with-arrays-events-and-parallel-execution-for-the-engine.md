@@ -258,3 +258,10 @@ reused, so results are bit-identical.
 vowel_i: 17010 registers before, 5054 after; `rhs` uses registers 0 to 1748 plus constants.
 0.05 s run over 3 repeats: L1 data misses 241e6 before, 230e6 after; cycles change by less than
 the noise (15.63e9 against 15.52e9, whole process). A small gain; it stays because it is free.
+
+### Peephole done (2026-11-09)
+
+`vm._peephole` reads copies through (`MOVE`) and folds `x + (-y)` into `x - y` and `x - (-y)`
+into `x + y`, inside one function; `_prune` drops what nothing reads. vowel_i `rhs`: 1828 to
+1748 instructions, no `MOVE` left. Its 156 `NEG` stay: 78 are `DIV` numerators and the rest
+feed outputs, and folding `-(a - b)` into `b - a` would change the sign of a zero result.
