@@ -205,3 +205,8 @@ A call no longer allocates its register file or the `solve` copies; the program 
 vowel_i over 0.05 s, cargo release build, CPU time: engine 6.7 s before, 4.7 s after, the same
 12963 steps. rustsim took 8.3 s in the same session, so the machine was noisy; repeat on a quiet
 machine before quoting a ratio.
+
+### Status (2026-11-09)
+
+Steps 1 to 8 and 10 are done. Step 9 (macOS) waits on a decision about CI minutes: a Mac
+runner costs 6 times a Linux one, and every push to main is a release.
