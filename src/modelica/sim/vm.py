@@ -253,6 +253,9 @@ class Program:
     order: tuple[int, ...] = ()
     """The state order Radau factors its matrices in, `bandwidth_order` of the first mode.
     Empty for the natural order."""
+    times: tuple[int, ...] = ()
+    """Per event, the workspace slot of its instant for a time event (`Trigger.at`), else -1.
+    Empty when no event is a time event."""
 
 
 @dataclass
@@ -1133,7 +1136,14 @@ def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program
             + (0 if lowering.emitter.switching is None else 1),
         ),
     )
-    program = replace(program, order=bandwidth_order(system.modes[0].sparsity))
+    at = [
+        -1 if event.trigger.at is None else event.trigger.at for event in lowering.emitter.events()
+    ]
+    program = replace(
+        program,
+        order=bandwidth_order(system.modes[0].sparsity),
+        times=tuple(at) if any(slot >= 0 for slot in at) else (),
+    )
     program = _fold(program, lowering.constants)
     pool = sorted(lowering.constants, key=lowering.constants.__getitem__)
     program = _preload(program, lowering.registers)

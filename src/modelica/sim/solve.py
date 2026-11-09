@@ -18,6 +18,7 @@ until someone actually calls :func:`simulate`.
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections import Counter
 from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast
@@ -429,6 +430,13 @@ class _Run:
             z = self.kernel.indicators(t, y, self.p, self.w, np.empty(self.kernel.events))
             return float(z[index]) + self.rearm.get(index, 0.0)
 
+        def never(t: float, y: NDArray[np.float64]) -> float:  # noqa: ARG001 - SciPy's signature
+            # A time event: `run` ends the segment at its instant (`_next_time`).
+            return -1.0
+
+        if self.kernel.code.events[index].at is not None:
+            crossing = never
+
         crossing.terminal = True  # pyright: ignore[reportFunctionMemberAccess]
         crossing.direction = self.kernel.code.events[index].direction  # pyright: ignore[reportFunctionMemberAccess]
         return crossing
@@ -446,14 +454,24 @@ class _Run:
         values: list[NDArray[np.float64]] = []
         events: list[Event] = []
         t, chatter, stalled_from, stalled_at = start, 0, 0, start
+        if (first := self._stale(start, y, set())) is not None and self._due(first, start):
+            # A time event due at the start (``sample(0, ...)``) fires there, before any step.
+            y = self._settle(start, y, first, events)
         while t < stop:
-            segment = self._segment(t, stop, y)
+            due = self._next_time(t)
+            segment = self._segment(t, min(stop, due), y)
             sampled, trajectory = self._sample(segment, grid)
             times.append(sampled)
             values.append(self._observe(sampled, trajectory))
-            if segment.status != 1:
+            if segment.status == 1:
+                when, at, before = self._fired(segment)
+            elif segment.status == 0 and due <= stop:
+                # A time event: the segment was cut at its instant, so it fires there exactly.
+                when = self._stale(due, segment.y[:, -1], set())
+                assert when is not None  # noqa: S101 - `_next_time` found it due
+                at, before = due, np.asarray(segment.y[:, -1], dtype=float)
+            else:
                 break
-            when, at, before = self._fired(segment)
             if self.kernel.code.events[when].terminates:
                 # `terminate(...)` fired: the run is defined only up to here. Record the
                 # instant and its reason, keep the samples of this segment (which ended at the
@@ -636,11 +654,25 @@ class _Run:
         gets nothing: its indicator carries a hysteresis margin of its own, and is only
         watched from the state set it would leave.
         """
-        if trigger.switch is not None:
+        if trigger.switch is not None or trigger.at is not None:
             return None
         if trigger.latch is not None and not self.w[trigger.latch] > HELD:
             return -_REARM
         return _REARM
+
+    def _due(self, index: int, t: float) -> bool:
+        """Whether event ``index`` is a time event whose instant is at or before ``t``."""
+        at = self.kernel.code.events[index].at
+        return at is not None and self.w[at] <= t
+
+    def _next_time(self, t: float) -> float:
+        """The earliest time-event instant after ``t`` (`Trigger.at`), or infinity."""
+        due = [
+            self.w[trigger.at]
+            for trigger in self.kernel.code.events
+            if trigger.at is not None and self.w[trigger.at] > t
+        ]
+        return min(due, default=math.inf)
 
     def _stale(self, t: float, y: NDArray[np.float64], fired: set[int]) -> int | None:
         """The first latch that no longer agrees with the relation it is holding.
@@ -650,6 +682,10 @@ class _Run:
         its indicator is numerical noise, so asking whether it agrees with itself is not a
         question with an answer.
         """
+        for index, trigger in enumerate(self.kernel.code.events):
+            # A time event due at this instant that has not acted yet: two samples can meet.
+            if trigger.at is not None and index not in fired and self.w[trigger.at] <= t:
+                return index
         z = self.kernel.indicators(t, y, self.p, self.w, np.empty(self.kernel.events))
         for index, trigger in enumerate(self.kernel.code.events):
             if trigger.latch is None or index in fired:

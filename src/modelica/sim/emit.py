@@ -443,6 +443,15 @@ class Trigger:
     """The ``terminate`` message, reported as the reason the run stopped. Empty when the
     crossing is not a terminate."""
 
+    at: int | None = None
+    """The workspace slot that holds this crossing's instant, for a time event.
+
+    Set for a ``when time >= v`` branch whose ``v`` is a discrete variable, which is what
+    ``when sample(start, interval)`` flattens to. ``v`` changes only at events, so the instant
+    is known ahead and the integrator steps to it exactly, with no root search. ``None`` for a
+    state event.
+    """
+
     def __str__(self) -> str:
         if self.terminates:
             return f"terminate: {self.message}" if self.message else "terminate"
@@ -1668,6 +1677,7 @@ class Emitter:
                     ),
                     terminates=_terminating(branch.body)[0],
                     message=_terminating(branch.body)[1],
+                    at=self.time_event(branch.condition),
                 ),
                 body=branch.body,
             )
@@ -1686,6 +1696,21 @@ class Emitter:
             for position, relation in enumerate(self.watched)
         ]
         return (*branches, *crossings, *self.switches())
+
+    def time_event(self, condition: ir.Expr) -> int | None:
+        """The workspace slot of ``v`` when ``condition`` is ``time >= v`` with ``v`` discrete."""
+        if not (
+            isinstance(condition, ir.Binary)
+            and condition.op == ">="
+            and isinstance(condition.lhs, ir.Ref)
+            and condition.lhs.name == "time"
+            and isinstance(condition.rhs, ir.Ref)
+        ):
+            return None
+        name = condition.rhs.name
+        if name not in self.system or self.system[name].variability != "discrete":
+            return None
+        return self.slots.get(name)
 
     def switches(self) -> list[_Event]:
         """One crossing per ordered pair of state sets: leave this one for that one.

@@ -53,6 +53,8 @@ pub struct Program {
     /// The state order Radau factors its matrices in (empty: the natural order), set by
     /// `md_vm_order`. A good order makes `mu/h I - J` banded.
     order: Vec<usize>,
+    /// Per event, the workspace slot of its time-event instant, or -1 (`md_vm_times`).
+    times: Vec<i64>,
     /// The gather tables (`vm.Function.tables`, every function's in one pool): register numbers.
     tables: Vec<usize>,
 }
@@ -497,8 +499,24 @@ pub unsafe extern "C" fn md_vm_new(
             r: preloaded, a: Vec::new(), b: Vec::new(), cache,
         }),
         order: Vec::new(),
+        times: Vec::new(),
         tables: unknowns.iter().map(|&r| r as usize).collect(),
     }))
+}
+
+/// Set, per event, the workspace slot that holds its time-event instant (-1: a state event).
+/// Returns 0, or -1 (and changes nothing) when `n` is not the event count.
+///
+/// # Safety
+/// `program` comes from `md_vm_new`; `times` is valid for `n` values.
+#[no_mangle]
+pub unsafe extern "C" fn md_vm_times(program: *mut Program, times: *const i64, n: usize) -> i32 {
+    if n != (*program).events {
+        return -1;
+    }
+    let given = if n == 0 { &[][..] } else { slice::from_raw_parts(times, n) };
+    (*program).times = given.to_vec();
+    0
 }
 
 /// Set the state order Radau factors in: `order[i]` is the state at row and column `i`.
@@ -639,7 +657,7 @@ pub unsafe extern "C" fn md_vm_run(
     let previous = CURRENT.with(|c| c.replace(program));
     let r = md_integrate(
         t0, t1, view(y0, n), view(p, np), view_mut(w, nw), rtol, atol,
-        view(dirs, ne), view(lat, ne), view(term, ne), view(grid, npts), &(*program).order, every != 0,
+        view(dirs, ne), view(lat, ne), view(term, ne), &(*program).times, view(grid, npts), &(*program).order, every != 0,
         view_mut(t_out, cap), view_mut(out, cap * n), view_mut(obs, cap * nobs),
         view_mut(events_out, nev_out), view_mut(ev_index_out, nev_out),
     );
@@ -736,7 +754,7 @@ pub unsafe extern "C" fn md_vm_run_many(
                         view_mut((w as *mut f64).add(k * nw), nw),
                         rtol, atol,
                         view(dirs as *const f64, ne), view(lat as *const i64, ne),
-                        view(term as *const i64, ne), view(grid as *const f64, npts), &local.order,
+                        view(term as *const i64, ne), &local.times, view(grid as *const f64, npts), &local.order,
                         every != 0,
                         view_mut((t_out as *mut f64).add(k * cap), cap),
                         view_mut((out as *mut f64).add(k * cap * n), cap * n),

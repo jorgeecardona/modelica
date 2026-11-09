@@ -626,6 +626,18 @@ fn md_row(
 }
 
 #[allow(dead_code)]
+/// The earliest time-event instant after `t`: `w[slot]` over every `slot` in `times` that is
+/// not -1. Infinity when there is none.
+fn md_next_time(t: f64, w: &[f64], times: &[i64]) -> f64 {
+    let mut next = f64::INFINITY;
+    for &at in times {
+        if at >= 0 && w[at as usize] > t && w[at as usize] < next {
+            next = w[at as usize];
+        }
+    }
+    next
+}
+
 fn md_integrate(
     t0: f64,
     t1: f64,
@@ -637,6 +649,7 @@ fn md_integrate(
     directions: &[f64],
     latches: &[i64],
     terminates: &[i64],
+    times: &[i64],
     grid: &[f64],
     order: &[usize],
     every: bool,
@@ -749,7 +762,7 @@ fn md_integrate(
         while !accepted {
             if h_abs < floor { status = TOO_SMALL; break; }
             h = h_abs;
-            t_new = (t + h).min(t1);
+            t_new = (t + h).min(t1).min(md_next_time(t, w, times));
             h = t_new - t;
             h_abs = h;
 
@@ -866,7 +879,16 @@ fn md_integrate(
                 if !active {
                     continue;
                 }
-                let x = md_locate(k, t, h, &y, &quad, p, w, rearm[k], g0, &mut ev_y, &mut z_ev);
+                // A time event (`time >= w[slot]`) whose instant ends this step fires there
+                // exactly: the step was cut to it, so there is no root to search for.
+                let at = times.get(k).copied().unwrap_or(-1);
+                let x = if at >= 0 && w[at as usize] <= t {
+                    0.0 // due at the step's start (`sample(0, ...)` at t0): fire there
+                } else if at >= 0 && t_new == w[at as usize] {
+                    1.0
+                } else {
+                    md_locate(k, t, h, &y, &quad, p, w, rearm[k], g0, &mut ev_y, &mut z_ev)
+                };
                 if x < fired_x {
                     fired_x = x;
                     fired = k as isize;
@@ -880,7 +902,7 @@ fn md_integrate(
             // the root, apply the model's transition, hold the fired crossing off its zero, and
             // restart the stepper there: state moved discontinuously, so the old Jacobian, the
             // extrapolation polynomial and the step-size history are all stale.
-            let te = t + fired_x * h;
+            let te = if fired_x == 1.0 { t_new } else { t + fired_x * h };
             // Before the transition, with the workspace as it still is: these points belong to
             // the segment that is ending, in the state set it ran in.
             while cursor < points && grid[cursor] <= te {
@@ -938,6 +960,11 @@ fn md_integrate(
                 pending = -1;
                 indicators(te, &ev_y, p, w, &mut z_ev);
                 for j in 0..nevents {
+                    // A time event due at this instant that has not acted yet: two can meet.
+                    if !fired_flags[j] && times.get(j).is_some_and(|&at| at >= 0 && w[at as usize] <= te) {
+                        pending = j as isize;
+                        break;
+                    }
                     if latches[j] < 0 || fired_flags[j] {
                         continue;
                     }
@@ -955,7 +982,10 @@ fn md_integrate(
                 if !fired_flags[j] {
                     continue;
                 }
-                rearm[j] = if latches[j] < 0 || w[latches[j] as usize] > MD_HELD {
+                // A time event moved its instant on, so it needs no nudge off its zero.
+                rearm[j] = if times.get(j).is_some_and(|&at| at >= 0) {
+                    0.0
+                } else if latches[j] < 0 || w[latches[j] as usize] > MD_HELD {
                     MD_REARM
                 } else {
                     -MD_REARM

@@ -116,6 +116,8 @@ def _open(path: Path) -> ctypes.CDLL:
     engine.md_vm_free.argtypes = [pointer]
     engine.md_vm_order.restype = ctypes.c_int32
     engine.md_vm_order.argtypes = [pointer, pointer, size]
+    engine.md_vm_times.restype = ctypes.c_int32
+    engine.md_vm_times.argtypes = [pointer, pointer, size]
     engine.md_vm_run_many.restype = None
     engine.md_vm_run_many.argtypes = [
         pointer, size, size, *_RUN_ARGUMENTS[:-1], pointer, pointer,
@@ -216,6 +218,12 @@ def load(program: vm.Program, path: Path | None = None) -> Loaded:
         if engine.md_vm_order(handle, order.ctypes.data, len(order)) != 0:
             engine.md_vm_free(handle)
             message = "the engine refused the state order"
+            raise SimulationError(message)
+    if program.times:
+        times = np.ascontiguousarray(program.times, dtype=np.int64)
+        if engine.md_vm_times(handle, times.ctypes.data, len(times)) != 0:
+            engine.md_vm_free(handle)
+            message = "the engine refused the time-event slots"
             raise SimulationError(message)
     return Loaded(engine, handle, encoded, program.layout)
 

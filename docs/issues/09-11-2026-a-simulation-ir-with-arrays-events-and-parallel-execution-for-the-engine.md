@@ -450,3 +450,10 @@ partition; no new opcode. Refused: inferred `Clock()`, `subSample`, `superSample
 commits: flatten, causalize, emitter with SciPy tick, `vm.lower` with engine, each with a test.
 
 Step 7 is met for grids by the banded LU. Next: 6a commit 1.
+
+6a commit 1 done: `Trigger.at` (the emitter sets it for `time >= v`, `v` discrete),
+`Program.times` and `md_vm_times` in the engine, `md_next_time` in Radau, and `_next_time` in
+SciPy. A sample fires at `pre(next) + interval` exactly on both backends, and two samples that
+meet at one instant both fire. Test: `tests/test_sample.py`. A model with no states does not
+run on the engine (the step size falls to zero at t = 0); that was so before this change, and it
+is filed. Next: 6b waits for steps 9 to 11, so step 9 (face-list opcodes) is next.

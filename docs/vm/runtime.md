@@ -48,6 +48,14 @@ band in the matrix and stops its loops there. Row swaps move only the part right
 as LAPACK's `gbtrf` does, so the solves stay inside the band too. A model in a good order
 factors in `n * lower * (lower + upper)` instead of `n^3 / 3`.
 
+A time event is a `when time >= v` branch whose `v` is a discrete variable, which is what
+`when sample(start, interval)` flattens to. `Program.times` gives each event's workspace slot of
+`v` (-1 for a state event), set with `md_vm_times`. Radau cuts each step at the earliest `v`
+ahead and fires the event at that instant exactly, with no root search and no rearm nudge. One
+due at the step's start fires there. At one instant the event iteration also fires every other
+time event that is due, then every stale latch. SciPy does the same: `_next_time` ends the
+segment, and `_stale` reports a due time event first.
+
 ## Parallel runs
 
 `md_vm_run_many` integrates many parameter vectors. It starts `threads` threads (0: one per

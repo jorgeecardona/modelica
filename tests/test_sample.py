@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
+from typing import Literal
+
 import pytest
 
 from modelica.lang import parse
@@ -35,3 +38,42 @@ def test_sample_fires_once_per_interval() -> None:
     result = simulate(causalize(flatten(parse(PULSE), "Pulse")), stop=0.05)
     fired = np.unique(np.round(result["tStart"], 9))
     np.testing.assert_allclose(fired, [k / 120 for k in range(7)], atol=1e-9)
+
+
+DECAY = """\
+model Decay
+  Real x(start = 1, fixed = true);
+  discrete Real tA(start = 0, fixed = true);
+  discrete Real tB(start = 0, fixed = true);
+equation
+  der(x) = -x;
+  when sample(0.05, 0.1) then
+    tA = time;
+  end when;
+  when sample(0.05, 0.2) then
+    tB = time;
+  end when;
+end Decay;
+"""
+
+
+@pytest.mark.parametrize("backend", ["python", "engine"])
+def test_a_sample_is_a_time_event_at_its_exact_instant(
+    backend: Literal["python", "engine"],
+) -> None:
+    """Each sample fires at ``pre(next) + interval`` exactly, and two that meet both fire."""
+    system = causalize(flatten(parse(DECAY), "Decay"))
+    if backend == "engine":
+        from modelica.sim.engine import installed  # noqa: PLC0415 - only this case needs it
+
+        if installed() is None and shutil.which("rustc") is None:
+            pytest.skip("no engine in this install and no rustc to build one")
+    result = simulate(system, stop=1.0, backend=backend)
+    expected: list[float] = []
+    for interval in (0.1, 0.2):
+        instant = 0.05
+        while instant <= 1.0:
+            expected.append(instant)
+            instant += interval
+    assert sorted(event.time for event in result.events) == sorted(expected)
+    assert result["x"][-1] == pytest.approx(np.exp(-1.0), rel=1e-5)
