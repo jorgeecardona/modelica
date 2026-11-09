@@ -25,7 +25,8 @@ import numpy as np
 
 from modelica.ir import nodes as ir
 from modelica.ir.derive import simplify
-from modelica.ir.rewrite import residual, substitute
+from modelica.ir.flat import at_cell
+from modelica.ir.rewrite import names, residual, substitute
 from modelica.sim.emit import (
     ITERATIONS,
     TOLERANCE,
@@ -42,7 +43,7 @@ from modelica.sim.emit import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from modelica.ir.system import Block, Mode, System
+    from modelica.ir.system import ArrayBlock, Block, Mode, System
 
 __all__ = ["Function", "Instr", "NewtonBlock", "Op", "Program", "evaluate", "lower"]
 
@@ -259,6 +260,7 @@ class _Scope:
     values: dict[ir.Expr, int]
     names: dict[str, int]
     newton: list[NewtonBlock]
+    tables: list[int] = field(default_factory=list[int])
 
     def child(self) -> _Scope:
         """A scope for a Newton body: it sees what is known, and leaks nothing back."""
@@ -388,9 +390,73 @@ class _Lowering:
         dst = self.emit(scope, Op.MOVE, source)
         scope.names[name] = dst
 
-    def blocks(self, scope: _Scope, mode: Mode) -> None:
-        for block in mode.blocks:
-            self.solve(scope, block)
+    def blocks(self, scope: _Scope, mode: Mode, *, arrays: bool = False) -> None:
+        """Every block in order; with ``arrays``, each `ArrayBlock` it can as array opcodes."""
+        runs = {array.first: array for array in mode.arrays} if arrays else {}
+        k = 0
+        while k < len(mode.blocks):
+            array = runs.get(k)
+            if array is not None and self.array(scope, mode, array):
+                k += len(array)
+                continue
+            self.solve(scope, mode.blocks[k])
+            k += 1
+
+    def array(self, scope: _Scope, mode: Mode, array: ArrayBlock) -> bool:  # noqa: C901 - one case per node
+        """One `ArrayBlock` as array opcodes; False, having written nothing, when it cannot.
+
+        The loop's right-hand side is written once over all cells: a subscript is a
+        ``VGATHER``, a part that reads no subscript is computed once and broadcast, and the
+        arithmetic is elementwise. Each cell does the operations its scalar block would, in
+        the same order, so the results are the same bits. A ``VSCATTER`` then gives each cell's
+        unknown its own register, as `assign` does.
+        """
+        equation = array.equation
+        cells = list(equation.cells())
+        run = mode.blocks[array.first : array.first + len(cells)]
+        shapes, constants = dict(equation.shapes), dict(equation.constants)
+        template = _reals(equation.equation.rhs)
+        indices = frozenset(index.name for index in equation.indices)
+        if not _vectorizable(template, indices):
+            return False
+        for k in {0, len(cells) - 1}:
+            if run[k].assignment != at_cell(template, cells[k], shapes, constants):
+                return False
+        n = len(cells)
+
+        def go(node: ir.Expr) -> int:
+            node = _unwrap(node)
+            if not _reads_array(node):
+                dst = self.register(n)
+                scope.code.append(Instr(Op.VBROADCAST, dst, self.expr(scope, node), 0, n))
+                return dst
+            dst = self.register(n)
+            match node:
+                case ir.Subscript():
+                    offset = len(scope.tables)
+                    scope.tables.extend(
+                        self.value(scope, at_cell(node, cell, shapes, constants)) for cell in cells
+                    )
+                    scope.code.append(Instr(Op.VGATHER, dst, offset, 0, n))
+                case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+                    left, right = go(lhs), go(rhs)
+                    scope.code.append(Instr(_VECTOR_OPS[op], dst, left, right, n))
+                case ir.Unary(op="-", operand=operand):
+                    scope.code.append(Instr(Op.VNEG, dst, go(operand), 0, n))
+                case ir.Call(name=name, args=(argument,)):
+                    scope.code.append(Instr(Op.VCALL1, dst, go(argument), n, _UNARY_CALLS[name]))
+                case _:
+                    raise AssertionError(node)
+            return dst
+
+        result = go(template)
+        targets = [self.register() for _ in cells]
+        offset = len(scope.tables)
+        scope.tables.extend(targets)
+        scope.code.append(Instr(Op.VSCATTER, 0, offset, result, n))
+        for block, register in zip(run, targets, strict=True):
+            scope.names[block.unknowns[0]] = register
+        return True
 
     def solve(self, scope: _Scope, block: Block) -> None:
         """One block, as `Emitter.solve`: assignment, linear solve, or Newton."""
@@ -466,7 +532,7 @@ class _Lowering:
     def function(self, body: Callable[[_Scope], None]) -> Function:
         scope = _Scope([], {}, {}, [])
         body(scope)
-        return Function(tuple(scope.code), tuple(scope.newton))
+        return Function(tuple(scope.code), tuple(scope.newton), tuple(scope.tables))
 
     def parameters(self) -> Function:
         """The parameter vector, each binding after the ones it reads (`Emitter.ordered`)."""
@@ -534,10 +600,10 @@ class _Lowering:
 
         return self.function(body)
 
-    def rhs(self, mode: Mode) -> Function:
+    def rhs(self, mode: Mode, *, arrays: bool = False) -> Function:
         def body(scope: _Scope) -> None:
             self.unpack(scope, mode)
-            self.blocks(scope, mode)
+            self.blocks(scope, mode, arrays=arrays)
             for slot, state in enumerate(mode.states):
                 source = self.ref(scope, mode.derivative[state])
                 scope.code.append(Instr(Op.STORE_OUT, 0, slot, source))
@@ -906,10 +972,11 @@ def bandwidth_order(sparsity: Sequence[Sequence[int]]) -> tuple[int, ...]:
     return tuple(order)
 
 
-def lower(system: System, *, hoist: bool = True) -> Program:
+def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program:
     """Write ``system``'s kernel functions as tapes.
 
-    ``hoist=False`` leaves out `_hoist`, so a test can check it changes no result.
+    ``hoist=False`` leaves out `_hoist` and ``arrays=False`` writes every `ArrayBlock` as
+    scalar blocks, so a test can check each changes no result.
 
     Raises `EmitError` for what the tape cannot express yet, with the emitter's message where
     the emitter would refuse too.
@@ -921,7 +988,9 @@ def lower(system: System, *, hoist: bool = True) -> Program:
     program = Program(
         registers=0,
         constants=(),
-        rhs=rhs,
+        # The jacobian is built from the scalar `rhs` (`_Tangents` reads scalar opcodes);
+        # the `rhs` the engine runs writes each `ArrayBlock` as array opcodes.
+        rhs=tuple(lowering.rhs(mode, arrays=arrays) for mode in modes),
         jacobian=tuple(
             _Tangents(lowering, len(mode.states)).function(f)
             for mode, f in zip(modes, rhs, strict=True)
@@ -1000,6 +1069,68 @@ def _apply(i: Instr, values: Mapping[int, float]) -> float:
             return float(_BINARY[i.c](np.float64(values[i.a]), np.float64(values[i.b])))
         b = values[i.b] if i.op not in (Op.NEG, Op.NOT) else 0.0
         return float(_arith(i.op, np.float64(values[i.a]), np.float64(b)))
+
+
+#: The binary operators an `ArrayBlock` writes elementwise.
+_VECTOR_OPS: Final = {"+": Op.VADD, "-": Op.VSUB, "*": Op.VMUL, "/": Op.VDIV}
+
+
+def _reals(node: ir.Expr) -> ir.Expr:
+    """``node`` with each integer literal outside a subscript written as a real.
+
+    Causalization leaves the scalar equations that way; the register holds the same float.
+    """
+    match node:
+        case ir.IntLiteral(value=value):
+            return ir.RealLiteral(float(value))
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, _reals(lhs), _reals(rhs))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _reals(operand))
+        case ir.Call(name=name, args=args, named=named):
+            return ir.Call(name, tuple(_reals(a) for a in args), named)
+        case ir.IfExpr(condition=c, then=t, otherwise=o):
+            return ir.IfExpr(_reals(c), _reals(t), _reals(o))
+        case _:
+            return node
+
+
+def _reads_array(node: ir.Expr) -> bool:
+    """Whether ``node`` holds a subscript, so its value differs from cell to cell."""
+    match node:
+        case ir.Subscript():
+            return True
+        case ir.Binary(lhs=lhs, rhs=rhs):
+            return _reads_array(lhs) or _reads_array(rhs)
+        case ir.Unary(operand=operand):
+            return _reads_array(operand)
+        case ir.Call(args=args):
+            return any(_reads_array(a) for a in args)
+        case ir.IfExpr(condition=c, then=t, otherwise=o):
+            return _reads_array(c) or _reads_array(t) or _reads_array(o)
+        case _:
+            return False
+
+
+def _vectorizable(node: ir.Expr, indices: frozenset[str]) -> bool:
+    """Whether `_Lowering.array` can write ``node`` with array opcodes.
+
+    A part with no subscript is computed once, so it may hold anything but a loop index.
+    """
+    node = _unwrap(node)
+    if not _reads_array(node):
+        return not (set(names(node)) & indices)
+    match node:
+        case ir.Subscript():
+            return True
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return op in _VECTOR_OPS and _vectorizable(lhs, indices) and _vectorizable(rhs, indices)
+        case ir.Unary(op="-", operand=operand):
+            return _vectorizable(operand, indices)
+        case ir.Call(name=name, args=(argument,)):
+            return name in _UNARY_CALLS and _vectorizable(argument, indices)
+        case _:
+            return False
 
 
 def _fold_code(  # noqa: C901, PLR0912 - one case per kind of instruction

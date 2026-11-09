@@ -383,3 +383,17 @@ the opcodes alone otherwise. Nothing lowers to them yet. Tests: a hand-written `
 each opcode gives the same output in the engine and in `vm.evaluate`, and matches NumPy; a
 table entry past the register file is refused. Next, 5b: `vm.lower` writes an `ArrayBlock` with
 them.
+
+Commit 5b done: `vm.lower` writes each `ArrayBlock` of `rhs` with array opcodes
+(`_Lowering.array`). The loop's right-hand side is lowered once: a subscript is a `VGATHER`, a
+part with no subscript is computed once and broadcast, `+ - * /`, negation and unary builtins
+are elementwise, and a `VSCATTER` gives each cell's unknown its own register. It checks the
+template against the first and last cells' scalar assignments and falls back to scalar blocks
+for anything else (an `if`, a comparison, a loop index used as a value). The jacobian is still
+built from the scalar `rhs`. Each cell does the same operations in the same order, so the run
+is bit-identical.
+
+TorusHeat `rhs`: 513 to 144 instructions; on the 50 x 50 grid 20001 to 5016 (the rest are the
+2500 state loads and 2500 output stores). `vm.lower` itself is not faster yet: `rhs` is lowered
+twice (scalar for the jacobian). Next: vector loads and stores of states, and a jacobian built
+from the `ArrayBlock`.

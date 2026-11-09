@@ -598,13 +598,13 @@ def test_hoisting_changes_no_result(engine: Path, monkeypatch: pytest.MonkeyPatc
 def test_compaction_puts_rhs_registers_first(monkeypatch: pytest.MonkeyPatch) -> None:
     """After `_compact` the rhs reads and writes the lowest registers, and none is lost."""
     system = _system(EXAMPLES / "models" / "TorusHeat.mo")
-    compact = vm.lower(system)
+    compact = vm.lower(system, arrays=False)
 
     def spread_out(program: vm.Program, base: int) -> tuple[vm.Program, int]:
         return program, base
 
     monkeypatch.setattr(vm, "_compact", spread_out)
-    spread = vm.lower(system)
+    spread = vm.lower(system, arrays=False)
     assert compact.registers < spread.registers
     base = compact.registers - len(compact.constants)
     used = {
@@ -693,3 +693,27 @@ def test_the_engine_refuses_a_table_that_names_no_register(engine: Path) -> None
     bad = dataclasses.replace(function, tables=(program.registers + 5, *function.tables[1:]))
     with pytest.raises(SimulationError, match="refused"):
         load(dataclasses.replace(program, rhs=(bad,)), engine)
+
+
+def test_an_array_block_runs_as_array_opcodes_with_the_same_bits(
+    engine: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TorusHeat's grid loop is a few array opcodes, and the run is bit for bit the scalar one."""
+    from modelica.sim import engine as native  # noqa: PLC0415
+
+    system = _system(EXAMPLES / "models" / "TorusHeat.mo")
+    arrays, scalar = vm.lower(system), vm.lower(system, arrays=False)
+    ops = [i.op for i in arrays.rhs[0].code]
+    assert vm.Op.VGATHER in ops
+    assert vm.Op.VSCATTER in ops
+    assert len(arrays.rhs[0].code) < len(scalar.rhs[0].code) // 3
+    knobs: dict[str, Any] = {"stop": 0.5, "tolerance": 1e-8, "points": 11, "path": engine}
+    first = native.simulate(system, **knobs).result
+    real = vm.lower
+
+    def plain(system: System, **_: object) -> vm.Program:
+        return real(system, arrays=False)
+
+    monkeypatch.setattr(vm, "lower", plain)
+    second = native.simulate(system, **knobs).result
+    np.testing.assert_array_equal(first.values, second.values)
