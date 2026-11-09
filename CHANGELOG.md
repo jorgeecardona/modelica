@@ -6,6 +6,7 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- The Jacobian tape is built from the array opcodes, not from a second scalar lowering; TorusHeat Jacobian is 414 instructions, down from 1090.
 - The engine loads and stores runs of states with one instruction; TorusHeat `rhs` is 18 instructions, down from 144.
 - **`pip install modelica` is enough to simulate.** NumPy and SciPy are now plain dependencies;
   `modelica[sim]` still installs and adds nothing.

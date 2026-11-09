@@ -698,6 +698,25 @@ class _Lowering:
 _LN10: Final = math.log(10.0)
 
 
+#: Partials of a run of ``n`` registers: for each pattern (the state cell ``k`` differentiates
+#: by, ``None`` for a zero partial) the first register of the run holding them.
+_Runs = dict[tuple[int | None, ...], int]
+
+
+class _Scalar(Exception):  # noqa: N818 - a signal, not an error
+    """The tangents of an array opcode cannot be written as runs; use the scalar ``rhs``."""
+
+
+def _distinct(runs: _Runs) -> None:
+    """Raise `_Scalar` when two patterns in ``runs`` name the same state in one cell."""
+    if len(runs) < 2:  # noqa: PLR2004
+        return
+    for column in zip(*runs, strict=True):
+        named = [j for j in column if j is not None]
+        if len(named) != len(set(named)):
+            raise _Scalar
+
+
 @dataclass
 class _Tangents:
     """Forward mode over a tape: ``d out / d y`` for every state at once, sparse by seed.
@@ -713,6 +732,8 @@ class _Tangents:
     width: int
     code: list[Instr] = field(default_factory=list[Instr])
     dots: dict[int, dict[int, int]] = field(default_factory=dict[int, dict[int, int]])
+    runs: dict[int, _Runs] = field(default_factory=dict[int, "_Runs"])
+    tables: list[int] = field(default_factory=list[int])
     scope: _Scope = field(default_factory=lambda: _Scope([], {}, {}, []))
 
     def emit(self, op: Op, a: int, b: int = 0, c: int = 0) -> int:
@@ -741,8 +762,100 @@ class _Tangents:
 
     def function(self, rhs: Function) -> Function:
         self.code = [Instr(Op.CLEAR_OUT, 0, self.width * self.width)]
+        self.tables = list(rhs.tables)
         self.run(rhs, rhs.code)
-        return Function(tuple(self.code), rhs.newton)
+        return Function(tuple(self.code), rhs.newton, tuple(self.tables))
+
+    def vemit(self, op: Op, n: int, a: int, b: int = 0) -> int:
+        dst = self.lowering.register(n)
+        self.code.append(Instr(op, dst, a, b, n))
+        return dst
+
+    def vcombine(self, op: Op, left: _Runs, right: _Runs) -> _Runs:
+        """``left + right`` or ``left - right`` over runs, pattern by pattern.
+
+        Raises `_Scalar` when two different patterns name the same state in one cell: the
+        scalar tangent would add them here, and the vector form cannot.
+        """
+        out: _Runs = {}
+        for key in left.keys() | right.keys():
+            if key in left and key in right:
+                out[key] = self.vemit(op, len(key), left[key], right[key])
+            elif key in left:
+                out[key] = left[key]
+            else:
+                out[key] = right[key] if op is Op.ADD else self.vemit(Op.VNEG, len(key), right[key])
+        _distinct(out)
+        return out
+
+    def vstep(self, i: Instr) -> None:  # noqa: C901, PLR0912 - one case per array opcode
+        """The partials of one array opcode, as runs keyed by the state each cell reads."""
+        runs, n = self.runs, i.c
+        a, b = runs.get(i.a, {}), runs.get(i.b, {})
+        out: _Runs
+        if i.op is Op.VGATHER:
+            out = self.gather([self.dots.get(r, {}) for r in self.tables[i.a : i.a + n]])
+        elif i.op is Op.VSCATTER:
+            for k, target in enumerate(self.tables[i.a : i.a + n]):
+                cell = {key[k]: run + k for key, run in self.runs.get(i.b, {}).items()}
+                cell.pop(None, None)  # type: ignore[call-overload]
+                if cell:
+                    self.dots[target] = cell  # type: ignore[assignment]
+                else:
+                    self.dots.pop(target, None)
+            return
+        elif i.op is Op.VBROADCAST:
+            out = {
+                (j,) * n: self.vemit(Op.VBROADCAST, n, d) for j, d in self.dots.get(i.a, {}).items()
+            }
+        elif i.op is Op.VNEG:
+            out = {key: self.vemit(Op.VNEG, n, d) for key, d in a.items()}
+        elif i.op in (Op.VADD, Op.VSUB):
+            out = self.vcombine(_SCALAR_OF[i.op], a, b)
+        elif i.op is Op.VMUL:
+            left = {key: self.vemit(Op.VMUL, n, i.b, d) for key, d in a.items()}
+            right = {key: self.vemit(Op.VMUL, n, i.a, d) for key, d in b.items()}
+            out = self.vcombine(Op.ADD, left, right)
+        elif i.op is Op.VDIV:
+            scaled = {key: self.vemit(Op.VMUL, n, i.dst, d) for key, d in b.items()}
+            inner = self.vcombine(Op.SUB, a, scaled)
+            out = {key: self.vemit(Op.VDIV, n, d, i.b) for key, d in inner.items()}
+        elif a:  # VCALL1 of something with partials: not written as runs yet
+            raise _Scalar
+        else:
+            out = {}
+        if out:
+            runs[i.dst] = out
+        else:
+            runs.pop(i.dst, None)
+
+    def gather(self, cells: Sequence[Mapping[int, int]]) -> _Runs:
+        """Runs for a gather whose cell ``k`` has the scalar partials ``cells[k]``.
+
+        Run ``q`` takes each cell's ``q``-th partial by state order; a cell with fewer is
+        padded with a zero partial, keyed ``None``.
+        """
+        n = len(cells)
+        width = max((len(c) for c in cells), default=0)
+        out: _Runs = {}
+        for q in range(width):
+            key: list[int | None] = []
+            registers: list[int] = []
+            for cell in cells:
+                items = sorted(cell.items())
+                if q < len(items):
+                    key.append(items[q][0])
+                    registers.append(items[q][1])
+                else:
+                    key.append(None)
+                    registers.append(self.constant(0.0))
+            offset = len(self.tables)
+            self.tables.extend(registers)
+            dst = self.lowering.register(n)
+            self.code.append(Instr(Op.VGATHER, dst, offset, 0, n))
+            out[tuple(key)] = dst
+        _distinct(out)
+        return out
 
     def run(self, function: Function, code: Sequence[Instr]) -> None:
         for i in code:
@@ -786,6 +899,8 @@ class _Tangents:
             self.solve(i.c, i.a, i.b, i.dst)
         elif op is Op.NEWTON:
             self.newton(function, function.newton[i.a])
+        elif op in _ARRAY:
+            self.vstep(i)
         else:
             # Loads of p, w, t, constants, comparisons and logic: no state in their partials.
             dots.pop(i.dst, None)
@@ -987,17 +1102,12 @@ def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program
     lowering = _Lowering(Emitter(system))
     modes = system.modes
     transitions = [lowering.transition(k, mode) for k, mode in enumerate(modes)]
-    rhs = tuple(lowering.rhs(mode) for mode in modes)
+    rhs = tuple(lowering.rhs(mode, arrays=arrays) for mode in modes)
     program = Program(
         registers=0,
         constants=(),
-        # The jacobian is built from the scalar `rhs` (`_Tangents` reads scalar opcodes);
-        # the `rhs` the engine runs writes each `ArrayBlock` as array opcodes.
-        rhs=tuple(lowering.rhs(mode, arrays=arrays) for mode in modes),
-        jacobian=tuple(
-            _Tangents(lowering, len(mode.states)).function(f)
-            for mode, f in zip(modes, rhs, strict=True)
-        ),
+        rhs=rhs,
+        jacobian=tuple(_jacobian(lowering, mode, f) for mode, f in zip(modes, rhs, strict=True)),
         observe=tuple(lowering.observe(mode) for mode in modes),
         indicators=tuple(lowering.indicators(k, mode) for k, mode in enumerate(modes)),
         transition_prefix=tuple(prefix for prefix, _ in transitions),
@@ -1034,6 +1144,18 @@ def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program
     if arrays:
         program = replace(program, rhs=tuple(_fuse(f) for f in program.rhs))
     return replace(program, registers=base + len(pool), constants=tuple(pool))
+
+
+def _jacobian(lowering: _Lowering, mode: Mode, rhs: Function) -> Function:
+    """``mode``'s Jacobian tape from ``rhs``, array opcodes and all.
+
+    When an array opcode's partials cannot be runs (`_Scalar`), it is built from a scalar
+    lowering of ``rhs`` instead.
+    """
+    try:
+        return _Tangents(lowering, len(mode.states)).function(rhs)
+    except _Scalar:
+        return _Tangents(lowering, len(mode.states)).function(lowering.rhs(mode, arrays=False))
 
 
 def _fuse(function: Function) -> Function:
@@ -1259,6 +1381,7 @@ def _array_writes(i: Instr, tables: Sequence[int]) -> list[int]:
 
 #: The array opcodes, and the scalar opcode each elementwise one applies.
 _VECTOR_TO_SCALAR: Final = {Op.VADD: Op.ADD, Op.VSUB: Op.SUB, Op.VMUL: Op.MUL, Op.VDIV: Op.DIV}
+_SCALAR_OF: Final = _VECTOR_TO_SCALAR
 _ARRAY: Final = frozenset(
     {Op.VGATHER, Op.VSCATTER, Op.VBROADCAST, Op.VNEG, Op.VCALL1, *_VECTOR_TO_SCALAR}
 )

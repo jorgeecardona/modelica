@@ -401,4 +401,13 @@ from the `ArrayBlock`.
 Vector state loads and stores done: `vm._fuse` runs last and writes a run of adjacent `LOAD_Y` or
 `STORE_OUT`, whose slot and register both go up by one, as one `VLOAD_Y` or `VSTORE_OUT`
 (opcodes 40 and 41). It runs after compaction, so no register-set pass sees them. Only `rhs` is
-fused. TorusHeat `rhs`: 144 to 18 instructions. Next: a jacobian built from the `ArrayBlock`.
+fused. TorusHeat `rhs`: 144 to 18 instructions.
+
+Jacobian from the array opcodes done: `_Tangents` differentiates the array `rhs` directly. A run's
+partials are runs keyed by a pattern: the state each cell differentiates by (`None` for a zero
+partial). A gather groups each cell's scalar partials by state order into new gather tables; a
+scatter gives each cell register its partials back as scalars. The rules mirror the scalar ones
+operand for operand, so the values are the same bits. It falls back to a scalar lowering
+(`_Scalar`) when two patterns name one state in one cell, or for `VCALL1` of a value with
+partials. `rhs` is now lowered once. TorusHeat jacobian: 1090 to 414 instructions (320 are the
+scalar `out` stores). Next: step 4 commit 6, `ArrayBlock` in the C and Rust emitters.

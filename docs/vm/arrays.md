@@ -79,8 +79,14 @@ loop index used as a value, or a loop whose first or last block is not the body 
 
 | Grid | Scalar `rhs` | With array opcodes |
 |---|---|---|
-| 8 x 8 | 513 instructions | 144 |
-| 50 x 50 | 20001 instructions | 5016 |
+| 8 x 8 (TorusHeat) | 513 instructions | 18 |
 
-Most of what is left is one state load and one output store per cell. The jacobian is still
-built from the scalar `rhs`.
+The 18 include one `VLOAD_Y` for all states and one `VSTORE_OUT` for all outputs: `_fuse` writes
+runs of adjacent loads and stores as one instruction, last of all passes.
+
+The jacobian is built from the same array `rhs`. A run's partials are runs keyed by the state
+each cell differentiates by. A gather regroups the cells' scalar partials into new gather
+tables, and a scatter gives each cell its partials back as scalars. The values are the same
+bits as the scalar jacobian. TorusHeat jacobian: 1090 to 414 instructions; 320 of the 414 are
+scalar `out` stores. When two runs name one state in one cell, or a `VCALL1` reads a value with
+partials, the jacobian falls back to a scalar lowering of `rhs`.

@@ -710,6 +710,9 @@ def test_an_array_block_runs_as_array_opcodes_with_the_same_bits(
     assert vm.Op.LOAD_Y not in ops
     assert vm.Op.STORE_OUT not in ops
     assert len(arrays.rhs[0].code) < len(scalar.rhs[0].code) // 10
+    jacobian = [i.op for i in arrays.jacobian[0].code]
+    assert vm.Op.VGATHER in jacobian  # built from the runs, not a scalar lowering
+    assert len(jacobian) < len(scalar.jacobian[0].code) // 2
     knobs: dict[str, Any] = {"stop": 0.5, "tolerance": 1e-8, "points": 11, "path": engine}
     first = native.simulate(system, **knobs).result
     real = vm.lower
@@ -732,3 +735,22 @@ def test_a_listing_prints_one_numbered_line_per_instruction() -> None:
     assert "= gather r[" in text
     assert "scatter r" in text
     assert "4.0" in text
+
+
+def test_a_jacobian_built_from_array_opcodes_has_the_scalar_bits() -> None:
+    """TorusHeat's jacobian from runs is bit for bit the one from the scalar tape."""
+    from modelica.sim.kernel import build  # noqa: PLC0415
+
+    system = _system(EXAMPLES / "models" / "TorusHeat.mo")
+    p = list(build(system).start(0.0)[0])
+    rng = np.random.default_rng(7)
+    y = list(rng.random(len(system.states)))
+    results: list[list[float]] = []
+    for arrays in (True, False):
+        program = vm.lower(system, arrays=arrays)
+        out = [0.0] * len(y) ** 2
+        w = [0.0] * program.layout.workspace
+        vm.evaluate(program, program.jacobian[0], 0.1, y, p, w, out)
+        results.append(out)
+    assert any(results[0])
+    assert results[0] == results[1]
