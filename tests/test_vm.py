@@ -501,10 +501,17 @@ def test_any_state_order_integrates_the_same(
 
     system = _system(EXAMPLES / "models" / f"{name}.mo")
     knobs: dict[str, Any] = {"stop": 2.0, "tolerance": 1e-8, "points": 21, "path": engine}
-    monkeypatch.setattr(vm, "bandwidth_order", lambda _: ())
-    natural = native.simulate(system, **knobs).result
     n = len(system.states)
-    monkeypatch.setattr(vm, "bandwidth_order", lambda _: tuple(reversed(range(n))))
+
+    def natural_order(_: object) -> tuple[int, ...]:
+        return ()
+
+    def reversed_order(_: object) -> tuple[int, ...]:
+        return tuple(reversed(range(n)))
+
+    monkeypatch.setattr(vm, "bandwidth_order", natural_order)
+    natural = native.simulate(system, **knobs).result
+    monkeypatch.setattr(vm, "bandwidth_order", reversed_order)
     assert vm.lower(system).order == tuple(reversed(range(n)))
     reordered = native.simulate(system, **knobs).result
     np.testing.assert_array_equal(natural.time, reordered.time)
