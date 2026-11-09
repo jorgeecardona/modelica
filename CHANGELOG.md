@@ -6,6 +6,7 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- The engine loads and stores runs of states with one instruction; TorusHeat `rhs` is 18 instructions, down from 144.
 - **`pip install modelica` is enough to simulate.** NumPy and SciPy are now plain dependencies;
   `modelica[sim]` still installs and adds nothing.
 - **Large array models flatten and causalize faster.** A `for` loop's equations are processed

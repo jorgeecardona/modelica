@@ -93,6 +93,9 @@ class Op(IntEnum):
     VDIV = 37
     VNEG = 38  # dst[k] = -a[k], k < c
     VCALL1 = 39  # dst[k] = builtin c of a[k], k < b
+    # Written only by `_fuse`, after every pass that reads register sets.
+    VLOAD_Y = 40  # dst[k] = y[a + k], k < c
+    VSTORE_OUT = 41  # out[a + k] = b[k], k < c
 
 
 class Builtin(IntEnum):
@@ -1028,7 +1031,33 @@ def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program
             indicators=tuple(_hoist(f, base) for f in program.indicators),
         )
     program, base = _compact(program, lowering.registers)
+    if arrays:
+        program = replace(program, rhs=tuple(_fuse(f) for f in program.rhs))
     return replace(program, registers=base + len(pool), constants=tuple(pool))
+
+
+def _fuse(function: Function) -> Function:
+    """``function`` with runs of adjacent ``LOAD_Y`` or ``STORE_OUT`` as one vector opcode.
+
+    A run is instructions next to each other whose ``y`` or ``out`` slot and register both go up
+    by one. It runs last, so no pass that reads register sets sees the vector forms. Newton
+    bodies are left as they are.
+    """
+    code: list[Instr] = []
+    for i in function.code:
+        last = code[-1] if code else None
+        if last is not None and i.op is Op.LOAD_Y and last.op in (Op.LOAD_Y, Op.VLOAD_Y):
+            n = 1 if last.op is Op.LOAD_Y else last.c
+            if i.a == last.a + n and i.dst == last.dst + n:
+                code[-1] = Instr(Op.VLOAD_Y, last.dst, last.a, 0, n + 1)
+                continue
+        if last is not None and i.op is Op.STORE_OUT and last.op in (Op.STORE_OUT, Op.VSTORE_OUT):
+            n = 1 if last.op is Op.STORE_OUT else last.c
+            if i.a == last.a + n and i.b == last.b + n:
+                code[-1] = Instr(Op.VSTORE_OUT, 0, last.a, last.b, n + 1)
+                continue
+        code.append(i)
+    return replace(function, code=tuple(code))
 
 
 # --------------------------------------------------------------------------------------
@@ -1751,6 +1780,10 @@ class _Machine:
                 out[i.a] = r[i.b]
             elif op is Op.STORE_W:
                 w[i.a] = r[i.b]
+            elif op is Op.VLOAD_Y:
+                r[i.dst : i.dst + i.c] = self.y[i.a : i.a + i.c]
+            elif op is Op.VSTORE_OUT:
+                out[i.a : i.a + i.c] = r[i.b : i.b + i.c]
             elif op is Op.MOVE:
                 r[i.dst] = r[i.a]
             elif op is Op.COPY_Y_OUT:
@@ -2054,6 +2087,10 @@ def _line(i: Instr, program: Program, tables: Sequence[int]) -> str:  # noqa: C9
         return f"out[:{i.a}] = 0"
     if op is Op.HOIST:
         return "--- hoist: everything above reads only time and constants ---"
+    if op is Op.VLOAD_Y:
+        return f"{run(i.dst, i.c)} = y[{i.a}:{i.a + i.c}]"
+    if op is Op.VSTORE_OUT:
+        return f"out[{i.a}:{i.a + i.c}] = {run(i.b, i.c)}"
     if op is Op.VGATHER:
         return f"{run(i.dst, i.c)} = gather r{list(tables[i.a : i.a + i.c])}"
     if op is Op.VSCATTER:

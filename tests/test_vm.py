@@ -570,7 +570,7 @@ def test_time_only_work_moves_before_hoist() -> None:
     split = ops.index(vm.Op.HOIST)
     assert vm.Op.CALL1 in ops[:split]
     assert vm.Op.LOAD_Y not in ops[:split]
-    assert vm.Op.LOAD_Y in ops[split:]
+    assert {vm.Op.LOAD_Y, vm.Op.VLOAD_Y} & set(ops[split:])
     assert vm.Op.HOIST not in [i.op for i in vm.lower(_driven(), hoist=False).rhs[0].code]
 
 
@@ -706,7 +706,10 @@ def test_an_array_block_runs_as_array_opcodes_with_the_same_bits(
     ops = [i.op for i in arrays.rhs[0].code]
     assert vm.Op.VGATHER in ops
     assert vm.Op.VSCATTER in ops
-    assert len(arrays.rhs[0].code) < len(scalar.rhs[0].code) // 3
+    assert ops.count(vm.Op.VLOAD_Y) == 1  # every state in one load (`vm._fuse`)
+    assert vm.Op.LOAD_Y not in ops
+    assert vm.Op.STORE_OUT not in ops
+    assert len(arrays.rhs[0].code) < len(scalar.rhs[0].code) // 10
     knobs: dict[str, Any] = {"stop": 0.5, "tolerance": 1e-8, "points": 11, "path": engine}
     first = native.simulate(system, **knobs).result
     real = vm.lower

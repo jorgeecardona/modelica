@@ -397,3 +397,8 @@ TorusHeat `rhs`: 513 to 144 instructions; on the 50 x 50 grid 20001 to 5016 (the
 2500 state loads and 2500 output stores). `vm.lower` itself is not faster yet: `rhs` is lowered
 twice (scalar for the jacobian). Next: vector loads and stores of states, and a jacobian built
 from the `ArrayBlock`.
+
+Vector state loads and stores done: `vm._fuse` runs last and writes a run of adjacent `LOAD_Y` or
+`STORE_OUT`, whose slot and register both go up by one, as one `VLOAD_Y` or `VSTORE_OUT`
+(opcodes 40 and 41). It runs after compaction, so no register-set pass sees them. Only `rhs` is
+fused. TorusHeat `rhs`: 144 to 18 instructions. Next: a jacobian built from the `ArrayBlock`.
