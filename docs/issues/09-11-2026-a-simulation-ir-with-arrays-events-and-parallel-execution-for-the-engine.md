@@ -472,4 +472,12 @@ from `vm.ldu_amul` over 7 faces, the held end as one more `-a` on cell 1 and the
 `a * T_left`) runs on the engine to the same trajectory as the `for`-loop HeatBar, within
 1e-12 relative over 40 s. Test: `test_a_heat_bar_written_with_face_lists_equals_heat_bar`. The
 tape is written by hand in the test; step 10 (a mesh front end) is what writes it from a mesh.
-Next: step 10.
+
+Step 10 commit 1 done: `modelica.sim.mesh`. `Mesh` holds OpenFOAM's `polyMesh` layout (points,
+faces, `owner`, `neighbour`, `Patch` ranges); `Mesh.addressing()` gives the `vm.Faces` that
+`vm.ldu_amul` reads. Face centres and area vectors come from triangles around the vertex mean,
+cell volumes and centres from pyramids, as OpenFOAM builds them. `mesh.box(shape, size)` writes
+a structured box, and `read_polymesh` and `write_polymesh` handle the ASCII files. Tests: a
+box's addressing equals its grid's adjacency in upper-triangular order, every cell has volume
+`dx dy dz` and is closed, and a mesh reads back as written. Gmsh is not read yet. Next: step 11,
+boundary patches with a rule (fixed value, fixed gradient, zero gradient) applied by opcodes.
