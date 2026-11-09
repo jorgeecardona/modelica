@@ -265,3 +265,20 @@ the noise (15.63e9 against 15.52e9, whole process). A small gain; it stays becau
 into `x + y`, inside one function; `_prune` drops what nothing reads. vowel_i `rhs`: 1828 to
 1748 instructions, no `MOVE` left. Its 156 `NEG` stay: 78 are `DIV` numerators and the rest
 feed outputs, and folding `-(a - b)` into `b - a` would change the sign of a zero result.
+
+### Why step 4 still matters: the Python front end scales with scalars (2026-11-09)
+
+On the corpus the engine's run is no longer the cost. TorusHeat (64 states) spends 0.091 s of
+0.096 s in `vm.lower` and under 5 ms integrating. Grown as an `n x n` grid over 0.2 s:
+
+| n | states | flatten + causalize | `vm.lower` | `simulate` total |
+|---|---|---|---|---|
+| 8 | 64 | 0.17 s | 0.10 s | 0.11 s |
+| 16 | 256 | 0.65 s | 0.42 s | 0.35 s |
+| 24 | 576 | 1.30 s | 1.08 s | 1.39 s |
+| 32 | 1024 | 3.61 s | 1.86 s | 1.77 s |
+
+Flattening grows faster than linearly. Every stage handles one scalar per cell, so a 50 x 50
+grid (step 7's test) would spend most of its time before the engine starts. Step 4 (index sets
+survive flattening) and step 5 (array opcodes) shrink this work by the grid size, not the run.
+Step 4 is therefore measured on front-end time, not on engine instructions.
