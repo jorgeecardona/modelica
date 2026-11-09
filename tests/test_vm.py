@@ -717,3 +717,15 @@ def test_an_array_block_runs_as_array_opcodes_with_the_same_bits(
     monkeypatch.setattr(vm, "lower", plain)
     second = native.simulate(system, **knobs).result
     np.testing.assert_array_equal(first.values, second.values)
+
+
+def test_a_listing_prints_one_numbered_line_per_instruction() -> None:
+    """`vm.listing` numbers each instruction and shows constants by value and runs by length."""
+    program = vm.lower(_system(EXAMPLES / "models" / "TorusHeat.mo"))
+    text = vm.listing(program, program.rhs[0])
+    lines = text.splitlines()
+    assert len(lines) == len(program.rhs[0].code)
+    assert lines[0].split()[0] == "0"
+    assert "= gather r[" in text
+    assert "scatter r" in text
+    assert "4.0" in text

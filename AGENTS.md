@@ -7,7 +7,7 @@ Guidance for AI coding agents working in this repo. Humans: read README.md and C
 `modelica` (distribution name) is a Modelica toolchain for Python: parse `.mo` source files,
 flatten them to a DAE, simulate, and interoperate with FMI 3.0 (single components) and SSP 2.0
 (systems of components). The front end is Python. Simulation defaults to a precompiled Rust
-engine (`engine/`, a bytecode VM shipped in platform wheels; see `docs/engine-vm.md`) and falls
+engine (`engine/`, a bytecode VM shipped in platform wheels; see `docs/vm/index.md`) and falls
 back to SciPy where no engine is installed. The git repo is named `pymodelica`; the import package and PyPI
 distribution are both `modelica`. Pre-alpha. Python 3.12+. No runtime dependencies at the core
 (`pip install modelica` brings nothing); numerics arrive as the `sim` extra (numpy + scipy).

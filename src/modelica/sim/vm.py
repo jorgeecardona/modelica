@@ -2002,6 +2002,88 @@ def encode(program: Program) -> Encoded:
     )
 
 
+_SYMBOLS: Final = {
+    Op.ADD: "+", Op.SUB: "-", Op.MUL: "*", Op.DIV: "/", Op.POW: "^",
+    Op.LT: "<", Op.LE: "<=", Op.GT: ">", Op.GE: ">=", Op.EQ: "==", Op.NE: "!=",
+    Op.AND: "and", Op.OR: "or",
+    Op.VADD: "+", Op.VSUB: "-", Op.VMUL: "*", Op.VDIV: "/",
+}  # fmt: skip
+
+
+def _line(i: Instr, program: Program, tables: Sequence[int]) -> str:  # noqa: C901, PLR0911, PLR0912 - one case per opcode
+    """One instruction as text: registers ``r12``, a run ``r12[4]``, a constant its value."""
+    op = i.op
+    base = program.registers - len(program.constants)
+
+    def reg(r: int) -> str:
+        # A preloaded constant reads better as its value.
+        return repr(program.constants[r - base]) if r >= base else f"r{r}"
+
+    def run(start: int, n: int) -> str:
+        return f"r{start}[{n}]"
+
+    if op is Op.CONST:
+        return f"r{i.dst} = {program.constants[i.a]!r}"
+    if op is Op.TIME:
+        return f"r{i.dst} = time"
+    if op in (Op.LOAD_Y, Op.LOAD_P, Op.LOAD_W):
+        return f"r{i.dst} = {op.name[-1].lower()}[{i.a}]"
+    if op is Op.STORE_OUT:
+        return f"out[{i.a}] = {reg(i.b)}"
+    if op is Op.STORE_W:
+        return f"w[{i.a}] = {reg(i.b)}"
+    if op is Op.MOVE:
+        return f"r{i.dst} = {reg(i.a)}"
+    if op in (Op.NEG, Op.NOT):
+        return f"r{i.dst} = {'-' if op is Op.NEG else 'not '}{reg(i.a)}"
+    if op in _SYMBOLS and op not in _ARRAY:
+        return f"r{i.dst} = {reg(i.a)} {_SYMBOLS[op]} {reg(i.b)}"
+    if op is Op.CALL1:
+        return f"r{i.dst} = {Builtin(i.c).name.lower()}({reg(i.a)})"
+    if op is Op.CALL2:
+        return f"r{i.dst} = {Builtin(i.c).name.lower()}({reg(i.a)}, {reg(i.b)})"
+    if op is Op.SELECT:
+        return f"r{i.dst} = {reg(i.b)} if {reg(i.a)} else {reg(i.c)}"
+    if op is Op.SOLVE:
+        return f"{run(i.dst, i.c)} = solve({run(i.a, i.c * i.c)}, {run(i.b, i.c)})"
+    if op is Op.NEWTON:
+        return f"newton block {i.a}"
+    if op is Op.COPY_Y_OUT:
+        return "out = y"
+    if op is Op.CLEAR_OUT:
+        return f"out[:{i.a}] = 0"
+    if op is Op.HOIST:
+        return "--- hoist: everything above reads only time and constants ---"
+    if op is Op.VGATHER:
+        return f"{run(i.dst, i.c)} = gather r{list(tables[i.a : i.a + i.c])}"
+    if op is Op.VSCATTER:
+        return f"scatter {run(i.b, i.c)} into r{list(tables[i.a : i.a + i.c])}"
+    if op is Op.VBROADCAST:
+        return f"{run(i.dst, i.c)} = {reg(i.a)}"
+    if op is Op.VNEG:
+        return f"{run(i.dst, i.c)} = -{run(i.a, i.c)}"
+    if op is Op.VCALL1:
+        return f"{run(i.dst, i.b)} = {Builtin(i.c).name.lower()}({run(i.a, i.b)})"
+    return f"{run(i.dst, i.c)} = {run(i.a, i.c)} {_SYMBOLS[op]} {run(i.b, i.c)}"
+
+
+def listing(program: Program, function: Function, *, width: int = 8) -> str:
+    """``function`` as readable text, one instruction per line, numbered.
+
+    A gather table longer than ``width`` entries is cut with ``...``. Meant for reading a tape,
+    not for parsing it back.
+    """
+    lines: list[str] = []
+    for number, i in enumerate(function.code):
+        text = _line(i, program, function.tables)
+        if "[" in text and text.count(",") > width:
+            head, _, rest = text.partition("r[")
+            entries = rest.split("]")[0].split(", ")
+            text = f"{head}r[{', '.join(entries[:width])}, ...]" + rest.split("]", 1)[1]
+        lines.append(f"{number:4d}  {text}")
+    return "\n".join(lines)
+
+
 def runtime() -> str:
     """The Radau runtime as ``engine/src/radau.rs`` holds it: `rust_radau`'s text, unchanged.
 

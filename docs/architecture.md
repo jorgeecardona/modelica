@@ -71,7 +71,7 @@ quietly become the poor relation.
 
 ## Performance: where the time goes
 
-The default simulation path is now the [precompiled engine](engine-vm.md): a Rust virtual
+The default simulation path is now the [precompiled engine](vm/index.md): a Rust virtual
 machine that runs Radau and interprets the model as bytecode. This section explains the SciPy
 path, which remains the fallback where no engine is installed.
 

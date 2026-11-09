@@ -94,7 +94,13 @@ nav:
   - Examples: examples.md
   - Finding where two tiers disagree: diverging.md
   - The precompiled engine: engine.md
-  - The engine's virtual machine: engine-vm.md
+  - The virtual machine:
+      - Overview: vm/index.md
+      - The tape: vm/tape.md
+      - Lowering: vm/lowering.md
+      - Array models: vm/arrays.md
+      - At run time: vm/runtime.md
+      - Changing the VM: vm/extending.md
   - The Rust backend, today: rust-backend.md
   - Notebooks:
       - Every model in the corpus: notebooks/gallery.ipynb
