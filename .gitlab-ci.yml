@@ -148,7 +148,7 @@ engine-wheel-windows:
     - export DLL=engine/target/x86_64-pc-windows-gnu/release/modelica_engine.dll
     - x86_64-w64-mingw32-objdump -p "$DLL" | grep "DLL Name"
     - "! x86_64-w64-mingw32-objdump -p \"$DLL\" | grep -iE 'libgcc|libwinpthread|libstdc'"
-    - x86_64-w64-mingw32-objdump -p "$DLL" | grep -q md_vm_run
+    - x86_64-w64-mingw32-objdump -p "$DLL" | grep -c md_vm_run
     - pip install --quiet uv
     - MODELICA_ENGINE_LIBRARY="$DLL" MODELICA_WHEEL_PLATFORM=win_amd64 uv build --wheel --out-dir dist-engine
     - python -m zipfile -l dist-engine/*.whl | grep "modelica/_engine.dll"
