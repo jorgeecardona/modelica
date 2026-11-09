@@ -196,3 +196,17 @@ Tests: any state order (the reversed one) gives the natural order's trajectory w
 a chain with bandwidth n/2 gets bandwidth 1; an order that is not a permutation is refused.
 vowel_i over 0.01 s: same steps and factorisations, largest difference 1.2e-4 on values up to
 3.4e6 (4e-11 relative).
+
+### Step 3 not needed: the Jacobian is already sparse (2026-11-09)
+
+`_Tangents` keeps one partial per structural non-zero, so the Jacobian tape is already the
+compressed one that colouring would give. A 0.05 s vowel_i run:
+
+| | tape instructions | calls |
+|---|---|---|
+| `rhs` | 1827 | 93523 |
+| `jacobian` | 1984 (222 non-zeros) | 24 |
+
+The Jacobian is about 0.03% of the run. Colouring stays useful only for a Jacobian made by
+finite differences, which the engine does not do. The run time is now in `rhs`: step 5 (array
+opcodes) is where the next gain is.
