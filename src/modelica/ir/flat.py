@@ -187,9 +187,8 @@ class FlatModel:
 
     name: str
     variables: tuple[FlatVariable, ...]
-    listing: tuple[ir.Equal | ArrayEquation, ...]
-    """The continuous equations in source order, ``connect()`` already expanded; a ``for``
-    loop over an ``Equal`` body may stay one `ArrayEquation`."""
+    equations: tuple[ir.Equal, ...]
+    """The continuous equations, ``connect()`` already expanded."""
     whens: tuple[ir.When, ...] = ()
     """Event clauses, kept apart from the continuous part they interrupt."""
     asserts: tuple[ir.Assert, ...] = ()
@@ -198,17 +197,6 @@ class FlatModel:
     Apart from the equations because they bind nothing: an assert is a diagnostic on the
     solution, not a constraint that shapes it."""
     initial_equations: tuple[ir.Equal, ...] = ()
-
-    @cached_property
-    def equations(self) -> tuple[ir.Equal, ...]:
-        """`listing` with every `ArrayEquation` written out, cell by cell, in place."""
-        out: list[ir.Equal] = []
-        for item in self.listing:
-            if isinstance(item, ArrayEquation):
-                out.extend(item.scalarize())
-            else:
-                out.append(item)
-        return tuple(out)
 
     def __getitem__(self, name: str) -> FlatVariable:
         try:

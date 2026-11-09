@@ -309,8 +309,8 @@ Commit 1 done: `_affine` stops once a third unknown has a non-zero coefficient, 
 differentiating every unknown first. Same result in every case. Causalize on the 32 x 32 grid:
 1.74 s to 0.53 s.
 
-Commit 2 done: `IndexSet`, `ArrayEquation` and `CellError` in `ir/flat.py`. `FlatModel.listing`
-holds the equations in source order, `ArrayEquation` allowed; `FlatModel.equations` is now a
-cached property that writes every `ArrayEquation` out in place, so every consumer reads scalars
-as before. `flatten` emits no `ArrayEquation` yet. Tests: a periodic stencil and a 2-D loop
+Commit 2 done: `IndexSet`, `ArrayEquation` and `CellError` in `ir/flat.py`. A first version
+renamed the `FlatModel.equations` field to `listing` and made `equations` a property; that broke
+`dataclasses.replace(model, equations=...)`, which users and the docs call, so `equations` stays
+the field. Commit 3 must carry loops beside it without breaking `replace`. Tests: a periodic stencil and a 2-D loop
 scalarize in loop order; `x[i + 1]` past the last cell raises `CellError` naming the cell.

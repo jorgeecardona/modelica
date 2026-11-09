@@ -3365,7 +3365,7 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
     return FlatModel(
         name=found.cls.name,
         variables=(*flattener.variables, *samplers),
-        listing=tuple(flattener.equations),
+        equations=tuple(flattener.equations),
         whens=whens,
         asserts=tuple(flattener.asserts),
         initial_equations=tuple(flattener.initial_equations),
