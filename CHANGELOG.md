@@ -6,6 +6,7 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- Radau stores its matrices in band storage built from the Jacobian pattern; a 10000-state heat grid runs in 364 MB, where dense storage needed 800 MB per matrix.
 - The Jacobian tape writes only its nonzeros (`Program.pattern`); TorusHeat writes 320 values instead of 4096.
 - The Jacobian of a finite-volume tape is built from its array opcodes, scatter-adds included.
 - `modelica.sim.fv` writes heat conduction on a mesh as an engine tape, with fixed-value, fixed-gradient and zero-gradient boundary patches applied by array opcodes.

@@ -49,7 +49,8 @@ as LAPACK's `gbtrf` does, so the solves stay inside the band too. A model in a g
 factors in `n * lower * (lower + upper)` instead of `n^3 / 3`.
 
 The jacobian tape writes one value per nonzero, in the order of `Program.pattern`
-(`md_vm_pattern`). The engine expands it into the dense matrix Radau factors.
+(`md_vm_pattern`). Radau places each entry in band storage of width `2 lower + upper + 1`
+in the state order, so memory grows with `n` times the band, not `n * n`.
 
 A time event is a `when time >= v` branch whose `v` is a discrete variable, which is what
 `when sample(start, interval)` flattens to. `Program.times` gives each event's workspace slot of

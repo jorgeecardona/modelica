@@ -532,3 +532,16 @@ dense matrix Radau reads (commit 2 replaces that with band storage). `vm.dense` 
 view in Python. Tests: every corpus pattern is inside `Mode.sparsity` with no repeats, the
 corpus jacobians equal the emitter's through `vm.dense`, and TorusHeat stores 320 entries, not
 4096. Next: commit 2, band storage in Radau.
+
+Step 12 commit 2 done (12a gate met): Radau holds its matrices in band storage. `md_integrate`
+takes the Jacobian pattern, places each entry once in row-major band storage of width
+`2 lower + upper + 1` in the state order (`at`, `diagonal`), and fills `mu/h I - J` from the
+pattern's values (`md_factor_band`). `md_gb_factor`, `md_gb_solve` and their complex twins are
+the band LU; the dense `md_lu_*` functions stay for `md_factor_pair`'s tests. With no pattern the
+entries are the dense matrix, so `rustsim` runs as before. The jacobian buffer is `nnz` long.
+Measured on TorusHeat at n = 100 (10000 states, this machine): front end 10.4 s, a 0.5 s run
+18.2 s, peak memory of the whole Python process 364 MB (dense storage needed 800 MB per matrix);
+each cell decays as `exp(-8 a sin^2(pi / n) t)` within 3e-14 over 5 s. Tests: the band LU,
+real and complex, matches numpy on random banded systems that pivot; TorusHeat at n = 50 decays
+exactly within 1e-12. Next: commit 3, a workspace so the time loop allocates nothing; the
+iterative solver (12b) waits for a profile.

@@ -58,8 +58,6 @@ pub struct Program {
     /// The Jacobian's entries `(row, column)`, one per value the jacobian tape writes, in
     /// slot order (`md_vm_pattern`). Empty: the tape writes the dense `n * n` matrix.
     pattern: Vec<(usize, usize)>,
-    /// The jacobian tape's values, one per `pattern` entry, before they go into the matrix.
-    values: RefCell<Vec<f64>>,
     /// The gather tables (`vm.Function.tables`, every function's in one pool): register numbers.
     tables: Vec<usize>,
 }
@@ -517,7 +515,6 @@ pub unsafe extern "C" fn md_vm_new(
         order: Vec::new(),
         times: Vec::new(),
         pattern: Vec::new(),
-        values: RefCell::new(Vec::new()),
         tables: unknowns.iter().map(|&r| r as usize).collect(),
     }))
 }
@@ -557,7 +554,6 @@ pub unsafe extern "C" fn md_vm_pattern(program: *mut Program, rows: *const u64, 
         pattern.push((i, j));
     }
     (*program).pattern = pattern;
-    *(*program).values.borrow_mut() = vec![0.0; nnz];
     0
 }
 
@@ -647,18 +643,8 @@ fn indicators(t: f64, y: &[f64], p: &[f64], w: &mut [f64], z: &mut [f64]) {
 fn jacobian(t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]) {
     let m = current();
     let k = m.mode(w);
-    if m.pattern.is_empty() {
-        m.call(4 * m.modes + k, None, t, y, p, w, out);
-        return;
-    }
-    // The tape writes one value per pattern entry; Radau still reads the dense matrix.
-    let mut values = m.values.borrow_mut();
-    m.call(4 * m.modes + k, None, t, y, p, w, &mut values);
-    let n = y.len();
-    out.fill(0.0);
-    for (&(i, j), &v) in m.pattern.iter().zip(values.iter()) {
-        out[i * n + j] = v;
-    }
+    // One value per pattern entry (or the dense matrix with no pattern): Radau reads both.
+    m.call(4 * m.modes + k, None, t, y, p, w, out);
 }
 
 fn transition(event: usize, t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]) {
@@ -710,7 +696,7 @@ pub unsafe extern "C" fn md_vm_run(
     let previous = CURRENT.with(|c| c.replace(program));
     let r = md_integrate(
         t0, t1, view(y0, n), view(p, np), view_mut(w, nw), rtol, atol,
-        view(dirs, ne), view(lat, ne), view(term, ne), &(*program).times, view(grid, npts), &(*program).order, every != 0,
+        view(dirs, ne), view(lat, ne), view(term, ne), &(*program).times, view(grid, npts), &(*program).order, &(*program).pattern, every != 0,
         view_mut(t_out, cap), view_mut(out, cap * n), view_mut(obs, cap * nobs),
         view_mut(events_out, nev_out), view_mut(ev_index_out, nev_out),
     );
@@ -807,7 +793,7 @@ pub unsafe extern "C" fn md_vm_run_many(
                         view_mut((w as *mut f64).add(k * nw), nw),
                         rtol, atol,
                         view(dirs as *const f64, ne), view(lat as *const i64, ne),
-                        view(term as *const i64, ne), &local.times, view(grid as *const f64, npts), &local.order,
+                        view(term as *const i64, ne), &local.times, view(grid as *const f64, npts), &local.order, &local.pattern,
                         every != 0,
                         view_mut((t_out as *mut f64).add(k * cap), cap),
                         view_mut((out as *mut f64).add(k * cap * n), cap * n),

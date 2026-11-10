@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -334,12 +335,15 @@ def test_md_newton_matches_radau() -> None:
             "    let mut w: [f64; 0] = [];",
             "    let jac = [-2.0f64, 1.0, 1.0, -2.0];",
             f"    let h = {h!r}f64;",
-            "    let mut ar = [0.0f64; 4];",
-            "    let mut pr = [0usize; 2];",
-            "    let mut acr = [0.0f64; 4];",
-            "    let mut aci = [0.0f64; 4];",
-            "    let mut pc = [0usize; 2];",
-            "    assert!(md_factor_pair(2, &jac, h, &mut ar, &mut pr, &mut acr, &mut aci, &mut pc, &[]));",
+            # Band storage with lower = upper = 1: width 4, entry (r, c) at r * 4 + c + 1 - r.
+            "    let at = [1usize, 2, 4, 5];",
+            "    let diagonal = [1usize, 5];",
+            "    let mut ar = [0.0f64; 8];",
+            "    let mut pr = [0usize; 4];",
+            "    let mut acr = [0.0f64; 8];",
+            "    let mut aci = [0.0f64; 8];",
+            "    let mut pc = [0usize; 4];",
+            "    assert!(md_factor_band(2, &jac, &at, &diagonal, h, (1, 1), &mut ar, &mut pr, &mut acr, &mut aci, &mut pc));",
             "    let mut z = [0.0f64; 6];",
             "    let scale = [1.0f64, 1.0];",
             f"    let (conv, iters, _rate, _calls) = md_newton(0.0, &y, h, &p, &mut w, &mut z, &scale, {tol!r}f64, &ar, &pr, &acr, &aci, &pc, &[]);",
@@ -402,3 +406,61 @@ def test_md_first_step_matches_radau() -> None:
     )
     found = _run(program)
     assert found[0] == pytest.approx(float(wanted), rel=1e-12, abs=1e-12)
+
+
+@needs_rustc
+@pytest.mark.parametrize(("n", "lower", "upper"), [(6, 1, 1), (9, 2, 3), (8, 3, 0), (5, 4, 4)])
+def test_md_gb_factor_solve_answers_what_numpy_answers(n: int, lower: int, upper: int) -> None:
+    """The band LU, real and complex, solves a random banded system as numpy does, to 1e-12.
+
+    The matrix fills its whole band and is not diagonally dominant, so the factorisation
+    pivots and the swapped rows reach into the extra ``lower`` columns of band storage.
+    """
+    numpy = pytest.importorskip("numpy")
+    rng = numpy.random.default_rng(20261110 + n + 10 * lower + 100 * upper)
+    inside = numpy.array(
+        [[1.0 if -lower <= j - i <= upper else 0.0 for j in range(n)] for i in range(n)]
+    )
+    a = rng.standard_normal((n, n)) * inside
+    c = (rng.standard_normal((n, n)) + 1j * rng.standard_normal((n, n))) * inside
+    b = rng.standard_normal(n)
+    d = rng.standard_normal(n) + 1j * rng.standard_normal(n)
+    width = 2 * lower + upper + 1
+
+    def band(m: Any) -> Any:
+        out = numpy.zeros(n * width, dtype=m.dtype)
+        for i in range(n):
+            for j in range(n):
+                if inside[i, j]:
+                    out[i * width + j + lower - i] = m[i, j]
+        return out
+
+    program = "\n".join(
+        [
+            *LINALG,
+            "fn main() {",
+            f"    let mut a: [f64; {n * width}] = [{_floats(band(a))}];",
+            f"    let mut piv = [0usize; {n + 2}];",
+            f"    assert!(md_gb_factor({n}, &mut a, &mut piv, {lower}, {upper}));",
+            f"    let mut b: [f64; {n}] = [{_floats(b)}];",
+            f"    md_gb_solve({n}, &a, &piv, &mut b);",
+            f"    let mut cr: [f64; {n * width}] = [{_floats(band(c).real)}];",
+            f"    let mut ci: [f64; {n * width}] = [{_floats(band(c).imag)}];",
+            f"    let mut cpiv = [0usize; {n + 2}];",
+            f"    assert!(md_cgb_factor({n}, &mut cr, &mut ci, &mut cpiv, {lower}, {upper}));",
+            f"    let mut dr: [f64; {n}] = [{_floats(d.real)}];",
+            f"    let mut di: [f64; {n}] = [{_floats(d.imag)}];",
+            f"    md_cgb_solve({n}, &cr, &ci, &cpiv, &mut dr, &mut di);",
+            "    let mut printed: Vec<String> = b.iter().map(|v| v.to_string()).collect();",
+            "    printed.extend(dr.iter().map(|v| v.to_string()));",
+            "    printed.extend(di.iter().map(|v| v.to_string()));",
+            '    println!("{}", printed.join(" "));',
+            "}",
+            "",
+        ]
+    )
+    flat = _run(program)
+    numpy.testing.assert_allclose(flat[:n], numpy.linalg.solve(a, b), rtol=1e-12, atol=1e-12)
+    complex_solution = numpy.linalg.solve(c, d)
+    numpy.testing.assert_allclose(flat[n : 2 * n], complex_solution.real, rtol=1e-11, atol=1e-12)
+    numpy.testing.assert_allclose(flat[2 * n :], complex_solution.imag, rtol=1e-11, atol=1e-12)

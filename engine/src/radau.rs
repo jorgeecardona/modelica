@@ -194,6 +194,159 @@ fn md_clu_solve_in(
     for q in 0..n { br[order[q]] = tr[q]; bi[order[q]] = ti[q]; }
 }
 
+// Band storage, row-major: row i holds columns i - lower ..= i + lower + upper, so entry (i, j)
+// is at i * w + j + lower - i with w = 2 lower + upper + 1. The extra `lower` columns on the
+// right take the fill that row swaps bring, as LAPACK's gbtrf band storage does.
+#[allow(dead_code)]
+fn md_gb_width(lower: usize, upper: usize) -> usize { 2 * lower + upper + 1 }
+
+// md_lu_factor on band storage with the band (lower, upper) given: n * lower * (lower + upper).
+#[allow(dead_code)]
+fn md_gb_factor(n: usize, a: &mut [f64], piv: &mut [usize], lower: usize, upper: usize) -> bool {
+    let w = md_gb_width(lower, upper);
+    let at = |i: usize, j: usize| i * w + j + lower - i;
+    piv[n] = lower;
+    piv[n + 1] = lower + upper;
+    for k in 0..n {
+        let last = n.min(k + lower + 1);
+        let right = n.min(k + lower + upper + 1);
+        let mut big = 0.0;
+        let mut row = k;
+        for i in k..last {
+            let size = a[at(i, k)].abs();
+            if size > big { big = size; row = i; }
+        }
+        piv[k] = row;
+        if big == 0.0 { return false; }
+        if row != k {
+            for j in k..right { a.swap(at(k, j), at(row, j)); }
+        }
+        let pivot = a[at(k, k)];
+        for i in (k + 1)..last {
+            let share = a[at(i, k)] / pivot;
+            a[at(i, k)] = share;
+            if share != 0.0 {
+                for j in (k + 1)..right { a[at(i, j)] -= share * a[at(k, j)]; }
+            }
+        }
+    }
+    true
+}
+
+// md_lu_solve against an md_gb_factor factorisation.
+#[allow(dead_code)]
+fn md_gb_solve(n: usize, a: &[f64], piv: &[usize], b: &mut [f64]) {
+    let (lower, width) = (piv[n], piv[n + 1]);
+    let w = lower + width + 1;
+    let at = |i: usize, j: usize| i * w + j + lower - i;
+    for k in 0..n {
+        let row = piv[k];
+        if row != k { b.swap(k, row); }
+        for i in (k + 1)..n.min(k + lower + 1) { b[i] -= a[at(i, k)] * b[k]; }
+    }
+    for k in (0..n).rev() {
+        for j in (k + 1)..n.min(k + width + 1) { b[k] -= a[at(k, j)] * b[j]; }
+        b[k] /= a[at(k, k)];
+    }
+}
+
+// md_clu_factor on band storage, as md_gb_factor.
+#[allow(dead_code)]
+fn md_cgb_factor(n: usize, ar: &mut [f64], ai: &mut [f64], piv: &mut [usize], lower: usize, upper: usize) -> bool {
+    let w = md_gb_width(lower, upper);
+    let at = |i: usize, j: usize| i * w + j + lower - i;
+    piv[n] = lower;
+    piv[n + 1] = lower + upper;
+    for k in 0..n {
+        let last = n.min(k + lower + 1);
+        let right = n.min(k + lower + upper + 1);
+        let mut big = 0.0;
+        let mut row = k;
+        for i in k..last {
+            let size = ar[at(i, k)] * ar[at(i, k)] + ai[at(i, k)] * ai[at(i, k)];
+            if size > big { big = size; row = i; }
+        }
+        piv[k] = row;
+        if big == 0.0 { return false; }
+        if row != k {
+            for j in k..right {
+                ar.swap(at(k, j), at(row, j));
+                ai.swap(at(k, j), at(row, j));
+            }
+        }
+        let pr = ar[at(k, k)];
+        let pi = ai[at(k, k)];
+        let den = pr * pr + pi * pi;
+        for i in (k + 1)..last {
+            let nr = ar[at(i, k)];
+            let ni = ai[at(i, k)];
+            let sr = (nr * pr + ni * pi) / den;
+            let si = (ni * pr - nr * pi) / den;
+            ar[at(i, k)] = sr;
+            ai[at(i, k)] = si;
+            if sr != 0.0 || si != 0.0 {
+                for j in (k + 1)..right {
+                    let akr = ar[at(k, j)];
+                    let aki = ai[at(k, j)];
+                    ar[at(i, j)] -= sr * akr - si * aki;
+                    ai[at(i, j)] -= sr * aki + si * akr;
+                }
+            }
+        }
+    }
+    true
+}
+
+// md_clu_solve against an md_cgb_factor factorisation.
+#[allow(dead_code)]
+fn md_cgb_solve(n: usize, ar: &[f64], ai: &[f64], piv: &[usize], br: &mut [f64], bi: &mut [f64]) {
+    let (lower, width) = (piv[n], piv[n + 1]);
+    let w = lower + width + 1;
+    let at = |i: usize, j: usize| i * w + j + lower - i;
+    for k in 0..n {
+        let row = piv[k];
+        if row != k { br.swap(k, row); bi.swap(k, row); }
+        for i in (k + 1)..n.min(k + lower + 1) {
+            let (akr, aki, bkr, bki) = (ar[at(i, k)], ai[at(i, k)], br[k], bi[k]);
+            br[i] -= akr * bkr - aki * bki;
+            bi[i] -= akr * bki + aki * bkr;
+        }
+    }
+    for k in (0..n).rev() {
+        for j in (k + 1)..n.min(k + width + 1) {
+            let (akr, aki, bjr, bji) = (ar[at(k, j)], ai[at(k, j)], br[j], bi[j]);
+            br[k] -= akr * bjr - aki * bji;
+            bi[k] -= akr * bji + aki * bjr;
+        }
+        let (dr, di) = (ar[at(k, k)], ai[at(k, k)]);
+        let den = dr * dr + di * di;
+        let (nr, ni) = (br[k], bi[k]);
+        br[k] = (nr * dr + ni * di) / den;
+        bi[k] = (ni * dr - nr * di) / den;
+    }
+}
+
+// md_gb_solve in the state order `order` (empty: the natural order), through `tmp`.
+#[allow(dead_code)]
+fn md_gb_solve_in(n: usize, a: &[f64], piv: &[usize], order: &[usize], b: &mut [f64], tmp: &mut [f64]) {
+    if order.is_empty() { md_gb_solve(n, a, piv, b); return; }
+    for q in 0..n { tmp[q] = b[order[q]]; }
+    md_gb_solve(n, a, piv, tmp);
+    for q in 0..n { b[order[q]] = tmp[q]; }
+}
+
+// md_cgb_solve in the state order `order`, as md_gb_solve_in.
+#[allow(dead_code)]
+fn md_cgb_solve_in(
+    n: usize, ar: &[f64], ai: &[f64], piv: &[usize], order: &[usize],
+    br: &mut [f64], bi: &mut [f64], tr: &mut [f64], ti: &mut [f64],
+) {
+    if order.is_empty() { md_cgb_solve(n, ar, ai, piv, br, bi); return; }
+    for q in 0..n { tr[q] = br[order[q]]; ti[q] = bi[order[q]]; }
+    md_cgb_solve(n, ar, ai, piv, tr, ti);
+    for q in 0..n { br[order[q]] = tr[q]; bi[order[q]] = ti[q]; }
+}
+
 const MAX_FACTOR: f64 = 10.0;
 const MIN_FACTOR: f64 = 0.2;
 const NEWTON_MAXITER: usize = 6;
@@ -258,6 +411,38 @@ fn md_factor_pair(
         aci[i * n + i] += mu_complex_i;
     }
     md_lu_factor(n, ar, pr) && md_clu_factor(n, acr, aci, pc)
+}
+
+// mu/h I - J for the real and the complex eigenvalue in band storage, from the Jacobian's
+// values `jac` at the band positions `at` (one per value, in the state order), and factor
+// both. radau.py:432.
+#[allow(dead_code)]
+fn md_factor_band(
+    n: usize,
+    jac: &[f64],
+    at: &[usize],
+    diagonal: &[usize],
+    h: f64,
+    band: (usize, usize),
+    ar: &mut [f64],
+    pr: &mut [usize],
+    acr: &mut [f64],
+    aci: &mut [f64],
+    pc: &mut [usize],
+) -> bool {
+    ar.fill(0.0);
+    acr.fill(0.0);
+    aci.fill(0.0);
+    for (k, &slot) in at.iter().enumerate() {
+        ar[slot] = -jac[k];
+        acr[slot] = -jac[k];
+    }
+    for &slot in diagonal {
+        ar[slot] += MD_MU_REAL / h;
+        acr[slot] += MD_MU_COMPLEX_R / h;
+        aci[slot] += MD_MU_COMPLEX_I / h;
+    }
+    md_gb_factor(n, ar, pr, band.0, band.1) && md_cgb_factor(n, acr, aci, pc, band.0, band.1)
 }
 
 // Returns (converged, iterations, rate, rhs_calls). z holds the stage increments, 3*n flat,
@@ -330,8 +515,8 @@ fn md_newton(
             bcr[q] = imag_r - (mu_complex_r * wm[n + q] - mu_complex_i * wm[2 * n + q]);
             bci[q] = imag_i - (mu_complex_r * wm[2 * n + q] + mu_complex_i * wm[n + q]);
         }
-        md_lu_solve_in(n, ar, pr, order, &mut br, &mut tr);
-        md_clu_solve_in(n, acr, aci, pc, order, &mut bcr, &mut bci, &mut tr, &mut ti);
+        md_gb_solve_in(n, ar, pr, order, &mut br, &mut tr);
+        md_cgb_solve_in(n, acr, aci, pc, order, &mut bcr, &mut bci, &mut tr, &mut ti);
         for q in 0..n {
             dw[q] = br[q];
             dw[n + q] = bcr[q];
@@ -503,6 +688,7 @@ fn md_integrate(
     times: &[i64],
     grid: &[f64],
     order: &[usize],
+    pattern: &[(usize, usize)],
     every: bool,
     t_out: &mut [f64],
     out: &mut [f64],
@@ -530,15 +716,35 @@ fn md_integrate(
     rhs(t, &y, p, w, &mut f);
     let mut evaluations = 1usize;
 
-    let mut jac = vec![0.0f64; n * n];
+    // The Jacobian's entries (row, column), one per value `jacobian` writes; with no pattern,
+    // the dense matrix row by row. Each goes to its place in the band storage of the matrices
+    // in the state order, whose band (lower, upper) the entries fix once here.
+    let entries: Vec<(usize, usize)> = if pattern.is_empty() {
+        (0..n).flat_map(|i| (0..n).map(move |j| (i, j))).collect()
+    } else {
+        pattern.to_vec()
+    };
+    let mut position: Vec<usize> = (0..n).collect();
+    for (q, &state) in order.iter().enumerate() { position[state] = q; }
+    let (mut lower, mut upper) = (0usize, 0usize);
+    for &(i, j) in &entries {
+        let (r, c) = (position[i], position[j]);
+        if r > c { lower = lower.max(r - c); } else { upper = upper.max(c - r); }
+    }
+    let width = md_gb_width(lower, upper);
+    let band_at = |r: usize, c: usize| r * width + c + lower - r;
+    let at: Vec<usize> = entries.iter().map(|&(i, j)| band_at(position[i], position[j])).collect();
+    let diagonal: Vec<usize> = (0..n).map(|q| band_at(q, q)).collect();
+
+    let mut jac = vec![0.0f64; entries.len()];
     jacobian(t, &y, p, w, &mut jac);
     let mut jacobians = 1usize;
     let mut fresh = true;
 
-    let mut ar = vec![0.0f64; n * n];
-    let mut acr = vec![0.0f64; n * n];
-    let mut aci = vec![0.0f64; n * n];
-    // Two slots past the pivots hold the band md_lu_factor found, for md_lu_solve.
+    let mut ar = vec![0.0f64; n * width];
+    let mut acr = vec![0.0f64; n * width];
+    let mut aci = vec![0.0f64; n * width];
+    // Two slots past the pivots hold the band, for md_gb_solve.
     let mut pr = vec![0usize; n + 2];
     let mut pc = vec![0usize; n + 2];
     let mut solve_tmp = vec![0.0f64; n];
@@ -634,7 +840,7 @@ fn md_integrate(
             let mut converged = false;
             while !converged {
                 if !factored {
-                    if !md_factor_pair(n, &jac, h, &mut ar, &mut pr, &mut acr, &mut aci, &mut pc, order) {
+                    if !md_factor_band(n, &jac, &at, &diagonal, h, (lower, upper), &mut ar, &mut pr, &mut acr, &mut aci, &mut pc) {
                         status = NO_CONVERGENCE;
                         break;
                     }
@@ -669,7 +875,7 @@ fn md_integrate(
                 combined[q] = f[q] + (MD_E[0] * z[q] + MD_E[1] * z[n + q] + MD_E[2] * z[2 * n + q]) / h;
                 error[q] = combined[q];
             }
-            md_lu_solve_in(n, &ar, &pr, order, &mut error, &mut solve_tmp);
+            md_gb_solve_in(n, &ar, &pr, order, &mut error, &mut solve_tmp);
             for q in 0..n { scale[q] = atol + rtol * y[q].abs().max(y_new[q].abs()); }
             for q in 0..n { scaled[q] = error[q] / scale[q]; }
             error_norm = md_norm(&scaled);
@@ -681,7 +887,7 @@ fn md_integrate(
                 rhs(t, &y_new, p, w, &mut f_new);
                 evaluations += 1;
                 for q in 0..n { error[q] = f_new[q] + combined[q] - f[q]; }
-                md_lu_solve_in(n, &ar, &pr, order, &mut error, &mut solve_tmp);
+                md_gb_solve_in(n, &ar, &pr, order, &mut error, &mut solve_tmp);
                 for q in 0..n { scaled[q] = error[q] / scale[q]; }
                 error_norm = md_norm(&scaled);
                 for q in 0..n { y_new[q] = y[q] + z[2 * n + q]; }

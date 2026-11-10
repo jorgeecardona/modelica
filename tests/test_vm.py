@@ -903,3 +903,23 @@ def test_torus_heat_stores_five_entries_per_row() -> None:
     """TorusHeat's jacobian tape writes its 5 * 64 nonzeros, not the 64 * 64 matrix."""
     program = vm.lower(_system(EXAMPLES / "models" / "TorusHeat.mo"))
     assert len(program.pattern) == 5 * 64
+
+
+def test_a_2500_state_torus_runs_in_band_storage_and_decays_exactly(engine: Path) -> None:
+    """TorusHeat at n = 50 on the engine: each cell decays as ``exp(-8 a sin^2(pi / n) t)``.
+
+    The start is the lowest Fourier mode, so the method-of-lines solution is that one
+    exponential. Radau factors in band storage from the jacobian pattern, never ``n * n``.
+    """
+    from modelica.sim import engine as native  # noqa: PLC0415
+
+    n = 50
+    source = (EXAMPLES / "models" / "TorusHeat.mo").read_text(encoding="utf-8")
+    model = parse(source.replace("Integer n = 8", f"Integer n = {n}"))
+    system = causalize(pytest.importorskip("modelica.sim").flatten([model], "TorusHeat"))
+    knobs: dict[str, Any] = {"stop": 5.0, "tolerance": 1e-9, "points": 3, "path": engine}
+    result = native.simulate(system, **knobs).result
+    cells = [k for k, name in enumerate(result.names) if name.startswith("T[")]
+    decay = np.exp(-8.0 * np.sin(np.pi / n) ** 2 * 5.0)
+    values = result.values[cells]
+    np.testing.assert_allclose(values[:, -1], values[:, 0] * decay, rtol=0, atol=1e-12)
