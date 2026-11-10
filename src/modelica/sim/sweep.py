@@ -32,7 +32,7 @@ import numpy as np
 
 from modelica.sim.emit import EmitError, settings
 from modelica.sim.kernel import build
-from modelica.sim.solve import SimulationError, simulate
+from modelica.sim.solve import SimulationError, simulate, warn_fallback
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -137,7 +137,8 @@ def _on_engine(
     knobs = {key: value for key, value in options.items() if key != "method"}
     try:
         return engine.results(system, vectors, **knobs)
-    except EmitError:
+    except EmitError as error:
         if backend == "engine":
             raise
+        warn_fallback(system.name, error)
         return None

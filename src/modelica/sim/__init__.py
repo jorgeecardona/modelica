@@ -60,6 +60,7 @@ from modelica.sim.sweep import vector as vector
 from modelica.sim.view import View as View
 
 if TYPE_CHECKING:
+    from modelica.sim.solve import EngineFallbackWarning as EngineFallbackWarning
     from modelica.sim.solve import SimulationError as SimulationError
     from modelica.sim.solve import simulate as simulate
 
@@ -69,6 +70,7 @@ __all__ = [
     "Code",
     "Divergence",
     "EmitError",
+    "EngineFallbackWarning",
     "Event",
     "Fit",
     "FitError",
@@ -101,7 +103,7 @@ __all__ = [
     "vector",
 ]
 
-_LAZY = frozenset({"SimulationError", "simulate"})
+_LAZY = frozenset({"EngineFallbackWarning", "SimulationError", "simulate"})
 
 
 def __getattr__(name: str) -> Any:  # noqa: ANN401 - a module __getattr__ is untyped by nature

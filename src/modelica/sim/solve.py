@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from modelica.ir.system import System
     from modelica.sim.emit import Code, Trigger
 
-__all__ = ["SimulationError", "simulate"]
+__all__ = ["EngineFallbackWarning", "SimulationError", "simulate"]
 
 _IMPLICIT = frozenset({"Radau", "BDF", "LSODA"})
 """The methods that solve with a Jacobian, and so are the ones worth handing an exact one."""
@@ -99,6 +99,16 @@ indicator's slope, which is orders below the tolerance any spec asserts an event
 
 class SimulationError(Exception):
     """The integration did not reach the end, and why."""
+
+
+class EngineFallbackWarning(RuntimeWarning):
+    """``backend="auto"`` ran on SciPy because the installed engine cannot run this model."""
+
+
+def warn_fallback(name: str, error: Exception) -> None:
+    """Warn that ``name`` runs on SciPy, slower, because the engine refused it with ``error``."""
+    message = f"{name}: the engine cannot run this model ({error}); running on SciPy instead"
+    warnings.warn(message, EngineFallbackWarning, stacklevel=4)
 
 
 class _Solution(Protocol):
@@ -243,9 +253,10 @@ def _on_engine(  # noqa: PLR0913 - the knobs of `simulate`
             parameters=parameters,
             start=start,
         )
-    except EmitError:
+    except EmitError as error:
         if backend == "engine":
             raise
+        warn_fallback(model.name, error)
         return None
 
 
