@@ -602,3 +602,14 @@ and the plant matches the exact piecewise recurrence within 1e-12 on SciPy and o
 The first tick is at `time = 0`, not at the run's start time.
 
 Plan steps 1 to 14 and 6a/6b are done; 12b (iterative solvers) waits for a profile.
+
+### Profile for 12b (2026-11-10)
+
+TorusHeat at n = 100 (10000 states), a 0.5 s run with tolerance 1e-8 on this machine: 16.6 s
+in all, of which `vm.lower` is 6.3 s. Radau takes 3 steps with 23 `rhs` calls, 1 jacobian and
+3 factor pairs. The periodic wrap keeps the band at 199 below and 199 above the diagonal even in
+the reverse Cuthill-McKee order, so one real LU is about `n lower (lower + upper)` = 7.9e8
+flops and the complex one about four times that: about 4e9 flops per pair, 1.2e10 for the run.
+The factorisation is most of the 10 s of integration; `rhs` is not. That is the evidence 12b
+waited for. Next: BiCGStab with DILU, generic over real and complex, unit tested against the
+band LU, then used in Newton above a size threshold.
