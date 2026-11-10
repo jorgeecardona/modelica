@@ -16,6 +16,7 @@ instruction (`Op.NEWTON`): the engine runs its body until the step is below `TOL
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass, field, replace
 from enum import IntEnum
@@ -41,11 +42,22 @@ from modelica.sim.emit import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from modelica.ir.system import ArrayBlock, Block, Mode, System
 
-__all__ = ["Function", "Instr", "NewtonBlock", "Op", "Program", "evaluate", "lower"]
+__all__ = [
+    "Function",
+    "Instr",
+    "NewtonBlock",
+    "Op",
+    "Program",
+    "Reduce",
+    "View",
+    "elements",
+    "evaluate",
+    "lower",
+]
 
 
 class Op(IntEnum):
@@ -97,6 +109,49 @@ class Op(IntEnum):
     # Written only by `_fuse` (in ``rhs`` and ``observe``), after every pass that reads registers.
     VLOAD_Y = 40  # dst[k] = y[a + k], k < c
     VSTORE_OUT = 41  # out[a + k] = b[k], k < c
+    # Shaped opcodes (`_SHAPED`): every operand except the last is an index into
+    # `Program.views`, and the destination view sets the iteration shape.
+    TBINARY = 43  # dst = a op b elementwise, c = the scalar `Op` (ADD to OR)
+    TCALL2 = 44  # dst = builtin c of (a, b) elementwise
+    TUNARY = 45  # dst = f(a) elementwise: c = NEG, NOT or CALL1; b = the builtin for CALL1
+    TSELECT = 46  # dst = b where a != 0 else c, elementwise; dst, a, b, c are views
+    TREDUCE = 47  # dst = a folded along axis b by `Reduce` c, in row-major order
+    TINDEX = 48  # dst = the 1-based index along axis a
+    ROLL = 49  # dst = np.roll(a, c, axis=b); dst must not overlap a
+
+
+class Reduce(IntEnum):
+    """How `Op.TREDUCE` folds an axis."""
+
+    SUM = 0
+    PRODUCT = 1
+    MIN = 2
+    MAX = 3
+
+
+@dataclass(frozen=True, slots=True)
+class View:
+    """An array as registers: element ``index`` is ``base + sum(index[k] * strides[k])``.
+
+    NumPy's strided model. A slice moves ``base`` and shrinks ``shape``; a transpose swaps
+    ``strides``; a stride of 0 repeats one register along that axis (a broadcast).
+    """
+
+    base: int
+    shape: tuple[int, ...]
+    strides: tuple[int, ...]
+
+    def __len__(self) -> int:
+        return math.prod(self.shape)
+
+    def at(self, index: Sequence[int]) -> int:
+        """The register of the element at ``index``."""
+        return self.base + sum(k * s for k, s in zip(index, self.strides, strict=True))
+
+
+def elements(view: View) -> list[int]:
+    """The registers of ``view`` in row-major order, the last index fastest."""
+    return [view.at(index) for index in itertools.product(*(range(n) for n in view.shape))]
 
 
 class Builtin(IntEnum):
@@ -266,6 +321,8 @@ class Program:
     times: tuple[int, ...] = ()
     """Per event, the workspace slot of its instant for a time event (`Trigger.at`), else -1.
     Empty when no event is a time event."""
+    views: tuple[View, ...] = ()
+    """The arrays the shaped opcodes (`Op.TBINARY` to `Op.ROLL`) name, by index."""
 
 
 @dataclass
@@ -2143,6 +2200,51 @@ class _Machine:
                 scalar = _VECTOR_TO_SCALAR[op]
                 r[i.dst + k] = float(_arith(scalar, np.float64(r[i.a + k]), np.float64(r[i.b + k])))
 
+    def _shaped(self, i: Instr) -> None:  # noqa: C901, PLR0912 - one case per opcode
+        """One shaped opcode over its destination view, in row-major order."""
+        r, views, op = self.r, self.program.views, i.op
+        dst = views[i.dst]
+        out = elements(dst)
+        if op is Op.TINDEX:
+            for register, index in zip(out, _indices(dst.shape), strict=True):
+                r[register] = float(index[i.a] + 1)
+            return
+        a = views[i.a]
+        if op is Op.TREDUCE:
+            fold = _FOLD[Reduce(i.c)]
+            for register, index in zip(out, _indices(dst.shape), strict=True):
+                total: Any = None
+                for k in range(a.shape[i.b]):
+                    full = (*index[: i.b], k, *index[i.b :])
+                    value = np.float64(r[a.at(full)])
+                    total = value if total is None else fold(total, value)
+                r[register] = float(total)
+            return
+        if op is Op.ROLL:
+            n = a.shape[i.b]
+            for register, index in zip(out, _indices(dst.shape), strict=True):
+                source = (*index[: i.b], (index[i.b] - i.c) % n, *index[i.b + 1 :])
+                r[register] = r[a.at(source)]
+            return
+        left = elements(a)
+        if op is Op.TUNARY:
+            for register, x in zip(out, left, strict=True):
+                value = np.float64(r[x])
+                if i.c == Op.CALL1:
+                    r[register] = float(_UNARY[i.b](value))
+                else:
+                    r[register] = float(_arith(Op(i.c), value, value))
+            return
+        right = elements(views[i.b])
+        if op is Op.TSELECT:
+            otherwise = elements(views[i.c])
+            for register, c, x, z in zip(out, left, right, otherwise, strict=True):
+                r[register] = r[x] if r[c] != 0.0 else r[z]
+            return
+        for register, x, z in zip(out, left, right, strict=True):
+            u, v = np.float64(r[x]), np.float64(r[z])
+            r[register] = float(_BINARY[i.c](u, v) if op is Op.TCALL2 else _arith(Op(i.c), u, v))
+
     def run(self, function: Function, code: Sequence[Instr]) -> None:
         # IEEE semantics, as the engine has them: a branch SELECT discards may compute
         # sqrt(-1) or 1/0, and that must give NaN or inf, not an exception.
@@ -2181,6 +2283,8 @@ class _Machine:
                 pass
             elif op in _ARRAY:
                 self._array(i, function.tables)
+            elif op in _SHAPED:
+                self._shaped(i)
             elif op is Op.SELECT:
                 r[i.dst] = r[i.b] if r[i.a] != 0.0 else r[i.c]
             elif op is Op.CALL1:
@@ -2225,6 +2329,21 @@ class _Machine:
                 r[unknown] = float(np.float64(r[unknown]) + r[block.step + position])
             if max(abs(r[block.step + k]) for k in range(n)) < TOLERANCE:
                 break
+
+
+def _indices(shape: tuple[int, ...]) -> Iterator[tuple[int, ...]]:
+    return itertools.product(*(range(n) for n in shape))
+
+
+_SHAPED: Final = frozenset(
+    {Op.TBINARY, Op.TCALL2, Op.TUNARY, Op.TSELECT, Op.TREDUCE, Op.TINDEX, Op.ROLL}
+)
+_FOLD: Final[dict[Reduce, Callable[[Any, Any], Any]]] = {
+    Reduce.SUM: lambda a, b: a + b,
+    Reduce.PRODUCT: lambda a, b: a * b,
+    Reduce.MIN: _BINARY[Builtin.MIN],
+    Reduce.MAX: _BINARY[Builtin.MAX],
+}
 
 
 def _arith(op: Op, a: float, b: float) -> float:  # noqa: C901, PLR0911, PLR0912 - one case per opcode
