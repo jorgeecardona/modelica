@@ -594,12 +594,17 @@ class _Lowering:
         shapes, constants = dict(equation.shapes), dict(equation.constants)
         template = _reals(equation.equation.rhs)
         indices = frozenset(index.name for index in equation.indices)
-        if not _vectorizable(template, indices):
+        if not _shapeable(template, indices):
             return False
+        # The scalar blocks are the loop body at each cell after `causalize` simplified it
+        # (``-k * 1 * x`` is ``-k * x``), with integer literals; compare in that form.
         for k in {0, len(cells) - 1}:
-            if run[k].assignment != at_cell(template, cells[k], shapes, constants):
+            body = _reals(simplify(at_cell(template, cells[k], shapes, constants)))
+            assignment = run[k].assignment
+            if assignment is None or _reals(assignment) != body:
                 return False
         domain = tuple(len(index) for index in equation.indices)
+        axes = {index.name: axis for axis, index in enumerate(equation.indices)}
         reads = list(_subscripts(template))
         plans = {node: _read_plan(node, equation, cells) for node in reads}
         if any(plan is None for plan in plans.values()):
@@ -611,12 +616,66 @@ class _Lowering:
             first = self.register(n)
             return self.view(scope, View(first, domain, _row_major(domain)))
 
-        def go(node: ir.Expr) -> int:
+        held_by_cell = self.emitter.held
+        found = 0
+
+        def latches(node: ir.Expr) -> list[ir.Expr]:
+            """Each cell's latch for relation ``node``; empty when no cell latches it."""
+            nonlocal found
+            out: list[ir.Expr] = []
+            kinds: set[bool] = set()
+            for cell in cells:
+                at = at_cell(node, cell, shapes, constants)
+                latched = _latched(at, held_by_cell)
+                if latched == at:
+                    latched = _latched(simplify(at), held_by_cell)
+                kinds.add(bool(_latch_refs(latched)))
+                out.append(latched)
+            if kinds == {True}:
+                found += 1
+                return out
+            if kinds == {False}:
+                return []
+            raise _RefusedError
+
+        def emit(op: Op, a: int, b: int = 0, c: int = 0) -> int:
+            dst = fresh()
+            scope.code.append(Instr(op, dst, a, b, c))
+            return dst
+
+        def broadcast(register: int) -> int:
+            return self.view(scope, View(register, domain, (0,) * len(domain)))
+
+        def go(node: ir.Expr) -> int:  # noqa: C901, PLR0911, PLR0912 - one case per node
             node = _unwrap(node)
-            if not _reads_array(node):
-                scalar = self.expr(scope, node)
-                return self.view(scope, View(scalar, domain, (0,) * len(domain)))
+            if not _varies(node, indices):
+                return broadcast(self.expr(scope, node))
             match node:
+                case ir.Ref(name=name) if name in axes:
+                    # The loop index as a value: its 1-based position, moved to its start.
+                    position = emit(Op.TINDEX, axes[name])
+                    start = equation.indices[axes[name]].start
+                    if start == 1:
+                        return position
+                    shift = broadcast(self.constant(scope, float(start - 1)))
+                    return emit(Op.TBINARY, position, shift, int(Op.ADD))
+                case ir.Unary(op="+", operand=operand):
+                    return go(operand)
+                case ir.Unary(op="not", operand=operand):
+                    return emit(Op.TUNARY, go(operand), 0, int(Op.NOT))
+                case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+                    return emit(Op.TSELECT, go(condition), go(then), go(otherwise))
+                case ir.Binary(op=op) if op in _RELATIONS and (held := latches(node)):
+                    # A relation that generates events reads its latch per cell, as the
+                    # scalar tape does: one block of the latch registers.
+                    first = self.register(n)
+                    offset = len(scope.tables)
+                    scope.tables.extend(self.value(scope, latch) for latch in held)
+                    scope.code.append(Instr(Op.VGATHER, first, offset, 0, n))
+                    return self.view(scope, View(first, domain, _row_major(domain)))
+                case ir.Call(name=name, args=(left, right)):
+                    builtin = _BINARY_CALLS[_builtin_name(name)]
+                    return emit(Op.TCALL2, go(left), go(right), int(builtin))
                 case ir.Subscript(base=base):
                     plan = plans[node]
                     assert plan is not None  # noqa: S101 - checked above
@@ -642,15 +701,21 @@ class _Lowering:
                 case ir.Call(name=name, args=(argument,)):
                     source = go(argument)
                     dst = fresh()
-                    builtin = int(_UNARY_CALLS[name])
+                    builtin = int(_UNARY_CALLS[_builtin_name(name)])
                     scope.code.append(Instr(Op.TUNARY, dst, source, builtin, int(Op.CALL1)))
                     return dst
                 case _:
                     raise AssertionError(node)
 
-        result = go(template)
+        try:
+            result = go(template)
+        except _RefusedError:
+            del scope.code[mark[0] :], scope.tables[mark[1] :], scope.views[mark[2] :]
+            return False
+        # Every relation the scalar block latches must have been found latched here too.
+        expected = len(_latch_refs(_latched(run[0].assignment or template, held_by_cell)))
         registers = elements(scope.views[result])
-        if len(set(registers)) != n:
+        if found != expected or len(set(registers)) != n:
             # A broadcast result would give every cell one register: leave it to `array`.
             del scope.code[mark[0] :], scope.tables[mark[1] :], scope.views[mark[2] :]
             return False
@@ -1781,6 +1846,62 @@ def _reads_array(node: ir.Expr) -> bool:
             return any(_reads_array(a) for a in args)
         case ir.IfExpr(condition=c, then=t, otherwise=o):
             return _reads_array(c) or _reads_array(t) or _reads_array(o)
+        case _:
+            return False
+
+
+class _RefusedError(Exception):
+    """`_Lowering.shaped_array` cannot write this loop; it writes nothing and returns False."""
+
+
+_RELATIONS: Final = frozenset({"<", "<=", ">", ">=", "==", "<>"})
+
+
+def _latch_refs(node: ir.Expr) -> set[str]:
+    """The ``$relation`` latches ``node`` reads."""
+    return {name for name in names(node) if name.startswith("$relation")}
+
+
+def _builtin_name(name: str) -> str:
+    """``Modelica.Math.sin`` read as ``sin``, as `_Lowering.call` reads it."""
+    if name in _UNARY_CALLS or name in _BINARY_CALLS or "." not in name:
+        return name
+    return name.rsplit(".", 1)[-1]
+
+
+def _varies(node: ir.Expr, indices: frozenset[str]) -> bool:
+    """Whether ``node`` differs from cell to cell: it reads a subscript or a loop index."""
+    return _reads_array(node) or bool(set(names(node)) & indices)
+
+
+def _shapeable(node: ir.Expr, indices: frozenset[str]) -> bool:  # noqa: PLR0911 - one case per node
+    """Whether `_Lowering.shaped_array` can write ``node`` with shaped opcodes.
+
+    Every operator and builtin the scalar tape has, an ``if``-expression, and the loop index as
+    a value. A part that does not vary is computed once, as the scalar tape computes it.
+    """
+    node = _unwrap(node)
+    if not _varies(node, indices):
+        return True
+    match node:
+        case ir.Subscript():
+            return True
+        case ir.Ref(name=name):
+            return name in indices
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return op in _BINARY_OPS and _shapeable(lhs, indices) and _shapeable(rhs, indices)
+        case ir.Unary(op=op, operand=operand):
+            return op in ("+", "-", "not") and _shapeable(operand, indices)
+        case ir.IfExpr(condition=c, then=t, otherwise=o):
+            return all(_shapeable(part, indices) for part in (c, t, o))
+        case ir.Call(name=name, args=(argument,)):
+            return _builtin_name(name) in _UNARY_CALLS and _shapeable(argument, indices)
+        case ir.Call(name=name, args=(left, right)):
+            return (
+                _builtin_name(name) in _BINARY_CALLS
+                and _shapeable(left, indices)
+                and _shapeable(right, indices)
+            )
         case _:
             return False
 
