@@ -36,6 +36,7 @@ from itertools import pairwise, product
 from typing import TYPE_CHECKING, Final, Literal, NamedTuple
 
 from modelica.ir import nodes as ir
+from modelica.ir.clocks import partition
 from modelica.ir.evaluate import EvaluationError, at, evaluate
 from modelica.ir.flat import (
     ArrayEquation,
@@ -3550,12 +3551,14 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
         {variable.name for variable in flattener.variables},
     )
     equations = tuple(flattener.equations)
-    return FlatModel(
-        loops=tuple(loop for loop in flattener.loops if loop.matches(equations)),
-        name=found.cls.name,
-        variables=(*flattener.variables, *samplers),
-        equations=equations,
-        whens=whens,
-        asserts=tuple(flattener.asserts),
-        initial_equations=tuple(flattener.initial_equations),
+    return partition(
+        FlatModel(
+            loops=tuple(loop for loop in flattener.loops if loop.matches(equations)),
+            name=found.cls.name,
+            variables=(*flattener.variables, *samplers),
+            equations=equations,
+            whens=whens,
+            asserts=tuple(flattener.asserts),
+            initial_equations=tuple(flattener.initial_equations),
+        )
     )

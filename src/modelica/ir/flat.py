@@ -23,6 +23,8 @@ from modelica.ir import nodes as ir
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
+    from modelica.ir.clocks import ClockedPartition
+
 __all__ = ["BaseType", "FlatModel", "FlatVariable"]
 
 type BaseType = Literal["Real", "Integer", "Boolean", "String"]
@@ -257,6 +259,8 @@ class FlatModel:
     initial_equations: tuple[ir.Equal, ...] = ()
     loops: tuple[Loop, ...] = ()
     """The ``for`` loops `equations` came from, where flattening kept them (`Loop`)."""
+    partitions: tuple[ClockedPartition, ...] = ()
+    """The clocked equations, one partition per periodic clock (`modelica.ir.clocks`)."""
 
     def __getitem__(self, name: str) -> FlatVariable:
         try:

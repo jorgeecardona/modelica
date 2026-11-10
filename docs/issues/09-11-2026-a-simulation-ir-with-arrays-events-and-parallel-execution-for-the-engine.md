@@ -579,3 +579,14 @@ with `u = sin(pi x) sin(pi y)` has nodal errors 5.30e-2, 1.30e-2, 3.22e-3 on 4, 
 Plan steps 1 to 14 are done, except 12b (iterative solvers, waiting for a profile) and 6b (the
 clocked path). Not yet: a model written in Modelica that lowers to the mesh tapes; today `fv` and
 `fem` tapes are built in Python and spliced into a program by hand in the tests.
+
+6b commit 1 done: `modelica.ir.clocks`. `flatten` ends with `clocks.partition`: an equation that
+calls `sample(u, Clock(interval))` or `previous(x)`, or reads a variable a clocked equation
+defines (outside `hold(...)`), is clocked. Clocked equations sharing a variable form one
+`ClockedPartition` (`interval`, `equations`, `variables`); they leave `FlatModel.equations`, and
+their variables become `discrete`. Refused with `ClockError`: two clocks in one partition,
+`Clock()` with other than one argument, `subSample`, `superSample`, `shiftSample`, `backSample`,
+`interval`. `causalize` refuses a model with partitions until the tick runs them, so a clocked
+model never runs with its clocked variables held at their start values. `sample(start, interval)`
+stays a time event. Tests: `tests/test_clocks.py`. Next: causalize each partition and give it
+workspace slots (previous and held), then the tick in SciPy and on the engine.
