@@ -198,9 +198,8 @@ def _factor(a: Any, piv: Any) -> bool:  # noqa: ANN401 - float64 or complex128, 
     """LU with partial pivoting, in place. False when a column is exactly zero.
 
     One body serves the real and the complex system: pivoting compares ``abs``, which is a
-    magnitude either way, and everything else is arithmetic that both types support. Numba
-    compiles a specialisation per element type from the same source, so the two matrices a
-    Radau step factorises cost one function to write and none to maintain twice.
+    magnitude either way, and everything else is arithmetic that both types support. The two
+    matrices a Radau step factorises share one function.
     """
     n = a.shape[0]
     for k in range(n):
@@ -277,7 +276,7 @@ def _norm(x: NDArray[np.float64]) -> float:
 def _newton(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917 - one iteration, written out
     rhs: _Evaluate,
     t: float,
-    y: Any,  # noqa: ANN401 - annotated loosely so numba types it, not the checker
+    y: Any,  # noqa: ANN401 - real or complex
     h: float,
     p: Any,  # noqa: ANN401
     w: Any,  # noqa: ANN401

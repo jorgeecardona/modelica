@@ -1,5 +1,10 @@
 # GPU backends
 
+!!! warning "Dropped direction"
+    This page argues for compiling the model (C, Rust, Numba or GPU code). The project dropped
+    that: models run on the precompiled engine, a VM that reads the model as a tape
+    ([engine](../engine.md)). The page is kept as a record.
+
 !!! note "Tracked in the register"
     The work this page points at is tracked in [`docs/issues`](https://gitlab.com/jorgeecardona/pymodelica/-/tree/main/docs/issues): the ensemble driver first, then the SPIR-V spike, the method-of-lines path, and JAX as the other vehicle for the same workload. This page is the argument; the register is what is owed.
 

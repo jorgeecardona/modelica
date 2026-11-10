@@ -112,8 +112,7 @@ print(picture.to_dot())           # or source for Graphviz
   Tarjan BLT sorting and Pantelides index reduction. States, candidate state sets, index and
   blocks are all readable off the `System`.
 - **Hybrid simulation.** Adaptive stiff integration (Radau, LSODA via SciPy), state and time
-  events with `reinit`, a sparse Jacobian, and asserts checked along the trajectory. The IR is
-  compilable by construction: `emit` writes the model as straight-line arithmetic.
+  events with `reinit`, a sparse Jacobian, and asserts checked along the trajectory.
 - **Diagrams with no extra program.** Any layer draws to SVG, Mermaid or DOT — components and
   connections, the incidence of equations against variables, or blocks in solution order.
 - **FMI 3.0.** Read and simulate an existing FMU, or export a flat model as one

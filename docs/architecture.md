@@ -18,7 +18,7 @@ graph TD
     PY["Python model (modelica.build)"] -->|"descriptors, operator overloading"| AST
     AST -->|"modelica.ir: instantiate, flatten"| FLAT["FlatModel: variables + equations"]
     FLAT -->|"modelica.ir: match, sort, reduce the index"| SYS["System: sorted blocks, states chosen"]
-    SYS -->|"modelica.sim: emit and compile"| PROB["Problem"]
+    SYS -->|"modelica.sim: lower to a tape (engine) or emit Python (SciPy)"| PROB["Problem"]
     PROB --> SOLVER["Solver"] --> RESULT["Result"]
     AST -.->|"modelica.diagram"| PIC["Graph: a picture of any stage"]
     FLAT -.-> PIC
@@ -94,16 +94,16 @@ does not depend on the implementation language at all. Correct order control, co
 size control and correct index reduction buy more than any micro-optimisation. If you get
 them wrong, no amount of C in the inner loop recovers it.
 
-What is left is the cost of one step, and **generated code** closes it.
+What is left is the cost of one step. The engine pays it with a precompiled VM.
 
-> **The IR must be compilable.** `modelica.sim` emits source for the right-hand side, the
-> Jacobian and the event indicators, and the engine (`modelica.sim.vm`) lowers the same IR to a tape. It does **not** build a tree of closures and
-> walk it at every evaluation.
+> **The IR lowers to straight-line arithmetic.** The engine (`modelica.sim.vm`) lowers the
+> right-hand side, the Jacobian and the event indicators to a register tape. The SciPy path
+> emits the same arithmetic as Python. Neither walks a tree of closures at every evaluation,
+> and nothing is compiled per model.
 
 This is a constraint on the design of the IR, which is why it is recorded here and not in a
 tuning note later. The expression IR is small, typed, closed under symbolic
-differentiation, and free of any Python object that cannot be written as arithmetic. A
-straightforward emitter can therefore turn a `FlatModel` into a nopython function. An
+differentiation, and free of any Python object that cannot be written as arithmetic. An
 interpreter over the same IR stays as the reference implementation. It is what the engine is
 tested against.
 
@@ -112,37 +112,16 @@ amount of solver quality hides that.
 
 ### Matching the Fortran codes is the floor
 
-"As fast as the Fortran codes" is the wrong place to stop. A compiler that owns the model
-can do three things that a precompiled library cannot.
+The engine owns the model, so it can do two things a black-box integrator cannot.
 
-* **Put the right-hand side inside the integrator loop.** RADAU5 is a library. It calls the
-  user's `F` through a function pointer, across a boundary the optimiser cannot see
-  through, and the parameters live in memory it must load. A JIT compiles the model and the
-  step together, and the parameters are folded to constants once at compile time instead of
-  loaded once per stage per step.
+* **Differentiate the model.** The equations are held symbolically, so an analytic and
+  sparse Jacobian is free. Its pattern comes from the incidence matching. A black-box
+  integrator uses finite differences: *n* extra evaluations per Jacobian.
+* **Make the system smaller before the solver sees it.** Tearing and BLT turn a block of *n*
+  equations into a smaller torn system inside a sequence of assignments.
 
-    This one is done and measured. `modelica.sim.radau` is Radau IIA written in this
-    repository so that it compiles with the kernel rather than calling into it; the
-    parameter folding is `build(fold=True)`, which the loop inherits rather than performs.
-    Against `solve_ivp(method="Radau")` at *matched error* it is 74x to 162x on Robertson
-    and 211x to 327x on van der Pol, and it takes slightly fewer steps to get there. The
-    table and the machine are in the issue that did it; `moon run :bench-fused` reproduces
-    it.
-* **Differentiate the model.** The equations are held symbolically, so an analytic *and
-  sparse* Jacobian is free. Its pattern falls straight out of the incidence matching that
-  is already built. A black-box integrator must use finite differences: *n* extra
-  evaluations per Jacobian, and truncation error injected exactly where it hurts Newton
-  convergence.
-* **Make the system smaller before the solver sees it.** Tearing and BLT turn a
-  simultaneous block of *n* equations into a much smaller torn system inside a sequence of
-  assignments. That is a symbolic transformation on the model. A bare ODE library receives
-  the system already assembled, and cannot do it.
-
-So the target is to be *faster* on the classic problems, and not merely close. The claim is
-only worth making against a fixed harness. [Benchmarks](ideas/benchmarks.md) records which
-problem sets that means, and why the measurement is a work-precision diagram and not a
-timing. [Backends](ideas/backends.md) covers the compiler that makes the three points above
-possible, and the debuggability it is meant to buy.
+The claim is only worth making against a fixed harness. [Benchmarks](ideas/benchmarks.md)
+records which problem sets that means.
 
 ## The layers
 

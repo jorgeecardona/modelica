@@ -1,11 +1,8 @@
 """A causalized system as Python source text.
 
-This is where the architecture's one hard performance rule is paid for: *the IR must be
-compilable*. Nothing here builds a tree of closures to walk at every step. A
-:class:`~modelica.ir.system.System` comes in and a string of ordinary Python comes out --
-scalars, arithmetic and array indexing, and nothing else -- which the CPython bytecode
-compiler will run as-is and Numba will compile to machine code without leaving nopython
-mode.
+A :class:`~modelica.ir.system.System` comes in and a string of ordinary Python comes out:
+scalars, arithmetic and array indexing. The SciPy path runs it; `modelica.sim.vm` reuses the
+`Emitter` walk to lower the same blocks to the engine's tape.
 
 The generated module holds nine functions, all of them filling a caller-supplied array
 rather than returning a new one, so that the step loop allocates as little as it can:
@@ -1522,8 +1519,7 @@ class Emitter:
         With a single set -- which is every model that did not need index reduction -- this
         writes exactly the one function the emitter has always written, so nothing pays for
         a choice it does not have. The picker compares against ``k + 0.5`` rather than
-        converting the slot to an integer: ``w`` is a float array, and a chain of float
-        comparisons is something Numba compiles without a thought.
+        converting the slot to an integer: ``w`` is a float array.
         """
         if len(bodies) == 1:
             return _function(name, arguments, bodies[0])

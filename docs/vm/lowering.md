@@ -5,8 +5,8 @@ order and the rules every step keeps.
 
 ## Steps
 
-1. **Write.** `_Lowering` walks each mode's blocks in order, as `Emitter` does for the C and
-   Rust backends, and writes one tape per kernel. An `ArrayBlock` in `rhs` is written with
+1. **Write.** `_Lowering` walks each mode's blocks in order, as `Emitter` does for the Python
+   path, and writes one tape per kernel. An `ArrayBlock` in `rhs` is written with
    array opcodes ([Array models](arrays.md)).
 2. **Jacobian.** `_Tangents` derives `d rhs / d y` from the scalar `rhs` tape by forward mode.
    It keeps one partial per structural non-zero and writes them into a dense row-major output,

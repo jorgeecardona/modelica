@@ -86,8 +86,7 @@ projects reaching the same rule from different languages is the best evidence av
 the rule is right.
 
 **Backends are templates.** A new target is a Jinja template rather than a pass, which is
-how eight backends stay maintainable. This project writes emitters by hand and argues in
-[backends](backends.md) that they are mechanical; the C emitter is where that gets tested.
+how eight backends stay maintainable. This project runs models on its own VM instead of generating code.
 
 **It publishes its coverage, and that is a good habit to copy.** Rumoca reports that **28 %
 of MSL examples reach end-to-end simulation**, and that **about 33 % of those that simulate

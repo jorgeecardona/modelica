@@ -1,8 +1,8 @@
 """``modelDescription.xml`` from a `System`: the half of an FMU that is not a binary.
 
 An FMU is a zip of two things -- a description of what the model *has*, and a shared library
-that computes it. This writes the first. It needs no compiler and no C emitter, which is why
-it comes first: the variable table, the causality and variability of every name, the model
+that computes it. This writes the first. It needs no compiler, which is why it comes
+first: the variable table, the causality and variability of every name, the model
 structure and the unit definitions are all facts the flattener already knows, and getting them
 wrong is the failure mode that makes an importer reject an FMU before it has run a step.
 

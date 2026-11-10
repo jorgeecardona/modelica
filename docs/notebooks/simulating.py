@@ -68,9 +68,8 @@ print(f"explicit:   {system.is_explicit}")
 #
 # ## 4. Causalized system → generated code
 #
-# The IR is compilable by construction, which is what lets a Python engine stand next to the
-# Fortran solvers. `emit` writes the model out as straight-line arithmetic; nothing walks a
-# tree of closures at evaluation time.
+# The SciPy path runs the model as Python that `emit` writes: straight-line arithmetic, with
+# no tree of closures walked at evaluation time. The engine runs the same arithmetic as a tape.
 
 # %%
 from modelica.sim import emit

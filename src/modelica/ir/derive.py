@@ -228,8 +228,7 @@ def simplify(node: ir.Expr) -> ir.Expr:
                 # what keeps a *schedule* differentiable in practice: a chain of `n`
                 # constant segments differentiates to `0.0 if c1 else 0.0 if c2 else ...`,
                 # which is `0.0` and nothing else, and every later stage pays for it if it
-                # is left standing. Numba's compilation of the nine-segment gas schedule in
-                # `RoastingMachine` needed more than 4 GB with the chain present.
+                # is left standing.
                 return chosen
             return ir.IfExpr(simplify(condition), chosen, other)
         case _:
