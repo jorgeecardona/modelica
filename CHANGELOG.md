@@ -1,10 +1,51 @@
 # Changelog
 
 All notable changes to this project are documented here. Versions follow
-[semantic versioning](https://semver.org/); the version in `pyproject.toml` is the single
-source of truth and is bumped automatically when shipped source changes.
+[semantic versioning](https://semver.org/); the version is `__version__` in
+`src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
-## Unreleased
+## Unreleased (0.1.0)
+
+The first release with a stated promise: install, parse, simulate on the precompiled engine,
+and get the same numbers as SciPy. The API can still change.
+
+### Install
+
+- `pip install modelica` is enough to simulate. NumPy and SciPy are plain dependencies.
+- Engine wheels for Linux x86_64 and aarch64, Windows x86_64 and macOS arm64. Other platforms
+  simulate with SciPy.
+
+### Language
+
+- Arrays: array equations, constructors (`zeros`, `ones`, `fill`, `identity`), reductions
+  (`sum`, `product`, `min`, `max`), products, `transpose`, and the dotted operators.
+- `when` with `reinit`, `terminate`, `sample`, structural `if`-equations, `homotopy`,
+  `smooth`, `der(der(x))`, and causal signal connectors (`Modelica.Blocks`).
+- Synchronous clocks: `sample(u, Clock(interval))`, `previous` and `hold`.
+
+### Simulation
+
+- `simulate` runs on the precompiled engine (a VM; nothing is compiled per model) and falls
+  back to SciPy. `Result.backend` says which ran. `EngineFallbackWarning` says when an
+  installed engine refused a model.
+- The engine: events, time events, any start time, output with or without a grid, a
+  diagonal mass matrix for index-1 DAEs, band storage, and BiCGStab for wide-band models.
+- `sweep` runs every point on the engine, on every core.
+- Dynamic state selection, index reduction, and an analytic sparse Jacobian.
+
+### Diagrams
+
+- Any stage draws to SVG, Mermaid or DOT: components, incidence, or blocks in solution order.
+
+### Removed
+
+- The C and Rust code generators and the Numba JIT backend (`jit=`).
+- Internals leave `modelica.sim.__all__`; import them by module path, for example
+  `from modelica.sim.emit import emit`.
+
+## Development log (0.0.3 to 0.0.269)
+
+The detailed list of changes made on the way to 0.1.0.
 
 - The C and Rust code generators are removed (`sim.cgen`, `sim.rustgen`, `sim.rustsim`, the C and Rust dialects). Models run on the precompiled engine or on SciPy; nothing is compiled per model.
 - `modelica.sim` exports the user surface only (flatten, causalize, simulate, sweep, steady, build, Result and their errors). Code generation, comparison, sensitivity and the mesh modules are imported by module path, for example `from modelica.sim.emit import emit`.
