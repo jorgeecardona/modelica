@@ -94,13 +94,6 @@ nav:
   - Examples: examples.md
   - Finding where two tiers disagree: diverging.md
   - The precompiled engine: engine.md
-  - The virtual machine:
-      - Overview: vm/index.md
-      - The tape: vm/tape.md
-      - Lowering: vm/lowering.md
-      - Array models: vm/arrays.md
-      - At run time: vm/runtime.md
-      - Changing the VM: vm/extending.md
   - Notebooks:
       - Every model in the corpus: notebooks/gallery.ipynb
       - Simulating a model: notebooks/simulating.py
@@ -111,6 +104,14 @@ nav:
       - Where the smoothness breaks: notebooks/events.ipynb
       - Roasting a batch: notebooks/roasting.ipynb
       - Enumerating the discrete half: notebooks/verifying.py
+  - Internals:
+    - The virtual machine:
+        - Overview: vm/index.md
+        - The tape: vm/tape.md
+        - Lowering: vm/lowering.md
+        - Array models: vm/arrays.md
+        - At run time: vm/runtime.md
+        - Changing the VM: vm/extending.md
   - Ideas:
       - What else exists in Python: ideas/landscape.md
       - Reachability and agreement: ideas/coverage.md

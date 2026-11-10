@@ -5,11 +5,10 @@ Guidance for AI coding agents working in this repo. Humans: read README.md and C
 ## Overview
 
 `modelica` (distribution name) is a Modelica toolchain for Python: parse `.mo` source files,
-flatten them to a DAE, simulate, and interoperate with FMI 3.0 (single components) and SSP 2.0
-(systems of components). The front end is Python. Simulation defaults to a precompiled Rust
+flatten them to a DAE, simulate, and draw them. FMI 3.0 and SSP 2.0 are started, not usable. The front end is Python. Simulation defaults to a precompiled Rust
 engine (`engine/`, a bytecode VM shipped in platform wheels; see `docs/vm/index.md`) and falls
 back to SciPy where no engine is installed. The git repo is named `pymodelica`; the import package and PyPI
-distribution are both `modelica`. Pre-alpha. Python 3.12+. `pip install modelica` brings NumPy
+distribution are both `modelica`. Version 0.1 (tested, API not frozen). Python 3.12+. `pip install modelica` brings NumPy
 and SciPy and simulates; the `sim` extra is kept empty so old install commands still work.
 
 Layers under `src/modelica/` — each usable without the ones above it:
@@ -19,10 +18,10 @@ Layers under `src/modelica/` — each usable without the ones above it:
 | `lang` | Hand-written lexer + parser: Modelica source → AST with source positions |
 | `build` | Python builder API → same AST values as `lang` |
 | `ir` | AST → flat model (variables, equations); matching, BLT, index reduction (Pantelides) |
-| `sim` | Flat model → ODE/DAE problem; solver backends (Radau, LSODA, SUNDIALS); events |
+| `sim` | System → simulation on the engine (`vm`, `engine`) or SciPy (`emit`, `kernel`, `solve`); events |
 | `diagram` | Any layer → SVG/Mermaid/DOT picture; also the `__main__` CLI entry point |
-| `fmi` | FMI 3.0 import (run an FMU) and export (emit a flat model as an FMU) |
-| `ssp` | SSP 2.0: read `.ssd`/`.ssv`/`.ssb`, run a co-simulation master |
+| `fmi` | FMI 3.0: `modelDescription.xml` and the calling sequence; no FMU import or export yet |
+| `ssp` | SSP 2.0: the co-simulation master protocol; no archive reading or stepping yet |
 
 The bundled Modelica Standard Library slice (`Modelica.*`) covers Units.SI, Electrical.Analog,
 Mechanics.Translational and Rotational, Thermal.HeatTransfer, and a subset of Blocks.

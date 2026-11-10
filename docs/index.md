@@ -1,7 +1,7 @@
 # modelica
 
 A Modelica toolchain for Python. It reads Modelica source, flattens it to a DAE, simulates
-it, and draws it. It exchanges models through **FMI 3.0** and **SSP 2.0**.
+it, and draws it.
 
 The front end (parser, flattener, causalization) is Python. Simulation runs on a
 [precompiled engine](engine.md): a virtual machine in Rust that ships in the platform wheels
@@ -12,11 +12,12 @@ wheel, simulation uses SciPy.
 pip install modelica
 ```
 
-One install covers parsing, diagrams, FMI and SSP, and simulation. It brings NumPy and SciPy.
+It brings NumPy and SciPy. Python 3.12 or later.
 
-!!! warning "Pre-alpha"
-    This is a full rewrite of a prototype from 2010, and it is not finished. The API is not
-    stable. The layers below are being built from the bottom up. Python 3.12 or later.
+!!! note "Status: 0.1"
+    Parsing, flattening, causalization, simulation and diagrams are tested, and give the same
+    numbers on the engine and on SciPy. The API can still change. `modelica.fmi`,
+    `modelica.ssp` and the modules not exported from `modelica.sim` are experimental.
 
 ## The layers
 
@@ -25,10 +26,10 @@ One install covers parsing, diagrams, FMI and SSP, and simulation. It brings Num
 | `modelica.lang` | Modelica source to tokens to an AST |
 | `modelica.build` | Python classes to the same AST values |
 | `modelica.ir` | AST to a flat model, then matching, BLT sorting and index reduction |
-| `modelica.sim` | Flat model to an ODE or DAE problem, with solvers and events |
+| `modelica.sim` | Simulation on the engine or SciPy, with events |
 | `modelica.diagram` | Any stage to a picture: SVG, Graphviz or Mermaid |
-| `modelica.fmi` | FMI 3.0 — import, simulate and export an FMU |
-| `modelica.ssp` | SSP 2.0 — system composition and a co-simulation master |
+| `modelica.fmi` | FMI 3.0: `modelDescription.xml` and the calling sequence (experimental) |
+| `modelica.ssp` | SSP 2.0: the co-simulation master protocol (experimental) |
 
 Start with [Architecture](architecture.md) for the data model and the build order.
 

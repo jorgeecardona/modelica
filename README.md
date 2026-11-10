@@ -6,14 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/LICENSE)
 
 A Modelica toolchain for Python: parse `.mo` source, flatten it to a DAE, simulate it, and
-draw it, with **FMI 3.0** and **SSP 2.0** support. Every stage up to simulation is an
+draw it. Every stage up to simulation is an
 ordinary Python value you can read and change. For engineers and researchers who want
 Modelica semantics inside Python rather than behind a separate compiler.
 
 Simulation runs on a precompiled engine: a virtual machine written in Rust that ships in the
-platform wheels (Linux x86_64 and arm64, Windows, macOS arm64) and interprets the model as
-bytecode. Nothing is compiled per model. Where no engine wheel exists, the pure-Python wheel
-simulates with SciPy instead. See [the engine](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/docs/engine.md).
+platform wheels and interprets the model as bytecode. Nothing is compiled per model. Where no
+engine wheel exists, the pure-Python wheel simulates with SciPy instead. See [the engine](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/docs/engine.md).
 
 > **Install name is `modelica`.** The git repository keeps its older name, `pymodelica`,
 > because PyPI's `pymodelica` holds an abandoned Modelon/JModelica.org upload. The import
@@ -46,11 +45,20 @@ OpenModelica or Dymola when you need breadth of language coverage today.
 pip install modelica
 ```
 
-That is all: parsing, diagrams, FMI and SSP, and simulation on the engine. It brings NumPy and
-SciPy.
+It brings NumPy and SciPy. Python 3.12 or later.
 
-**Status: pre-alpha.** A full rewrite of a 2010 Python 2 experiment; no code of it is left,
-only the goal. Python 3.12 or later.
+| Platform | Simulation runs on |
+| --- | --- |
+| Linux x86_64, Linux aarch64, Windows x86_64, macOS arm64 | the precompiled engine |
+| any other | SciPy |
+
+`Result.backend` says which one ran. The engine runs a `System` with `method="Radau"` (the
+default); other calls run on SciPy ([the engine](https://cardona-oss.gitlab.io/pymodelica/engine/)).
+
+**Status: 0.1.** Parsing, flattening, causalization, simulation and diagrams are tested and
+give the same numbers on the engine and on SciPy. The API can still change. Experimental and
+not promised: `modelica.fmi`, `modelica.ssp`, and the `modelica.sim` modules not exported from
+`modelica.sim` (`fv`, `fem`, `mesh`, `sensitivity`, `compare`).
 
 ## Quickstart
 
@@ -105,20 +113,17 @@ print(picture.to_dot())           # or source for Graphviz
 - **Two front ends, one IR.** A hand-written lexer and recursive-descent parser carry source
   positions, so an error says where; a Python builder API (`modelica.build`) produces the
   same AST values. The two are cross-checked against each other.
-- **Dependency-free core.** `import modelica` pulls in nothing. Numerics arrive as the `sim`
-  extra (numpy + scipy), so tooling that only reads model structure stays cheap to install.
 - **The flat model is a value.** Flattening resolves `extends`, modifications and `connect()`
   into scalar variables and acausal equations; causalization does alias elimination, matching,
   Tarjan BLT sorting and Pantelides index reduction. States, candidate state sets, index and
   blocks are all readable off the `System`.
-- **Hybrid simulation.** Adaptive stiff integration (Radau, LSODA via SciPy), state and time
+- **Hybrid simulation.** Adaptive stiff integration (Radau on the engine; Radau, BDF and LSODA
+  via SciPy), state and time
   events with `reinit`, a sparse Jacobian, and asserts checked along the trajectory.
 - **Diagrams with no extra program.** Any layer draws to SVG, Mermaid or DOT — components and
   connections, the incidence of equations against variables, or blocks in solution order.
-- **FMI 3.0.** Read and simulate an existing FMU, or export a flat model as one
-  (`modelica.fmi`).
-- **SSP 2.0.** Read the `.ssd`/`.ssv`/`.ssb` files inside a `.ssp` and run a co-simulation
-  master over the components (`modelica.ssp`).
+- **FMI 3.0, started.** `modelica.fmi` writes a model's `modelDescription.xml` and holds the
+  FMI calling sequence as a state machine. Importing or exporting a whole FMU is not done.
 - **A bundled Modelica Standard Library slice** under the real `Modelica.*` names: `Units.SI`,
   `Electrical.Analog`, `Mechanics.Translational` and `Rotational`, `Thermal.HeatTransfer`, and
   a piece of `Blocks`. A curated subset, not the whole library.
@@ -134,12 +139,12 @@ Each layer is usable without the ones above it.
 | `modelica.ir` | AST to a flat model; then matching, BLT sorting and index reduction. |
 | `modelica.sim` | Flat model to an ODE/DAE problem; solver backends and events. |
 | `modelica.diagram` | Any of the above to a picture: components, incidence, or blocks. |
-| `modelica.fmi` | FMI 3.0: read an FMU and simulate it, or export a flat model as one. |
-| `modelica.ssp` | SSP 2.0: read a `.ssp` and run a co-simulation master. |
+| `modelica.fmi` | FMI 3.0: `modelDescription.xml` and the calling sequence (experimental). |
+| `modelica.ssp` | SSP 2.0: the co-simulation master's protocol (experimental). |
 
 ## What of Modelica it handles
 
-The language is large and this is pre-alpha, so the honest summary is a table. About 95 % of
+The language is large, so the summary is a table. About 95 % of
 the Modelica Standard Library example models the project measures against parse; fewer
 simulate end to end. The per-model
 [coverage notes](https://cardona-oss.gitlab.io/pymodelica/ideas/coverage/) track the frontier.
@@ -153,7 +158,7 @@ simulate end to end. The per-model
 | Functions | user functions with `algorithm` bodies, `if` and `for` statements | |
 | Arrays | indexed access, array parameters and starts, element-wise array equations and products (dot, matrix-vector, matrix-matrix), `for` loops, multi-dimensional grids | array `/` and `^` |
 | Numerics | index reduction (Pantelides), alias elimination, BLT sorting, adaptive stiff integration (Radau, LSODA), state events, sparse Jacobian | a symplectic integrator |
-| Standards | FMI 3.0 (import and export), SSP 2.0 co-simulation | |
+| Standards | FMI 3.0 `modelDescription.xml` | FMU import and export, SSP archives |
 
 ## Links
 
