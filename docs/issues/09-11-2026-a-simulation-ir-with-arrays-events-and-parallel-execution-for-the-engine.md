@@ -491,3 +491,26 @@ writes nothing. Every number comes from `p`, so a wall value is a parameter. A p
 rule is an error. Tests: on a 10 x 4 box with walls at 100 and 20 (or 100 and a gradient of
 -80) the steady state is `100 - 80 x` at the cell centres within 1e-8, and the engine gives the
 same bits as `vm.evaluate`. Next: step 12, the Jacobian in LDU form and iterative solvers.
+
+### Fable review 5: step 12 is storage first (2026-11-10)
+
+Radau stores the Jacobian and its three iteration matrices densely, `n * n` each: 800 MB per
+matrix at n = 10000. That, not the linear solver, blocks the 100 x 100 grid. Banded LU there is
+under 1e9 flops per factor pair and runs only when `h` changes, so step 12 splits in two.
+
+12a, now: one Jacobian format everywhere, a fixed CSR pattern built once in Python in the
+permuted order, values refilled each call. `_Tangents` writes `STORE_OUT` to a pattern slot
+(`CLEAR_OUT nnz`); the pattern comes from the tape's partials, is checked against
+`Mode.sparsity`, and two stores to one entry are a lowering error. Radau holds LAPACK `gbtrf`
+band storage, `(2 lower + upper + 1) n`, filled from the pattern through an index built once;
+the dense case is a full band. No LDU Jacobian: a general model has no faces.
+
+12b, later and only if a profile asks: BiCGStab with DILU, generic over real and complex (the
+complex Radau matrix is complex symmetric, not Hermitian, so no CG), inexact Newton tolerance,
+a `solver` option. PCG with DIC only on evidence.
+
+Commits: 0, time the 100 x 100 `fv.heat` lowering (the `VSCATTER_ADD` tangent falls back to
+scalar today) and add the scatter-add tangent rule if slow; 1, the Jacobian pattern in `vm.py`
+and the FFI, with a dense view so tests compare unchanged; 2, band storage in Radau, test: the
+100 x 100 grid runs and reaches its steady profile within 1e-8 (12a gate); 3, a workspace so the
+time loop allocates nothing; 4 and 5, the iterative solver (12b).
