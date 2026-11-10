@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import operator
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -151,3 +152,95 @@ def test_unary_builtin_and_binary_builtin() -> None:
         _out(s + 120, 12),
     )
     np.testing.assert_array_equal(_run(views, code, 12), np.maximum(VALUES, np.sin(VALUES)).ravel())
+
+
+@pytest.fixture(scope="module")
+def engine(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The wheel's engine, else one built once from ``engine/src``."""
+    from modelica.sim.engine import installed, library  # noqa: PLC0415 - only the engine tests
+
+    if (bundled := installed()) is not None:
+        return bundled
+    if shutil.which("rustc") is None:
+        pytest.skip("no engine in this install and no rustc to build one")
+    return library(tmp_path_factory.mktemp("engine"))
+
+
+def _every_opcode() -> tuple[vm.Program, vm.Function]:
+    """One function using each shaped opcode once, on ``VALUES`` loaded at register ``s``."""
+    program = _program()
+    s = program.registers
+    op, instr = vm.Op, vm.Instr
+    views = (
+        _dense(s, SHAPE),  # 0: the input
+        vm.View(s, (4, 3), (1, 4)),  # 1: its transpose
+        _dense(s + 20, (4, 3)),  # 2
+        _dense(s + 40, SHAPE),  # 3
+        _dense(s + 60, (4,)),  # 4: a sum over axis 0
+        _dense(s + 70, SHAPE),  # 5
+        vm.View(s + 200, SHAPE, (0, 0)),  # 6: a broadcast zero
+        _dense(s + 90, SHAPE),  # 7
+        _dense(s + 110, SHAPE),  # 8
+    )
+    code = (
+        instr(op.VLOAD_Y, s, 0, 0, VALUES.size),
+        instr(op.TBINARY, 2, 1, 1, int(op.MUL)),  # T * T, transposed
+        instr(op.ROLL, 3, 0, 1, -1),
+        instr(op.TREDUCE, 4, 3, 0, int(vm.Reduce.SUM)),
+        instr(op.TUNARY, 5, 0, int(vm.Builtin.SIN), int(op.CALL1)),
+        instr(op.TCALL2, 5, 5, 3, int(vm.Builtin.MAX)),
+        instr(op.TBINARY, 7, 0, 6, int(op.GT)),
+        instr(op.TINDEX, 8, 1),
+        instr(op.TSELECT, 7, 7, 5, 8),
+        instr(op.VSTORE_OUT, 0, 0, s + 20, 12),
+        instr(op.VSTORE_OUT, 0, 12, s + 60, 4),
+        instr(op.VSTORE_OUT, 0, 16, s + 90, 12),
+    )
+    program = dataclasses.replace(program, registers=s + 256 + len(program.constants), views=views)
+    function = vm.Function(code)
+    return dataclasses.replace(program, rhs=(function,)), function
+
+
+def test_the_engine_runs_shaped_opcodes_with_the_same_bits(engine: Path) -> None:
+    from modelica.sim.engine import load  # noqa: PLC0415 - only the engine tests need it
+
+    program, function = _every_opcode()
+    y = VALUES.ravel().tolist()
+    p = [0.0] * len(program.layout.parameters)
+    expected = [0.0] * 28
+    vm.evaluate(program, function, 0.0, y, p, [0.0] * 64, expected)
+    loaded = load(program, engine)
+    out = np.zeros(28)
+    loaded.call(loaded.encoded.rhs(0), 0.0, np.array(y), np.array(p), np.zeros(64), out)
+    loaded.close()
+    np.testing.assert_array_equal(out, expected)
+    np.testing.assert_array_equal(out[12:16], np.roll(VALUES, -1, axis=1).sum(axis=0))
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        "a view past the registers",
+        "a roll onto its own operand",
+        "operands of two shapes",
+        "a reduce along a missing axis",
+    ],
+)
+def test_the_engine_refuses_a_bad_view(engine: Path, broken: str) -> None:
+    from modelica.sim.engine import load  # noqa: PLC0415 - only the engine tests need it
+    from modelica.sim.solve import SimulationError  # noqa: PLC0415
+
+    program, function = _every_opcode()
+    views = list(program.views)
+    code = list(function.code)
+    if broken == "a view past the registers":
+        views[3] = vm.View(program.registers - 2, SHAPE, (4, 1))
+    elif broken == "a roll onto its own operand":
+        code[2] = vm.Instr(vm.Op.ROLL, 0, 0, 1, -1)
+    elif broken == "operands of two shapes":
+        code[1] = vm.Instr(vm.Op.TBINARY, 2, 0, 1, int(vm.Op.MUL))
+    else:
+        code[3] = vm.Instr(vm.Op.TREDUCE, 4, 3, 2, int(vm.Reduce.SUM))
+    bad = vm.Function(tuple(code))
+    with pytest.raises(SimulationError, match="refused"):
+        load(dataclasses.replace(program, views=tuple(views), rhs=(bad,)), engine)

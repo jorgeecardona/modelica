@@ -120,9 +120,14 @@ def _open(path: Path) -> ctypes.CDLL:
     engine = ctypes.CDLL(str(path))
     size, pointer = ctypes.c_size_t, ctypes.c_void_p
     engine.md_vm_new.restype = pointer
+    format_ = getattr(engine, "md_vm_format", None)
+    if format_ is None or format_() != vm.FORMAT:
+        message = f"{path}: an engine for another tape format; rebuild it or upgrade modelica"
+        raise SimulationError(message)
     engine.md_vm_new.argtypes = [
         size, size, size, ctypes.c_int64,
         pointer, size, pointer, size, pointer, size, pointer, size, pointer, size,
+        pointer, size,
     ]  # fmt: skip
     engine.md_vm_free.argtypes = [pointer]
     engine.md_vm_order.restype = ctypes.c_int32
@@ -249,8 +254,9 @@ def load(program: vm.Program, path: Path | None = None) -> Loaded:
         np.ascontiguousarray(encoded.functions, dtype=np.int32),
         np.ascontiguousarray(encoded.newton, dtype=np.int32),
         np.ascontiguousarray(encoded.unknowns, dtype=np.int32),
+        np.ascontiguousarray(encoded.views, dtype=np.int32),
     ]
-    constants, code, functions, newton, unknowns = arrays
+    constants, code, functions, newton, unknowns, views = arrays
     handle = engine.md_vm_new(
         encoded.registers,
         encoded.modes,
@@ -261,6 +267,7 @@ def load(program: vm.Program, path: Path | None = None) -> Loaded:
         functions.ctypes.data, len(functions) // 4,
         newton.ctypes.data, len(newton) // 7,
         unknowns.ctypes.data, len(unknowns),
+        views.ctypes.data, len(views),
     )  # fmt: skip
     if not handle:
         message = "the engine refused the program"

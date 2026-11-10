@@ -2418,6 +2418,10 @@ def mode(program: Program, w: Sequence[float]) -> int:
 # --------------------------------------------------------------------------------------
 
 
+#: The tape format `encode` writes; the engine's ``md_vm_format`` must return the same.
+FORMAT: Final = 2
+
+
 @dataclass(frozen=True)
 class Encoded:
     """A `Program` as the five flat arrays ``md_vm_new`` reads (``engine/src/lib.rs``).
@@ -2436,6 +2440,8 @@ class Encoded:
     unknowns: tuple[int, ...]
     modes: int
     events: int
+    views: tuple[int, ...] = ()
+    """Per view ``base, ndim, *shape, *strides`` (`Program.views`)."""
 
     def rhs(self, mode: int) -> int:
         """The function index of ``rhs`` in ``mode``."""
@@ -2538,6 +2544,11 @@ def encode(program: Program) -> Encoded:
         unknowns=tuple(unknowns),
         modes=len(program.rhs),
         events=len(program.transition[0]) if program.transition else 0,
+        views=tuple(
+            x
+            for view in program.views
+            for x in (view.base, len(view.shape), *view.shape, *view.strides)
+        ),
     )
 
 

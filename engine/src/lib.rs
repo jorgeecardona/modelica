@@ -17,6 +17,100 @@ const TOLERANCE: f64 = 1e-12;
 const INSTR: usize = 5;
 const FUNCTION: usize = 4;
 const NEWTON: usize = 7;
+/// The tape format `vm.encode` writes and `md_vm_new` reads. 2 added shaped views.
+const FORMAT: u32 = 2;
+/// The most axes a view may have.
+const DIMS: usize = 8;
+
+/// An array as registers, as `vm.View`: element `index` is `base + sum(index[k] * strides[k])`.
+#[derive(Clone)]
+struct View {
+    base: usize,
+    shape: Vec<usize>,
+    strides: Vec<usize>,
+}
+
+impl View {
+    fn at(&self, index: &[usize]) -> usize {
+        self.base + index.iter().zip(&self.strides).map(|(i, s)| i * s).sum::<usize>()
+    }
+    /// The last register an element can name, or `None` for an empty view.
+    fn last(&self) -> Option<usize> {
+        if self.shape.contains(&0) { return None; }
+        Some(self.base + self.shape.iter().zip(&self.strides).map(|(n, s)| (n - 1) * s).sum::<usize>())
+    }
+    /// Call `f` with every index of `shape` in row-major order, the last axis fastest.
+    fn each(shape: &[usize], mut f: impl FnMut(&[usize])) {
+        if shape.contains(&0) { return; }
+        let mut index = [0usize; DIMS];
+        let n = shape.len();
+        loop {
+            f(&index[..n]);
+            let mut k = n;
+            loop {
+                if k == 0 { return; }
+                k -= 1;
+                index[k] += 1;
+                if index[k] < shape[k] { break; }
+                index[k] = 0;
+            }
+        }
+    }
+    fn elements(&self, out: &mut Vec<usize>) {
+        View::each(&self.shape, |i| out.push(self.at(i)));
+    }
+}
+
+/// Decode `[base, ndim, shape.., strides..]` per view. `None` when a view names a register at
+/// or past `registers`, has more than `DIMS` axes, or a field is negative.
+fn decode_views(flat: &[i32], registers: usize) -> Option<Vec<View>> {
+    let mut views = Vec::new();
+    let mut k = 0;
+    while k < flat.len() {
+        let base = usize::try_from(*flat.get(k)?).ok()?;
+        let nd = usize::try_from(*flat.get(k + 1)?).ok()?;
+        if nd > DIMS { return None; }
+        let field = |j: usize| flat.get(j).and_then(|&x| usize::try_from(x).ok());
+        let shape = (0..nd).map(|j| field(k + 2 + j)).collect::<Option<Vec<_>>>()?;
+        let strides = (0..nd).map(|j| field(k + 2 + nd + j)).collect::<Option<Vec<_>>>()?;
+        let view = View { base, shape, strides };
+        if view.last().is_some_and(|last| last >= registers) || base >= registers {
+            return None;
+        }
+        views.push(view);
+        k += 2 + 2 * nd;
+    }
+    Some(views)
+}
+
+/// Whether a shaped instruction names views that exist with shapes that fit its opcode.
+fn shaped(op: i32, dst: i64, a: i64, b: i64, c: i64, views: &[View]) -> bool {
+    let get = |k: i64| usize::try_from(k).ok().and_then(|k| views.get(k));
+    let Some(d) = get(dst) else { return false };
+    let same = |k: i64| get(k).is_some_and(|v| v.shape == d.shape);
+    match op {
+        43 => same(a) && same(b) && (8..=20).contains(&c),
+        44 => same(a) && same(b) && (32..=36).contains(&c),
+        45 => same(a) && (c == 21 || c == 22 || (c == 23 && (0..=17).contains(&b))),
+        46 => same(a) && same(b) && same(c),
+        47 => get(a).is_some_and(|v| {
+            let axis = b as usize;
+            b >= 0 && axis < v.shape.len() && (0..=3).contains(&c) && v.shape[axis] > 0
+                && d.shape.len() + 1 == v.shape.len()
+                && d.shape.iter().eq(v.shape.iter().enumerate().filter(|&(k, _)| k != axis).map(|(_, n)| n))
+        }),
+        48 => a >= 0 && (a as usize) < d.shape.len(),
+        49 => get(a).is_some_and(|v| {
+            // The destination must not overlap the operand: compared by their register hulls.
+            let apart = match (d.last(), v.last()) {
+                (Some(dl), Some(vl)) => dl < v.base || vl < d.base,
+                _ => true,
+            };
+            v.shape == d.shape && b >= 0 && (b as usize) < d.shape.len() && apart
+        }),
+        _ => false,
+    }
+}
 
 /// One Newton block: indices into the program's arrays, as `vm.NewtonBlock`.
 #[derive(Clone)]
@@ -65,6 +159,8 @@ pub struct Program {
     iterative: bool,
     /// The gather tables (`vm.Function.tables`, every function's in one pool): register numbers.
     tables: Vec<usize>,
+    /// The arrays the shaped opcodes name (`vm.Program.views`).
+    views: Vec<View>,
 }
 
 /// Memory one call works in, kept between calls so a call allocates nothing: the register
@@ -179,7 +275,7 @@ fn solve(r: &mut [f64], a: &mut Vec<f64>, b: &mut Vec<f64>, n: usize, matrix: us
 /// Whether every register an instruction in `code[range]` names is below `registers`, every
 /// constant index is in the pool and every `NEWTON` names a block of its function. `run` reads
 /// registers without bounds checks on the strength of this.
-fn valid(code: &[i32], range: (usize, usize), registers: usize, constants: usize, blocks: usize, tables: &[i32]) -> bool {
+fn valid(code: &[i32], range: (usize, usize), registers: usize, constants: usize, blocks: usize, tables: &[i32], views: &[View]) -> bool {
     let Some(slice) = code.get(range.0 * INSTR..(range.0 + range.1) * INSTR) else { return false };
     let fits = |x: i64| x >= 0 && (x as usize) < registers;
     let span = |start: i64, n: i64| start >= 0 && n >= 0 && (start + n) as usize <= registers;
@@ -212,6 +308,7 @@ fn valid(code: &[i32], range: (usize, usize), registers: usize, constants: usize
             40 => span(dst, c) && a >= 0,
             42 => span(b, c) && table(a, c),
             41 => span(b, c) && a >= 0,
+            43..=49 => shaped(op, dst, a, b, c, views),
             _ => false,
         }
     })
@@ -292,7 +389,77 @@ impl Program {
                 }
                 40 => f.r[dst..dst + c as usize].copy_from_slice(&f.y[a..a + c as usize]),
                 41 => f.out[a..a + c as usize].copy_from_slice(&f.r[b..b + c as usize]),
+                43..=49 => self.shaped(op, dst, a, b, c, f.r),
                 _ => unreachable!("opcode {op} is not in vm.Op"),
+            }
+        }
+    }
+
+    /// One shaped opcode over its destination view, in row-major order, as `vm._Machine._shaped`.
+    fn shaped(&self, op: i32, dst: usize, a: usize, b: usize, c: i32, r: &mut [f64]) {
+        let views = &self.views;
+        let d = &views[dst];
+        // SAFETY: `valid` checked every view's last register against the register count.
+        let reg = r.as_mut_ptr();
+        let get = |k: usize| unsafe { *reg.add(k) };
+        let set = |k: usize, v: f64| unsafe { *reg.add(k) = v };
+        match op {
+            48 => View::each(&d.shape, |i| set(d.at(i), (i[a] + 1) as f64)),
+            47 => {
+                let v = &views[a];
+                let mut full = [0usize; DIMS];
+                View::each(&d.shape, |i| {
+                    full[..b].copy_from_slice(&i[..b]);
+                    full[b + 1..=i.len()].copy_from_slice(&i[b..]);
+                    let mut total = 0.0;
+                    for k in 0..v.shape[b] {
+                        full[b] = k;
+                        let x = get(v.at(&full[..=i.len()]));
+                        total = if k == 0 { x } else {
+                            match c { 0 => total + x, 1 => total * x, 2 => md_min(total, x), _ => md_max(total, x) }
+                        };
+                    }
+                    set(d.at(i), total);
+                });
+            }
+            49 => {
+                let v = &views[a];
+                let n = v.shape[b] as i64;
+                let mut source = [0usize; DIMS];
+                View::each(&d.shape, |i| {
+                    source[..i.len()].copy_from_slice(i);
+                    source[b] = (i[b] as i64 - c as i64).rem_euclid(n) as usize;
+                    set(d.at(i), get(v.at(&source[..i.len()])));
+                });
+            }
+            45 => {
+                let v = &views[a];
+                View::each(&d.shape, |i| {
+                    let x = get(v.at(i));
+                    let value = match c { 21 => -x, 22 => truth(x == 0.0), _ => unary(b as i32, x) };
+                    set(d.at(i), value);
+                });
+            }
+            46 => {
+                let (cond, then, other) = (&views[a], &views[b], &views[c as usize]);
+                View::each(&d.shape, |i| {
+                    set(d.at(i), if get(cond.at(i)) != 0.0 { get(then.at(i)) } else { get(other.at(i)) });
+                });
+            }
+            _ => {
+                let (u, v) = (&views[a], &views[b]);
+                View::each(&d.shape, |i| {
+                    let (x, z) = (get(u.at(i)), get(v.at(i)));
+                    let value = if op == 44 { binary(c, x, z) } else {
+                        match c {
+                            8 => x + z, 9 => x - z, 10 => x * z, 11 => x / z, 12 => x.powf(z),
+                            13 => truth(x < z), 14 => truth(x <= z), 15 => truth(x > z),
+                            16 => truth(x >= z), 17 => truth(x == z), 18 => truth(x != z),
+                            19 => truth(x != 0.0 && z != 0.0), _ => truth(x != 0.0 || z != 0.0),
+                        }
+                    };
+                    set(d.at(i), value);
+                });
             }
         }
     }
@@ -365,11 +532,12 @@ impl Program {
 }
 
 /// The registers the instructions in `code[range]` write, a solve's and a Newton block's too.
-fn writes(code: &[i32], range: (usize, usize), function: &Function, tables: &[i32], out: &mut Vec<usize>) {
+fn writes(code: &[i32], range: (usize, usize), function: &Function, tables: &[i32], views: &[View], out: &mut Vec<usize>) {
     for i in code[range.0 * INSTR..(range.0 + range.1) * INSTR].chunks_exact(INSTR) {
         let (op, dst, a, b, c) = (i[0], i[1] as usize, i[2] as usize, i[3] as usize, i[4] as usize);
         match op {
             0..=4 | 7..=25 => out.push(dst),
+            43..=49 => views[dst].elements(out),
             31 | 33..=38 => out.extend(dst..dst + c),
             32 | 42 => out.extend(tables[a..a + c].iter().map(|&r| r as usize)),
             39 => out.extend(dst..dst + b),
@@ -379,7 +547,7 @@ fn writes(code: &[i32], range: (usize, usize), function: &Function, tables: &[i3
                 let block = &function.newton[a];
                 out.extend(&block.unknowns);
                 out.extend(block.step..block.step + block.unknowns.len());
-                writes(code, block.body, function, tables, out);
+                writes(code, block.body, function, tables, views, out);
             }
             _ => {}
         }
@@ -387,12 +555,22 @@ fn writes(code: &[i32], range: (usize, usize), function: &Function, tables: &[i3
 }
 
 /// The registers the instructions in `code[range]` read, a solve's and a Newton block's too.
-fn reads(code: &[i32], range: (usize, usize), function: &Function, tables: &[i32], out: &mut Vec<usize>) {
+fn reads(code: &[i32], range: (usize, usize), function: &Function, tables: &[i32], views: &[View], out: &mut Vec<usize>) {
     for i in code[range.0 * INSTR..(range.0 + range.1) * INSTR].chunks_exact(INSTR) {
         let (op, a, b, c) = (i[0], i[2] as usize, i[3] as usize, i[4] as usize);
         match op {
             31 => out.extend(tables[a..a + c].iter().map(|&r| r as usize)),
             32 => out.extend(b..b + c),
+            43 | 44 => {
+                views[a].elements(out);
+                views[b].elements(out);
+            }
+            45 | 47 | 49 => views[a].elements(out),
+            46 => {
+                views[a].elements(out);
+                views[b].elements(out);
+                views[c].elements(out);
+            }
             33 => out.push(a),
             34..=37 => {
                 out.extend(a..a + c);
@@ -419,7 +597,7 @@ fn reads(code: &[i32], range: (usize, usize), function: &Function, tables: &[i32
                 out.extend(&block.unknowns);
                 out.extend(block.matrix..block.matrix + n * n);
                 out.extend(block.right..block.right + n);
-                reads(code, block.body, function, tables, out);
+                reads(code, block.body, function, tables, views, out);
             }
             _ => {}
         }
@@ -427,11 +605,11 @@ fn reads(code: &[i32], range: (usize, usize), function: &Function, tables: &[i32
 }
 
 /// The registers written before `split` in `function` and read after it.
-fn live(code: &[i32], function: &Function, split: usize, tables: &[i32]) -> Vec<usize> {
+fn live(code: &[i32], function: &Function, split: usize, tables: &[i32], views: &[View]) -> Vec<usize> {
     let mut before = Vec::new();
-    writes(code, (function.code.0, split), function, tables, &mut before);
+    writes(code, (function.code.0, split), function, tables, views, &mut before);
     let mut after = Vec::new();
-    reads(code, (function.code.0 + split + 1, function.code.1 - split - 1), function, tables, &mut after);
+    reads(code, (function.code.0 + split + 1, function.code.1 - split - 1), function, tables, views, &mut after);
     let after: std::collections::HashSet<usize> = after.into_iter().collect();
     let mut out: Vec<usize> = before.into_iter().filter(|r| after.contains(r)).collect();
     out.sort_unstable();
@@ -459,6 +637,8 @@ pub unsafe extern "C" fn md_vm_new(
     nnewton: usize,
     unknowns: *const i32,
     nunknowns: usize,
+    views: *const i32,
+    nviews: usize,
 ) -> *mut Program {
     let view = |ptr: *const i32, n: usize| if n == 0 { &[][..] } else { slice::from_raw_parts(ptr, n) };
     let constants = if nconstants == 0 { Vec::new() } else { slice::from_raw_parts(constants, nconstants).to_vec() };
@@ -466,6 +646,7 @@ pub unsafe extern "C" fn md_vm_new(
     let table = view(functions, nfunctions * FUNCTION);
     let blocks = view(newton, nnewton * NEWTON);
     let unknowns = view(unknowns, nunknowns);
+    let Some(views) = decode_views(view(views, nviews), registers) else { return std::ptr::null_mut() };
     let mut decoded = Vec::with_capacity(nfunctions);
     for row in table.chunks_exact(FUNCTION) {
         let (start, len, first, count) = (row[0] as usize, row[1] as usize, row[2] as usize, row[3] as usize);
@@ -485,12 +666,12 @@ pub unsafe extern "C" fn md_vm_new(
                 && block.matrix + n * n <= registers
                 && block.right + n <= registers
                 && block.step + n <= registers;
-            if !inside || !valid(&code, block.body, registers, constants.len(), count, unknowns) {
+            if !inside || !valid(&code, block.body, registers, constants.len(), count, unknowns, &views) {
                 return std::ptr::null_mut();
             }
             own.push(block);
         }
-        if !valid(&code, (start, len), registers, constants.len(), count, unknowns) {
+        if !valid(&code, (start, len), registers, constants.len(), count, unknowns, &views) {
             return std::ptr::null_mut();
         }
         let hoist = code[start * INSTR..(start + len) * INSTR]
@@ -498,7 +679,7 @@ pub unsafe extern "C" fn md_vm_new(
             .position(|i| i[0] == 30);
         let mut function = Function { code: (start, len), newton: own, hoist, live: Vec::new() };
         if let Some(split) = hoist {
-            function.live = live(&code, &function, split, unknowns);
+            function.live = live(&code, &function, split, unknowns, &views);
         }
         decoded.push(function);
     }
@@ -523,7 +704,15 @@ pub unsafe extern "C" fn md_vm_new(
         mass: Vec::new(),
         iterative: false,
         tables: unknowns.iter().map(|&r| r as usize).collect(),
+        views,
     }))
+}
+
+/// The tape format this engine reads (`FORMAT`). `modelica.sim.engine` refuses a library
+/// whose format differs from `vm.FORMAT`.
+#[no_mangle]
+pub extern "C" fn md_vm_format() -> u32 {
+    FORMAT
 }
 
 /// Set, per event, the workspace slot that holds its time-event instant (-1: a state event).
