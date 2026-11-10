@@ -1638,16 +1638,29 @@ def _prune(functions: Sequence[Function]) -> list[Function]:  # noqa: C901 - cou
     return out
 
 
-def _rewrite(i: Instr, alias: Mapping[int, int]) -> Instr:
-    """``i`` reading ``alias[r]`` wherever it read a register ``r`` in ``alias``."""
-    if i.op in (Op.MOVE, Op.NEG, Op.NOT, Op.CALL1):
-        return Instr(i.op, i.dst, alias.get(i.a, i.a), i.b, i.c)
-    if i.op is Op.SELECT:
-        return Instr(i.op, i.dst, *(alias.get(r, r) for r in (i.a, i.b, i.c)))
-    if i.op in _PURE:
-        return Instr(i.op, i.dst, alias.get(i.a, i.a), alias.get(i.b, i.b), i.c)
-    if i.op in (Op.STORE_OUT, Op.STORE_W):
-        return Instr(i.op, i.dst, i.a, alias.get(i.b, i.b), i.c)
+def _rewrite(i: Instr, alias: Mapping[int, int]) -> Instr:  # noqa: PLR0911 - one return per shape
+    """``i`` reading ``alias[r]`` wherever it read a register ``r`` in ``alias``.
+
+    Returns ``i`` itself when it reads no such register, so a pass over a long tape builds new
+    instructions only where something changes.
+    """
+    op = i.op
+    if op in (Op.MOVE, Op.NEG, Op.NOT, Op.CALL1):
+        if i.a not in alias:
+            return i
+        return Instr(op, i.dst, alias[i.a], i.b, i.c)
+    if op is Op.SELECT:
+        if i.a not in alias and i.b not in alias and i.c not in alias:
+            return i
+        return Instr(op, i.dst, *(alias.get(r, r) for r in (i.a, i.b, i.c)))
+    if op in _PURE:
+        if i.a not in alias and i.b not in alias:
+            return i
+        return Instr(op, i.dst, alias.get(i.a, i.a), alias.get(i.b, i.b), i.c)
+    if op in (Op.STORE_OUT, Op.STORE_W):
+        if i.b not in alias:
+            return i
+        return Instr(op, i.dst, i.a, alias[i.b], i.c)
     return i
 
 
@@ -1925,20 +1938,24 @@ def _peephole(function: Function) -> Function:
     """
     if function.newton:
         return function
-    written: dict[int, list[int]] = {}
+    # How many times each register is written, and where last.
+    count: dict[int, int] = {}
+    last: dict[int, int] = {}
     for position, i in enumerate(function.code):
-        for r in _writes(i, function):
-            written.setdefault(r, []).append(position)
+        for r in [i.dst] if i.op in _REMOVABLE else _writes(i, function):
+            count[r] = count.get(r, 0) + 1
+            last[r] = position
 
     def settled(dst: int, source: int, position: int) -> bool:
-        writes = written.get(source, [])
-        return len(written[dst]) == 1 and len(writes) <= 1 and all(w < position for w in writes)
+        return count[dst] == 1 and count.get(source, 0) <= 1 and last.get(source, -1) < position
 
     alias: dict[int, int] = {}
     negated: dict[int, int] = {}
     code: list[Instr] = []
     for position, original in enumerate(function.code):
-        i = _unnegate(_rewrite(original, alias), negated)
+        i = _rewrite(original, alias) if alias else original
+        if negated:
+            i = _unnegate(i, negated)
         if i.op is Op.MOVE and settled(i.dst, i.a, position):
             alias[i.dst] = i.a
         elif i.op is Op.NEG and settled(i.dst, i.a, position):

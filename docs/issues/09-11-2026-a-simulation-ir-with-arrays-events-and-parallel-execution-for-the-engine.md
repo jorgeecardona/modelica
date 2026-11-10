@@ -552,3 +552,9 @@ The results are the same bits. On TorusHeat at n = 100 a 0.5 s run takes 17.6 s,
 `vm.lower` is 8.9 s and the integration about 8.7 s. Next: `vm.lower` on large grids (the
 front end now costs as much as the run), then 12b only if a profile of the integration shows
 the factorisation dominating.
+
+`vm.lower` faster on large tapes: `_rewrite` returns the instruction itself when it reads no
+aliased register, `_peephole` rewrites only once an alias or a negation exists, and counts
+writes instead of listing their positions. TorusHeat at n = 100: `vm.lower` 8.9 s to about
+6 s. What is left is `_compact` (2.3 s) and `_prune` (1.3 s) walking about 170000
+instructions, most of them the jacobian's 50000 `out` stores and their `LOAD_P`s.
