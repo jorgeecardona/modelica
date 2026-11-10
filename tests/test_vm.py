@@ -1,6 +1,6 @@
 """The tape against the emitted Python, on every corpus model, in Python and in the Rust engine.
 
-The differential style of `tests/test_rustgen.py`: two implementations of one `System`, the same
+Two implementations of one `System`, the same
 inputs at the model's start point, the answers compared. `vm.evaluate` is checked on every
 model; the Rust engine (``engine/src/lib.rs``) is compiled once with ``rustc`` and checked on the
 same calls, and skipped when there is no ``rustc``.
@@ -266,26 +266,7 @@ def test_the_engine_equals_the_tape_at_random_points(engine: Path, model: Path) 
     loaded.close()
 
 
-_TRAJECTORY_MODELS = ("BouncingBall", "Lorenz", "Pendulum", "PhaseChange", "BumpStop", "TwoTank")
-
-
-@pytest.mark.slow  # compiles each model with rustsim for the comparison
-@pytest.mark.parametrize("name", _TRAJECTORY_MODELS)
-def test_the_engine_integrates_like_rustsim(engine: Path, name: str) -> None:
-    """A whole run: the same Radau runtime on the tape and on compiled code, step for step."""
-    from modelica.sim import engine as native  # noqa: PLC0415 - only the engine tests need it
-    from modelica.sim import rustsim  # noqa: PLC0415
-
-    model = EXAMPLES / "models" / f"{name}.mo"
-    system = _system(model)
-    compiled = rustsim.simulate(system, stop=2.0, points=40)
-    tape = native.simulate(system, stop=2.0, points=40, path=engine)
-    assert tape.event_list == compiled.event_list
-    assert tape.steps == compiled.steps
-    np.testing.assert_allclose(tape.result.values, compiled.result.values, rtol=1e-9, atol=1e-12)
-
-
-def test_the_engine_runtime_is_the_rustsim_runtime() -> None:
+def test_the_engine_runtime_is_the_rust_radau_text() -> None:
     """``engine/src/radau.rs`` is `rust_radau`'s text; rewrite it with ``vm.write_runtime()``."""
     written = (ROOT / "engine" / "src" / "radau.rs").read_text(encoding="utf-8")
     assert written == vm.runtime()

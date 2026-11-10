@@ -54,7 +54,7 @@ on it.
 ## How it works
 
 `modelica.sim.vm` lowers the model to a register tape, and the engine (`engine/src/lib.rs`) runs
-the tape inside the same Radau integrator and event loop as the [Rust backend](rust-backend.md).
+the tape inside a Radau IIA integrator and event loop (`engine/src/radau.rs`).
 The tape format, the lowering passes and the run-time caches are in
 [The engine's virtual machine](vm/index.md).
 

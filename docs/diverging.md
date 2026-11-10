@@ -89,8 +89,7 @@ The two arguments are observers. An observer is anything with the signature of t
 `observe` function: it takes the time, the state, the parameters and the workspace, and it
 writes every variable of the model into an output array.
 
-A `Kernel` is an observer. A compiled C unit becomes one with a small `ctypes` wrapper, the
-way `tests/test_cgen.py` wraps it. An exported FMU becomes one with a wrapper of its own.
+A `Kernel` is an observer. An exported FMU becomes one with a small wrapper.
 
 Neither side is privileged. The interpreter is a useful reference because it is the simplest
 implementation, but the pairs that matter do not always contain it.

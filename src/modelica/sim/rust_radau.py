@@ -1,19 +1,13 @@
 """The Rust Radau IIA runtime, ported from `modelica.sim.radau`.
 
-`docs/issues/03-09-2026-a-rust-backend-is-a-third-dialect-plus-a-port-of-radau.md` names this
-as step 2: once `rustgen` emits a model's kernel (done for the supported subset), the
-integrator is a port of `radau.py` -- three-stage Radau IIA, order five, RADAU5 after Hairer
-and Wanner IV.8 -- with the linear algebra SciPy cannot lend a compiled caller written out
-here instead. `radau.py:19` says the same for the numba path.
+The engine (``engine/src/radau.rs``, written by `vm.write_runtime`) runs this integrator.
+It is a port of `radau.py`: three-stage Radau IIA, order five, RADAU5 after Hairer and
+Wanner IV.8, with the linear algebra written out.
 
 A Radau step factorises two matrices: one real ``n``-by-``n`` for the method's real
-eigenvalue, and one complex ``n``-by-``n`` for its conjugate pair. The real one is
-`modelica.sim.dialect.RUST`'s ``md_solve``, already written. This module begins with the
-complex one, because it is the piece the issue calls out as still to write and it is testable
-on its own before any of the step exists.
+eigenvalue, and one complex ``n``-by-``n`` for its conjugate pair.
 
-The module holds Rust source as text, the way `dialect.C_PREAMBLE` does, because the artifact
-is compiled by `rustc`, not imported by Python.
+The module holds Rust source as text: the engine build compiles it with `rustc`.
 """
 
 from __future__ import annotations
@@ -527,7 +521,7 @@ LINALG: Final[tuple[str, ...]] = (
 
 # The method's constants, computed here from the same formulas `radau.py` uses so a
 # transcription error cannot creep in, then emitted as Rust literals. Pure Python (no numpy),
-# so this module stays importable without the `sim` extra, the way `cgen` does.
+# so this module stays importable without the `sim` extra.
 _S6 = 6.0**0.5
 _C = [(4.0 - _S6) / 10.0, (4.0 + _S6) / 10.0, 1.0]
 _E = [(-13.0 - 7.0 * _S6) / 3.0, (-13.0 + 7.0 * _S6) / 3.0, -1.0 / 3.0]

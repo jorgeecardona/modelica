@@ -5,8 +5,7 @@ compilable*. Nothing here builds a tree of closures to walk at every step. A
 :class:`~modelica.ir.system.System` comes in and a string of ordinary Python comes out --
 scalars, arithmetic and array indexing, and nothing else -- which the CPython bytecode
 compiler will run as-is and Numba will compile to machine code without leaving nopython
-mode. The same emitter, pointed at a different set of templates, is what will produce C
-for FMU export.
+mode.
 
 The generated module holds nine functions, all of them filling a caller-supplied array
 rather than returning a new one, so that the step loop allocates as little as it can:

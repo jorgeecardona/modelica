@@ -1,37 +1,21 @@
-"""Simulate a model through the Rust backend: emit it, compile it once, call it.
+"""Call the engine's ``md_vm_run`` and read its buffers back into a `Run`.
 
-The execution model `docs/issues/03-09-2026-a-rust-backend-is-a-third-dialect-plus-a-port-of-radau.md`
-decided: ahead of time and native, no compiler on the run path. `program` writes the model's
-unit (`rustgen`) and the radau runtime (`rust_radau`) into one Rust source behind a C entry
-point; `build` compiles that source into a shared library **once**, keyed by the source's
-content hash, so a model that has not changed is never compiled again; `simulate` loads the
-library through `ctypes` and runs it, handing back the same `Result` the interpreter does, so
-the two tiers can be compared by the same tests and drawn by the same panel.
-
-`rustc` is the whole toolchain -- no cargo, no crate, no runtime library -- and it is needed
-only when the cache misses. The browser form (WebAssembly) is the same source under a different
-target and is not built here yet.
+`drive` passes NumPy arrays to the entry point by address, with their lengths, and `assemble`
+reads the rows, events and counters back. `engine` uses both.
 """
 
 from __future__ import annotations
 
 import ctypes
-import hashlib
 import os
 import platform
-import shutil
-import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
 
-from modelica.sim.kernel import build as build_kernel
 from modelica.sim.result import Event, Result
-from modelica.sim.rust_radau import CONSTANTS, FIRST_STEP, INTEGRATE, LINALG, NEWTON, STEP
-from modelica.sim.rustgen import unit
 from modelica.sim.solve import SimulationError
 
 if TYPE_CHECKING:
@@ -42,83 +26,7 @@ if TYPE_CHECKING:
     from modelica.ir.system import System
     from modelica.sim.emit import Trigger
 
-__all__ = [
-    "Run",
-    "assemble",
-    "build",
-    "compiler",
-    "drive",
-    "program",
-    "rows_for",
-    "simulate",
-    "triggers",
-]
-
-#: The C entry point over `md_integrate`. Every pointer comes from a NumPy array the caller
-#: keeps alive for the duration of the call, with its length beside it; a zero length means
-#: the array may be empty, and an empty slice is made without reading the pointer. The eight
-#: counters the driver returns come back through ``counters`` so the status can be the return
-#: value, which is what a C caller checks first.
-ENTRY = """\
-#[no_mangle]
-pub extern "C" fn md_run(
-    t0: f64,
-    t1: f64,
-    y0: *const f64,
-    n: usize,
-    p: *const f64,
-    np: usize,
-    w: *mut f64,
-    nw: usize,
-    rtol: f64,
-    atol: f64,
-    dirs: *const f64,
-    lat: *const i64,
-    term: *const i64,
-    ne: usize,
-    grid: *const f64,
-    npts: usize,
-    every: i32,
-    t_out: *mut f64,
-    cap: usize,
-    out: *mut f64,
-    obs: *mut f64,
-    nobs: usize,
-    events_out: *mut f64,
-    ev_index_out: *mut f64,
-    nev_out: usize,
-    counters: *mut f64,
-) -> i32 {
-    unsafe fn view<'a>(ptr: *const f64, len: usize) -> &'a [f64] {
-        if len == 0 { &[] } else { std::slice::from_raw_parts(ptr, len) }
-    }
-    unsafe fn view_mut<'a>(ptr: *mut f64, len: usize) -> &'a mut [f64] {
-        if len == 0 { &mut [] } else { std::slice::from_raw_parts_mut(ptr, len) }
-    }
-    let (y0, p, w) = unsafe { (view(y0, n), view(p, np), view_mut(w, nw)) };
-    let dirs = unsafe { view(dirs, ne) };
-    let lat: &[i64] = if ne == 0 { &[] } else { unsafe { std::slice::from_raw_parts(lat, ne) } };
-    let term: &[i64] = if ne == 0 { &[] } else { unsafe { std::slice::from_raw_parts(term, ne) } };
-    let grid = unsafe { view(grid, npts) };
-    let t_out = unsafe { view_mut(t_out, cap) };
-    let out = unsafe { view_mut(out, cap * n) };
-    let obs = unsafe { view_mut(obs, cap * nobs) };
-    let events_out = unsafe { view_mut(events_out, nev_out) };
-    let ev_index_out = unsafe { view_mut(ev_index_out, nev_out) };
-    let r = md_integrate(t0, t1, y0, p, w, rtol, atol, dirs, lat, term, &[], grid, &[], &[], &[], false, every != 0, t_out, out, obs, events_out, ev_index_out);
-    let counters = unsafe { view_mut(counters, 9) };
-    counters[0] = r.0 as f64;
-    counters[1] = r.1 as f64;
-    counters[2] = r.2 as f64;
-    counters[3] = r.3 as f64;
-    counters[4] = r.4 as f64;
-    counters[5] = r.5 as f64;
-    counters[6] = r.6 as f64;
-    counters[7] = r.7;
-    counters[8] = r.8 as f64;
-    r.0
-}
-"""
+__all__ = ["Run", "assemble", "default_cache", "drive", "rows_for", "suffix", "triggers"]
 
 #: What the driver's status means, by the constants `rust_radau.STEP` declares.
 STATUS = {
@@ -129,36 +37,14 @@ STATUS = {
 }
 
 
-def compiler() -> str | None:
-    """The ``rustc`` on PATH, or ``None``: the backend needs it only when the cache misses."""
-    return shutil.which("rustc")
-
-
-def program(system: System) -> str:
-    """The model and the integrator as one Rust source, behind the C entry point."""
-    return "\n".join(
-        [
-            "#![allow(dead_code)]",
-            unit(system),
-            *CONSTANTS,
-            *LINALG,
-            *STEP,
-            *NEWTON,
-            *FIRST_STEP,
-            *INTEGRATE,
-            ENTRY,
-        ]
-    )
-
-
-def _default_cache() -> Path:
+def default_cache() -> Path:
     """``$PYMODELICA_CACHE/rust``, else the user's cache directory."""
     root = os.environ.get("PYMODELICA_CACHE")
     base = Path(root) if root else Path.home() / ".cache" / "pymodelica"
     return base / "rust"
 
 
-def _suffix() -> str:
+def suffix() -> str:
     """What the platform calls a shared library."""
     system = platform.system()
     if system == "Darwin":
@@ -166,53 +52,6 @@ def _suffix() -> str:
     if system == "Windows":
         return ".dll"
     return ".so"
-
-
-def build(system: System, cache: Path | None = None) -> Path:
-    """The shared library for ``system``, compiled once and kept under its content hash.
-
-    The key is the hash of the complete source, so any change to the model, to the emitter or
-    to the runtime is a different artifact, and an unchanged model costs a hash and a stat. The
-    compile goes to a temporary name in the same directory and is renamed into place, so two
-    processes building the same model cannot leave each other a half-written library.
-    """
-    source = program(system)
-    key = hashlib.sha256(source.encode("utf-8")).hexdigest()[:20]
-    folder = cache if cache is not None else _default_cache()
-    folder.mkdir(parents=True, exist_ok=True)
-    library = folder / f"{key}{_suffix()}"
-    if library.exists():
-        return library
-    rustc = compiler()
-    if rustc is None:
-        message = f"{system.name}: no rustc on PATH, and no compiled library for it in {folder}"
-        raise SimulationError(message)
-    source_path = folder / f"{key}.rs"
-    source_path.write_text(source, encoding="utf-8")
-    with tempfile.NamedTemporaryFile(dir=folder, suffix=_suffix(), delete=False) as handle:
-        partial = Path(handle.name)
-    done = subprocess.run(  # noqa: S603 - the compiler from PATH, on source generated here
-        [
-            rustc,
-            "--edition",
-            "2021",
-            "-O",
-            "--crate-type",
-            "cdylib",
-            str(source_path),
-            "-o",
-            str(partial),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if done.returncode != 0:
-        partial.unlink(missing_ok=True)
-        message = f"{system.name}: rustc failed on {source_path}\n{done.stderr}"
-        raise SimulationError(message)
-    partial.replace(library)
-    return library
 
 
 @dataclass(frozen=True)
@@ -262,40 +101,6 @@ def _grid(
     if times is not None:
         return np.ascontiguousarray(np.asarray(times, dtype=np.float64))
     return np.linspace(t0, stop, points or 300)
-
-
-def simulate(  # noqa: PLR0913, PLR0917 - a solver has knobs, the same ones `solve.simulate` has
-    system: System,
-    stop: float,
-    times: Sequence[float] | NDArray[np.float64] | None = None,
-    points: int | None = None,
-    tolerance: float = 1e-6,
-    absolute: float | None = None,
-    parameters: NDArray[np.float64] | None = None,
-    cache: Path | None = None,
-) -> Run:
-    """Integrate ``system`` from its start to ``stop`` in the compiled Rust runtime.
-
-    The same knobs as `modelica.sim.simulate`, the same `Result` back: states and observed
-    variables at ``times`` (or ``points`` evenly spaced), by name. The library is built on the
-    first call for a model and reused after; a status other than success raises
-    `SimulationError` with what the driver reported.
-    """
-    library = build(system, cache)
-    kernel = build_kernel(system)
-    return drive(
-        system,
-        ctypes.CDLL(str(library)).md_run,
-        (),
-        start=kernel.start(0.0, parameters),
-        events=kernel.code.events,
-        observed=kernel.code.observed,
-        stop=stop,
-        times=times,
-        points=points,
-        tolerance=tolerance,
-        absolute=absolute,
-    )
 
 
 #: The ctypes argument types of ``md_run``, after any leading arguments a caller adds.

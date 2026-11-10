@@ -101,7 +101,6 @@ nav:
       - Array models: vm/arrays.md
       - At run time: vm/runtime.md
       - Changing the VM: vm/extending.md
-  - The Rust backend, today: rust-backend.md
   - Notebooks:
       - Every model in the corpus: notebooks/gallery.ipynb
       - Simulating a model: notebooks/simulating.py

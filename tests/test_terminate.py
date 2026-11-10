@@ -13,16 +13,13 @@ reports the message as the cause -- in the interpreter and in the compiled Rust 
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+import shutil
 
 import pytest
 
 from modelica.ir.causalize import causalize
 from modelica.lang import parse
-from modelica.sim import flatten, rustsim, simulate
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from modelica.sim import engine, flatten, simulate
 
 # A first-order decay that stops when it has fallen below a tenth: x(t) = e^{-t} crosses 0.1 at
 # t = ln(10), a terminate time known in closed form, so the located instant can be checked exactly.
@@ -91,16 +88,19 @@ def test_the_trigger_records_that_it_terminates() -> None:
     assert not any(trigger.reinitialises for trigger in kernel.code.events)
 
 
-@pytest.mark.skipif(rustsim.compiler() is None, reason="no rustc on this machine")
-def test_the_rust_backend_terminates_at_the_same_instant(tmp_path: Path) -> None:
-    """The compiled backend stops where the interpreter does, and reports the same cause.
+@pytest.mark.skipif(
+    engine.installed() is None and shutil.which("rustc") is None,
+    reason="no engine in this install and no rustc to build one",
+)
+def test_the_engine_terminates_at_the_same_instant() -> None:
+    """The engine stops where the interpreter does, and reports the same cause.
 
-    The Rust run fills a fixed sample grid and truncates it at the terminate instant, so its last
+    The engine run fills a fixed sample grid and truncates it at the terminate instant, so its last
     grid point sits at or just before the crossing; the reported end time and the event are the
     located instant itself.
     """
     system = _system(DECAY, "Decay")
-    run = rustsim.simulate(system, stop=10.0, tolerance=1e-9, cache=tmp_path)
+    run = engine.simulate(system, stop=10.0, tolerance=1e-9)
     assert run.end == pytest.approx(_TERMINATE_TIME, abs=1e-6)
     assert not (run.result.time > _TERMINATE_TIME + 1e-6).any()
     assert run.events == 1

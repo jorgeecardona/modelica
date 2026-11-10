@@ -6,7 +6,7 @@ here is: compile it, run it, and compare numbers against a reference the rest of
 trusts -- here `numpy.linalg.solve` on the same complex system, since the point is that the
 hand-written factorisation agrees with LAPACK, not with itself.
 
-`rustc` is optional exactly as `cc` is in `tests/test_cgen.py`: no compiler, no test.
+`rustc` is optional: no compiler, no test.
 """
 
 from __future__ import annotations

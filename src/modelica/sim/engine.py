@@ -1,13 +1,13 @@
 """Run a model in the precompiled engine (``engine/src/lib.rs``): the tape, no compiler per model.
 
 `modelica.sim.vm` lowers the model to a tape; this module hands the tape to the engine library
-and integrates with the same Radau runtime `rustsim` compiles. The result is `rustsim.Run`.
+and integrates with the Radau runtime in ``engine/src/radau.rs``. The result is `runner.Run`.
 
 The engine is one shared library for every model. A platform wheel of ``modelica`` carries it as
 ``modelica/_engine.<suffix>`` (``hatch_build.py``): Linux x86_64 and aarch64, Windows x86_64 and
 macOS arm64. With a pure wheel or a source checkout,
 `library` builds it once with ``rustc`` from ``engine/src`` and keeps it in the cache directory
-`rustsim` uses.
+(`runner.default_cache`).
 """
 
 from __future__ import annotations
@@ -25,13 +25,13 @@ import numpy as np
 
 from modelica.sim import vm
 from modelica.sim.result import Result
-from modelica.sim.rustsim import (
+from modelica.sim.runner import (
     _RUN_ARGUMENTS,  # pyright: ignore[reportPrivateUsage] - the same entry point arguments
-    _default_cache,  # pyright: ignore[reportPrivateUsage] - the same cache directory
-    _suffix,  # pyright: ignore[reportPrivateUsage]
     assemble,
+    default_cache,
     drive,
     rows_for,
+    suffix,
     triggers,
 )
 from modelica.sim.solve import SimulationError
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from modelica.ir.system import System
-    from modelica.sim.rustsim import Run
+    from modelica.sim.runner import Run
 
 __all__ = ["Loaded", "installed", "library", "load", "result", "results", "simulate"]
 
@@ -54,7 +54,7 @@ def installed() -> Path | None:
 
     A platform wheel carries it as ``modelica/_engine.<suffix>`` (``hatch_build.py``).
     """
-    bundled = Path(__file__).resolve().parents[1] / f"_engine{_suffix()}"
+    bundled = Path(__file__).resolve().parents[1] / f"_engine{suffix()}"
     return bundled if bundled.exists() else None
 
 
@@ -70,16 +70,16 @@ def library(cache: Path | None = None) -> Path:
     digest = hashlib.sha256()
     for source in sources:
         digest.update(source.read_bytes())
-    folder = cache if cache is not None else _default_cache()
+    folder = cache if cache is not None else default_cache()
     folder.mkdir(parents=True, exist_ok=True)
-    target = folder / f"engine-{digest.hexdigest()[:20]}{_suffix()}"
+    target = folder / f"engine-{digest.hexdigest()[:20]}{suffix()}"
     if target.exists():
         return target
     rustc = shutil.which("rustc")
     if rustc is None:
         message = f"no rustc on PATH, and no engine library in {folder}"
         raise SimulationError(message)
-    with tempfile.NamedTemporaryFile(dir=folder, suffix=_suffix(), delete=False) as handle:
+    with tempfile.NamedTemporaryFile(dir=folder, suffix=suffix(), delete=False) as handle:
         partial = Path(handle.name)
     done = subprocess.run(  # noqa: S603 - the compiler from PATH, on the engine's own source
         [
@@ -258,7 +258,7 @@ def load(program: vm.Program, path: Path | None = None) -> Loaded:
     return Loaded(engine, handle, encoded, program.layout)
 
 
-def simulate(  # noqa: PLR0913, PLR0917 - the same knobs as `rustsim.simulate`
+def simulate(  # noqa: PLR0913, PLR0917 - the same knobs as `solve.simulate`
     system: System,
     stop: float,
     times: Sequence[float] | NDArray[np.float64] | None = None,
@@ -273,7 +273,7 @@ def simulate(  # noqa: PLR0913, PLR0917 - the same knobs as `rustsim.simulate`
 ) -> Run:
     """Integrate ``system`` in the engine: lower it to a tape, then run the Radau runtime on it.
 
-    ``every`` returns the rows `modelica.sim.simulate` returns (`rustsim.drive`).
+    ``every`` returns the rows `modelica.sim.simulate` returns (`runner.drive`).
     """
     return _runs(
         system,

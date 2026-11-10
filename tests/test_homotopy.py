@@ -12,7 +12,7 @@ including any relations in it, which must not become events nothing reads.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+import shutil
 
 import numpy as np
 import pytest
@@ -22,10 +22,7 @@ from modelica.ir.causalize import causalize
 from modelica.ir.derive import d_dt
 from modelica.ir.evaluate import evaluate
 from modelica.lang import parse
-from modelica.sim import flatten, rustsim, simulate
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from modelica.sim import engine, flatten, simulate
 
 _X = ir.Ref(("x",))
 
@@ -86,13 +83,16 @@ def test_a_nonlinear_actual_exercises_the_jacobian_rule() -> None:
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(rustsim.compiler() is None, reason="no rustc on this machine")
-def test_the_rust_backend_takes_the_actual_too(tmp_path: Path) -> None:
-    """The shared unwrap strips homotopy in the Rust dialect as well: same trajectory."""
+@pytest.mark.skipif(
+    engine.installed() is None and shutil.which("rustc") is None,
+    reason="no engine in this install and no rustc to build one",
+)
+def test_the_engine_takes_the_actual_too() -> None:
+    """The engine strips homotopy as well: same trajectory."""
     system = _system(CUBIC, "HomoCubic")
     grid = np.linspace(0.0, 1.0, 41)
     reference = simulate(system, stop=1.0, times=grid, tolerance=1e-9)
-    run = rustsim.simulate(system, stop=1.0, times=grid, tolerance=1e-9, cache=tmp_path)
+    run = engine.simulate(system, stop=1.0, times=grid, tolerance=1e-9)
     on_grid = np.interp(run.result.time, reference.time, reference["x"])
     assert np.max(np.abs(on_grid - run.result["x"])) < 1e-9
 

@@ -100,7 +100,7 @@ class Op(IntEnum):
 
 
 class Builtin(IntEnum):
-    """The functions a ``CALL1``/``CALL2`` names, with Modelica's meaning (`dialect.RUST`)."""
+    """The functions a ``CALL1``/``CALL2`` names, with Modelica's meaning."""
 
     ABS = 0
     ACOS = 1
@@ -2513,7 +2513,7 @@ def listing(program: Program, function: Function, *, width: int = 8) -> str:
 def runtime() -> str:
     """The Radau runtime as ``engine/src/radau.rs`` holds it: `rust_radau`'s text, unchanged.
 
-    The engine compiles the same integrator `rustsim` does. The file is generated so the
+    The engine is built with this integrator. The file is generated so the
     engine crate builds without Python; ``tests/test_vm.py`` fails when it is out of date, and
     ``uv run python -c "from modelica.sim import vm; vm.write_runtime()"`` rewrites it.
     """

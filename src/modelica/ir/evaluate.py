@@ -64,10 +64,6 @@ _FUNCTIONS: dict[str, Callable[[float], float]] = {
     "log": math.log,
     "log10": math.log10,
     "abs": abs,
-    # Added when the C dialect landed: the emitter could translate these and the reference
-    # tier could not evaluate them, so a model using `floor` had a compiled answer and no
-    # interpreted one to check it against. `docs/ideas/backends.md:8` calls this tier the
-    # reference, and a reference that knows fewer functions than the compiler is not one.
     "ceil": math.ceil,
     "floor": math.floor,
     # `integer(x)` is the largest integer not greater than x -- floor, typed Integer. In a Real
