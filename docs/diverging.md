@@ -1,8 +1,7 @@
 # Finding where two tiers disagree
 
 The same model runs in more than one way. The interpreter evaluates it. The emitted Python
-kernel runs it. Numba compiles that kernel. The C emitter writes it as a translation unit.
-Each of these is a second implementation of the same arithmetic.
+kernel runs it. The engine runs it as a tape. Each of these is a second implementation of the same arithmetic.
 
 When two of them give different answers, one of them is wrong. The problem is to find
 **which equation** they first disagree on. A comparison of the final answers says only that
@@ -22,10 +21,10 @@ from modelica.sim import build, causalize, flatten, diverges
 path = "examples/models/RoastingMachine.mo"
 system = causalize(flatten([parse(open(path).read(), path)], "RoastingMachine"))
 
-interpreted = build(system)
-compiled = build(system, jit=True)
+plain = build(system)
+folded = build(system, fold=True)
 
-print(diverges(system, interpreted, compiled))
+print(diverges(system, plain, folded))
 ```
 
 Two tiers that agree give `None`:
@@ -97,9 +96,9 @@ implementation, but the pairs that matter do not always contain it.
 ## The tolerance
 
 Two Python tiers agree bit for bit, because they perform the same operations in the same
-order. `tests/test_jit.py` holds them to that.
+order.
 
-A C tier does not, and cannot. A different `libm` rounds `exp` in a different last place. So
+The engine need not. A different `libm` rounds `exp` in a different last place. So
 the default agreement is `1e-12`, relative and absolute. Pass `relative=0.0, absolute=0.0`
 for a pair that must be exact.
 

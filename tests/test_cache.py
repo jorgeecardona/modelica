@@ -100,19 +100,6 @@ def test_a_parameter_value_is_part_of_the_model() -> None:
     assert build(_system(RC)) is not build(_system(RC.replace("R = 1.0", "R = 2.0")))
 
 
-def test_the_default_and_the_written_out_keyword_are_one_entry() -> None:
-    """``build(s)`` and ``build(s, jit=False)`` are the same question and must be one answer.
-
-    `functools.lru_cache` keys on the call as written, so decorating `build` directly made
-    these two entries -- and both forms are in this repo, since `simulate` always passes the
-    keyword. The model was compiled twice while the hit rate looked healthy.
-    """
-    pytest.importorskip("numpy")
-    system = _system(RC)
-    assert build(system) is build(system, jit=False)
-    assert cache_info().misses == 1
-
-
 def test_the_cache_is_bounded() -> None:
     """More models than it holds evicts the oldest rather than growing without end."""
     pytest.importorskip("numpy")

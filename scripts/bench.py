@@ -21,7 +21,6 @@ says so.
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import platform
 import time
@@ -33,7 +32,7 @@ import numpy as np
 
 from modelica.ir.causalize import causalize
 from modelica.lang import parse
-from modelica.sim import flatten, radau
+from modelica.sim import flatten
 from modelica.sim.solve import simulate
 
 if TYPE_CHECKING:
@@ -51,28 +50,7 @@ WITNESSES = ("Radau", "LSODA")
 TOLERANCES = (1e-4, 1e-6, 1e-8, 1e-10)
 SCIPY = ("Radau", "BDF", "LSODA")
 
-#: The fused loop is `modelica.sim.radau`: the same Radau IIA method as the first of those,
-#: with the step compiled together with the model instead of calling into it from Python. It
-#: is on this diagram and not on a table of its own because that is the only comparison that
-#: settles anything -- it is a *different implementation of the same method*, so if fusion is
-#: worth having it shows up as the same curve shifted left, and if it is not, the two curves
-#: land on top of each other.
-#:
-#: numba is in no dependency group (`pyproject.toml` says why), so the column appears when it
-#: is importable and the table says so when it is not. `moon run :bench-fused` installs it.
-FUSED = "fused"
-
-
-def available() -> tuple[str, ...]:
-    """The methods this environment can actually run, which is not a constant."""
-    try:
-        importlib.import_module("numba")
-    except ImportError:
-        return SCIPY
-    return (*SCIPY, FUSED)
-
-
-METHODS = available()
+METHODS = SCIPY
 
 #: A reference has to be this many times tighter than the tightest point it is the reference
 #: *for*. Ten is modest and it is the rule that decides how deep each sweep below can go.
@@ -165,11 +143,6 @@ def once(
     tolerance where a method takes fewer steps than there are output points, it is not, and
     that is why the fused column is the one that reports the real number.
     """
-    if method == FUSED:
-        answer, stats = radau.simulate(
-            model, stop=stop, times=grid, tolerance=tolerance, absolute=tolerance, jit=True
-        )
-        return answer, stats.steps
     result = simulate(
         model, stop=stop, times=grid, tolerance=tolerance, absolute=tolerance, method=method
     )
@@ -229,8 +202,6 @@ def run(repeats: int, points: int) -> dict[str, Any]:
         " computed here -- not the Bari published solution"
     )
     print(f"timing    best of {repeats}")
-    if FUSED not in METHODS:
-        print("fused     not measured -- numba is absent; run `moon run :bench-fused`")
     print()
 
     collected: dict[str, Any] = {"machine": machine, "reference": REFERENCE, "problems": {}}

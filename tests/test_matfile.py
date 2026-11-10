@@ -3,8 +3,7 @@
 A round trip through our own writer proves only that we are self-consistent, and the entry
 that asked for this said so. `DyMat` is the second opinion: it is one of the three maintained
 Python packages whose whole job is reading this format, and it is what
-`test_dymat_opens_what_we_wrote` runs. It is not a dependency -- the test skips without it,
-the way `tests/test_jit.py` skips without Numba.
+`test_dymat_opens_what_we_wrote` runs. It is not a dependency -- the test skips without it.
 
 Two ways of getting this format wrong are what the tests below are shaped around, and both
 produce a file that *opens*:

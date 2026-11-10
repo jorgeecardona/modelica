@@ -36,37 +36,12 @@ tasks:
     command: 'uv run --isolated --python 3.12 --with-editable . --with pytest --with numpy --with scipy pytest -q'
     inputs: ['src/**/*.py', 'tests/**/*.py', 'pyproject.toml']
 
-  # `build(system, jit=True)` compiles the emitted module with Numba, and until this task
-  # existed nothing ever ran it. Isolated, and Numba named here rather than in pyproject:
-  # it pins `numpy<2.5` while this project runs 2.5, and uv locks one resolution across every
-  # extra, so merely *declaring* it rolled the whole lock -- dev environment included -- back
-  # a numpy minor. The long version is in pyproject where the extra would have gone. numpy
-  # resolves down inside this throwaway environment and nowhere else, and `tests/test_jit.py`
-  # skips itself in the normal one, which is why running it there is not enough.
-  test-jit:
-    command: >-
-      uv run --isolated --with-editable . --with pytest --with numpy --with scipy
-      --with numba pytest -q tests/test_jit.py
-    inputs: ['src/**/*.py', 'tests/test_jit.py', 'examples/models/*', 'pyproject.toml']
-
   # Work-precision, not a gate. `docs/ideas/benchmarks.md` argues the shape and
   # `docs/issues` records why this is deliberately not in `ci`: a timing on a shared runner
   # is noise, and a flaky performance gate teaches people to ignore the pipeline. Somebody
   # runs this and records the number with the machine beside it.
   bench:
     command: 'uv run --extra sim python -u scripts/bench.py --out bench.json'
-    options:
-      cache: false
-      runInCI: false
-
-  # The same diagram with the fused loop's column on it. Separate because numba cannot be
-  # installed beside this project's numpy -- the long version is in `pyproject.toml` -- so it
-  # needs the same throwaway environment `test-jit` uses. `scripts/bench.py` drops the column
-  # rather than failing when numba is absent, which is why `:bench` above still runs.
-  bench-fused:
-    command: >-
-      uv run --isolated --with-editable . --with numpy --with scipy --with numba
-      python -u scripts/bench.py --out bench-fused.json
     options:
       cache: false
       runInCI: false
@@ -130,7 +105,6 @@ tasks:
       - '~:typecheck'
       - '~:test'
       - '~:test-python-floor'
-      - '~:test-jit'
       - '~:build'
       - '~:docs'
       - '~:version-guard'

@@ -1,15 +1,7 @@
-"""Radau IIA, written here so that the step and the right-hand side compile together.
+"""Radau IIA in Python, the reference the engine's runtime (`rust_radau`) is ported from.
 
-`modelica.sim.solve` hands the emitted kernel to SciPy. That works and it is the reference
-path, but the step, the Newton iteration and the controller are SciPy's Python, and they
-call the compiled kernel across a Python boundary several times per stage per step. The
-kernel is compiled; the loop around it is not.
-
-This module is the loop. It is the three-stage Radau IIA method of order five --
-Hairer and Wanner's RADAU5, *Solving Ordinary Differential Equations II*, IV.8 -- written
-in a subset of Python that numba compiles, with `rhs` and `jacobian` taken as arguments.
-Handing a compiled dispatcher to a compiled caller is a native call: the interpreter is
-not entered once between the first step and the last.
+The three-stage Radau IIA method of order five, Hairer and Wanner's RADAU5, *Solving
+Ordinary Differential Equations II*, IV.8, with `rhs` and `jacobian` taken as arguments.
 
 **What it does not do.** No events. `modelica.sim.solve` stops on a zero crossing, applies
 the discontinuity and restarts, and that machinery lives on the Python side; a model with
@@ -30,7 +22,6 @@ here unchanged -- the folded kernel simply ignores the ``p`` it is handed.
 
 from __future__ import annotations
 
-import importlib
 from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
@@ -707,43 +698,6 @@ def integrate(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917 - one step func
 
 # -- the two tiers ----------------------------------------------------------------------
 
-_COMPILED: dict[str, Any] = {}
-
-
-def _fused() -> Any:  # noqa: ANN401 - a numba dispatcher, which has no type to name here
-    """`integrate` and its helpers, compiled.
-
-    Every helper is compiled too, and that is the point rather than an optimisation: a
-    compiled `integrate` calling an interpreted `_newton` would be worse than either tier,
-    and numba would refuse it anyway. They are cached in a module-level dict because a
-    dispatcher specialises per argument type and rebuilding one throws that away.
-
-    The kernel functions arrive as dispatchers, not as Python functions. Numba specialises
-    on the dispatcher's type and emits a direct native call, so nothing between the first
-    step and the last enters the interpreter.
-    """
-    if "integrate" in _COMPILED:
-        return _COMPILED["integrate"]
-    try:
-        numba = importlib.import_module("numba")
-    except ImportError as failure:  # pragma: no cover - depends on the environment
-        message = "the fused integrator needs numba: pip install numba"
-        raise ImportError(message) from failure
-    njit: Any = numba.njit
-    scope = globals()
-    for name in (
-        "_factor",
-        "_solve",
-        "_norm",
-        "_newton",
-        "_first_step",
-        "_factor_pair",
-        "_predict",
-    ):
-        scope[name] = njit(cache=False, error_model="numpy")(scope[name])
-    _COMPILED["integrate"] = njit(cache=False, error_model="numpy")(scope["integrate"])
-    return _COMPILED["integrate"]
-
 
 def simulate(  # noqa: PLR0913 - the same knobs the interpreted path has
     model: System | Code | Kernel,
@@ -754,7 +708,6 @@ def simulate(  # noqa: PLR0913 - the same knobs the interpreted path has
     absolute: float | None = None,
     times: Sequence[float] | NDArray[np.float64] | None = None,
     points: int = 51,
-    jit: bool = True,
     fold: bool = False,
     parameters: NDArray[np.float64] | None = None,
 ) -> tuple[Result, Stats]:
@@ -764,13 +717,8 @@ def simulate(  # noqa: PLR0913 - the same knobs the interpreted path has
     path there is no third option: the steps the method took are not reported. They are not
     hidden out of tidiness -- collecting them means growing an array inside the compiled
     loop, which is the one thing that would put an allocation on the hot path.
-
-    ``jit=False`` runs the identical loop interpreted. It is far slower than the SciPy path
-    and it exists so the compiled answer has something to be checked against that is not
-    SciPy: two implementations of the same method agreeing is a weaker statement than two
-    tiers of *this* implementation agreeing on the arithmetic.
     """
-    kernel = model if isinstance(model, Kernel) else build(model, jit=jit, fold=fold)
+    kernel = model if isinstance(model, Kernel) else build(model, fold=fold)
     if kernel.events:
         message = (
             f"{kernel.name} has {kernel.events} event condition(s), and the fused loop has no"
@@ -785,8 +733,7 @@ def simulate(  # noqa: PLR0913 - the same knobs the interpreted path has
         else np.sort(np.asarray(times, dtype=float))
     )
     values = np.empty((len(grid), kernel.states))
-    loop = _fused() if jit else integrate
-    counted = loop(
+    counted = integrate(
         kernel.rhs,
         kernel.jacobian,
         float(start),

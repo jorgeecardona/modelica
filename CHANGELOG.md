@@ -7,6 +7,7 @@ source of truth and is bumped automatically when shipped source changes.
 ## Unreleased
 
 - The C and Rust code generators are removed (`sim.cgen`, `sim.rustgen`, `sim.rustsim`, the C and Rust dialects). Models run on the precompiled engine or on SciPy; nothing is compiled per model.
+- The Numba JIT backend is removed, with the `jit=` argument of `simulate`, `sweep` and `build`.
 - Large models with a wide band solve Radau's linear systems by BiCGStab with DILU; a 10000-state heat grid integrates in 0.37 s instead of 11.2 s.
 - Synchronous clocks run: a partition on `Clock(interval)` ticks as a time event, with `previous`, `sample(u, c)` and `hold`; a sampled PI controller matches its exact recurrence on SciPy and the engine.
 - Synchronous clocks are flattened: `sample(u, Clock(interval))`, `previous` and `hold` form clocked partitions. Simulating them comes next; until then such a model is refused with a clear error.

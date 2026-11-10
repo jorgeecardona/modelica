@@ -146,7 +146,6 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     times: Sequence[float] | NDArray[np.float64] | None = None,
     points: int | None = None,
     method: str = "Radau",
-    jit: bool = False,
     parameters: NDArray[np.float64] | None = None,
     backend: Literal["auto", "python", "engine"] = "auto",
 ) -> Result:
@@ -175,8 +174,7 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     ``backend`` picks who integrates. ``"auto"`` (the default) uses the precompiled engine
     (`modelica.sim.engine`, inside a platform wheel) when it is installed and can run the call,
     else SciPy. ``"python"`` is always SciPy on the emitted Python. ``"engine"`` raises when the
-    engine cannot run the call. The engine runs a `System` with ``method="Radau"`` and no
-    ``jit``. Both return the same rows: with a grid, the grid instants plus the start, the
+    engine cannot run the call. The engine runs a `System` with ``method="Radau"``. Both return the same rows: with a grid, the grid instants plus the start, the
     stop and both sides of each event; with no grid, every accepted step instead.
     """
     if backend != "python":
@@ -190,7 +188,6 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
             times=times,
             points=points,
             method=method,
-            jit=jit,
             parameters=parameters,
         )
         if ran is not None:
@@ -200,7 +197,7 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     # `d(observed)/dy`. It is the largest function the emitter writes -- 17 % of the module on
     # a 1000-cell bar -- so a caller who only wants a trajectory should not pay to emit it, to
     # compile it, or to hold it. A caller who *does* want it builds the kernel itself.
-    kernel = model if isinstance(model, Kernel) else build(model, jit=jit, observed_jacobian=False)
+    kernel = model if isinstance(model, Kernel) else build(model, observed_jacobian=False)
     grid = _grid(start, stop, times, points)
     p, y, w = kernel.start(start, parameters)
     plan = _Run(kernel, p, w, tolerance, absolute if absolute is not None else tolerance, method)
@@ -222,18 +219,17 @@ def _on_engine(  # noqa: PLR0913 - the knobs of `simulate`
     times: Sequence[float] | NDArray[np.float64] | None,
     points: int | None,
     method: str,
-    jit: bool,
     parameters: NDArray[np.float64] | None,
 ) -> Result | None:
     """The run on the engine, or ``None`` when ``"auto"`` should fall back to SciPy."""
     from modelica.ir.system import System as SystemType  # noqa: PLC0415 - runtime check
     from modelica.sim import engine  # noqa: PLC0415 - the engine is optional
 
-    supported = isinstance(model, SystemType) and method == "Radau" and not jit
+    supported = isinstance(model, SystemType) and method == "Radau"
     if backend == "auto" and (not supported or engine.installed() is None):
         return None
     if not supported:
-        message = "backend='engine' runs a System with method='Radau' and no jit"
+        message = "backend='engine' runs a System with method='Radau'"
         raise SimulationError(message)
     assert isinstance(model, SystemType)  # noqa: S101 - narrowed by `supported`
     try:

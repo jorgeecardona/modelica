@@ -97,16 +97,15 @@ them wrong, no amount of C in the inner loop recovers it.
 What is left is the cost of one step, and **generated code** closes it.
 
 > **The IR must be compilable.** `modelica.sim` emits source for the right-hand side, the
-> Jacobian and the event indicators, and gives it to a compiler. Numba `@njit` comes first,
-> and C is the fallback path for FMU export. It does **not** build a tree of closures and
+> Jacobian and the event indicators, and the engine (`modelica.sim.vm`) lowers the same IR to a tape. It does **not** build a tree of closures and
 > walk it at every evaluation.
 
 This is a constraint on the design of the IR, which is why it is recorded here and not in a
 tuning note later. The expression IR is small, typed, closed under symbolic
 differentiation, and free of any Python object that cannot be written as arithmetic. A
 straightforward emitter can therefore turn a `FlatModel` into a nopython function. An
-interpreter over the same IR stays as the reference implementation. It is what the compiled
-kernel is tested against, and it is what runs when Numba is absent.
+interpreter over the same IR stays as the reference implementation. It is what the engine is
+tested against.
 
 The other design — a tree of closures walked from Python — is 10 to 100 times slower. No
 amount of solver quality hides that.
@@ -275,7 +274,7 @@ connectors and connections.
 3. Matching and BLT, then Pantelides and dummy derivatives. The first physical model with
    `connect()`.
 4. Events.
-5. Code generation from the `FlatModel`, with Numba. Then work-precision diagrams against
+5. Code generation from the `FlatModel`. Then work-precision diagrams against
    SciPy's Fortran-backed integrators on Robertson and van der Pol. See
    [benchmarks](ideas/benchmarks.md) for the harness this has to answer to.
 6. `fmi` import: read and simulate an existing FMU. This checks the variable and model

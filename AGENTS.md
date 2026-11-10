@@ -41,12 +41,10 @@ Mechanics.Translational and Rotational, Thermal.HeatTransfer, and a subset of Bl
 - `make test` — pytest with `--parallel=process` (one worker per CPU core via pytest-parallex).
   Drop the flag (`uv run pytest -q`) when debugging a single failure.
 - `make check` — `lint + format-check + typecheck + test`. Must pass before every commit.
-  `:ci` runs more: test-python-floor, test-jit, build, docs, version-guard, and version-ahead
+  `:ci` runs more: test-python-floor, build, docs, version-guard, and version-ahead
   (`__version__` must be greater than `origin/main` when `src/` changed).
 - `moon run :test-python-floor` — proves the package imports and tests pass on Python 3.12
   (the `requires-python` floor) in an isolated environment.
-- `moon run :test-jit` — Numba/JIT tests in a throwaway env (Numba pins numpy < 2.5 and cannot
-  live in the main lock). `tests/test_jit.py` skips itself outside that env.
 - Some simulation tests compile generated C; they are skipped automatically when no C compiler
   is on `PATH`.
 
@@ -70,9 +68,6 @@ Mechanics.Translational and Rotational, Thermal.HeatTransfer, and a subset of Bl
   `--no-verify` on a src change — `scripts/ci-version-guard` will fail the pipeline anyway.
 - **Distribution name vs. repo name:** the package is `modelica`, not `pymodelica`. PyPI's
   `pymodelica` is an abandoned upload; don't reference it.
-- **Numba is intentionally absent from `pyproject.toml`.** It pins `numpy < 2.5`; including it
-  rolls the entire lock back. The JIT backend is tested via `moon run :test-jit` (isolated env).
-  Don't add a `jit` extra without reading the long comment in `pyproject.toml` first.
 - **Docs notebooks are executed at build time** (`make docs` / `moon run :docs` with
   `mkdocs build --strict`). A notebook that stops working fails the build. Narrative pages are
   `.py` jupytext percent format (diffable); interactive pages are committed `.ipynb` with output

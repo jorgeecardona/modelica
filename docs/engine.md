@@ -9,7 +9,7 @@ runs on your machine. This page says when the engine runs, how to check, and how
 
 - The engine is installed: a platform wheel of `modelica` carries it as `modelica/_engine.*`.
 - The model is a `System`, not a `Code` or `Kernel`.
-- `method="Radau"` (the default) and no `jit`.
+- `method="Radau"` (the default).
 
 In every other case it uses SciPy. `backend="python"` always uses SciPy. `backend="engine"`
 raises a `SimulationError` when the engine cannot run the call.

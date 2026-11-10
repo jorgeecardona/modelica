@@ -2,21 +2,13 @@
 
 :mod:`modelica.sim.emit` writes the model out as text; this executes that text and hands
 back the eight functions bound together, with the array sizes the caller needs to allocate.
-Splitting it out is not ceremony -- the same :class:`~modelica.sim.emit.Code` will later
-be handed to a C compiler for FMU export instead of to CPython, and everything above this
-line stays the same.
-
-The generated source is deliberately restricted to scalars, arithmetic and array indexing
-so that ``@njit`` accepts it without leaving nopython mode. Numba is not a dependency,
-though: ``jit=True`` is opt-in, and the interpreted functions are what runs by default.
+The functions run in CPython; the engine (`modelica.sim.vm`) runs the same model as a tape.
 """
 
 from __future__ import annotations
 
-import importlib
 from dataclasses import dataclass
 from functools import lru_cache
-from types import FunctionType
 from typing import TYPE_CHECKING, Any, Final, NamedTuple, Protocol
 
 import numpy as np
@@ -222,7 +214,6 @@ measured to choose it, and if a workload ever wants more this is the number to c
 def build(
     model: System | Code,
     *,
-    jit: bool = False,
     fold: bool = False,
     sensitivity: Sequence[str] = (),
     observed_jacobian: bool = True,
@@ -248,20 +239,14 @@ def build(
     (``_seed`` and ``_null``) are read and never written. `clear_cache` drops everything -- a
     test that wants to time a cold compile has to.
 
-    The keyword is normalised here rather than cached with it, and that is not a style
-    choice. `functools.lru_cache` keys on the call as written, so ``build(system)`` and
-    ``build(system, jit=False)`` are two entries for one answer -- and both forms are in this
-    repo, since `modelica.sim.solve.simulate` always passes the keyword. Decorating `build`
-    directly compiled the same model twice and reported a hit rate that looked fine.
     """
-    return _compiled(model, jit, fold, tuple(sensitivity), observed_jacobian)
+    return _compiled(model, fold, tuple(sensitivity), observed_jacobian)
 
 
 @lru_cache(maxsize=CACHED)
 def _compiled(
     model: System | Code,
-    jit: bool,  # noqa: FBT001 - positional so `lru_cache` sees one key per call shape
-    fold: bool,  # noqa: FBT001 - the same reason
+    fold: bool,  # noqa: FBT001 - positional so `lru_cache` sees one key per call shape
     sensitivity: tuple[str, ...],
     observed_jacobian: bool,  # noqa: FBT001 - the same reason
 ) -> Kernel:
@@ -272,8 +257,6 @@ def _compiled(
     )
     namespace: dict[str, Any] = {"np": np}
     exec(compile(code.source, f"<modelica:{code.name}>", "exec"), namespace)  # noqa: S102
-    if jit:
-        _accelerate(namespace)
     return Kernel(
         code=code,
         parameters=namespace["parameters"],
@@ -303,56 +286,3 @@ def clear_cache() -> None:
 def cache_info() -> CacheInfo:
     """Hits, misses, and how full the cache is -- `functools.lru_cache`'s own record."""
     return CacheInfo(*_compiled.cache_info())
-
-
-def _accelerate(namespace: dict[str, Any]) -> None:
-    """Compile every function the generated module defines, in place.
-
-    Every one, not the seven the kernel holds. A model with more than one state set writes
-    ``rhs_0``, ``rhs_1`` and a ``rhs`` that picks between them, and compiling only the
-    picker would leave it calling into the interpreter -- which numba would either refuse
-    or fall back on, and either way the point of asking would be gone.
-
-    In place, and not into a copy, because the namespace *is* the functions' ``__globals__``:
-    the picker resolves ``rhs_0`` by looking there, so the compiled one has to be what it
-    finds. Numba compiles lazily, at the first call, so the order of replacement does not
-    matter -- every name is already the compiled one by the time any of them runs.
-
-    Numba is asked for by name rather than ``from numba import njit`` because it is
-    genuinely optional: it is in no dependency group, so it is absent from the environment
-    the type checker reads, and a real import would have to be suppressed there.
-
-    ``error_model="numpy"`` keeps the two tiers saying the same thing. Numba defaults to
-    ``"python"``, where dividing by zero raises ``ZeroDivisionError`` the way CPython does,
-    while the interpreted kernel divides *numpy* scalars and gets an infinity. That is a
-    genuine semantic fork between the two, and the interpreted tier is the reference one --
-    differential debugging (see `docs/ideas/backends.md`) is worth nothing if the fast path
-    can answer a question the slow path answers differently.
-
-    ``cache=False`` is not an oversight and cannot be turned on. Numba's on-disk cache needs
-    to find the source file a function came from, and these functions come from `exec`. Asking
-    for it raises at decoration time rather than falling back -- measured on numba 0.66,
-    ``RuntimeError: cannot cache function 'rhs': no locator available for file
-    '<modelica:Demo>'``. Writing the generated source to a real file would give numba a
-    locator, and that is a disk cache, which is a separate piece of work with an invalidation
-    problem of its own. The in-process cache on `build` is what removes the repeated
-    compilation this was reached for.
-
-    Stated honestly, the error model is defensive rather than a fix for an observed failure: no model in
-    the corpus reaches a division by exactly zero. The pendulum comes closest and does not
-    arrive -- at ``y = -L`` its Newton lands on an ``x`` of about 1e-16 rather than on 0.0, so
-    both tiers return the same finite nonsense. But an exact zero pivot is *reachable in
-    principle* precisely where this engine has something to say: it is a state set going
-    singular, which dynamic state selection exists to survive by switching rather than by
-    stopping. An infinity there is information; an exception is a crash. The default model
-    was chosen for scripts, and this is a numerical kernel.
-    """
-    try:
-        numba = importlib.import_module("numba")
-    except ImportError as error:  # pragma: no cover - depends on the environment
-        message = "jit=True needs numba: pip install numba"
-        raise ImportError(message) from error
-    njit: Any = numba.njit
-    for name, value in list(namespace.items()):
-        if isinstance(value, FunctionType):
-            namespace[name] = njit(cache=False, error_model="numpy")(value)

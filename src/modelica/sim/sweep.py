@@ -100,13 +100,12 @@ def sweep(
     state and workspace arrays. That is what a caller who wants to put a pool
     or a device behind this needs to be able to assume.
     """
-    jit = bool(options.pop("jit", False))
     backend = options.pop("backend", "auto")
     vectors = [vector(system, point) for point in over]
-    ran = _on_engine(system, vectors, backend=backend, jit=jit, options=options)
+    ran = _on_engine(system, vectors, backend=backend, options=options)
     if ran is not None:
         return ran
-    kernel = build(system, jit=jit)
+    kernel = build(system)
     return tuple(simulate(kernel, parameters=p, backend="python", **options) for p in vectors)
 
 
@@ -119,7 +118,6 @@ def _on_engine(
     vectors: list[NDArray[np.float64]],
     *,
     backend: str,
-    jit: bool,
     options: dict[str, Any],
 ) -> tuple[Result, ...] | None:
     """Every point on the engine, loaded once; ``None`` when ``"auto"`` falls back to SciPy.
@@ -130,13 +128,11 @@ def _on_engine(
 
     if backend == "python":
         return None
-    supported = (
-        not jit and options.get("method", "Radau") == "Radau" and set(options) <= _ENGINE_KNOBS
-    )
+    supported = options.get("method", "Radau") == "Radau" and set(options) <= _ENGINE_KNOBS
     if backend == "auto" and (not supported or engine.installed() is None):
         return None
     if not supported:
-        message = "backend='engine' sweeps with method='Radau', no jit and the engine's knobs"
+        message = "backend='engine' sweeps with method='Radau' and the engine's knobs"
         raise SimulationError(message)
     knobs = {key: value for key, value in options.items() if key != "method"}
     try:

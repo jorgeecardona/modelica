@@ -51,10 +51,8 @@ __all__ = ["Divergence", "Observer", "diverges"]
 TOLERANCE: float = 1e-12
 """Default agreement, absolute and relative both.
 
-Not zero, though the two tiers in this repository today *are* bit-for-bit -- `tests/test_jit.py`
-asserts it. The C backend is not and cannot be: a different ``libm`` rounds ``exp`` differently
-in the last place. A default that only the Python tiers could meet would make the tool useless
-for the pair it was written for.
+Not zero: the engine and the Python path call different ``libm`` builds, which can round
+``exp`` differently in the last place.
 """
 
 

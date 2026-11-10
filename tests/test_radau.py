@@ -7,9 +7,6 @@ for a closed form, ``reference`` for a trusted solver -- and `tests/test_example
 holds the SciPy path to them. Holding a second integrator to the *same* numbers is a stronger
 statement than holding it to the first one's output, because neither is grading the other.
 
-Everything here runs the loop interpreted, which is the point: it is ordinary Python and
-needs no numba, so the arithmetic is covered in the normal test run and `tests/test_jit.py`
-is left with the one question only it can answer -- whether compiling changes the answer.
 """
 
 from __future__ import annotations
@@ -77,7 +74,6 @@ def test_the_fused_loop_reaches_the_reference_points(model: Path) -> None:
         tolerance=spec.get("tolerance", 1e-6),
         absolute=spec.get("absolute"),
         times=sorted({point["t"] for point in points}),
-        jit=False,
     )
     assert stats.status == 0
     for point in points:
@@ -93,7 +89,7 @@ def test_a_model_with_events_is_refused_by_name() -> None:
     """And refused with the alternative in the message, not merely with a type."""
     system = _system(EXAMPLES / "models" / "BouncingBall.mo")
     with pytest.raises(FusionError, match="event"):
-        simulate(system, stop=1.0, jit=False)
+        simulate(system, stop=1.0)
 
 
 def test_folding_the_parameters_does_not_change_the_answer() -> None:
@@ -105,10 +101,8 @@ def test_folding_the_parameters_does_not_change_the_answer() -> None:
     """
     system = _system(EXAMPLES / "models" / "Robertson.mo")
     grid = np.linspace(0.0, 400.0, 17)
-    loose, _ = simulate(system, stop=400.0, times=grid, tolerance=1e-9, absolute=1e-9, jit=False)
-    tight, _ = simulate(
-        system, stop=400.0, times=grid, tolerance=1e-9, absolute=1e-9, jit=False, fold=True
-    )
+    loose, _ = simulate(system, stop=400.0, times=grid, tolerance=1e-9, absolute=1e-9)
+    tight, _ = simulate(system, stop=400.0, times=grid, tolerance=1e-9, absolute=1e-9, fold=True)
     for name in system.states:
         assert np.allclose(loose[name], tight[name], rtol=0.0, atol=0.0)
 
@@ -121,8 +115,8 @@ def test_a_requested_time_is_interpolated_and_does_not_move_the_steps() -> None:
     quietly buying a different answer from a fine one.
     """
     system = _system(EXAMPLES / "models" / "VanDerPol.mo")
-    dense, _ = simulate(system, stop=5.0, points=101, tolerance=1e-8, absolute=1e-8, jit=False)
-    sparse, _ = simulate(system, stop=5.0, times=[5.0], tolerance=1e-8, absolute=1e-8, jit=False)
+    dense, _ = simulate(system, stop=5.0, points=101, tolerance=1e-8, absolute=1e-8)
+    sparse, _ = simulate(system, stop=5.0, times=[5.0], tolerance=1e-8, absolute=1e-8)
     for name in system.states:
         assert dense[name][-1] == pytest.approx(sparse[name][-1], rel=0.0, abs=0.0)
 
@@ -130,7 +124,7 @@ def test_a_requested_time_is_interpolated_and_does_not_move_the_steps() -> None:
 def test_the_counters_add_up() -> None:
     """A step costs at least one Newton iteration, and an iteration is three stages."""
     system = _system(EXAMPLES / "models" / "Robertson.mo")
-    _, stats = simulate(system, stop=1e4, points=11, tolerance=1e-8, absolute=1e-8, jit=False)
+    _, stats = simulate(system, stop=1e4, points=11, tolerance=1e-8, absolute=1e-8)
     assert stats.steps > 0
     assert stats.evaluations >= 3 * stats.steps
     assert stats.jacobians >= 1
