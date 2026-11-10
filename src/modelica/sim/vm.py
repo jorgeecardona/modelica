@@ -1030,7 +1030,95 @@ class _Tangents:
         self.code = [Instr(Op.CLEAR_OUT, 0, self.width * self.width)]
         self.tables = list(rhs.tables)
         self.run(rhs, rhs.code)
-        return Function(tuple(self.code), rhs.newton, tuple(self.tables))
+        function = Function(tuple(self.code), rhs.newton, tuple(self.tables), rhs.views)
+        return _stores_last(function)
+
+    def dense_of(self, view: View) -> int:
+        """The first register of ``view``'s values as one contiguous run, copied when needed."""
+        registers = elements(view)
+        if registers == list(range(registers[0], registers[0] + len(registers))):
+            return registers[0]
+        offset = len(self.tables)
+        self.tables.extend(registers)
+        dst = self.lowering.register(len(registers))
+        self.code.append(Instr(Op.VGATHER, dst, offset, 0, len(registers)))
+        return dst
+
+    def view_runs(self, registers: Sequence[int]) -> _Runs:
+        """The partials of the cells ``registers`` as runs, regathered when needed."""
+        n = len(registers)
+        if registers == list(range(registers[0], registers[0] + n)):
+            return self.run_of(registers[0], n)
+        cells = [self.element(r) for r in registers]
+        return self.gather(cells) if any(cells) else {}
+
+    def sstep(self, i: Instr, views: Sequence[View]) -> None:  # noqa: C901, PLR0912, PLR0915 - one case per opcode
+        """The partials of one shaped opcode, as runs over its dense destination block.
+
+        The destination of every shaped opcode `shaped_array` writes is a fresh dense block, so
+        its partials are runs as a flat array opcode's are. What is not written here (``^``, an
+        ``if`` or a builtin of something with partials, a reduction) raises `_Scalar`.
+        """
+        dst = views[i.dst]
+        out_registers = elements(dst)
+        n = len(out_registers)
+        if out_registers != list(range(out_registers[0], out_registers[0] + n)):
+            raise _Scalar
+        start = out_registers[0]
+        op = i.op
+        out: _Runs = {}
+        if op is Op.ROLL:
+            source = views[i.a]
+            axis, shift = i.b, i.c
+            moved = [
+                source.at(
+                    (*index[:axis], (index[axis] - shift) % source.shape[axis], *index[axis + 1 :])
+                )
+                for index in _indices(dst.shape)
+            ]
+            out = self.view_runs(moved)
+        elif op in (Op.TBINARY, Op.TUNARY):
+            a = self.view_runs(elements(views[i.a]))
+            b = self.view_runs(elements(views[i.b])) if op is Op.TBINARY else {}
+            kind = Op(i.c)
+            if op is Op.TUNARY:
+                if kind is Op.NEG:
+                    out = {key: self.vemit(Op.VNEG, n, d) for key, d in a.items()}
+                elif kind is Op.CALL1 and a:
+                    raise _Scalar
+            elif kind in (Op.ADD, Op.SUB):
+                out = self.vcombine(kind, a, b)
+            elif kind is Op.MUL:
+                left_value, right_value = self.dense_of(views[i.a]), self.dense_of(views[i.b])
+                left = {key: self.vemit(Op.VMUL, n, right_value, d) for key, d in a.items()}
+                right = {key: self.vemit(Op.VMUL, n, left_value, d) for key, d in b.items()}
+                out = self.vcombine(Op.ADD, left, right)
+            elif kind is Op.DIV:
+                right_value = self.dense_of(views[i.b])
+                scaled = {key: self.vemit(Op.VMUL, n, start, d) for key, d in b.items()}
+                inner = self.vcombine(Op.SUB, a, scaled)
+                out = {key: self.vemit(Op.VDIV, n, d, right_value) for key, d in inner.items()}
+            elif kind is Op.POW and (a or b):
+                raise _Scalar
+            # Comparisons and logic: no state in their partials.
+        elif op is Op.TSELECT:
+            if self.view_runs(elements(views[i.b])) or self.view_runs(elements(views[i.c])):
+                raise _Scalar
+        elif op is Op.TCALL2:
+            if self.view_runs(elements(views[i.a])) or self.view_runs(elements(views[i.b])):
+                raise _Scalar
+        elif op is Op.TREDUCE:
+            raise _Scalar
+        # TINDEX: no partials.
+        for k in range(n):
+            if start + k in self.owner:
+                self.release(start + k)
+            self.dots.pop(start + k, None)
+            self.owner[start + k] = (start, k)
+        if out:
+            self.runs[start] = out
+        else:
+            self.runs.pop(start, None)
 
     def vemit(self, op: Op, n: int, a: int, b: int = 0) -> int:
         dst = self.lowering.register(n)
@@ -1046,7 +1134,8 @@ class _Tangents:
         out: _Runs = {}
         for key in left.keys() | right.keys():
             if key in left and key in right:
-                out[key] = self.vemit(op, len(key), left[key], right[key])
+                vector = Op.VADD if op is Op.ADD else Op.VSUB
+                out[key] = self.vemit(vector, len(key), left[key], right[key])
             elif key in left:
                 out[key] = left[key]
             else:
@@ -1220,6 +1309,8 @@ class _Tangents:
             self.newton(function, function.newton[i.a])
         elif op in _ARRAY:
             self.vstep(i)
+        elif op in _SHAPED:
+            self.sstep(i, function.views)
         else:
             # Loads of p, w, t, constants, comparisons and logic: no state in their partials.
             dots.pop(i.dst, None)
@@ -1424,15 +1515,12 @@ def lower(
     lowering = _Lowering(Emitter(system))
     modes = system.modes
     transitions = [lowering.transition(k, mode) for k, mode in enumerate(modes)]
-    # The jacobian is built from the flat array opcodes, which `_Tangents` differentiates; the
-    # tape the integrator runs uses the shaped ones.
-    flat = tuple(lowering.rhs(mode, arrays=arrays) for mode in modes)
     rhs = tuple(lowering.rhs(mode, arrays=arrays, shaped=shaped) for mode in modes)
     program = Program(
         registers=0,
         constants=(),
         rhs=rhs,
-        jacobian=tuple(_jacobian(lowering, mode, f) for mode, f in zip(modes, flat, strict=True)),
+        jacobian=tuple(_jacobian(lowering, mode, f) for mode, f in zip(modes, rhs, strict=True)),
         observe=tuple(lowering.observe(mode, arrays=arrays, shaped=shaped) for mode in modes),
         indicators=tuple(lowering.indicators(k, mode) for k, mode in enumerate(modes)),
         transition_prefix=tuple(prefix for prefix, _ in transitions),
@@ -1480,6 +1568,7 @@ def lower(
             program,
             rhs=tuple(_fuse(f) for f in program.rhs),
             observe=tuple(_fuse(f) for f in program.observe),
+            jacobian=tuple(_fuse(f) for f in program.jacobian),
         )
     return replace(program, registers=base + len(pool), constants=tuple(pool))
 
@@ -1578,21 +1667,44 @@ def _jacobian(lowering: _Lowering, mode: Mode, rhs: Function) -> Function:
         return _Tangents(lowering, len(mode.states)).function(lowering.rhs(mode, arrays=False))
 
 
+def _stores_last(function: Function) -> Function:
+    """``function`` with its ``STORE_OUT`` moved to the end, ordered by source register.
+
+    The partials of one run then sit in consecutive stores, which `_pattern` numbers
+    consecutively and `_fuse` writes as one ``VSTORE_OUT``. Left as it is when a store's source
+    is written again after it.
+    """
+    code = function.code
+    later: set[int] = set()
+    safe = True
+    for i in reversed(code):
+        if i.op is Op.STORE_OUT and i.b in later:
+            safe = False
+            break
+        later.update(_writes(i, function))
+    if not safe:
+        return function
+    stores = sorted((i for i in code if i.op is Op.STORE_OUT), key=lambda i: i.b)
+    rest = tuple(i for i in code if i.op is not Op.STORE_OUT)
+    return replace(function, code=(*rest, *stores))
+
+
 def _pattern(program: Program, n: int) -> Program:
     """``program`` with its jacobian tapes writing one value per nonzero, not ``n * n``.
 
-    The pattern is every ``(row, column)`` any mode's tape stores, in row order. Each
-    ``STORE_OUT`` slot ``row * n + column`` becomes that entry's index, and ``CLEAR_OUT``
-    clears the pattern's length. Raises `EmitError` when one tape stores an entry twice.
+    The pattern is every ``(row, column)`` any mode's tape stores, in the order the tapes first
+    store them (`_stores_last` groups a run's partials). Each ``STORE_OUT`` slot
+    ``row * n + column`` becomes that entry's index, and ``CLEAR_OUT`` clears the pattern's
+    length. Raises `EmitError` when one tape stores an entry twice.
     """
-    entries: set[tuple[int, int]] = set()
+    entries: dict[tuple[int, int], None] = {}
     for function in program.jacobian:
         stored = [i.a for i in function.code if i.op is Op.STORE_OUT]
         if len(stored) != len(set(stored)):
             message = "a jacobian tape stores one entry twice"
             raise EmitError(message)
-        entries.update(divmod(slot, n) for slot in stored)
-    pattern = tuple(sorted(entries))
+        entries.update(dict.fromkeys(divmod(slot, n) for slot in stored))
+    pattern = tuple(entries)
     index = {row * n + column: k for k, (row, column) in enumerate(pattern)}
 
     def entry(i: Instr) -> Instr:
@@ -1647,7 +1759,7 @@ def _fuse(function: Function) -> Function:
 
     A run is instructions next to each other whose ``y`` or ``out`` slot and register both go up
     by one. It runs last, so no pass that reads register sets sees the vector forms. Newton
-    bodies are left as they are. Only ``rhs`` and ``observe`` are fused.
+    bodies are left as they are. ``rhs``, ``observe`` and ``jacobian`` are fused.
     """
     code: list[Instr] = []
     for i in function.code:

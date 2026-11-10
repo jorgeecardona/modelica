@@ -756,7 +756,11 @@ def test_a_jacobian_built_from_array_opcodes_has_the_scalar_bits() -> None:
         out = [0.0] * len(y) ** 2
         w = [0.0] * program.layout.workspace
         vm.evaluate(program, program.jacobian[0], 0.1, y, p, w, out)
-        results.append(out)
+        # Entry k of the pattern is out[k]; the pattern's order differs between the two.
+        dense = [0.0] * len(y) ** 2
+        for k, (row, column) in enumerate(program.pattern):
+            dense[row * len(y) + column] = out[k]
+        results.append(dense)
     assert any(results[0])
     assert results[0] == results[1]
 

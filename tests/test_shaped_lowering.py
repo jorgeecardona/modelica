@@ -6,6 +6,7 @@ Each model's loop is written with views, and every run is bit for bit the scalar
 from __future__ import annotations
 
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 import numpy as np
@@ -155,3 +156,38 @@ def test_the_plate_runs_the_same_on_the_engine_and_on_scipy() -> None:
     on_engine = simulate(system, stop=0.2, points=5, tolerance=1e-9, backend="engine")
     on_scipy = simulate(system, stop=0.2, points=5, tolerance=1e-9, backend="python")
     np.testing.assert_allclose(on_engine.values, on_scipy.values, rtol=1e-6, atol=1e-9)
+
+
+def _dense_jacobian(program: vm.Program, y: list[float]) -> np.ndarray:
+    n = len(y)
+    p = [0.0] * len(program.layout.parameters)
+    vm.evaluate(program, program.parameters, 0.0, [], [], [], p)
+    out = [0.0] * len(program.pattern)
+    vm.evaluate(program, program.jacobian[0], 0.0, y, p, [0.0] * program.layout.workspace, out)
+    matrix = np.zeros((n, n))
+    for k, (row, column) in enumerate(program.pattern):
+        matrix[row, column] = out[k]
+    return matrix
+
+
+def test_the_jacobian_stores_each_stencil_offset_in_one_instruction() -> None:
+    """TorusHeat's five offsets, 64 values each, sit side by side: one ``VSTORE_OUT`` of 320."""
+    torus = Path(__file__).resolve().parent.parent / "examples" / "models" / "TorusHeat.mo"
+    system = causalize(flatten([parse(torus.read_text(), str(torus))], "TorusHeat"))
+    shaped, scalar = vm.lower(system), vm.lower(system, arrays=False)
+    code = shaped.jacobian[0].code
+    stores = [i for i in code if i.op is vm.Op.VSTORE_OUT]
+    assert [i.c for i in stores] == [5 * 64]
+    assert not any(i.op is vm.Op.STORE_OUT for i in code)
+    assert len(code) < len(scalar.jacobian[0].code) // 20
+    y = np.random.default_rng(4).normal(size=len(system.states)).tolist()
+    np.testing.assert_array_equal(_dense_jacobian(shaped, y), _dense_jacobian(scalar, y))
+
+
+def test_a_product_of_two_runs_of_one_state_adds_both_partials() -> None:
+    """``r u (1 - u)`` in FisherKPP: d/du is ``r (1 - u) - r u``, both terms, in every cell."""
+    model = Path(__file__).resolve().parent.parent / "examples" / "models" / "FisherKPP.mo"
+    system = causalize(flatten([parse(model.read_text(), str(model))], "FisherKPP"))
+    shaped, scalar = vm.lower(system), vm.lower(system, arrays=False)
+    y = np.random.default_rng(7).random(len(system.states)).tolist()
+    np.testing.assert_array_equal(_dense_jacobian(shaped, y), _dense_jacobian(scalar, y))
