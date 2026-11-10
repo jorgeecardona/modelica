@@ -227,7 +227,7 @@ def test_a_3d_box_matches_the_finite_volume_tape_and_solves_iteratively() -> Non
     row-major order; the cube is symmetric, so the two orders are one.
     """
     from modelica.sim import fv, mesh  # noqa: PLC0415
-    from test_fv import (
+    from test_fv import (  # noqa: PLC0415 - one test reuses its program builder
         _program,  # pyright: ignore[reportUnknownVariableType, reportPrivateUsage]
     )
 
