@@ -4,7 +4,7 @@ All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org/); the version is `__version__` in
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
-## Unreleased (0.1.0)
+## 0.1.0 (2026-11-10)
 
 The first release with a stated promise: install, parse, simulate on the precompiled engine,
 and get the same numbers as SciPy. The API can still change.
