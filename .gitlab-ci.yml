@@ -44,6 +44,9 @@ ci:
   id_tokens:
     PYPI_ID_TOKEN:
       aud: pypi
+  # One ci job at a time: two pushes a minute apart both found the version missing on PyPI
+  # and both uploaded it, and the second upload failed with "File already exists".
+  resource_group: pypi
   environment:
     name: pypi
     url: https://pypi.org/project/modelica/
