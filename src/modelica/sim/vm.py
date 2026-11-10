@@ -606,9 +606,8 @@ class _Lowering:
         domain = tuple(len(index) for index in equation.indices)
         axes = {index.name: axis for axis, index in enumerate(equation.indices)}
         reads = list(_subscripts(template))
+        # A read that is neither a slice nor a roll (``T[max(i - 1, 1)]``) is gathered.
         plans = {node: _read_plan(node, equation, cells) for node in reads}
-        if any(plan is None for plan in plans.values()):
-            return False
         n = len(cells)
         mark = (len(scope.code), len(scope.tables), len(scope.views), self.registers)
 
@@ -676,9 +675,17 @@ class _Lowering:
                 case ir.Call(name=name, args=(left, right)):
                     builtin = _BINARY_CALLS[_builtin_name(name)]
                     return emit(Op.TCALL2, go(left), go(right), int(builtin))
+                case ir.Subscript(base=base) if plans[node] is None:
+                    first = self.register(n)
+                    offset = len(scope.tables)
+                    scope.tables.extend(
+                        self.value(scope, at_cell(node, cell, shapes, constants)) for cell in cells
+                    )
+                    scope.code.append(Instr(Op.VGATHER, first, offset, 0, n))
+                    return self.view(scope, View(first, domain, _row_major(domain)))
                 case ir.Subscript(base=base):
                     plan = plans[node]
-                    assert plan is not None  # noqa: S101 - checked above
+                    assert plan is not None  # noqa: S101 - the case above took None
                     name = ".".join(base.parts)
                     shape = shapes[name]
                     first = self.dense(scope, name, shape)
@@ -1140,8 +1147,27 @@ class _Tangents:
                 out[key] = left[key]
             else:
                 out[key] = right[key] if op is Op.ADD else self.vemit(Op.VNEG, len(key), right[key])
-        _distinct(out)
+        try:
+            _distinct(out)
+        except _Scalar:
+            return self.merged(out)
         return out
+
+    def merged(self, runs: _Runs) -> _Runs:
+        """``runs`` with the partials two patterns give one state in one cell added there.
+
+        A clamped read (``T[max(i - 1, 1)]``) names the centre state in an edge cell. Each cell's
+        partials are summed by state, in pattern order, and regathered (`gather`).
+        """
+        n = len(next(iter(runs)))
+        cells: list[dict[int, int]] = [{} for _ in range(n)]
+        for key, run in runs.items():
+            for k, state in enumerate(key):
+                if state is None:
+                    continue
+                cell = cells[k]
+                cell[state] = self.emit(Op.ADD, cell[state], run + k) if state in cell else run + k
+        return self.gather(cells)
 
     def vstep(self, i: Instr) -> None:  # noqa: C901, PLR0912 - one case per array opcode
         """The partials of one array opcode, as runs keyed by the state each cell reads."""

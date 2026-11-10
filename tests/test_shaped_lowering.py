@@ -191,3 +191,55 @@ def test_a_product_of_two_runs_of_one_state_adds_both_partials() -> None:
     shaped, scalar = vm.lower(system), vm.lower(system, arrays=False)
     y = np.random.default_rng(7).random(len(system.states)).tolist()
     np.testing.assert_array_equal(_dense_jacobian(shaped, y), _dense_jacobian(scalar, y))
+
+
+BOX3D = """
+model Box "Heat in an insulated cube: a neighbour past a face is the cell itself"
+  parameter Integer n = 13;
+  parameter Real a = 2.5 * n ^ 2;
+  Real T[n, n, n];
+initial equation
+  for i in 1:n loop
+    for j in 1:n loop
+      for k in 1:n loop
+        T[i, j, k] = i + 0.5 * j - 0.25 * k;
+      end for;
+    end for;
+  end for;
+equation
+  for i in 1:n loop
+    for j in 1:n loop
+      for k in 1:n loop
+        der(T[i, j, k]) = a * (T[max(i - 1, 1), j, k] + T[min(i + 1, n), j, k]
+          + T[i, max(j - 1, 1), k] + T[i, min(j + 1, n), k]
+          + T[i, j, max(k - 1, 1)] + T[i, j, min(k + 1, n)] - 6 * T[i, j, k]);
+      end for;
+    end for;
+  end for;
+end Box;
+"""
+
+
+def test_a_3d_box_matches_the_finite_volume_tape_and_solves_iteratively() -> None:
+    """``Real T[n, n, n]`` with zero-gradient faces is `fv.heat` on `mesh.box`, cell for cell.
+
+    Cell ``(i, j, k)`` of the box is number ``i + n (j + n k)``, which is ``T[k, j, i]`` in
+    row-major order; the cube is symmetric, so the two orders are one.
+    """
+    from modelica.sim import fv, mesh  # noqa: PLC0415
+    from test_fv import _program  # pyright: ignore[reportUnknownVariableType]  # noqa: PLC0415
+
+    system = causalize(flatten([parse(BOX3D, "Box.mo")], "Box"))
+    program = vm.lower(system)
+    assert program.iterative
+    cube = mesh.box((13, 13, 13))
+    rules = {patch.name: fv.ZeroGradient() for patch in cube.patches}
+    reference, function, p = _program(cube, rules)  # pyright: ignore[reportUnknownVariableType]
+    y = np.random.default_rng(5).normal(size=13**3).tolist()
+    expected = [0.0] * len(y)
+    vm.evaluate(reference, function, 0.0, y, p, [], expected)  # pyright: ignore[reportUnknownArgumentType]
+    np.testing.assert_allclose(_rhs(program, y), expected, rtol=1e-12, atol=1e-9)
+    # The clamped reads name the centre state at a face; the jacobian adds both partials there.
+    scalar = vm.lower(system, arrays=False)
+    assert len(program.jacobian[0].code) < len(scalar.jacobian[0].code) // 10
+    np.testing.assert_array_equal(_dense_jacobian(program, y), _dense_jacobian(scalar, y))

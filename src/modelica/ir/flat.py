@@ -161,6 +161,10 @@ def _integer(node: ir.Expr, cell: Mapping[str, int]) -> int:  # noqa: PLR0911 - 
             return _integer(a, cell) % _integer(b, cell)
         case ir.Call(name="div", args=(a, b)):
             return int(_integer(a, cell) / _integer(b, cell))
+        case ir.Call(name="max", args=(a, b)):
+            return max(_integer(a, cell), _integer(b, cell))
+        case ir.Call(name="min", args=(a, b)):
+            return min(_integer(a, cell), _integer(b, cell))
         case _:
             message = f"an array index must be an integer expression of the loop indices: {node}"
             raise CellError(message)
