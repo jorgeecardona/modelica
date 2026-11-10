@@ -593,7 +593,7 @@ def _scalarise(node: ir.Expr) -> ir.Expr:
 def _reader(expr: str, names: tuple[str, ...]) -> Callable[[Any], float]:
     """Compile a Modelica expression into something callable on a column of the result."""
     parse_expression = _require("modelica.lang", "parse_expression")
-    emit_expr = _require("modelica.sim", "emit_expr")
+    emit_expr = _require("modelica.sim.emit", "emit_expr")
 
     symbols = {name: f"v[{index}]" for index, name in enumerate(names)}
     source = emit_expr(_scalarise(parse_expression(expr)), symbols)
@@ -718,7 +718,7 @@ def test_the_pendulum_changes_its_mind_about_what_to_integrate() -> None:
     parse = _require("modelica.lang", "parse")
     flatten = _require("modelica.sim", "flatten")
     causalize = _require("modelica.sim", "causalize")
-    emit = _require("modelica.sim", "emit")
+    emit = _require("modelica.sim.emit", "emit")
     simulate = _require("modelica.sim", "simulate")
 
     model = MODELS / "Pendulum.mo"

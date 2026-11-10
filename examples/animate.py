@@ -56,7 +56,8 @@ from matplotlib.animation import FFMpegWriter, FuncAnimation, PillowWriter
 from matplotlib.collections import LineCollection
 
 from modelica.lang import parse, parse_expression
-from modelica.sim import Result, causalize, emit_expr, flatten, simulate
+from modelica.sim import Result, causalize, flatten, simulate
+from modelica.sim.emit import emit_expr
 
 mpl.use("Agg")
 

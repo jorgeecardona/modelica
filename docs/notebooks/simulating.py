@@ -72,7 +72,7 @@ print(f"explicit:   {system.is_explicit}")
 # no tree of closures walked at evaluation time. The engine runs the same arithmetic as a tape.
 
 # %%
-from modelica.sim import emit
+from modelica.sim.emit import emit
 
 code = emit(system)
 print(code.source[: code.source.index("def rhs")])

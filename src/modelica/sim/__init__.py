@@ -1,22 +1,16 @@
-"""The flat model as something you can actually run.
+"""Run a model: flatten it, causalize it, simulate it.
 
-This is the layer users call. Below it, :mod:`modelica.ir` holds the passes -- flattening,
-differentiation, causalization -- and each is usable on its own; here they are composed
-into the two verbs that matter:
+* `flatten`: source, class or package in, a `FlatModel` out.
+* `causalize`: flat model in, a `System` out (states and blocks in evaluation order).
+* `simulate`: system in, a `Result` out. It runs on the precompiled engine when installed,
+  else on SciPy (`EngineFallbackWarning` says when an installed engine refused a model).
+* `sweep`: one result per parameter point.
+* `steady`: the state where the model settles.
+* `build`: the model as callable Python functions (the SciPy path).
 
-* :func:`flatten` -- source, class or package in, :class:`~modelica.ir.flat.FlatModel` out;
-* :func:`causalize` -- flat model in, :class:`~modelica.ir.system.System` out: states and
-  the blocks to evaluate, in the order to evaluate them;
-* :func:`emit` and :func:`build` -- system in, generated source and callables out;
-* :func:`diverges` -- two tiers of one model in, the first block they disagree on out;
-* :func:`simulate` -- system in, a :class:`~modelica.sim.result.Result` out;
-* :mod:`modelica.sim.radau` -- the same, by a Radau IIA loop compiled together with the
-  model rather than handed to SciPy: much faster, and no events;
-* :func:`sweep` -- system and a list of parameter values in, one result per value out;
-* :func:`steady` -- system in, the state where it settles out.
-
-Numerics live behind the ``sim`` extra. Importing this module does not pull in SciPy;
-only :func:`simulate` does, which is why it is imported lazily below.
+Experimental modules are imported by module path and are not part of this surface:
+`modelica.sim.emit`, `kernel`, `compare`, `sensitivity`, `fv`, `fem`, `mesh`, `vm`,
+`engine`, `radau`.
 """
 
 from __future__ import annotations
@@ -25,38 +19,18 @@ from typing import TYPE_CHECKING, Any
 
 from modelica.ir.causalize import CausalizationError as CausalizationError
 from modelica.ir.causalize import causalize as causalize
-from modelica.ir.source import Source as Source
 from modelica.ir.source import flatten as flatten
-from modelica.ir.source import to_program as to_program
-from modelica.ir.system import Block as Block
 from modelica.ir.system import System as System
-from modelica.sim.compare import Divergence as Divergence
-from modelica.sim.compare import diverges as diverges
-from modelica.sim.emit import Code as Code
-from modelica.sim.emit import EmitError as EmitError
 from modelica.sim.emit import Trigger as Trigger
-from modelica.sim.emit import emit as emit
-from modelica.sim.emit import emit_expr as emit_expr
-from modelica.sim.kernel import Kernel as Kernel
 from modelica.sim.kernel import build as build
 from modelica.sim.matfile import read as read
 from modelica.sim.result import Event as Event
 from modelica.sim.result import Result as Result
-from modelica.sim.sensitivity import (
-    Fit,
-    FitError,
-    Identifiability,
-    Sensitivity,
-    fit,
-    identifiability,
-    sensitivity,
-)
 from modelica.sim.steady import Steady as Steady
 from modelica.sim.steady import SteadyError as SteadyError
 from modelica.sim.steady import steady as steady
 from modelica.sim.sweep import grid as grid
 from modelica.sim.sweep import sweep as sweep
-from modelica.sim.sweep import vector as vector
 from modelica.sim.view import View as View
 
 if TYPE_CHECKING:
@@ -65,21 +39,11 @@ if TYPE_CHECKING:
     from modelica.sim.solve import simulate as simulate
 
 __all__ = [
-    "Block",
     "CausalizationError",
-    "Code",
-    "Divergence",
-    "EmitError",
     "EngineFallbackWarning",
     "Event",
-    "Fit",
-    "FitError",
-    "Identifiability",
-    "Kernel",
     "Result",
-    "Sensitivity",
     "SimulationError",
-    "Source",
     "Steady",
     "SteadyError",
     "System",
@@ -87,20 +51,12 @@ __all__ = [
     "View",
     "build",
     "causalize",
-    "diverges",
-    "emit",
-    "emit_expr",
-    "fit",
     "flatten",
     "grid",
-    "identifiability",
     "read",
-    "sensitivity",
     "simulate",
     "steady",
     "sweep",
-    "to_program",
-    "vector",
 ]
 
 _LAZY = frozenset({"EngineFallbackWarning", "SimulationError", "simulate"})

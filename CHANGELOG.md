@@ -7,6 +7,7 @@ source of truth and is bumped automatically when shipped source changes.
 ## Unreleased
 
 - The C and Rust code generators are removed (`sim.cgen`, `sim.rustgen`, `sim.rustsim`, the C and Rust dialects). Models run on the precompiled engine or on SciPy; nothing is compiled per model.
+- `modelica.sim` exports the user surface only (flatten, causalize, simulate, sweep, steady, build, Result and their errors). Code generation, comparison, sensitivity and the mesh modules are imported by module path, for example `from modelica.sim.emit import emit`.
 - `backend="engine"` on a platform with no engine wheel raises a clear error instead of trying to build the engine with rustc.
 - `simulate` and `sweep` warn (`EngineFallbackWarning`) when the installed engine cannot run a model and SciPy runs it instead.
 - Two crossings at the same instant fire in the same order on the engine and on SciPy.

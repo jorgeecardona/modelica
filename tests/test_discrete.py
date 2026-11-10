@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from modelica.lang import parse
-from modelica.sim import build, causalize, emit, flatten, simulate
-from modelica.sim.emit import EmitError
+from modelica.sim import build, causalize, flatten, simulate
+from modelica.sim.emit import EmitError, emit
 
 if TYPE_CHECKING:
     from modelica.ir.system import System

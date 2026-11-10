@@ -25,7 +25,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from modelica.lang import parse
-from modelica.sim import causalize, emit, flatten, simulate
+from modelica.sim import causalize, flatten, simulate
+from modelica.sim.emit import emit
 
 if TYPE_CHECKING:
     from modelica.ir.system import System

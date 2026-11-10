@@ -7,7 +7,7 @@ When two of them give different answers, one of them is wrong. The problem is to
 **which equation** they first disagree on. A comparison of the final answers says only that
 they disagree.
 
-`modelica.sim.diverges` answers the question. It evaluates one state in two tiers and
+`modelica.sim.compare.diverges` answers the question. It evaluates one state in two tiers and
 returns the first block where the values differ.
 
 ## The workflow
@@ -16,7 +16,8 @@ Build the model. Build the two tiers. Ask.
 
 ```python
 from modelica.lang import parse
-from modelica.sim import build, causalize, flatten, diverges
+from modelica.sim import build, causalize, flatten
+from modelica.sim.compare import diverges
 
 path = "examples/models/RoastingMachine.mo"
 system = causalize(flatten([parse(open(path).read(), path)], "RoastingMachine"))
