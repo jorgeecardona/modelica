@@ -110,7 +110,7 @@ class Op(IntEnum):
     VLOAD_Y = 40  # dst[k] = y[a + k], k < c
     VSTORE_OUT = 41  # out[a + k] = b[k], k < c
     # Shaped opcodes (`_SHAPED`): every operand except the last is an index into
-    # `Program.views`, and the destination view sets the iteration shape.
+    # `Function.views`, and the destination view sets the iteration shape.
     TBINARY = 43  # dst = a op b elementwise, c = the scalar `Op` (ADD to OR)
     TCALL2 = 44  # dst = builtin c of (a, b) elementwise
     TUNARY = 45  # dst = f(a) elementwise: c = NEG, NOT or CALL1; b = the builtin for CALL1
@@ -266,6 +266,8 @@ class Function:
     newton: tuple[NewtonBlock, ...] = ()
     tables: tuple[int, ...] = ()
     """Register numbers that ``VGATHER`` and ``VSCATTER`` read through, by offset."""
+    views: tuple[View, ...] = ()
+    """The arrays the shaped opcodes (`Op.TBINARY` to `Op.ROLL`) name, by index."""
 
 
 @dataclass(frozen=True)
@@ -321,8 +323,6 @@ class Program:
     times: tuple[int, ...] = ()
     """Per event, the workspace slot of its instant for a time event (`Trigger.at`), else -1.
     Empty when no event is a time event."""
-    views: tuple[View, ...] = ()
-    """The arrays the shaped opcodes (`Op.TBINARY` to `Op.ROLL`) name, by index."""
 
 
 @dataclass
@@ -1575,12 +1575,13 @@ def _vectorizable(node: ir.Expr, indices: frozenset[str]) -> bool:
             return False
 
 
-def _fold_code(  # noqa: C901, PLR0912 - one case per kind of instruction
+def _fold_code(  # noqa: C901, PLR0912, PLR0913, PLR0917 - one case per kind of instruction
     code: Sequence[Instr],
     known: dict[int, float],
     pool: dict[float, int],
     blocks: Sequence[NewtonBlock],
     bodies: list[tuple[Instr, ...]],
+    written: Callable[[Instr], list[int]] = lambda _: [],
 ) -> tuple[Instr, ...]:
     """``code`` with every instruction whose operands are all constants made a constant.
 
@@ -1620,20 +1621,25 @@ def _fold_code(  # noqa: C901, PLR0912 - one case per kind of instruction
             for register in (*block.unknowns, *range(block.step, block.step + n)):
                 inner.pop(register, None)
                 known.pop(register, None)
-            bodies[i.a] = _fold_code(block.body, inner, pool, blocks, bodies)
+            bodies[i.a] = _fold_code(block.body, inner, pool, blocks, bodies, written)
         elif i.op in _REMOVABLE:
             known.pop(i.dst, None)
+        elif i.op in _ARRAY or i.op in _SHAPED:
+            for register in written(i):
+                known.pop(register, None)
         out.append(i)
     return tuple(out)
 
 
 def _fold_function(function: Function, pool: dict[float, int]) -> Function:
     bodies = [block.body for block in function.newton]
-    code = _fold_code(function.code, {}, pool, function.newton, bodies)
+    code = _fold_code(
+        function.code, {}, pool, function.newton, bodies, lambda i: _writes(i, function)
+    )
     newton = tuple(
         replace(block, body=body) for block, body in zip(function.newton, bodies, strict=True)
     )
-    return Function(code, newton, function.tables)
+    return Function(code, newton, function.tables, function.views)
 
 
 def _array_reads(i: Instr, tables: Sequence[int]) -> list[int]:
@@ -1688,8 +1694,28 @@ _ARRAY: Final = frozenset(
 )
 
 
-def _reads(i: Instr, function: Function) -> list[int]:
+#: Which operands of a shaped opcode are views it reads.
+_VIEW_READS: Final = {
+    Op.TBINARY: ("a", "b"),
+    Op.TCALL2: ("a", "b"),
+    Op.TUNARY: ("a",),
+    Op.TSELECT: ("a", "b", "c"),
+    Op.TREDUCE: ("a",),
+    Op.TINDEX: (),
+    Op.ROLL: ("a",),
+}
+
+
+def view_operands(i: Instr) -> tuple[str, ...]:
+    """The fields of a shaped instruction that name a view: ``dst`` and what it reads."""
+    return ("dst", *_VIEW_READS[i.op]) if i.op in _SHAPED else ()
+
+
+def _reads(i: Instr, function: Function) -> list[int]:  # noqa: PLR0911 - one return per kind
     """The registers ``i`` reads, ranges included."""
+    if i.op in _SHAPED:
+        views = function.views
+        return [r for name in _VIEW_READS[i.op] for r in elements(views[int(getattr(i, name))])]
     if i.op in _ARRAY:
         return _array_reads(i, function.tables)
     if i.op in _PURE:
@@ -1752,7 +1778,7 @@ def _prune(functions: Sequence[Function]) -> list[Function]:  # noqa: C901 - cou
         newton = tuple(
             replace(block, body=body) for block, body in zip(function.newton, bodies, strict=True)
         )
-        out.append(Function(code, newton, function.tables))
+        out.append(Function(code, newton, function.tables, function.views))
     return out
 
 
@@ -1804,6 +1830,8 @@ def _preload(program: Program, base: int) -> Program:  # noqa: C901 - one walk p
                 # An array opcode reads its operands as runs or through a table, never through
                 # a rewritten scalar operand, so a constant it reads keeps its register.
                 ranged.update(_array_reads(i, function.tables))
+            elif i.op in _SHAPED:
+                ranged.update(_reads(i, function))
         for block in function.newton:
             n = len(block.unknowns)
             ranged.update(range(block.matrix, block.matrix + n * n))
@@ -1824,7 +1852,7 @@ def _preload(program: Program, base: int) -> Program:  # noqa: C901 - one walk p
             )
 
         newton = tuple(replace(block, body=code(block.body)) for block in function.newton)
-        return Function(code(function.code), newton, function.tables)
+        return Function(code(function.code), newton, function.tables, function.views)
 
     return replace(
         program,
@@ -1842,6 +1870,8 @@ def _preload(program: Program, base: int) -> Program:  # noqa: C901 - one walk p
 
 def _writes(i: Instr, function: Function) -> list[int]:
     """The registers ``i`` writes, ranges included; a ``NEWTON``'s body counts as its own."""
+    if i.op in _SHAPED:
+        return elements(function.views[i.dst])
     if i.op in _ARRAY:
         return _array_writes(i, function.tables)
     if i.op in _REMOVABLE:
@@ -1897,7 +1927,9 @@ def _hoist(function: Function, base: int) -> Function:
             after.append(i)
     if sum(i.op in _PURE for i in before) < _HOIST_AT_LEAST:
         return function
-    return Function((*before, Instr(Op.HOIST, 0), *after), function.newton, function.tables)
+    return Function(
+        (*before, Instr(Op.HOIST, 0), *after), function.newton, function.tables, function.views
+    )
 
 
 #: The fields that name a register, by opcode; a range's first register too (`register_fields`).
@@ -1952,6 +1984,11 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
         for block in function.newton:
             n = len(block.unknowns)
             spans += [(block.matrix, n * n), (block.right, n), (block.step, n)]
+        # A view moves as its hull, so its strides still hold after renumbering.
+        for view in function.views:
+            last = max(elements(view), default=view.base)
+            if view.base < base:
+                spans.append((view.base, last - view.base + 1))
     merged: list[list[int]] = []
     for start, size in sorted((s, n) for s, n in spans if n > 0):
         if merged and start < merged[-1][1]:
@@ -1984,6 +2021,8 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
                 touch(r)
         for r in function.tables:
             touch(r)
+        for view in function.views:
+            touch(view.base)
     size = len(number)
 
     def at(r: int) -> int:
@@ -2017,6 +2056,7 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
             tuple(instr(i) for i in function.code),
             newton,
             tuple(at(r) for r in function.tables),
+            tuple(replace(view, base=at(view.base)) for view in function.views),
         )
 
     compacted = replace(
@@ -2079,7 +2119,7 @@ def _peephole(function: Function) -> Function:
         elif i.op is Op.NEG and settled(i.dst, i.a, position):
             negated[i.dst] = i.a
         code.append(i)
-    return Function(tuple(code), function.newton, function.tables)
+    return Function(tuple(code), function.newton, function.tables, function.views)
 
 
 def _fold(program: Program, pool: dict[float, int]) -> Program:
@@ -2200,9 +2240,9 @@ class _Machine:
                 scalar = _VECTOR_TO_SCALAR[op]
                 r[i.dst + k] = float(_arith(scalar, np.float64(r[i.a + k]), np.float64(r[i.b + k])))
 
-    def _shaped(self, i: Instr) -> None:  # noqa: C901, PLR0912 - one case per opcode
+    def _shaped(self, i: Instr, views: Sequence[View]) -> None:  # noqa: C901, PLR0912 - one case per opcode
         """One shaped opcode over its destination view, in row-major order."""
-        r, views, op = self.r, self.program.views, i.op
+        r, op = self.r, i.op
         dst = views[i.dst]
         out = elements(dst)
         if op is Op.TINDEX:
@@ -2284,7 +2324,7 @@ class _Machine:
             elif op in _ARRAY:
                 self._array(i, function.tables)
             elif op in _SHAPED:
-                self._shaped(i)
+                self._shaped(i, function.views)
             elif op is Op.SELECT:
                 r[i.dst] = r[i.b] if r[i.a] != 0.0 else r[i.c]
             elif op is Op.CALL1:
@@ -2441,7 +2481,7 @@ class Encoded:
     modes: int
     events: int
     views: tuple[int, ...] = ()
-    """Per view ``base, ndim, *shape, *strides`` (`Program.views`)."""
+    """Per view ``base, ndim, *shape, *strides``: every function's `Function.views` in turn."""
 
     def rhs(self, mode: int) -> int:
         """The function index of ``rhs`` in ``mode``."""
@@ -2483,29 +2523,41 @@ class Encoded:
         return self.parameters + 2
 
 
-def encode(program: Program) -> Encoded:
+def encode(program: Program) -> Encoded:  # noqa: C901 - one walk over every function
     """Pack ``program`` into flat integer and float arrays, in `Encoded`'s layout."""
     code: list[int] = []
     functions: list[int] = []
     newton: list[int] = []
     unknowns: list[int] = []
 
-    def put(instrs: Sequence[Instr], tables: int = 0) -> tuple[int, int]:
+    views: list[int] = []
+    pooled = 0
+
+    def put(instrs: Sequence[Instr], tables: int = 0, first: int = 0) -> tuple[int, int]:
         # A gather or scatter names its table by offset in the function's `tables`, which
-        # sit in `unknowns` from ``tables`` on.
+        # sit in `unknowns` from ``tables`` on. A shaped opcode names its views by index in the
+        # function's `views`, which sit in the pool from view ``first`` on.
         start = len(code) // 5
         for i in instrs:
             a = i.a + tables if i.op in (Op.VGATHER, Op.VSCATTER, Op.VSCATTER_ADD) else i.a
-            code.extend((int(i.op), i.dst, a, i.b, i.c))
+            fields = {"dst": i.dst, "a": a, "b": i.b, "c": i.c}
+            for name in view_operands(i):
+                fields[name] += first
+            code.extend((int(i.op), fields["dst"], fields["a"], fields["b"], fields["c"]))
         return start, len(instrs)
 
     def add(function: Function) -> None:
+        nonlocal pooled
         tables = len(unknowns)
         unknowns.extend(function.tables)
-        start, count = put(function.code, tables)
+        first = pooled
+        for view in function.views:
+            views.extend((view.base, len(view.shape), *view.shape, *view.strides))
+        pooled += len(function.views)
+        start, count = put(function.code, tables, first)
         first = len(newton) // 7
         for block in function.newton:
-            body, length = put(block.body, tables)
+            body, length = put(block.body, tables, first)
             newton.extend(
                 (
                     len(unknowns),
@@ -2544,11 +2596,7 @@ def encode(program: Program) -> Encoded:
         unknowns=tuple(unknowns),
         modes=len(program.rhs),
         events=len(program.transition[0]) if program.transition else 0,
-        views=tuple(
-            x
-            for view in program.views
-            for x in (view.base, len(view.shape), *view.shape, *view.strides)
-        ),
+        views=tuple(views),
     )
 
 

@@ -52,7 +52,8 @@ class View:
     strides: tuple[int, ...]    # registers per step on each axis; 0 broadcasts that axis
 ```
 
-`Program.views: tuple[View, ...]` holds every array a tape names. Views index the existing
+`Function.views: tuple[View, ...]` holds the arrays a function's tape names, as
+`Function.tables` holds its gather tables; `encode` pools them. Views index the existing
 register file, so Newton blocks, `SOLVE` and the scalar tangents read view elements as
 ordinary registers. The iteration shape is the loop domain; each read is a view over it.
 
@@ -104,7 +105,7 @@ front-end time: `flatten` and `causalize` stay per cell. Phase 2 keeps the array
 
 ## Plan
 
-1. `View`, `Program.views` and the six opcodes in `vm.evaluate`. Test: each against NumPy,
+1. `View`, `Function.views` and the shaped opcodes in `vm.evaluate`. Test: each against NumPy,
    with slices, transposes and stride 0.
 2. The engine encodes, validates and runs views. Test: bitwise equal to `vm.evaluate`; a bad
    view is rejected.

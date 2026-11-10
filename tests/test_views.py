@@ -33,12 +33,14 @@ def _run(views: tuple[vm.View, ...], code: tuple[vm.Instr, ...], size: int) -> n
     """Load ``VALUES`` into view 0 (registers ``s`` on), run ``code``, return ``out[:size]``."""
     program = _program()
     s = program.registers
-    program = dataclasses.replace(program, registers=s + 256 + len(program.constants), views=views)
+    program = dataclasses.replace(program, registers=s + 256 + len(program.constants))
     load = vm.Instr(vm.Op.VLOAD_Y, s, 0, 0, VALUES.size)
     out = [0.0] * size
     w = [0.0] * 64
     p = [0.0] * len(program.layout.parameters)
-    vm.evaluate(program, vm.Function((load, *code)), 0.0, VALUES.ravel().tolist(), p, w, out)
+    vm.evaluate(
+        program, vm.Function((load, *code), views=views), 0.0, VALUES.ravel().tolist(), p, w, out
+    )
     return np.asarray(out)
 
 
@@ -196,8 +198,8 @@ def _every_opcode() -> tuple[vm.Program, vm.Function]:
         instr(op.VSTORE_OUT, 0, 12, s + 60, 4),
         instr(op.VSTORE_OUT, 0, 16, s + 90, 12),
     )
-    program = dataclasses.replace(program, registers=s + 256 + len(program.constants), views=views)
-    function = vm.Function(code)
+    program = dataclasses.replace(program, registers=s + 256 + len(program.constants))
+    function = vm.Function(code, views=views)
     return dataclasses.replace(program, rhs=(function,)), function
 
 
@@ -231,7 +233,7 @@ def test_the_engine_refuses_a_bad_view(engine: Path, broken: str) -> None:
     from modelica.sim.solve import SimulationError  # noqa: PLC0415
 
     program, function = _every_opcode()
-    views = list(program.views)
+    views = list(function.views)
     code = list(function.code)
     if broken == "a view past the registers":
         views[3] = vm.View(program.registers - 2, SHAPE, (4, 1))
@@ -241,6 +243,54 @@ def test_the_engine_refuses_a_bad_view(engine: Path, broken: str) -> None:
         code[1] = vm.Instr(vm.Op.TBINARY, 2, 0, 1, int(vm.Op.MUL))
     else:
         code[3] = vm.Instr(vm.Op.TREDUCE, 4, 3, 2, int(vm.Reduce.SUM))
-    bad = vm.Function(tuple(code))
+    bad = vm.Function(tuple(code), views=tuple(views))
     with pytest.raises(SimulationError, match="refused"):
-        load(dataclasses.replace(program, views=tuple(views), rhs=(bad,)), engine)
+        load(dataclasses.replace(program, rhs=(bad,)), engine)
+
+
+def _outputs(program: vm.Program, function: vm.Function) -> list[float]:
+    out = [0.0] * 28
+    p = [0.0] * len(program.layout.parameters)
+    vm.evaluate(program, function, 0.0, VALUES.ravel().tolist(), p, [0.0] * 64, out)
+    return out
+
+
+def test_prune_keeps_a_scalar_that_only_a_view_reads() -> None:
+    """A register read only through a broadcast view is live: `_prune` keeps its writer."""
+    program, function = _every_opcode()
+    s = _program().registers
+    # The broadcast zero (view 6) now reads y[0], loaded into its register.
+    code = (*function.code[:1], vm.Instr(vm.Op.LOAD_Y, s + 200, 0), *function.code[1:])
+    function = dataclasses.replace(function, code=code)
+    (pruned,) = vm._prune([function])  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
+    assert any(i.op is vm.Op.LOAD_Y for i in pruned.code)
+    assert _outputs(program, pruned) == _outputs(program, function)
+
+
+def _scalar_moves(function: vm.Function) -> vm.Function:
+    """``function`` with its run loads and stores written one register at a time.
+
+    `_compact` runs before `_fuse` writes ``VLOAD_Y`` and ``VSTORE_OUT``, so it sees these.
+    """
+    code: list[vm.Instr] = []
+    for i in function.code:
+        if i.op is vm.Op.VLOAD_Y:
+            code.extend(vm.Instr(vm.Op.LOAD_Y, i.dst + k, i.a + k) for k in range(i.c))
+        elif i.op is vm.Op.VSTORE_OUT:
+            code.extend(vm.Instr(vm.Op.STORE_OUT, 0, i.a + k, i.b + k) for k in range(i.c))
+        else:
+            code.append(i)
+    return dataclasses.replace(function, code=tuple(code))
+
+
+def test_compact_moves_each_view_as_one_block() -> None:
+    """Renumbering keeps a view's elements in place relative to its base: same outputs."""
+    program, function = _every_opcode()
+    function = _scalar_moves(function)
+    program = dataclasses.replace(program, rhs=(function,))
+    base = program.registers - len(program.constants)
+    compacted, first = vm._compact(program, base)  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
+    compacted = dataclasses.replace(compacted, registers=first + len(program.constants))
+    (moved,) = compacted.rhs
+    assert compacted.registers < program.registers
+    assert _outputs(compacted, moved) == _outputs(program, function)
