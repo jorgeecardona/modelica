@@ -613,3 +613,12 @@ flops and the complex one about four times that: about 4e9 flops per pair, 1.2e1
 The factorisation is most of the 10 s of integration; `rhs` is not. That is the evidence 12b
 waited for. Next: BiCGStab with DILU, generic over real and complex, unit tested against the
 band LU, then used in Newton above a size threshold.
+
+12b commit 4 done: `md_bicgstab` with `md_dilu` and `md_dilu_apply` in the runtime, generic over
+`MdNum` (`f64` and `MdC`, a complex number as two f64), over a matrix in rows (`start`,
+`columns`, `values`). DILU builds its diagonal as OpenFOAM's DILUPreconditioner does, from each
+entry's mirror. BiCGStab is right-preconditioned, uses the bilinear inner product (the complex
+Radau matrix is complex symmetric), and minimises the residual for omega with the conjugate.
+Test: on a 6 x 6 five-point grid, a nonsymmetric real system and a complex symmetric one solve
+as numpy does within 1e-10. Not yet used by Radau. Next: commit 5, the iterative solve in
+Newton above a size threshold, and a `solver` choice so a test can run both.

@@ -464,3 +464,76 @@ def test_md_gb_factor_solve_answers_what_numpy_answers(n: int, lower: int, upper
     complex_solution = numpy.linalg.solve(c, d)
     numpy.testing.assert_allclose(flat[n : 2 * n], complex_solution.real, rtol=1e-11, atol=1e-12)
     numpy.testing.assert_allclose(flat[2 * n :], complex_solution.imag, rtol=1e-11, atol=1e-12)
+
+
+@needs_rustc
+@pytest.mark.parametrize("kind", ["real", "complex"])
+def test_md_bicgstab_with_dilu_answers_what_numpy_answers(kind: str) -> None:  # noqa: C901 - builds the CSR arrays inline
+    """BiCGStab with DILU solves a 2-D grid system as numpy does, real or complex symmetric.
+
+    The pattern is a 6 x 6 five-point grid. The real matrix is not symmetric; the complex one is
+    complex symmetric (``A = A^T``), as Radau's ``(alpha + i beta)/h - J`` is for a symmetric
+    ``J``. Both are diagonally dominant, so the iteration converges.
+    """
+    numpy = pytest.importorskip("numpy")
+    rng = numpy.random.default_rng(20261110)
+    side = 6
+    n = side * side
+    a = numpy.zeros((n, n), dtype=complex)
+    for i in range(side):
+        for j in range(side):
+            c = i + side * j
+            for di, dj in ((1, 0), (0, 1)):
+                if i + di < side and j + dj < side:
+                    d = i + di + side * (j + dj)
+                    if kind == "real":
+                        a[c, d], a[d, c] = rng.uniform(-1, 0, 2)
+                    else:
+                        a[c, d] = a[d, c] = complex(*rng.uniform(-1, 0, 2))
+    for c in range(n):
+        a[c, c] = 4.5 + (0.0 if kind == "real" else 2.0j)
+    if kind == "real":
+        a = a.real
+    b = rng.standard_normal(n) + (0.0 if kind == "real" else 1j * rng.standard_normal(n))
+    entries = [(r, c) for r in range(n) for c in range(n) if a[r, c] != 0]
+    start = [0] * (n + 1)
+    for r, _ in entries:
+        start[r + 1] += 1
+    for r in range(n):
+        start[r + 1] += start[r]
+    where = {entry: k for k, entry in enumerate(entries)}
+    mirror = [where.get((c, r), 2**64 - 1) for r, c in entries]
+    diagonal = [where[r, r] for r in range(n)]
+
+    def value(x: complex) -> str:
+        if kind == "real":
+            return f"{float(x.real)!r}f64"
+        return f"MdC {{ re: {float(x.real)!r}, im: {float(x.imag)!r} }}"
+
+    kind_type = "f64" if kind == "real" else "MdC"
+    program = "\n".join(
+        [
+            *LINALG,
+            "fn main() {",
+            f"    let start: [usize; {n + 1}] = [{', '.join(map(str, start))}];",
+            f"    let columns: [usize; {len(entries)}] = [{', '.join(str(c) for _, c in entries)}];",
+            f"    let values: [{kind_type}; {len(entries)}] = [{', '.join(value(a[r, c]) for r, c in entries)}];",
+            f"    let mirror: [usize; {len(entries)}] = [{', '.join(map(str, mirror))}];",
+            f"    let diagonal: [usize; {n}] = [{', '.join(map(str, diagonal))}];",
+            f"    let b: [{kind_type}; {n}] = [{', '.join(value(x) for x in b)}];",
+            f"    let mut rd = [<{kind_type} as MdNum>::zero(); {n}];",
+            f"    assert!(md_dilu({n}, &start, &columns, &values, &mirror, &diagonal, &mut rd));",
+            f"    let mut x = [<{kind_type} as MdNum>::zero(); {n}];",
+            f"    let mut work = [<{kind_type} as MdNum>::zero(); {7 * n}];",
+            f"    assert!(md_bicgstab({n}, &start, &columns, &values, &rd, &b, &mut x, 1e-14, 200, &mut work));",
+            "    let printed: Vec<String> = x.iter().map(|v| v.to_string()).collect();"
+            if kind == "real"
+            else "    let printed: Vec<String> = x.iter().flat_map(|v| [v.re.to_string(), v.im.to_string()]).collect();",
+            '    println!("{}", printed.join(" "));',
+            "}",
+            "",
+        ]
+    )
+    flat = numpy.array(_run(program))
+    got = flat if kind == "real" else flat[0::2] + 1j * flat[1::2]
+    numpy.testing.assert_allclose(got, numpy.linalg.solve(a, b), rtol=1e-10, atol=1e-12)
