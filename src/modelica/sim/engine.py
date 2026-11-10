@@ -118,6 +118,8 @@ def _open(path: Path) -> ctypes.CDLL:
     engine.md_vm_order.argtypes = [pointer, pointer, size]
     engine.md_vm_pattern.restype = ctypes.c_int32
     engine.md_vm_pattern.argtypes = [pointer, pointer, pointer, size, size]
+    engine.md_vm_mass.restype = ctypes.c_int32
+    engine.md_vm_mass.argtypes = [pointer, pointer, size]
     engine.md_vm_times.restype = ctypes.c_int32
     engine.md_vm_times.argtypes = [pointer, pointer, size]
     engine.md_vm_run_many.restype = None
@@ -228,6 +230,12 @@ def load(program: vm.Program, path: Path | None = None) -> Loaded:
         if engine.md_vm_pattern(handle, rows.ctypes.data, cols.ctypes.data, len(rows), n) != 0:
             engine.md_vm_free(handle)
             message = "the engine refused the jacobian pattern"
+            raise SimulationError(message)
+    if program.mass:
+        mass = np.ascontiguousarray(program.mass, dtype=np.float64)
+        if engine.md_vm_mass(handle, mass.ctypes.data, len(mass)) != 0:
+            engine.md_vm_free(handle)
+            message = "the engine refused the mass matrix"
             raise SimulationError(message)
     if program.times:
         times = np.ascontiguousarray(program.times, dtype=np.int64)

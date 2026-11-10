@@ -558,3 +558,11 @@ aliased register, `_peephole` rewrites only once an alias or a negation exists, 
 writes instead of listing their positions. TorusHeat at n = 100: `vm.lower` 8.9 s to about
 6 s. What is left is `_compact` (2.3 s) and `_prune` (1.3 s) walking about 170000
 instructions, most of them the jacobian's 50000 `out` stores and their `LOAD_P`s.
+
+Step 13 done, for a diagonal mass matrix: `Program.mass` (one value per state, 0 for an
+algebraic row) and `md_vm_mass`. Radau factors `mu/h M - J` (`md_factor_band` adds `m mu/h` on
+the diagonal), the Newton right-hand side carries `m` on the stage terms, and the error estimate
+uses `f + M (E z) / h`. `rhs` then computes `f`. Tests on the engine: `M = diag(2, 4, 0.5)` with
+`f = -y` gives `exp(-t / m)` within 1e-7; `x' = -y`, `0 = y - x`, `z' = 0` with
+`M = diag(1, 0, 1)` runs as an index-1 DAE and gives `x = y = exp(-t)`. A full (non-diagonal)
+mass matrix, as finite elements assemble, waits for step 14. Next: step 14.

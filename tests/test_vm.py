@@ -923,3 +923,70 @@ def test_a_2500_state_torus_runs_in_band_storage_and_decays_exactly(engine: Path
     decay = np.exp(-8.0 * np.sin(np.pi / n) ** 2 * 5.0)
     values = result.values[cells]
     np.testing.assert_allclose(values[:, -1], values[:, 0] * decay, rtol=0, atol=1e-12)
+
+
+def _mass_program(
+    base: vm.Program, rhs: list[vm.Instr], jacobian: list[tuple[int, int]], mass: tuple[float, ...]
+) -> vm.Program:
+    """Lorenz's program with a hand-written ``rhs``, a dense jacobian of constants, and ``mass``.
+
+    The pool is preloaded at the top of the register file. The constants -1, 0 and 1 and 60
+    zeros go after the old ones and the file grows by 63, so the old constants keep their
+    registers. ``rhs`` and the jacobian use the zeroed registers from ``base.registers + 3``;
+    ``jacobian`` lists ``(slot, constant)`` with constant 0, 1, 2 for -1, 0, 1.
+    """
+    op, instr = vm.Op, vm.Instr
+    c, top = len(base.constants), base.registers + 3
+    stores: list[vm.Instr] = [instr(op.CLEAR_OUT, 0, 9)]
+    for slot, k in jacobian:
+        stores += [
+            instr(op.CONST, top + 20 + slot, c + k),
+            instr(op.STORE_OUT, 0, slot, top + 20 + slot),
+        ]
+    return dataclasses.replace(
+        base,
+        registers=base.registers + 63,
+        constants=(*base.constants, -1.0, 0.0, 1.0, *(0.0,) * 60),
+        rhs=(vm.Function(tuple(rhs)),),
+        jacobian=(vm.Function(tuple(stores)),),
+        pattern=(),
+        mass=mass,
+    )
+
+
+@pytest.mark.parametrize("case", ["lumped", "algebraic"])
+def test_radau_with_a_mass_matrix(engine: Path, monkeypatch: pytest.MonkeyPatch, case: str) -> None:
+    """``M y' = f`` on the engine: a lumped mass, and a singular one (an index-1 DAE).
+
+    Lumped: ``f = -y``, ``M = diag(2, 4, 0.5)``, so ``y_i = exp(-t / m_i)``. Algebraic:
+    ``x' = -y``, ``0 = y - x``, ``z' = 0`` with ``M = diag(1, 0, 1)``, so ``x = y = exp(-t)``.
+    """
+    from modelica.sim import engine as native  # noqa: PLC0415
+
+    op, instr = vm.Op, vm.Instr
+    system = _system(EXAMPLES / "models" / "Lorenz.mo")
+    base = vm.lower(system)
+    s = base.registers + 3  # the zeroed registers `_mass_program` adds
+    loads = [instr(op.LOAD_Y, s + k, k) for k in range(3)]
+    if case == "lumped":
+        mass = (2.0, 4.0, 0.5)
+        rhs = [*loads, *(instr(op.NEG, s + 3 + k, s + k) for k in range(3))]
+        rhs += [instr(op.STORE_OUT, 0, k, s + 3 + k) for k in range(3)]
+        jacobian = [(0, 0), (4, 0), (8, 0)]
+        expected = np.exp(-5.0 / np.array(mass))
+    else:
+        mass = (1.0, 0.0, 1.0)
+        rhs = [*loads, instr(op.NEG, s + 3, s + 1), instr(op.SUB, s + 4, s + 1, s + 0)]
+        rhs += [instr(op.CONST, s + 5, len(base.constants) + 1)]
+        rhs += [instr(op.STORE_OUT, 0, k, s + 3 + k) for k in range(3)]
+        jacobian = [(1, 0), (3, 0), (4, 2)]
+        expected = np.array([np.exp(-5.0), np.exp(-5.0), 1.0])
+    program = _mass_program(base, rhs, jacobian, mass)
+    def lowered(*_: object, **__: object) -> vm.Program:
+        return program
+
+    monkeypatch.setattr(vm, "lower", lowered)
+    knobs: dict[str, Any] = {"stop": 5.0, "tolerance": 1e-10, "points": 2, "path": engine}
+    result = native.simulate(system, **knobs).result
+    rows = [result.names.index(name) for name in ("x", "y", "z")]
+    np.testing.assert_allclose(result.values[rows, -1], expected, rtol=1e-7)

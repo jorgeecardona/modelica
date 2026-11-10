@@ -257,6 +257,9 @@ class Program:
     pattern: tuple[tuple[int, int], ...] = ()
     """The Jacobian's entries ``(row, column)``: the jacobian tape writes ``out[k]`` for entry
     ``k`` (`_pattern`). Empty: it writes the dense ``n * n`` matrix, row by row (`dense`)."""
+    mass: tuple[float, ...] = ()
+    """The diagonal of the mass matrix in ``M y' = f``, one per state; 0 marks an algebraic row.
+    Empty: ``M = I``. ``rhs`` then computes ``f``, not ``y'``."""
     times: tuple[int, ...] = ()
     """Per event, the workspace slot of its instant for a time event (`Trigger.at`), else -1.
     Empty when no event is a time event."""

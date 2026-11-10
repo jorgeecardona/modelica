@@ -52,6 +52,9 @@ The jacobian tape writes one value per nonzero, in the order of `Program.pattern
 (`md_vm_pattern`). Radau places each entry in band storage of width `2 lower + upper + 1`
 in the state order, so memory grows with `n` times the band, not `n * n`.
 
+`Program.mass` (`md_vm_mass`) gives a diagonal mass matrix: Radau then solves `M y' = f`,
+factoring `mu/h M - J`. A row with mass 0 is algebraic, so an index-1 DAE runs.
+
 A time event is a `when time >= v` branch whose `v` is a discrete variable, which is what
 `when sample(start, interval)` flattens to. `Program.times` gives each event's workspace slot of
 `v` (-1 for a state event), set with `md_vm_times`. Radau cuts each step at the earliest `v`

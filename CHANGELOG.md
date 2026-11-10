@@ -6,6 +6,7 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- Radau on the engine solves `M y' = f` with a diagonal mass matrix (`Program.mass`); a zero entry makes the row algebraic, so index-1 DAEs run.
 - Radau stores its matrices in band storage built from the Jacobian pattern; a 10000-state heat grid runs in 364 MB, where dense storage needed 800 MB per matrix.
 - The Jacobian tape writes only its nonzeros (`Program.pattern`); TorusHeat writes 320 values instead of 4096.
 - The Jacobian of a finite-volume tape is built from its array opcodes, scatter-adds included.

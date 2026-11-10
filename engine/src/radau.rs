@@ -413,7 +413,7 @@ fn md_factor_pair(
     md_lu_factor(n, ar, pr) && md_clu_factor(n, acr, aci, pc)
 }
 
-// mu/h I - J for the real and the complex eigenvalue in band storage, from the Jacobian's
+// mu/h M - J for the real and the complex eigenvalue in band storage, from the Jacobian's
 // values `jac` at the band positions `at` (one per value, in the state order), and factor
 // both. radau.py:432.
 #[allow(dead_code)]
@@ -422,6 +422,7 @@ fn md_factor_band(
     jac: &[f64],
     at: &[usize],
     diagonal: &[usize],
+    mass: &[f64],
     h: f64,
     band: (usize, usize),
     ar: &mut [f64],
@@ -437,10 +438,12 @@ fn md_factor_band(
         ar[slot] = -jac[k];
         acr[slot] = -jac[k];
     }
-    for &slot in diagonal {
-        ar[slot] += MD_MU_REAL / h;
-        acr[slot] += MD_MU_COMPLEX_R / h;
-        aci[slot] += MD_MU_COMPLEX_I / h;
+    // mu/h M on the diagonal, M the mass of each row in the state order (1 with no mass).
+    for (q, &slot) in diagonal.iter().enumerate() {
+        let m = mass.get(q).copied().unwrap_or(1.0);
+        ar[slot] += m * MD_MU_REAL / h;
+        acr[slot] += m * MD_MU_COMPLEX_R / h;
+        aci[slot] += m * MD_MU_COMPLEX_I / h;
     }
     md_gb_factor(n, ar, pr, band.0, band.1) && md_cgb_factor(n, acr, aci, pc, band.0, band.1)
 }
@@ -488,6 +491,7 @@ fn md_newton(
     aci: &[f64],
     pc: &[usize],
     order: &[usize],
+    mass: &[f64],
     work: &mut MdNewtonWork,
 ) -> (bool, usize, f64, usize) {
     let n = y.len();
@@ -534,9 +538,11 @@ fn md_newton(
                 imag_r += MD_TI[1][i] * stages[i * n + q];
                 imag_i += MD_TI[2][i] * stages[i * n + q];
             }
-            br[q] = real - mu_real * wm[q];
-            bcr[q] = imag_r - (mu_complex_r * wm[n + q] - mu_complex_i * wm[2 * n + q]);
-            bci[q] = imag_i - (mu_complex_r * wm[2 * n + q] + mu_complex_i * wm[n + q]);
+            // M y' = f: the stage terms carry the row's mass (1 with no mass, 0 algebraic).
+            let m = mass.get(q).copied().unwrap_or(1.0);
+            br[q] = real - m * mu_real * wm[q];
+            bcr[q] = imag_r - m * (mu_complex_r * wm[n + q] - mu_complex_i * wm[2 * n + q]);
+            bci[q] = imag_i - m * (mu_complex_r * wm[2 * n + q] + mu_complex_i * wm[n + q]);
         }
         md_gb_solve_in(n, ar, pr, order, br, tr);
         md_cgb_solve_in(n, acr, aci, pc, order, bcr, bci, tr, ti);
@@ -712,6 +718,7 @@ fn md_integrate(
     grid: &[f64],
     order: &[usize],
     pattern: &[(usize, usize)],
+    mass: &[f64],
     every: bool,
     t_out: &mut [f64],
     out: &mut [f64],
@@ -758,6 +765,12 @@ fn md_integrate(
     let band_at = |r: usize, c: usize| r * width + c + lower - r;
     let at: Vec<usize> = entries.iter().map(|&(i, j)| band_at(position[i], position[j])).collect();
     let diagonal: Vec<usize> = (0..n).map(|q| band_at(q, q)).collect();
+    // The diagonal mass matrix of M y' = f, per row in the state order; empty: M = I.
+    let mass_in_order: Vec<f64> = if mass.is_empty() {
+        Vec::new()
+    } else {
+        (0..n).map(|q| mass[if order.is_empty() { q } else { order[q] }]).collect()
+    };
 
     let mut jac = vec![0.0f64; entries.len()];
     jacobian(t, &y, p, w, &mut jac);
@@ -864,7 +877,7 @@ fn md_integrate(
             let mut converged = false;
             while !converged {
                 if !factored {
-                    if !md_factor_band(n, &jac, &at, &diagonal, h, (lower, upper), &mut ar, &mut pr, &mut acr, &mut aci, &mut pc) {
+                    if !md_factor_band(n, &jac, &at, &diagonal, &mass_in_order, h, (lower, upper), &mut ar, &mut pr, &mut acr, &mut aci, &mut pc) {
                         status = NO_CONVERGENCE;
                         break;
                     }
@@ -872,7 +885,7 @@ fn md_integrate(
                     factorisations += 1;
                 }
                 let result =
-                    md_newton(t, &y, h, p, w, &mut z, &scale, tol, &ar, &pr, &acr, &aci, &pc, order, &mut newton_work);
+                    md_newton(t, &y, h, p, w, &mut z, &scale, tol, &ar, &pr, &acr, &aci, &pc, order, mass, &mut newton_work);
                 converged = result.0;
                 iterations = result.1;
                 rate = result.2;
@@ -896,7 +909,8 @@ fn md_integrate(
 
             for q in 0..n {
                 y_new[q] = y[q] + z[2 * n + q];
-                combined[q] = f[q] + (MD_E[0] * z[q] + MD_E[1] * z[n + q] + MD_E[2] * z[2 * n + q]) / h;
+                let m = mass.get(q).copied().unwrap_or(1.0);
+                combined[q] = f[q] + m * (MD_E[0] * z[q] + MD_E[1] * z[n + q] + MD_E[2] * z[2 * n + q]) / h;
                 error[q] = combined[q];
             }
             md_gb_solve_in(n, &ar, &pr, order, &mut error, &mut solve_tmp);

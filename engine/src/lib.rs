@@ -58,6 +58,9 @@ pub struct Program {
     /// The Jacobian's entries `(row, column)`, one per value the jacobian tape writes, in
     /// slot order (`md_vm_pattern`). Empty: the tape writes the dense `n * n` matrix.
     pattern: Vec<(usize, usize)>,
+    /// The diagonal of the mass matrix in `M y' = f`, one per state (`md_vm_mass`); 0 marks an
+    /// algebraic row. Empty: `M = I`.
+    mass: Vec<f64>,
     /// The gather tables (`vm.Function.tables`, every function's in one pool): register numbers.
     tables: Vec<usize>,
 }
@@ -515,6 +518,7 @@ pub unsafe extern "C" fn md_vm_new(
         order: Vec::new(),
         times: Vec::new(),
         pattern: Vec::new(),
+        mass: Vec::new(),
         tables: unknowns.iter().map(|&r| r as usize).collect(),
     }))
 }
@@ -554,6 +558,20 @@ pub unsafe extern "C" fn md_vm_pattern(program: *mut Program, rows: *const u64, 
         pattern.push((i, j));
     }
     (*program).pattern = pattern;
+    0
+}
+
+/// Set the diagonal mass matrix of `M y' = f`: one value per state, 0 for an algebraic row.
+///
+/// # Safety
+/// `program` comes from `md_vm_new`; `mass` is valid for `n` values.
+#[no_mangle]
+pub unsafe extern "C" fn md_vm_mass(program: *mut Program, mass: *const f64, n: usize) -> i32 {
+    let given = if n == 0 { &[][..] } else { slice::from_raw_parts(mass, n) };
+    if given.iter().any(|m| !m.is_finite()) {
+        return -1;
+    }
+    (*program).mass = given.to_vec();
     0
 }
 
@@ -696,7 +714,7 @@ pub unsafe extern "C" fn md_vm_run(
     let previous = CURRENT.with(|c| c.replace(program));
     let r = md_integrate(
         t0, t1, view(y0, n), view(p, np), view_mut(w, nw), rtol, atol,
-        view(dirs, ne), view(lat, ne), view(term, ne), &(*program).times, view(grid, npts), &(*program).order, &(*program).pattern, every != 0,
+        view(dirs, ne), view(lat, ne), view(term, ne), &(*program).times, view(grid, npts), &(*program).order, &(*program).pattern, &(*program).mass, every != 0,
         view_mut(t_out, cap), view_mut(out, cap * n), view_mut(obs, cap * nobs),
         view_mut(events_out, nev_out), view_mut(ev_index_out, nev_out),
     );
@@ -793,7 +811,7 @@ pub unsafe extern "C" fn md_vm_run_many(
                         view_mut((w as *mut f64).add(k * nw), nw),
                         rtol, atol,
                         view(dirs as *const f64, ne), view(lat as *const i64, ne),
-                        view(term as *const i64, ne), &local.times, view(grid as *const f64, npts), &local.order, &local.pattern,
+                        view(term as *const i64, ne), &local.times, view(grid as *const f64, npts), &local.order, &local.pattern, &local.mass,
                         every != 0,
                         view_mut((t_out as *mut f64).add(k * cap), cap),
                         view_mut((out as *mut f64).add(k * cap * n), cap * n),
