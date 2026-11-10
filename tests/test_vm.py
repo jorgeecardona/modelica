@@ -1006,8 +1006,8 @@ def test_a_wide_band_picks_the_iterative_solver() -> None:
 
 def test_phase_change_fires_the_same_events_in_the_same_order(engine: Path) -> None:
     """``T > Ms`` and ``T < Ms`` cross at one instant: both backends fire the lower index first."""
-    from modelica.sim import simulate  # noqa: PLC0415 - only the engine tests need it
     from modelica.sim import engine as native  # noqa: PLC0415
+    from modelica.sim import simulate  # noqa: PLC0415 - only the engine tests need it
 
     system = _system(EXAMPLES / "models" / "PhaseChange.mo")
     reference = simulate(system, stop=1000.0, backend="python")
