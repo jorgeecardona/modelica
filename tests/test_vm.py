@@ -114,6 +114,10 @@ def _tol(label: str) -> float:
     return 1e-9 if label == "jacobian" else 1e-12
 
 
+#: The position of the jacobian in `_index` and the call groups: it writes the pattern's values.
+_JACOBIAN = 4
+
+
 def _index(encoded: vm.Encoded, which: int, mode: int) -> int:
     pick = (
         encoded.rhs,
@@ -146,6 +150,8 @@ def test_the_tape_equals_the_interpreter(model: Path) -> None:
         vm.evaluate(
             program, groups[which][mode], 0.0, list(point.y), list(point.p), w, out, then=then
         )
+        if which == _JACOBIAN:
+            out = vm.dense(program, out, len(point.y))
         np.testing.assert_allclose(out, expected, rtol=_tol(label), atol=_tol(label), err_msg=label)
         np.testing.assert_allclose(w, expected_w, rtol=1e-12, atol=1e-12, err_msg=label)
 
@@ -193,6 +199,8 @@ def test_the_engine_equals_the_interpreter(engine: Path, model: Path) -> None:
             then = -1 if event is None else encoded.transition(mode, event)
             p = np.asarray(point.p, dtype=np.float64)
             loaded.call(_index(encoded, which, mode), 0.0, point.y.copy(), p, w, out, then)
+            if which == _JACOBIAN:
+                out = np.array(vm.dense(program, list(out), len(point.y)))
             tolerance = _tol(label)
             np.testing.assert_allclose(out, expected, rtol=tolerance, atol=tolerance, err_msg=label)
             np.testing.assert_allclose(w, expected_w, rtol=1e-12, atol=1e-12, err_msg=label)
@@ -874,3 +882,24 @@ def test_a_heat_bar_written_with_face_lists_equals_heat_bar(
     monkeypatch.setattr(vm, "lower", faces)
     lists = native.simulate(system, **knobs).result
     np.testing.assert_allclose(lists.values, loops.values, rtol=1e-12, atol=1e-10)
+
+
+@pytest.mark.parametrize("model", _models(), ids=[m.stem for m in _models()])
+def test_the_jacobian_pattern_is_inside_the_sparsity(model: Path) -> None:
+    """Every entry a jacobian tape stores is one `Mode.sparsity` allows, and none twice."""
+    system = _system(model)
+    program = vm.lower(system)
+    allowed = {
+        (row, column)
+        for mode in system.modes
+        for row, columns in enumerate(mode.sparsity)
+        for column in columns
+    }
+    assert set(program.pattern) <= allowed
+    assert len(set(program.pattern)) == len(program.pattern)
+
+
+def test_torus_heat_stores_five_entries_per_row() -> None:
+    """TorusHeat's jacobian tape writes its 5 * 64 nonzeros, not the 64 * 64 matrix."""
+    program = vm.lower(_system(EXAMPLES / "models" / "TorusHeat.mo"))
+    assert len(program.pattern) == 5 * 64

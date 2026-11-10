@@ -116,6 +116,8 @@ def _open(path: Path) -> ctypes.CDLL:
     engine.md_vm_free.argtypes = [pointer]
     engine.md_vm_order.restype = ctypes.c_int32
     engine.md_vm_order.argtypes = [pointer, pointer, size]
+    engine.md_vm_pattern.restype = ctypes.c_int32
+    engine.md_vm_pattern.argtypes = [pointer, pointer, pointer, size, size]
     engine.md_vm_times.restype = ctypes.c_int32
     engine.md_vm_times.argtypes = [pointer, pointer, size]
     engine.md_vm_run_many.restype = None
@@ -218,6 +220,14 @@ def load(program: vm.Program, path: Path | None = None) -> Loaded:
         if engine.md_vm_order(handle, order.ctypes.data, len(order)) != 0:
             engine.md_vm_free(handle)
             message = "the engine refused the state order"
+            raise SimulationError(message)
+    if program.pattern:
+        rows = np.ascontiguousarray([i for i, _ in program.pattern], dtype=np.uint64)
+        cols = np.ascontiguousarray([j for _, j in program.pattern], dtype=np.uint64)
+        n = len(program.layout.states)
+        if engine.md_vm_pattern(handle, rows.ctypes.data, cols.ctypes.data, len(rows), n) != 0:
+            engine.md_vm_free(handle)
+            message = "the engine refused the jacobian pattern"
             raise SimulationError(message)
     if program.times:
         times = np.ascontiguousarray(program.times, dtype=np.int64)

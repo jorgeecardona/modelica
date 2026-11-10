@@ -254,6 +254,9 @@ class Program:
     order: tuple[int, ...] = ()
     """The state order Radau factors its matrices in, `bandwidth_order` of the first mode.
     Empty for the natural order."""
+    pattern: tuple[tuple[int, int], ...] = ()
+    """The Jacobian's entries ``(row, column)``: the jacobian tape writes ``out[k]`` for entry
+    ``k`` (`_pattern`). Empty: it writes the dense ``n * n`` matrix, row by row (`dense`)."""
     times: tuple[int, ...] = ()
     """Per event, the workspace slot of its instant for a time event (`Trigger.at`), else -1.
     Empty when no event is a time event."""
@@ -1192,6 +1195,7 @@ def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program
             + (0 if lowering.emitter.switching is None else 1),
         ),
     )
+    program = _pattern(program, len(system.states))
     at = [
         -1 if event.trigger.at is None else event.trigger.at for event in lowering.emitter.events()
     ]
@@ -1284,6 +1288,47 @@ def _jacobian(lowering: _Lowering, mode: Mode, rhs: Function) -> Function:
         return _Tangents(lowering, len(mode.states)).function(rhs)
     except _Scalar:
         return _Tangents(lowering, len(mode.states)).function(lowering.rhs(mode, arrays=False))
+
+
+def _pattern(program: Program, n: int) -> Program:
+    """``program`` with its jacobian tapes writing one value per nonzero, not ``n * n``.
+
+    The pattern is every ``(row, column)`` any mode's tape stores, in row order. Each
+    ``STORE_OUT`` slot ``row * n + column`` becomes that entry's index, and ``CLEAR_OUT``
+    clears the pattern's length. Raises `EmitError` when one tape stores an entry twice.
+    """
+    entries: set[tuple[int, int]] = set()
+    for function in program.jacobian:
+        stored = [i.a for i in function.code if i.op is Op.STORE_OUT]
+        if len(stored) != len(set(stored)):
+            message = "a jacobian tape stores one entry twice"
+            raise EmitError(message)
+        entries.update(divmod(slot, n) for slot in stored)
+    pattern = tuple(sorted(entries))
+    index = {row * n + column: k for k, (row, column) in enumerate(pattern)}
+
+    def entry(i: Instr) -> Instr:
+        if i.op is Op.STORE_OUT:
+            return Instr(Op.STORE_OUT, 0, index[i.a], i.b)
+        if i.op is Op.CLEAR_OUT:
+            return Instr(Op.CLEAR_OUT, 0, len(pattern))
+        return i
+
+    return replace(
+        program,
+        jacobian=tuple(replace(f, code=tuple(map(entry, f.code))) for f in program.jacobian),
+        pattern=pattern,
+    )
+
+
+def dense(program: Program, values: Sequence[float], n: int) -> list[float]:
+    """The ``n * n`` Jacobian, row by row, from what a jacobian tape wrote into ``values``."""
+    if not program.pattern:
+        return list(values[: n * n])
+    out = [0.0] * (n * n)
+    for (row, column), value in zip(program.pattern, values, strict=False):
+        out[row * n + column] = value
+    return out
 
 
 def _fuse(function: Function) -> Function:

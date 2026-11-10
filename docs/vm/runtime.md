@@ -48,6 +48,9 @@ band in the matrix and stops its loops there. Row swaps move only the part right
 as LAPACK's `gbtrf` does, so the solves stay inside the band too. A model in a good order
 factors in `n * lower * (lower + upper)` instead of `n^3 / 3`.
 
+The jacobian tape writes one value per nonzero, in the order of `Program.pattern`
+(`md_vm_pattern`). The engine expands it into the dense matrix Radau factors.
+
 A time event is a `when time >= v` branch whose `v` is a discrete variable, which is what
 `when sample(start, interval)` flattens to. `Program.times` gives each event's workspace slot of
 `v` (-1 for a state event), set with `md_vm_times`. Radau cuts each step at the earliest `v`

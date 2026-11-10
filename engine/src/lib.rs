@@ -55,6 +55,11 @@ pub struct Program {
     order: Vec<usize>,
     /// Per event, the workspace slot of its time-event instant, or -1 (`md_vm_times`).
     times: Vec<i64>,
+    /// The Jacobian's entries `(row, column)`, one per value the jacobian tape writes, in
+    /// slot order (`md_vm_pattern`). Empty: the tape writes the dense `n * n` matrix.
+    pattern: Vec<(usize, usize)>,
+    /// The jacobian tape's values, one per `pattern` entry, before they go into the matrix.
+    values: RefCell<Vec<f64>>,
     /// The gather tables (`vm.Function.tables`, every function's in one pool): register numbers.
     tables: Vec<usize>,
 }
@@ -511,6 +516,8 @@ pub unsafe extern "C" fn md_vm_new(
         }),
         order: Vec::new(),
         times: Vec::new(),
+        pattern: Vec::new(),
+        values: RefCell::new(Vec::new()),
         tables: unknowns.iter().map(|&r| r as usize).collect(),
     }))
 }
@@ -527,6 +534,30 @@ pub unsafe extern "C" fn md_vm_times(program: *mut Program, times: *const i64, n
     }
     let given = if n == 0 { &[][..] } else { slice::from_raw_parts(times, n) };
     (*program).times = given.to_vec();
+    0
+}
+
+/// Set the Jacobian's sparsity pattern: entry `k` of the jacobian tape's output is row
+/// `rows[k]`, column `cols[k]`. Returns 0, or -1 (and changes nothing) when an entry is
+/// outside `n x n` or appears twice.
+///
+/// # Safety
+/// `program` comes from `md_vm_new`; `rows` and `cols` are valid for `nnz` values.
+#[no_mangle]
+pub unsafe extern "C" fn md_vm_pattern(program: *mut Program, rows: *const u64, cols: *const u64, nnz: usize, n: usize) -> i32 {
+    let rows = if nnz == 0 { &[][..] } else { slice::from_raw_parts(rows, nnz) };
+    let cols = if nnz == 0 { &[][..] } else { slice::from_raw_parts(cols, nnz) };
+    let mut seen = std::collections::HashSet::with_capacity(nnz);
+    let mut pattern = Vec::with_capacity(nnz);
+    for (&i, &j) in rows.iter().zip(cols) {
+        let (i, j) = (i as usize, j as usize);
+        if i >= n || j >= n || !seen.insert((i, j)) {
+            return -1;
+        }
+        pattern.push((i, j));
+    }
+    (*program).pattern = pattern;
+    *(*program).values.borrow_mut() = vec![0.0; nnz];
     0
 }
 
@@ -616,7 +647,18 @@ fn indicators(t: f64, y: &[f64], p: &[f64], w: &mut [f64], z: &mut [f64]) {
 fn jacobian(t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]) {
     let m = current();
     let k = m.mode(w);
-    m.call(4 * m.modes + k, None, t, y, p, w, out);
+    if m.pattern.is_empty() {
+        m.call(4 * m.modes + k, None, t, y, p, w, out);
+        return;
+    }
+    // The tape writes one value per pattern entry; Radau still reads the dense matrix.
+    let mut values = m.values.borrow_mut();
+    m.call(4 * m.modes + k, None, t, y, p, w, &mut values);
+    let n = y.len();
+    out.fill(0.0);
+    for (&(i, j), &v) in m.pattern.iter().zip(values.iter()) {
+        out[i * n + j] = v;
+    }
 }
 
 fn transition(event: usize, t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]) {

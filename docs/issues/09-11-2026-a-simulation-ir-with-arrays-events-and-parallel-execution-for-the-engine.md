@@ -523,3 +523,12 @@ of an `fv.heat` tape (fixed value and fixed gradient walls) equals its matrix wi
 the 100 x 100 box the jacobian tape takes 0.87 s to build (99845 instructions, 49600 of them
 `out` stores); `mesh.box` geometry takes 6.4 s in Python loops, the larger front-end cost.
 Next: commit 1, the Jacobian pattern on the tape.
+
+Step 12 commit 1 done: `Program.pattern`. `vm._pattern` collects every `(row, column)` the
+jacobian tapes store, in row order, and rewrites each `STORE_OUT` to that entry's index and
+`CLEAR_OUT` to the pattern's length; a tape that stores one entry twice is an `EmitError`.
+`md_vm_pattern` gives the pattern to the engine, whose `jacobian` still expands it into the
+dense matrix Radau reads (commit 2 replaces that with band storage). `vm.dense` gives the dense
+view in Python. Tests: every corpus pattern is inside `Mode.sparsity` with no repeats, the
+corpus jacobians equal the emitter's through `vm.dense`, and TorusHeat stores 320 entries, not
+4096. Next: commit 2, band storage in Radau.
