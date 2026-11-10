@@ -1,4 +1,4 @@
-"""``backend="auto"`` warns when the installed engine refuses a model and SciPy runs it."""
+"""What happens when the engine cannot run: the ``auto`` warning, and the pure-wheel error."""
 
 from __future__ import annotations
 
@@ -9,7 +9,15 @@ from typing import Any
 import pytest
 
 from modelica.lang import parse
-from modelica.sim import EngineFallbackWarning, causalize, engine, flatten, simulate, sweep
+from modelica.sim import (
+    EngineFallbackWarning,
+    SimulationError,
+    causalize,
+    engine,
+    flatten,
+    simulate,
+    sweep,
+)
 from modelica.sim.emit import EmitError
 
 DECAY = """
@@ -63,3 +71,16 @@ def test_an_explicit_method_falls_back_without_a_warning() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error", EngineFallbackWarning)
         simulate(_system(), stop=1.0, points=3, method="LSODA")
+
+
+def test_a_pure_wheel_never_calls_rustc(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """No bundled engine and no ``engine/src``: a clear error, and no compiler is started."""
+    monkeypatch.setattr(engine, "installed", lambda: None)
+    monkeypatch.setattr(engine, "SOURCE", tmp_path / "missing")
+
+    def no_compiler(*_: object, **__: object) -> None:
+        pytest.fail("rustc was called on a pure wheel")
+
+    monkeypatch.setattr(engine.subprocess, "run", no_compiler)
+    with pytest.raises(SimulationError, match="no engine in this install"):
+        engine.library()

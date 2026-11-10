@@ -61,11 +61,22 @@ def installed() -> Path | None:
 def library(cache: Path | None = None) -> Path:
     """The engine's shared library: the installed wheel's, else built once from ``engine/src``.
 
-    The build is for a source checkout without the wheel. It is kept by the hash of the
-    sources, so it happens once per change to the engine, never per model.
+    The build is for a source checkout only. It is kept by the hash of the sources, so it
+    happens once per change to the engine, never per model. A pure wheel has no
+    ``engine/src`` and never calls ``rustc``.
+
+    Raises:
+        SimulationError: no engine in this install and no ``engine/src`` to build from, or
+            ``rustc`` is missing or fails.
     """
     if cache is None and (wheel := installed()) is not None:
         return wheel
+    if not (SOURCE / "lib.rs").exists():
+        message = (
+            "no engine in this install: platform wheels exist for Linux x86_64 and aarch64,"
+            " Windows x86_64 and macOS arm64; use backend='python' elsewhere"
+        )
+        raise SimulationError(message)
     sources = sorted(SOURCE.glob("*.rs"))
     digest = hashlib.sha256()
     for source in sources:
