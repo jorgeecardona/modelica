@@ -97,3 +97,61 @@ def test_an_index_from_two_moves_to_its_start() -> None:
     shaped, scalar = vm.lower(system), vm.lower(system, arrays=False)
     y = [0.9, -0.3, 0.45, 0.6, 0.15, 0.25]
     assert _rhs(shaped, y) == _rhs(scalar, y)
+
+
+PLATE = """
+model Plate "Heat on a square plate: the edges cool on their own, the interior diffuses"
+  parameter Integer n = 7;
+  parameter Real a = 1.5;
+  Real T[n, n];
+initial equation
+  for i in 1:n loop
+    for j in 1:n loop
+      T[i, j] = sin(3.14159 * (i - 1) / (n - 1)) * sin(3.14159 * (j - 1) / (n - 1));
+    end for;
+  end for;
+equation
+  for i in 2:n-1 loop
+    for j in 2:n-1 loop
+      der(T[i, j]) = a * (T[i - 1, j] + T[i + 1, j] + T[i, j - 1] + T[i, j + 1] - 4 * T[i, j]);
+    end for;
+  end for;
+  for j in 1:n loop
+    der(T[1, j]) = -T[1, j];
+    der(T[n, j]) = -T[n, j];
+  end for;
+  for i in 2:n-1 loop
+    der(T[i, 1]) = -T[i, 1];
+    der(T[i, n]) = -T[i, n];
+  end for;
+end Plate;
+"""
+
+
+def _plate() -> System:
+    return causalize(flatten([parse(PLATE, "Plate.mo")], "Plate"))
+
+
+def test_an_interior_stencil_reads_slices_with_no_table() -> None:
+    """``T[i - 1, j]`` over ``i in 2:n-1`` is a view with a moved base: no gather, no roll."""
+    system = _plate()
+    shaped, scalar = vm.lower(system), vm.lower(system, arrays=False)
+    function = shaped.rhs[0]
+    ops = [i.op for i in function.code]
+    assert vm.Op.TBINARY in ops, vm.listing(shaped, function)
+    assert vm.Op.ROLL not in ops
+    inner = [v for v in function.views if v.shape == (5, 5) and v.strides != (0, 0)]
+    assert len({v.base for v in inner}) >= 5  # the centre and four neighbours, one block
+    y = np.random.default_rng(3).normal(size=len(system.states)).tolist()
+    assert _rhs(shaped, y) == _rhs(scalar, y)
+
+
+def test_the_plate_runs_the_same_on_the_engine_and_on_scipy() -> None:
+    from modelica.sim import engine  # noqa: PLC0415 - only this test needs the engine
+
+    if engine.installed() is None and shutil.which("rustc") is None:
+        pytest.skip("no engine in this install and no rustc to build one")
+    system = _plate()
+    on_engine = simulate(system, stop=0.2, points=5, tolerance=1e-9, backend="engine")
+    on_scipy = simulate(system, stop=0.2, points=5, tolerance=1e-9, backend="python")
+    np.testing.assert_allclose(on_engine.values, on_scipy.values, rtol=1e-6, atol=1e-9)
