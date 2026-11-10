@@ -120,6 +120,8 @@ def _open(path: Path) -> ctypes.CDLL:
     engine.md_vm_pattern.argtypes = [pointer, pointer, pointer, size, size]
     engine.md_vm_mass.restype = ctypes.c_int32
     engine.md_vm_mass.argtypes = [pointer, pointer, size]
+    engine.md_vm_solver.restype = ctypes.c_int32
+    engine.md_vm_solver.argtypes = [pointer, ctypes.c_int32]
     engine.md_vm_times.restype = ctypes.c_int32
     engine.md_vm_times.argtypes = [pointer, pointer, size]
     engine.md_vm_run_many.restype = None
@@ -191,6 +193,41 @@ class Loaded:
         )  # fmt: skip
 
 
+def _configure(engine: ctypes.CDLL, handle: int, program: vm.Program) -> None:
+    """Give the loaded program its state order, pattern, mass, solver and time events.
+
+    Frees ``handle`` and raises `SimulationError` when the engine refuses one of them.
+    """
+    if program.order:
+        order = np.ascontiguousarray(program.order, dtype=np.uint64)
+        if engine.md_vm_order(handle, order.ctypes.data, len(order)) != 0:
+            engine.md_vm_free(handle)
+            message = "the engine refused the state order"
+            raise SimulationError(message)
+    if program.pattern:
+        rows = np.ascontiguousarray([i for i, _ in program.pattern], dtype=np.uint64)
+        cols = np.ascontiguousarray([j for _, j in program.pattern], dtype=np.uint64)
+        n = len(program.layout.states)
+        if engine.md_vm_pattern(handle, rows.ctypes.data, cols.ctypes.data, len(rows), n) != 0:
+            engine.md_vm_free(handle)
+            message = "the engine refused the jacobian pattern"
+            raise SimulationError(message)
+    if program.mass:
+        mass = np.ascontiguousarray(program.mass, dtype=np.float64)
+        if engine.md_vm_mass(handle, mass.ctypes.data, len(mass)) != 0:
+            engine.md_vm_free(handle)
+            message = "the engine refused the mass matrix"
+            raise SimulationError(message)
+    if program.iterative:
+        engine.md_vm_solver(handle, 1)
+    if program.times:
+        times = np.ascontiguousarray(program.times, dtype=np.int64)
+        if engine.md_vm_times(handle, times.ctypes.data, len(times)) != 0:
+            engine.md_vm_free(handle)
+            message = "the engine refused the time-event slots"
+            raise SimulationError(message)
+
+
 def load(program: vm.Program, path: Path | None = None) -> Loaded:
     """Decode ``program`` in the engine at ``path`` (default: `library`)."""
     engine = _open(path if path is not None else library())
@@ -217,32 +254,7 @@ def load(program: vm.Program, path: Path | None = None) -> Loaded:
     if not handle:
         message = "the engine refused the program"
         raise SimulationError(message)
-    if program.order:
-        order = np.ascontiguousarray(program.order, dtype=np.uint64)
-        if engine.md_vm_order(handle, order.ctypes.data, len(order)) != 0:
-            engine.md_vm_free(handle)
-            message = "the engine refused the state order"
-            raise SimulationError(message)
-    if program.pattern:
-        rows = np.ascontiguousarray([i for i, _ in program.pattern], dtype=np.uint64)
-        cols = np.ascontiguousarray([j for _, j in program.pattern], dtype=np.uint64)
-        n = len(program.layout.states)
-        if engine.md_vm_pattern(handle, rows.ctypes.data, cols.ctypes.data, len(rows), n) != 0:
-            engine.md_vm_free(handle)
-            message = "the engine refused the jacobian pattern"
-            raise SimulationError(message)
-    if program.mass:
-        mass = np.ascontiguousarray(program.mass, dtype=np.float64)
-        if engine.md_vm_mass(handle, mass.ctypes.data, len(mass)) != 0:
-            engine.md_vm_free(handle)
-            message = "the engine refused the mass matrix"
-            raise SimulationError(message)
-    if program.times:
-        times = np.ascontiguousarray(program.times, dtype=np.int64)
-        if engine.md_vm_times(handle, times.ctypes.data, len(times)) != 0:
-            engine.md_vm_free(handle)
-            message = "the engine refused the time-event slots"
-            raise SimulationError(message)
+    _configure(engine, handle, program)
     return Loaded(engine, handle, encoded, program.layout)
 
 

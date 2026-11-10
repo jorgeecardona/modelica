@@ -622,3 +622,14 @@ Radau matrix is complex symmetric), and minimises the residual for omega with th
 Test: on a 6 x 6 five-point grid, a nonsymmetric real system and a complex symmetric one solve
 as numpy does within 1e-10. Not yet used by Radau. Next: commit 5, the iterative solve in
 Newton above a size threshold, and a `solver` choice so a test can run both.
+
+12b commit 5 done: `MdLinear` holds Radau's two systems, either in band storage for the LU or as
+sparse rows (every pattern entry plus the diagonal) for BiCGStab with DILU. `md_newton` and the
+error estimate call `solve_real` and `solve_complex`; a linear solve that does not converge
+within 1000 iterations to 1e-12 counts as a Newton failure. `Program.iterative` chooses
+(`md_vm_solver`), and `vm.lower` sets it (`_wide`) above 2000 states when `n lower (lower +
+upper)` is more than 50 times the nonzeros. TorusHeat at n = 100 (lowering excluded, this
+machine): band LU 11.2 s, iterative 0.37 s, the same values. Tests: at n = 20 the iterative run
+equals the band one within 1e-8; at n = 50 `vm.lower` picks the iterative solver, at n = 8 not.
+
+Plan steps 1 to 14 with 6a, 6b, 12a and 12b are done.

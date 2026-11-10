@@ -260,6 +260,9 @@ class Program:
     mass: tuple[float, ...] = ()
     """The diagonal of the mass matrix in ``M y' = f``, one per state; 0 marks an algebraic row.
     Empty: ``M = I``. ``rhs`` then computes ``f``, not ``y'``."""
+    iterative: bool = False
+    """Solve Radau's linear systems by BiCGStab with DILU (`md_vm_solver`) instead of the band
+    LU: for large models whose band is wide."""
     times: tuple[int, ...] = ()
     """Per event, the workspace slot of its instant for a time event (`Trigger.at`), else -1.
     Empty when no event is a time event."""
@@ -1220,6 +1223,7 @@ def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program
             observe=tuple(_hoist(f, base) for f in program.observe),
             indicators=tuple(_hoist(f, base) for f in program.indicators),
         )
+    program = replace(program, iterative=_wide(program, len(system.states)))
     program, base = _compact(program, lowering.registers)
     if arrays:
         program = replace(
@@ -1353,6 +1357,29 @@ def _pattern(program: Program, n: int) -> Program:
         jacobian=tuple(replace(f, code=tuple(map(entry, f.code))) for f in program.jacobian),
         pattern=pattern,
     )
+
+
+#: The iterative solver is chosen above this many states, when the band LU's work per
+#: factorisation is more than `_WIDE` times the work of one sparse product.
+_ITERATIVE_STATES: Final = 2000
+_WIDE: Final = 50
+
+
+def _wide(program: Program, n: int) -> bool:
+    """Whether Radau should solve iteratively: many states and a band much wider than the rows.
+
+    The band LU costs about ``n lower (lower + upper)`` per factorisation, a sparse product
+    ``nnz``. Above `_ITERATIVE_STATES` states with the first more than `_WIDE` times ``nnz``
+    the band is the run's cost (a periodic grid keeps it at twice the side).
+    """
+    if n <= _ITERATIVE_STATES or not program.pattern:
+        return False
+    position = {state: q for q, state in enumerate(program.order)} if program.order else None
+    lower = upper = 0
+    for i, j in program.pattern:
+        r, c = (position[i], position[j]) if position else (i, j)
+        lower, upper = max(lower, r - c), max(upper, c - r)
+    return n * lower * (lower + upper) > _WIDE * len(program.pattern)
 
 
 def dense(program: Program, values: Sequence[float], n: int) -> list[float]:

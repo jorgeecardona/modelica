@@ -709,6 +709,177 @@ STEP: Final[tuple[str, ...]] = (
     "    md_gb_factor(n, ar, pr, band.0, band.1) && md_cgb_factor(n, acr, aci, pc, band.0, band.1)",
     "}",
     "",
+    "// The linear systems of one Radau run, `mu/h M - J` real and complex: in band storage factored",
+    "// by LU, or (`iterative`) as sparse rows solved by BiCGStab with DILU (plan step 12b). Built once",
+    "// per run from the Jacobian's entries; `factor` refills the values, the solves work in place.",
+    "#[allow(dead_code)]",
+    "struct MdLinear {",
+    "    n: usize,",
+    "    iterative: bool,",
+    "    order: Vec<usize>,",
+    "    // Band storage (the LU path).",
+    "    band: (usize, usize),",
+    "    at: Vec<usize>,",
+    "    diagonal: Vec<usize>,",
+    "    mass_in_order: Vec<f64>,",
+    "    ar: Vec<f64>,",
+    "    acr: Vec<f64>,",
+    "    aci: Vec<f64>,",
+    "    pr: Vec<usize>,",
+    "    pc: Vec<usize>,",
+    "    tmp_r: Vec<f64>,",
+    "    tmp_i: Vec<f64>,",
+    "    // Sparse rows (the iterative path), in the natural order, the diagonal always present.",
+    "    start: Vec<usize>,",
+    "    columns: Vec<usize>,",
+    "    from: Vec<usize>,",
+    "    mirror: Vec<usize>,",
+    "    row_diagonal: Vec<usize>,",
+    "    mass: Vec<f64>,",
+    "    vr: Vec<f64>,",
+    "    vc: Vec<MdC>,",
+    "    rdr: Vec<f64>,",
+    "    rdc: Vec<MdC>,",
+    "    xr: Vec<f64>,",
+    "    xc: Vec<MdC>,",
+    "    bc: Vec<MdC>,",
+    "    workr: Vec<f64>,",
+    "    workc: Vec<MdC>,",
+    "}",
+    "",
+    "#[allow(dead_code)]",
+    "impl MdLinear {",
+    "    fn new(n: usize, entries: &[(usize, usize)], order: &[usize], mass: &[f64], iterative: bool) -> Self {",
+    "        let mut position: Vec<usize> = (0..n).collect();",
+    "        for (q, &state) in order.iter().enumerate() { position[state] = q; }",
+    "        let (mut lower, mut upper) = (0usize, 0usize);",
+    "        if !iterative {",
+    "            for &(i, j) in entries {",
+    "                let (r, c) = (position[i], position[j]);",
+    "                if r > c { lower = lower.max(r - c); } else { upper = upper.max(c - r); }",
+    "            }",
+    "        }",
+    "        let width = md_gb_width(lower, upper);",
+    "        let band_at = |r: usize, c: usize| r * width + c + lower - r;",
+    "        let (at, diagonal, size) = if iterative {",
+    "            (Vec::new(), Vec::new(), 0)",
+    "        } else {",
+    "            (",
+    "                entries.iter().map(|&(i, j)| band_at(position[i], position[j])).collect(),",
+    "                (0..n).map(|q| band_at(q, q)).collect(),",
+    "                n * width,",
+    "            )",
+    "        };",
+    "        let mass_in_order: Vec<f64> = if mass.is_empty() {",
+    "            Vec::new()",
+    "        } else {",
+    "            (0..n).map(|q| mass[if order.is_empty() { q } else { order[q] }]).collect()",
+    "        };",
+    "        // Sparse rows: every entry plus the diagonal, each row's columns in order.",
+    "        let (mut start, mut columns, mut from, mut mirror, mut row_diagonal) =",
+    "            (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());",
+    "        if iterative {",
+    "            let mut rows: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];",
+    "            for (k, &(i, j)) in entries.iter().enumerate() { rows[i].push((j, k)); }",
+    "            for (i, row) in rows.iter_mut().enumerate() {",
+    "                if !row.iter().any(|&(j, _)| j == i) { row.push((i, usize::MAX)); }",
+    "                row.sort_unstable();",
+    "            }",
+    "            start.push(0);",
+    "            for (i, row) in rows.iter().enumerate() {",
+    "                for &(j, k) in row {",
+    "                    if j == i { row_diagonal.push(columns.len()); }",
+    "                    columns.push(j);",
+    "                    from.push(k);",
+    "                }",
+    "                start.push(columns.len());",
+    "                let _ = i;",
+    "            }",
+    "            let mut index = std::collections::HashMap::with_capacity(columns.len());",
+    "            for i in 0..n {",
+    "                for k in start[i]..start[i + 1] { index.insert((i, columns[k]), k); }",
+    "            }",
+    "            for i in 0..n {",
+    "                for k in start[i]..start[i + 1] {",
+    "                    mirror.push(*index.get(&(columns[k], i)).unwrap_or(&usize::MAX));",
+    "                }",
+    "            }",
+    "        }",
+    "        let nnz = columns.len();",
+    "        let z = MdC { re: 0.0, im: 0.0 };",
+    "        let (sr, sc) = if iterative { (n, n) } else { (0, 0) };",
+    "        MdLinear {",
+    "            n, iterative, order: order.to_vec(), band: (lower, upper), at, diagonal, mass_in_order,",
+    "            ar: vec![0.0; size], acr: vec![0.0; size], aci: vec![0.0; size],",
+    "            pr: vec![0; n + 2], pc: vec![0; n + 2], tmp_r: vec![0.0; n], tmp_i: vec![0.0; n],",
+    "            start, columns, from, mirror, row_diagonal, mass: mass.to_vec(),",
+    "            vr: vec![0.0; nnz], vc: vec![z; nnz], rdr: vec![0.0; sr], rdc: vec![z; sc],",
+    "            xr: vec![0.0; sr], xc: vec![z; sc], bc: vec![z; sc],",
+    "            workr: vec![0.0; 7 * sr], workc: vec![z; 7 * sc],",
+    "        }",
+    "    }",
+    "",
+    "    // Fill both matrices from the Jacobian's values for step h, then factor (LU) or build the",
+    "    // preconditioner (DILU). False when a pivot is zero.",
+    "    fn factor(&mut self, jac: &[f64], h: f64) -> bool {",
+    "        if !self.iterative {",
+    "            return md_factor_band(",
+    "                self.n, jac, &self.at, &self.diagonal, &self.mass_in_order, h, self.band,",
+    "                &mut self.ar, &mut self.pr, &mut self.acr, &mut self.aci, &mut self.pc,",
+    "            );",
+    "        }",
+    "        for i in 0..self.n {",
+    "            let m = self.mass.get(i).copied().unwrap_or(1.0);",
+    "            for k in self.start[i]..self.start[i + 1] {",
+    "                let e = if self.from[k] == usize::MAX { 0.0 } else { -jac[self.from[k]] };",
+    "                self.vr[k] = e;",
+    "                self.vc[k] = MdC { re: e, im: 0.0 };",
+    "                if self.columns[k] == i {",
+    "                    self.vr[k] += m * MD_MU_REAL / h;",
+    "                    self.vc[k] = MdC { re: e + m * MD_MU_COMPLEX_R / h, im: m * MD_MU_COMPLEX_I / h };",
+    "                }",
+    "            }",
+    "        }",
+    "        md_dilu(self.n, &self.start, &self.columns, &self.vr, &self.mirror, &self.row_diagonal, &mut self.rdr)",
+    "            && md_dilu(self.n, &self.start, &self.columns, &self.vc, &self.mirror, &self.row_diagonal, &mut self.rdc)",
+    "    }",
+    "",
+    "    // b = A^-1 b for the real matrix. False when the iteration did not converge.",
+    "    fn solve_real(&mut self, b: &mut [f64]) -> bool {",
+    "        if !self.iterative {",
+    "            md_gb_solve_in(self.n, &self.ar, &self.pr, &self.order, b, &mut self.tmp_r);",
+    "            return true;",
+    "        }",
+    "        for x in self.xr.iter_mut() { *x = 0.0; }",
+    "        let ok = md_bicgstab(",
+    "            self.n, &self.start, &self.columns, &self.vr, &self.rdr, b, &mut self.xr,",
+    "            MD_LINEAR_TOL, MD_LINEAR_LIMIT, &mut self.workr,",
+    "        );",
+    "        b.copy_from_slice(&self.xr);",
+    "        ok",
+    "    }",
+    "",
+    "    // (br + i bi) = A^-1 (br + i bi) for the complex matrix.",
+    "    fn solve_complex(&mut self, br: &mut [f64], bi: &mut [f64]) -> bool {",
+    "        if !self.iterative {",
+    "            md_cgb_solve_in(self.n, &self.acr, &self.aci, &self.pc, &self.order, br, bi, &mut self.tmp_r, &mut self.tmp_i);",
+    "            return true;",
+    "        }",
+    "        for q in 0..self.n { self.bc[q] = MdC { re: br[q], im: bi[q] }; self.xc[q] = MdC { re: 0.0, im: 0.0 }; }",
+    "        let ok = md_bicgstab(",
+    "            self.n, &self.start, &self.columns, &self.vc, &self.rdc, &self.bc, &mut self.xc,",
+    "            MD_LINEAR_TOL, MD_LINEAR_LIMIT, &mut self.workc,",
+    "        );",
+    "        for q in 0..self.n { br[q] = self.xc[q].re; bi[q] = self.xc[q].im; }",
+    "        ok",
+    "    }",
+    "}",
+    "",
+    "// The iterative solve's stop: residual at most this times the right-hand side's norm, within",
+    "// this many iterations; past them the Newton iteration counts as not converged.",
+    "const MD_LINEAR_TOL: f64 = 1e-12;",
+    "const MD_LINEAR_LIMIT: usize = 1000;",
+    "",
 )
 
 
@@ -761,12 +932,7 @@ NEWTON: Final = (
     "    z: &mut [f64],",
     "    scale: &[f64],",
     "    tol: f64,",
-    "    ar: &[f64],",
-    "    pr: &[usize],",
-    "    acr: &[f64],",
-    "    aci: &[f64],",
-    "    pc: &[usize],",
-    "    order: &[usize],",
+    "    lin: &mut MdLinear,",
     "    mass: &[f64],",
     "    work: &mut MdNewtonWork,",
     ") -> (bool, usize, f64, usize) {",
@@ -820,8 +986,8 @@ NEWTON: Final = (
     "            bcr[q] = imag_r - m * (mu_complex_r * wm[n + q] - mu_complex_i * wm[2 * n + q]);",
     "            bci[q] = imag_i - m * (mu_complex_r * wm[2 * n + q] + mu_complex_i * wm[n + q]);",
     "        }",
-    "        md_gb_solve_in(n, ar, pr, order, br, tr);",
-    "        md_cgb_solve_in(n, acr, aci, pc, order, bcr, bci, tr, ti);",
+    "        let _ = (&tr, &ti);",
+    "        if !lin.solve_real(br) || !lin.solve_complex(bcr, bci) { break; }",
     "        for q in 0..n {",
     "            dw[q] = br[q];",
     "            dw[n + q] = bcr[q];",
@@ -1024,6 +1190,7 @@ fn md_integrate(
     order: &[usize],
     pattern: &[(usize, usize)],
     mass: &[f64],
+    iterative: bool,
     every: bool,
     t_out: &mut [f64],
     out: &mut [f64],
@@ -1059,36 +1226,13 @@ fn md_integrate(
     } else {
         pattern.to_vec()
     };
-    let mut position: Vec<usize> = (0..n).collect();
-    for (q, &state) in order.iter().enumerate() { position[state] = q; }
-    let (mut lower, mut upper) = (0usize, 0usize);
-    for &(i, j) in &entries {
-        let (r, c) = (position[i], position[j]);
-        if r > c { lower = lower.max(r - c); } else { upper = upper.max(c - r); }
-    }
-    let width = md_gb_width(lower, upper);
-    let band_at = |r: usize, c: usize| r * width + c + lower - r;
-    let at: Vec<usize> = entries.iter().map(|&(i, j)| band_at(position[i], position[j])).collect();
-    let diagonal: Vec<usize> = (0..n).map(|q| band_at(q, q)).collect();
-    // The diagonal mass matrix of M y' = f, per row in the state order; empty: M = I.
-    let mass_in_order: Vec<f64> = if mass.is_empty() {
-        Vec::new()
-    } else {
-        (0..n).map(|q| mass[if order.is_empty() { q } else { order[q] }]).collect()
-    };
+    let mut lin = MdLinear::new(n, &entries, order, mass, iterative);
 
     let mut jac = vec![0.0f64; entries.len()];
     jacobian(t, &y, p, w, &mut jac);
     let mut jacobians = 1usize;
     let mut fresh = true;
 
-    let mut ar = vec![0.0f64; n * width];
-    let mut acr = vec![0.0f64; n * width];
-    let mut aci = vec![0.0f64; n * width];
-    // Two slots past the pivots hold the band, for md_gb_solve.
-    let mut pr = vec![0usize; n + 2];
-    let mut pc = vec![0usize; n + 2];
-    let mut solve_tmp = vec![0.0f64; n];
     let mut factored = false;
     let mut factorisations = 0usize;
 
@@ -1182,7 +1326,7 @@ fn md_integrate(
             let mut converged = false;
             while !converged {
                 if !factored {
-                    if !md_factor_band(n, &jac, &at, &diagonal, &mass_in_order, h, (lower, upper), &mut ar, &mut pr, &mut acr, &mut aci, &mut pc) {
+                    if !lin.factor(&jac, h) {
                         status = NO_CONVERGENCE;
                         break;
                     }
@@ -1190,7 +1334,7 @@ fn md_integrate(
                     factorisations += 1;
                 }
                 let result =
-                    md_newton(t, &y, h, p, w, &mut z, &scale, tol, &ar, &pr, &acr, &aci, &pc, order, mass, &mut newton_work);
+                    md_newton(t, &y, h, p, w, &mut z, &scale, tol, &mut lin, mass, &mut newton_work);
                 converged = result.0;
                 iterations = result.1;
                 rate = result.2;
@@ -1218,7 +1362,7 @@ fn md_integrate(
                 combined[q] = f[q] + m * (MD_E[0] * z[q] + MD_E[1] * z[n + q] + MD_E[2] * z[2 * n + q]) / h;
                 error[q] = combined[q];
             }
-            md_gb_solve_in(n, &ar, &pr, order, &mut error, &mut solve_tmp);
+            if !lin.solve_real(&mut error) { for e in error.iter_mut() { *e = f64::INFINITY; } }
             for q in 0..n { scale[q] = atol + rtol * y[q].abs().max(y_new[q].abs()); }
             for q in 0..n { scaled[q] = error[q] / scale[q]; }
             error_norm = md_norm(&scaled);
@@ -1230,7 +1374,7 @@ fn md_integrate(
                 rhs(t, &y_new, p, w, &mut f_new);
                 evaluations += 1;
                 for q in 0..n { error[q] = f_new[q] + combined[q] - f[q]; }
-                md_gb_solve_in(n, &ar, &pr, order, &mut error, &mut solve_tmp);
+                if !lin.solve_real(&mut error) { for e in error.iter_mut() { *e = f64::INFINITY; } }
                 for q in 0..n { scaled[q] = error[q] / scale[q]; }
                 error_norm = md_norm(&scaled);
                 for q in 0..n { y_new[q] = y[q] + z[2 * n + q]; }

@@ -991,3 +991,33 @@ def test_radau_with_a_mass_matrix(engine: Path, monkeypatch: pytest.MonkeyPatch,
     result = native.simulate(system, **knobs).result
     rows = [result.names.index(name) for name in ("x", "y", "z")]
     np.testing.assert_allclose(result.values[rows, -1], expected, rtol=1e-7)
+
+
+def test_the_iterative_solver_equals_the_band_lu(
+    engine: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TorusHeat at n = 20 with BiCGStab and DILU runs as with the band LU, within 1e-8."""
+    from modelica.sim import engine as native  # noqa: PLC0415
+
+    source = (EXAMPLES / "models" / "TorusHeat.mo").read_text(encoding="utf-8")
+    model = parse(source.replace("Integer n = 8", "Integer n = 20"))
+    system = causalize(pytest.importorskip("modelica.sim").flatten([model], "TorusHeat"))
+    knobs: dict[str, Any] = {"stop": 2.0, "tolerance": 1e-10, "points": 5, "path": engine}
+    band = native.simulate(system, **knobs).result
+    real = vm.lower
+
+    def iterative(system: System, **options: Any) -> vm.Program:
+        return dataclasses.replace(real(system, **options), iterative=True)
+
+    monkeypatch.setattr(vm, "lower", iterative)
+    sparse = native.simulate(system, **knobs).result
+    np.testing.assert_allclose(sparse.values, band.values, rtol=0, atol=1e-8)
+
+
+def test_a_wide_band_picks_the_iterative_solver() -> None:
+    """TorusHeat at n = 50 (2500 states, band about 100 wide) solves iteratively; at 8 it does not."""
+    source = (EXAMPLES / "models" / "TorusHeat.mo").read_text(encoding="utf-8")
+    flat = pytest.importorskip("modelica.sim").flatten
+    wide = causalize(flat([parse(source.replace("Integer n = 8", "Integer n = 50"))], "TorusHeat"))
+    assert vm.lower(wide).iterative
+    assert not vm.lower(_system(EXAMPLES / "models" / "TorusHeat.mo")).iterative
