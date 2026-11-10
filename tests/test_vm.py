@@ -982,6 +982,7 @@ def test_radau_with_a_mass_matrix(engine: Path, monkeypatch: pytest.MonkeyPatch,
         jacobian = [(1, 0), (3, 0), (4, 2)]
         expected = np.array([np.exp(-5.0), np.exp(-5.0), 1.0])
     program = _mass_program(base, rhs, jacobian, mass)
+
     def lowered(*_: object, **__: object) -> vm.Program:
         return program
 
