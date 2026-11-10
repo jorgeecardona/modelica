@@ -26,7 +26,7 @@ import numpy as np
 
 from modelica.ir import nodes as ir
 from modelica.ir.derive import simplify
-from modelica.ir.flat import at_cell
+from modelica.ir.flat import at_cell, element, indices_at
 from modelica.ir.rewrite import names, residual, substitute
 from modelica.sim.emit import (
     ITERATIONS,
@@ -44,6 +44,7 @@ from modelica.sim.emit import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
 
+    from modelica.ir.flat import ArrayEquation
     from modelica.ir.system import ArrayBlock, Block, Mode, System
 
 __all__ = [
@@ -334,6 +335,9 @@ class _Scope:
     names: dict[str, int]
     newton: list[NewtonBlock]
     tables: list[int] = field(default_factory=list[int])
+    views: list[View] = field(default_factory=list[View])
+    arrays: dict[str, int] = field(default_factory=dict[str, int])
+    """The first register of each array copied into a dense block (`_Lowering.dense`)."""
 
     def child(self) -> _Scope:
         """A scope for a Newton body: it sees what is known, and leaks nothing back."""
@@ -467,13 +471,21 @@ class _Lowering:
         dst = self.emit(scope, Op.MOVE, source)
         scope.names[name] = dst
 
-    def blocks(self, scope: _Scope, mode: Mode, *, arrays: bool = False) -> None:
-        """Every block in order; with ``arrays``, each `ArrayBlock` it can as array opcodes."""
+    def blocks(
+        self, scope: _Scope, mode: Mode, *, arrays: bool = False, shaped: bool = False
+    ) -> None:
+        """Every block in order; with ``arrays``, each `ArrayBlock` it can as array opcodes.
+
+        With ``shaped`` too, an `ArrayBlock` is first tried as shaped opcodes over views
+        (`shaped_array`), then as flat array opcodes.
+        """
         runs = {array.first: array for array in mode.arrays} if arrays else {}
         k = 0
         while k < len(mode.blocks):
             array = runs.get(k)
-            if array is not None and self.array(scope, mode, array):
+            if array is not None and (
+                (shaped and self.shaped_array(scope, mode, array)) or self.array(scope, mode, array)
+            ):
                 k += len(array)
                 continue
             self.solve(scope, mode.blocks[k])
@@ -535,6 +547,114 @@ class _Lowering:
         scope.tables.extend(targets)
         scope.code.append(Instr(Op.VSCATTER, 0, offset, result, n))
         for block, register in zip(run, targets, strict=True):
+            scope.names[block.unknowns[0]] = register
+        return True
+
+    def view(self, scope: _Scope, view: View) -> int:
+        """The index of ``view`` in the function's views, added if new."""
+        if view in scope.views:
+            return scope.views.index(view)
+        scope.views.append(view)
+        return len(scope.views) - 1
+
+    def dense(self, scope: _Scope, name: str, shape: tuple[int, ...]) -> int:
+        """The first register of a dense row-major copy of array ``name``, made once per scope.
+
+        One ``VGATHER`` reads every element's register; every subscript of the array is then
+        a view of this block.
+        """
+        if name in scope.arrays:
+            return scope.arrays[name]
+        indices = itertools.product(*(range(1, n + 1) for n in shape))
+        sources = [self.value(scope, ir.Ref((element(name, at),))) for at in indices]
+        if sources == list(range(sources[0], sources[0] + len(sources))):
+            # Already one block, as the states are after `unpack`: no copy.
+            scope.arrays[name] = sources[0]
+            return sources[0]
+        first = self.register(len(sources))
+        offset = len(scope.tables)
+        scope.tables.extend(sources)
+        scope.code.append(Instr(Op.VGATHER, first, offset, 0, len(sources)))
+        scope.arrays[name] = first
+        return first
+
+    def shaped_array(self, scope: _Scope, mode: Mode, array: ArrayBlock) -> bool:  # noqa: C901, PLR0915 - one case per node
+        """One `ArrayBlock` as shaped opcodes over views; False, having written nothing, when not.
+
+        Each array the loop reads is copied once into a dense block (`dense`). A subscript whose
+        every index is ``i + k`` of one loop index, or a constant, is a view of that block (a
+        slice; a transpose when the axes are in another order). The periodic form
+        ``mod(i + k - 1, n) + 1`` over the whole axis is a view and a `Op.ROLL`. A part that
+        reads no subscript is computed once and read through a stride-0 view. Each cell does
+        the operations its scalar block would, in the same order: the same bits.
+        """
+        equation = array.equation
+        cells = list(equation.cells())
+        run = mode.blocks[array.first : array.first + len(cells)]
+        shapes, constants = dict(equation.shapes), dict(equation.constants)
+        template = _reals(equation.equation.rhs)
+        indices = frozenset(index.name for index in equation.indices)
+        if not _vectorizable(template, indices):
+            return False
+        for k in {0, len(cells) - 1}:
+            if run[k].assignment != at_cell(template, cells[k], shapes, constants):
+                return False
+        domain = tuple(len(index) for index in equation.indices)
+        reads = list(_subscripts(template))
+        plans = {node: _read_plan(node, equation, cells) for node in reads}
+        if any(plan is None for plan in plans.values()):
+            return False
+        n = len(cells)
+        mark = (len(scope.code), len(scope.tables), len(scope.views), self.registers)
+
+        def fresh() -> int:
+            first = self.register(n)
+            return self.view(scope, View(first, domain, _row_major(domain)))
+
+        def go(node: ir.Expr) -> int:
+            node = _unwrap(node)
+            if not _reads_array(node):
+                scalar = self.expr(scope, node)
+                return self.view(scope, View(scalar, domain, (0,) * len(domain)))
+            match node:
+                case ir.Subscript(base=base):
+                    plan = plans[node]
+                    assert plan is not None  # noqa: S101 - checked above
+                    name = ".".join(base.parts)
+                    shape = shapes[name]
+                    first = self.dense(scope, name, shape)
+                    result = self.view(scope, plan.view(first, shape, domain))
+                    for axis, offset in plan.rolls:
+                        rolled = fresh()
+                        scope.code.append(Instr(Op.ROLL, rolled, result, axis, offset))
+                        result = rolled
+                    return result
+                case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+                    left, right = go(lhs), go(rhs)
+                    dst = fresh()
+                    scope.code.append(Instr(Op.TBINARY, dst, left, right, int(_BINARY_OPS[op])))
+                    return dst
+                case ir.Unary(op="-", operand=operand):
+                    source = go(operand)
+                    dst = fresh()
+                    scope.code.append(Instr(Op.TUNARY, dst, source, 0, int(Op.NEG)))
+                    return dst
+                case ir.Call(name=name, args=(argument,)):
+                    source = go(argument)
+                    dst = fresh()
+                    builtin = int(_UNARY_CALLS[name])
+                    scope.code.append(Instr(Op.TUNARY, dst, source, builtin, int(Op.CALL1)))
+                    return dst
+                case _:
+                    raise AssertionError(node)
+
+        result = go(template)
+        registers = elements(scope.views[result])
+        if len(set(registers)) != n:
+            # A broadcast result would give every cell one register: leave it to `array`.
+            del scope.code[mark[0] :], scope.tables[mark[1] :], scope.views[mark[2] :]
+            return False
+        for block, register in zip(run, registers, strict=True):
             scope.names[block.unknowns[0]] = register
         return True
 
@@ -612,7 +732,9 @@ class _Lowering:
     def function(self, body: Callable[[_Scope], None]) -> Function:
         scope = _Scope([], {}, {}, [])
         body(scope)
-        return Function(tuple(scope.code), tuple(scope.newton), tuple(scope.tables))
+        return Function(
+            tuple(scope.code), tuple(scope.newton), tuple(scope.tables), tuple(scope.views)
+        )
 
     def parameters(self) -> Function:
         """The parameter vector, each binding after the ones it reads (`Emitter.ordered`)."""
@@ -680,22 +802,22 @@ class _Lowering:
 
         return self.function(body)
 
-    def rhs(self, mode: Mode, *, arrays: bool = False) -> Function:
+    def rhs(self, mode: Mode, *, arrays: bool = False, shaped: bool = False) -> Function:
         def body(scope: _Scope) -> None:
             self.unpack(scope, mode)
-            self.blocks(scope, mode, arrays=arrays)
+            self.blocks(scope, mode, arrays=arrays, shaped=shaped)
             for slot, state in enumerate(mode.states):
                 source = self.ref(scope, mode.derivative[state])
                 scope.code.append(Instr(Op.STORE_OUT, 0, slot, source))
 
         return self.function(body)
 
-    def observe(self, mode: Mode, *, arrays: bool = False) -> Function:
+    def observe(self, mode: Mode, *, arrays: bool = False, shaped: bool = False) -> Function:
         emitter = self.emitter
 
         def body(scope: _Scope) -> None:
             self.unpack(scope, mode)
-            self.blocks(scope, mode, arrays=arrays)
+            self.blocks(scope, mode, arrays=arrays, shaped=shaped)
             for name, node in emitter.system.aliases.items():
                 self.assign(scope, name, node)
             for slot, name in enumerate(emitter.observed):
@@ -1222,11 +1344,14 @@ def bandwidth_order(sparsity: Sequence[Sequence[int]]) -> tuple[int, ...]:
     return tuple(order)
 
 
-def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program:
+def lower(
+    system: System, *, hoist: bool = True, arrays: bool = True, shaped: bool = True
+) -> Program:
     """Write ``system``'s kernel functions as tapes.
 
-    ``hoist=False`` leaves out `_hoist` and ``arrays=False`` writes every `ArrayBlock` as
-    scalar blocks, so a test can check each changes no result.
+    ``hoist=False`` leaves out `_hoist`, ``arrays=False`` writes every `ArrayBlock` as
+    scalar blocks, and ``shaped=False`` writes them with flat array opcodes instead of views,
+    so a test can check each changes no result.
 
     Raises `EmitError` for what the tape cannot express yet, with the emitter's message where
     the emitter would refuse too.
@@ -1234,13 +1359,16 @@ def lower(system: System, *, hoist: bool = True, arrays: bool = True) -> Program
     lowering = _Lowering(Emitter(system))
     modes = system.modes
     transitions = [lowering.transition(k, mode) for k, mode in enumerate(modes)]
-    rhs = tuple(lowering.rhs(mode, arrays=arrays) for mode in modes)
+    # The jacobian is built from the flat array opcodes, which `_Tangents` differentiates; the
+    # tape the integrator runs uses the shaped ones.
+    flat = tuple(lowering.rhs(mode, arrays=arrays) for mode in modes)
+    rhs = tuple(lowering.rhs(mode, arrays=arrays, shaped=shaped) for mode in modes)
     program = Program(
         registers=0,
         constants=(),
         rhs=rhs,
-        jacobian=tuple(_jacobian(lowering, mode, f) for mode, f in zip(modes, rhs, strict=True)),
-        observe=tuple(lowering.observe(mode, arrays=arrays) for mode in modes),
+        jacobian=tuple(_jacobian(lowering, mode, f) for mode, f in zip(modes, flat, strict=True)),
+        observe=tuple(lowering.observe(mode, arrays=arrays, shaped=shaped) for mode in modes),
         indicators=tuple(lowering.indicators(k, mode) for k, mode in enumerate(modes)),
         transition_prefix=tuple(prefix for prefix, _ in transitions),
         transition=tuple(branches for _, branches in transitions),
@@ -1515,6 +1643,109 @@ def _apply(i: Instr, values: Mapping[int, float]) -> float:
 
 #: The binary operators an `ArrayBlock` writes elementwise.
 _VECTOR_OPS: Final = {"+": Op.VADD, "-": Op.VSUB, "*": Op.VMUL, "/": Op.VDIV}
+
+
+def _row_major(shape: tuple[int, ...]) -> tuple[int, ...]:
+    """The strides of a dense row-major block of ``shape``."""
+    return tuple(math.prod(shape[k + 1 :]) for k in range(len(shape)))
+
+
+def _subscripts(node: ir.Expr) -> Iterator[ir.Subscript]:
+    """Every subscript in ``node``, outermost first."""
+    match node:
+        case ir.Subscript():
+            yield node
+        case ir.Binary(lhs=lhs, rhs=rhs):
+            yield from _subscripts(lhs)
+            yield from _subscripts(rhs)
+        case ir.Unary(operand=operand):
+            yield from _subscripts(operand)
+        case ir.Call(args=args):
+            for argument in args:
+                yield from _subscripts(argument)
+        case ir.IfExpr(condition=c, then=t, otherwise=o):
+            yield from _subscripts(c)
+            yield from _subscripts(t)
+            yield from _subscripts(o)
+        case _:
+            return
+
+
+@dataclass(frozen=True, slots=True)
+class _Read:
+    """How one subscript reads its array over the loop domain.
+
+    Per array axis: the loop axis it follows (``None`` for a constant index) and the 0-based
+    element it reads at that loop axis's first value. ``rolls`` are the `Op.ROLL` operands
+    ``(loop axis, offset)`` a periodic index adds.
+    """
+
+    follows: tuple[int | None, ...]
+    first: tuple[int, ...]
+    rolls: tuple[tuple[int, int], ...]
+
+    def view(self, base: int, shape: tuple[int, ...], domain: tuple[int, ...]) -> View:
+        """The subscript as a view of the dense block of ``shape`` at ``base``."""
+        array = _row_major(shape)
+        strides = [0] * len(domain)
+        start = base
+        for axis, (loop, first) in enumerate(zip(self.follows, self.first, strict=True)):
+            start += first * array[axis]
+            if loop is not None:
+                strides[loop] += array[axis]
+        return View(start, domain, tuple(strides))
+
+
+def _read_plan(  # noqa: C901 - a slice, a constant or a roll per axis
+    node: ir.Subscript, equation: ArrayEquation, cells: Sequence[Mapping[str, int]]
+) -> _Read | None:
+    """How ``node`` reads its array, from its values at every cell; ``None`` for a gather."""
+    constants = dict(equation.constants)
+    shape = dict(equation.shapes)[".".join(node.base.parts)]
+    names = [index.name for index in equation.indices]
+    starts = [index.start for index in equation.indices]
+    values = [indices_at(node, cell, constants) for cell in cells]
+    follows: list[int | None] = []
+    first: list[int] = []
+    rolls: list[tuple[int, int]] = []
+    used: set[int] = set()
+    for axis, extent in enumerate(shape):
+        column = [at[axis] for at in values]
+        if len(set(column)) == 1:
+            follows.append(None)
+            first.append(column[0] - 1)
+            continue
+        found = False
+        for loop, name in enumerate(names):
+            if loop in used:
+                continue
+            shifts = {at - cell[name] for at, cell in zip(column, cells, strict=True)}
+            if len(shifts) == 1:
+                (k,) = shifts
+                follows.append(loop)
+                first.append(starts[loop] + k - 1)
+                used.add(loop)
+                found = True
+                break
+            # Periodic: ((i + k - 1) mod n) + 1 over the whole axis, i from 1 to n.
+            span = equation.indices[loop]
+            if span.start == 1 and span.stop == extent:
+                for k in range(1, extent):
+                    if all(
+                        at == (cell[name] + k - 1) % extent + 1
+                        for at, cell in zip(column, cells, strict=True)
+                    ):
+                        follows.append(loop)
+                        first.append(0)
+                        rolls.append((loop, -k if 2 * k <= extent else extent - k))
+                        used.add(loop)
+                        found = True
+                        break
+            if found:
+                break
+        if not found:
+            return None
+    return _Read(tuple(follows), tuple(first), tuple(rolls))
 
 
 def _reals(node: ir.Expr) -> ir.Expr:
@@ -2608,7 +2839,40 @@ _SYMBOLS: Final = {
 }  # fmt: skip
 
 
-def _line(i: Instr, program: Program, tables: Sequence[int]) -> str:  # noqa: C901, PLR0911, PLR0912 - one case per opcode
+def _shaped_line(  # noqa: PLR0911 - one case per opcode
+    i: Instr, program: Program, views: Sequence[View], reg: Callable[[int], str]
+) -> str:
+    """A shaped instruction as text: a view is ``r12[8x8:8,1]``, its base, shape and strides."""
+
+    def view(k: int) -> str:
+        v = views[k]
+        if not any(v.strides):
+            return reg(v.base)
+        shape = "x".join(map(str, v.shape))
+        return f"r{v.base}[{shape}:{','.join(map(str, v.strides))}]"
+
+    op, dst = i.op, view(i.dst)
+    if op is Op.TBINARY:
+        return f"{dst} = {view(i.a)} {_SYMBOLS[Op(i.c)]} {view(i.b)}"
+    if op is Op.TCALL2:
+        return f"{dst} = {Builtin(i.c).name.lower()}({view(i.a)}, {view(i.b)})"
+    if op is Op.TUNARY:
+        if i.c == Op.CALL1:
+            return f"{dst} = {Builtin(i.b).name.lower()}({view(i.a)})"
+        return f"{dst} = {'-' if i.c == Op.NEG else 'not '}{view(i.a)}"
+    if op is Op.TSELECT:
+        return f"{dst} = {view(i.b)} if {view(i.a)} else {view(i.c)}"
+    if op is Op.TREDUCE:
+        return f"{dst} = {Reduce(i.c).name.lower()}({view(i.a)}, axis={i.b})"
+    if op is Op.TINDEX:
+        return f"{dst} = index(axis={i.a})"
+    del program
+    return f"{dst} = roll({view(i.a)}, {i.c}, axis={i.b})"
+
+
+def _line(  # noqa: C901, PLR0911, PLR0912 - one case per opcode
+    i: Instr, program: Program, tables: Sequence[int], views: Sequence[View] = ()
+) -> str:
     """One instruction as text: registers ``r12``, a run ``r12[4]``, a constant its value."""
     op = i.op
     base = program.registers - len(program.constants)
@@ -2668,6 +2932,8 @@ def _line(i: Instr, program: Program, tables: Sequence[int]) -> str:  # noqa: C9
         return f"{run(i.dst, i.c)} = -{run(i.a, i.c)}"
     if op is Op.VCALL1:
         return f"{run(i.dst, i.b)} = {Builtin(i.c).name.lower()}({run(i.a, i.b)})"
+    if op in _SHAPED:
+        return _shaped_line(i, program, views, reg)
     return f"{run(i.dst, i.c)} = {run(i.a, i.c)} {_SYMBOLS[op]} {run(i.b, i.c)}"
 
 
@@ -2679,7 +2945,7 @@ def listing(program: Program, function: Function, *, width: int = 8) -> str:
     """
     lines: list[str] = []
     for number, i in enumerate(function.code):
-        text = _line(i, program, function.tables)
+        text = _line(i, program, function.tables, function.views)
         if "[" in text and text.count(",") > width:
             head, _, rest = text.partition("r[")
             entries = rest.split("]")[0].split(", ")

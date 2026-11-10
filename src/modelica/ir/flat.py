@@ -166,6 +166,14 @@ def _integer(node: ir.Expr, cell: Mapping[str, int]) -> int:  # noqa: PLR0911 - 
             raise CellError(message)
 
 
+def indices_at(
+    node: ir.Subscript, cell: Mapping[str, int], constants: Mapping[str, int] | None = None
+) -> tuple[int, ...]:
+    """The 1-based element ``node`` reads at ``cell``, one integer per axis."""
+    known = cell if not constants else {**constants, **cell}
+    return tuple(_integer(index, known) for index in node.indices)
+
+
 def at_cell(  # noqa: PLR0911 - one case per node
     node: ir.Expr,
     cell: Mapping[str, int],

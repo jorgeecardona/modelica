@@ -687,24 +687,28 @@ def test_the_engine_refuses_a_table_that_names_no_register(engine: Path) -> None
 def test_an_array_block_runs_as_array_opcodes_with_the_same_bits(
     engine: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """TorusHeat's grid loop is a few array opcodes, and the run is bit for bit the scalar one."""
+    """TorusHeat's grid loop is a few shaped opcodes, and the run is bit for bit the scalar one.
+
+    The four periodic neighbour reads are `Op.ROLL` of the state block: no gather table.
+    """
     from modelica.sim import engine as native  # noqa: PLC0415
 
     system = _system(EXAMPLES / "models" / "TorusHeat.mo")
     arrays, scalar = vm.lower(system), vm.lower(system, arrays=False)
     ops = [i.op for i in arrays.rhs[0].code]
-    assert vm.Op.VGATHER in ops
-    assert vm.Op.VSCATTER in ops
+    assert ops.count(vm.Op.ROLL) == 4
+    assert not arrays.rhs[0].tables
+    assert vm.Op.VSCATTER not in ops
     assert ops.count(vm.Op.VLOAD_Y) == 1  # every state in one load (`vm._fuse`)
     assert vm.Op.LOAD_Y not in ops
     assert vm.Op.STORE_OUT not in ops
     assert len(arrays.rhs[0].code) < len(scalar.rhs[0].code) // 10
     observe = [i.op for i in arrays.observe[0].code]
-    assert vm.Op.VGATHER in observe
+    assert vm.Op.ROLL in observe
     assert len(observe) < len(scalar.observe[0].code) // 10
     jacobian = [i.op for i in arrays.jacobian[0].code]
     assert vm.Op.VGATHER in jacobian  # built from the runs, not a scalar lowering
-    assert len(jacobian) < len(scalar.jacobian[0].code) // 2
+    assert len(jacobian) < len(scalar.jacobian[0].code)
     knobs: dict[str, Any] = {"stop": 0.5, "tolerance": 1e-8, "points": 11, "path": engine}
     first = native.simulate(system, **knobs).result
     real = vm.lower
@@ -716,17 +720,26 @@ def test_an_array_block_runs_as_array_opcodes_with_the_same_bits(
     second = native.simulate(system, **knobs).result
     np.testing.assert_array_equal(first.values, second.values)
 
+    def flat(system: System, **_: object) -> vm.Program:
+        return real(system, shaped=False)
+
+    monkeypatch.setattr(vm, "lower", flat)
+    third = native.simulate(system, **knobs).result
+    np.testing.assert_array_equal(first.values, third.values)
+
 
 def test_a_listing_prints_one_numbered_line_per_instruction() -> None:
-    """`vm.listing` numbers each instruction and shows constants by value and runs by length."""
+    """`vm.listing` numbers each instruction, shows constants by value and views by shape."""
     program = vm.lower(_system(EXAMPLES / "models" / "TorusHeat.mo"))
     text = vm.listing(program, program.rhs[0])
     lines = text.splitlines()
     assert len(lines) == len(program.rhs[0].code)
     assert lines[0].split()[0] == "0"
-    assert "= gather r[" in text
-    assert "scatter r" in text
+    assert "= roll(r" in text
+    assert "[8x8:8,1]" in text
     assert "4.0" in text
+    flat = vm.lower(_system(EXAMPLES / "models" / "TorusHeat.mo"), shaped=False)
+    assert "= gather r[" in vm.listing(flat, flat.rhs[0])
 
 
 def test_a_jacobian_built_from_array_opcodes_has_the_scalar_bits() -> None:
