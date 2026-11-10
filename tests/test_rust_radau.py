@@ -346,7 +346,7 @@ def test_md_newton_matches_radau() -> None:
             "    assert!(md_factor_band(2, &jac, &at, &diagonal, h, (1, 1), &mut ar, &mut pr, &mut acr, &mut aci, &mut pc));",
             "    let mut z = [0.0f64; 6];",
             "    let scale = [1.0f64, 1.0];",
-            f"    let (conv, iters, _rate, _calls) = md_newton(0.0, &y, h, &p, &mut w, &mut z, &scale, {tol!r}f64, &ar, &pr, &acr, &aci, &pc, &[]);",
+            f"    let (conv, iters, _rate, _calls) = md_newton(0.0, &y, h, &p, &mut w, &mut z, &scale, {tol!r}f64, &ar, &pr, &acr, &aci, &pc, &[], &mut MdNewtonWork::new(2));",
             "    let mut printed: Vec<String> = z.iter().map(|v| v.to_string()).collect();",
             "    printed.push(if conv { 1.0 } else { 0.0 }.to_string());",
             "    printed.push((iters as f64).to_string());",

@@ -445,6 +445,31 @@ fn md_factor_band(
     md_gb_factor(n, ar, pr, band.0, band.1) && md_cgb_factor(n, acr, aci, pc, band.0, band.1)
 }
 
+// The vectors one md_newton call works in, sized for n states and kept for the whole run.
+#[allow(dead_code)]
+struct MdNewtonWork {
+    stages: Vec<f64>,
+    point: Vec<f64>,
+    wm: Vec<f64>,
+    dw: Vec<f64>,
+    br: Vec<f64>,
+    bcr: Vec<f64>,
+    bci: Vec<f64>,
+    tr: Vec<f64>,
+    ti: Vec<f64>,
+}
+
+#[allow(dead_code)]
+impl MdNewtonWork {
+    fn new(n: usize) -> Self {
+        let v = |k: usize| vec![0.0f64; k];
+        MdNewtonWork {
+            stages: v(3 * n), point: v(n), wm: v(3 * n), dw: v(3 * n),
+            br: v(n), bcr: v(n), bci: v(n), tr: v(n), ti: v(n),
+        }
+    }
+}
+
 // Returns (converged, iterations, rate, rhs_calls). z holds the stage increments, 3*n flat,
 // and is updated in place. radau.py:286.
 #[allow(dead_code)]
@@ -463,6 +488,7 @@ fn md_newton(
     aci: &[f64],
     pc: &[usize],
     order: &[usize],
+    work: &mut MdNewtonWork,
 ) -> (bool, usize, f64, usize) {
     let n = y.len();
     // No states: nothing to solve, and the rate below would be 0 / 0.
@@ -470,15 +496,12 @@ fn md_newton(
     let mu_real = MD_MU_REAL / h;
     let mu_complex_r = MD_MU_COMPLEX_R / h;
     let mu_complex_i = MD_MU_COMPLEX_I / h;
-    let mut stages = vec![0.0f64; 3 * n];
-    let mut point = vec![0.0f64; n];
-    let mut wm = vec![0.0f64; 3 * n];
-    let mut dw = vec![0.0f64; 3 * n];
-    let mut br = vec![0.0f64; n];
-    let mut bcr = vec![0.0f64; n];
-    let mut bci = vec![0.0f64; n];
-    let mut tr = vec![0.0f64; n];
-    let mut ti = vec![0.0f64; n];
+    // Scratch from `work`, made once per run: a Newton call allocates nothing.
+    let MdNewtonWork { stages, point, wm, dw, br, bcr, bci, tr, ti } = work;
+    // Each starts at zero, as a fresh vector did, so every run gives the same bits.
+    for v in [&mut *stages, &mut *point, &mut *wm, &mut *dw, &mut *br, &mut *bcr, &mut *bci, &mut *tr, &mut *ti] {
+        v.fill(0.0);
+    }
     // wm[i] = sum_j MD_TI[i][j] * z[j]
     for i in 0..3 {
         for q in 0..n {
@@ -500,7 +523,7 @@ fn md_newton(
         }
         calls += 3;
         let mut finite = true;
-        for &v in &stages { if !v.is_finite() { finite = false; break; } }
+        for &v in stages.iter() { if !v.is_finite() { finite = false; break; } }
         if !finite { break; }
         for q in 0..n {
             let mut real = 0.0;
@@ -515,8 +538,8 @@ fn md_newton(
             bcr[q] = imag_r - (mu_complex_r * wm[n + q] - mu_complex_i * wm[2 * n + q]);
             bci[q] = imag_i - (mu_complex_r * wm[2 * n + q] + mu_complex_i * wm[n + q]);
         }
-        md_gb_solve_in(n, ar, pr, order, &mut br, &mut tr);
-        md_cgb_solve_in(n, acr, aci, pc, order, &mut bcr, &mut bci, &mut tr, &mut ti);
+        md_gb_solve_in(n, ar, pr, order, br, tr);
+        md_cgb_solve_in(n, acr, aci, pc, order, bcr, bci, tr, ti);
         for q in 0..n {
             dw[q] = br[q];
             dw[n + q] = bcr[q];
@@ -752,6 +775,7 @@ fn md_integrate(
     let mut factorisations = 0usize;
 
     let mut z = vec![0.0f64; 3 * n];
+    let mut newton_work = MdNewtonWork::new(n);
     let mut quad = vec![0.0f64; n * 3];
     let mut y_poly = vec![0.0f64; n];
     let mut t_poly = t0;
@@ -848,7 +872,7 @@ fn md_integrate(
                     factorisations += 1;
                 }
                 let result =
-                    md_newton(t, &y, h, p, w, &mut z, &scale, tol, &ar, &pr, &acr, &aci, &pc, order);
+                    md_newton(t, &y, h, p, w, &mut z, &scale, tol, &ar, &pr, &acr, &aci, &pc, order, &mut newton_work);
                 converged = result.0;
                 iterations = result.1;
                 rate = result.2;

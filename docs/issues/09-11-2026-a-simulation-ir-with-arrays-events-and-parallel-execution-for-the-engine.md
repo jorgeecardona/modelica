@@ -545,3 +545,10 @@ each cell decays as `exp(-8 a sin^2(pi / n) t)` within 3e-14 over 5 s. Tests: th
 real and complex, matches numpy on random banded systems that pivot; TorusHeat at n = 50 decays
 exactly within 1e-12. Next: commit 3, a workspace so the time loop allocates nothing; the
 iterative solver (12b) waits for a profile.
+
+Step 12 commit 3 done: `MdNewtonWork` holds the nine vectors `md_newton` worked in (about
+`17 n` values), made once per run and zeroed at each call, so a Newton call allocates nothing.
+The results are the same bits. On TorusHeat at n = 100 a 0.5 s run takes 17.6 s, of which
+`vm.lower` is 8.9 s and the integration about 8.7 s. Next: `vm.lower` on large grids (the
+front end now costs as much as the run), then 12b only if a profile of the integration shows
+the factorisation dominating.
