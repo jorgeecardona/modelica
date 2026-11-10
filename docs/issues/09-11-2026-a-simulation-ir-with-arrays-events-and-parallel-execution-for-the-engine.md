@@ -590,3 +590,15 @@ their variables become `discrete`. Refused with `ClockError`: two clocks in one 
 model never runs with its clocked variables held at their start values. `sample(start, interval)`
 stays a time event. Tests: `tests/test_clocks.py`. Next: causalize each partition and give it
 workspace slots (previous and held), then the tick in SciPy and on the engine.
+
+6b done, by lowering instead of new machinery: `clocks.as_when` turns each partition into
+`when sample(0, interval)` whose body assigns the partition's variables in dependency order,
+with `previous(x)` read as `pre(x)`, `sample(u, c)` as `u`, and each value assigned earlier in
+the tick written in (a `when` body reads other discrete variables as they were before the
+event). `clocks.unhold` reads `hold(x)` as `x` in the continuous equations. The tick then takes
+the time-event path of 6a on both backends: no new opcode, no new Program function. An algebraic
+loop inside a tick is a `ClockError`. Test: a sampled PI controller ticks at 0, 0.1, ..., 0.9
+and the plant matches the exact piecewise recurrence within 1e-12 on SciPy and on the engine.
+The first tick is at `time = 0`, not at the run's start time.
+
+Plan steps 1 to 14 and 6a/6b are done; 12b (iterative solvers) waits for a profile.

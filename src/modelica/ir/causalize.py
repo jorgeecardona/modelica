@@ -1109,14 +1109,6 @@ def causalize(flat: FlatModel) -> System:
     has nothing left to solve for, when a variable nothing computes has no derivative to
     integrate, or when index reduction asks for a derivative that does not exist.
     """
-    if flat.partitions:
-        # Refused until a clock tick runs them (plan step 6b): integrating the continuous part
-        # alone would hold every clocked variable at its start value and look like a result.
-        message = (
-            f"{flat.name}: clocked partitions (Clock, sample(u, c), previous, hold) are flattened"
-            " but not simulated yet"
-        )
-        raise CausalizationError(message)
     work = _start(flat)
     _eliminate_aliases(work)
     _reduce_index(work)

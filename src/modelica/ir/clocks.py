@@ -183,3 +183,109 @@ def partition(model: FlatModel) -> FlatModel:  # noqa: C901 - seed, spread, grou
         ),
         partitions=tuple(partitions),
     )
+
+
+def _plain(node: ir.Expr) -> ir.Expr:  # noqa: PLR0911 - one case per node type
+    """``node`` with the clocked operators read as event operators.
+
+    ``previous(x)`` is ``pre(x)``, the value at the last tick; ``sample(u, c)`` is ``u`` read
+    at the tick; ``hold(x)`` is ``x``, which as a discrete variable keeps its value between
+    ticks.
+    """
+    match node:
+        case ir.Call(name="previous", args=(argument,)):
+            return ir.Call("pre", (_plain(argument),))
+        case ir.Call(name="sample", args=(argument, ir.Call(name="Clock"))):
+            return _plain(argument)
+        case ir.Call(name="hold", args=(argument,)):
+            return _plain(argument)
+        case ir.Call(name=name, args=args, named=named):
+            return ir.Call(name, tuple(_plain(arg) for arg in args), named)
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, _plain(lhs), _plain(rhs))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _plain(operand))
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(_plain(condition), _plain(then), _plain(otherwise))
+        case _:
+            return node
+
+
+def _current(node: ir.Expr) -> set[str]:  # noqa: PLR0911 - one case per node type
+    """The names ``node`` reads at the current tick: outside ``previous(...)``."""
+    match node:
+        case ir.Call(name="previous"):
+            return set()
+        case ir.Ref():
+            return {node.name}
+        case ir.Binary(lhs=lhs, rhs=rhs):
+            return _current(lhs) | _current(rhs)
+        case ir.Unary(operand=operand):
+            return _current(operand)
+        case ir.Call(args=args):
+            found: set[str] = set()
+            for arg in args:
+                found |= _current(arg)
+            return found
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return _current(condition) | _current(then) | _current(otherwise)
+        case _:
+            return set()
+
+
+def as_when(partition: ClockedPartition) -> ir.When:
+    """``partition`` as ``when sample(0, interval)`` assigning its variables in order.
+
+    Each equation defines one variable; they are ordered so each reads, at the current tick,
+    only variables already assigned. The first tick is at ``time = 0``.
+
+    Raises:
+        ClockError: the equations read each other in a cycle (an algebraic loop at a tick).
+    """
+    pending = dict(zip(partition.variables, partition.equations, strict=True))
+    ordered: list[ir.Assign] = []
+    # A `when` body reads other discrete variables as they were before the event, so a value
+    # this tick assigned earlier is written in, not read back.
+    known: dict[str, ir.Expr] = {}
+    while pending:
+        ready = [
+            name
+            for name, equation in pending.items()
+            if not (_current(equation.rhs) & (set(pending) - {name}))
+            and name not in _current(equation.rhs)
+        ]
+        if not ready:
+            message = f"the clocked equations of {sorted(pending)} read each other in a cycle"
+            raise ClockError(message)
+        for name in ready:
+            value = _inline(_plain(pending.pop(name).rhs), known)
+            known[name] = value
+            ordered.append(ir.Assign(ir.Ref(tuple(name.split("."))), value))
+    condition = ir.Call("sample", (ir.RealLiteral(0.0), partition.interval))
+    return ir.When((ir.WhenBranch(condition, tuple(ordered)),))
+
+
+def _inline(node: ir.Expr, known: dict[str, ir.Expr]) -> ir.Expr:  # noqa: PLR0911 - one case per node type
+    """``node`` with each name in ``known`` replaced by its value, except inside ``pre(...)``."""
+    match node:
+        case ir.Call(name="pre"):
+            return node
+        case ir.Ref() if node.name in known:
+            return known[node.name]
+        case ir.Call(name=name, args=args, named=named):
+            return ir.Call(name, tuple(_inline(arg, known) for arg in args), named)
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, _inline(lhs, known), _inline(rhs, known))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _inline(operand, known))
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(
+                _inline(condition, known), _inline(then, known), _inline(otherwise, known)
+            )
+        case _:
+            return node
+
+
+def unhold(equation: ir.Equal) -> ir.Equal:
+    """A continuous equation with ``hold(x)`` read as ``x``."""
+    return ir.Equal(_plain(equation.lhs), _plain(equation.rhs))

@@ -36,7 +36,7 @@ from itertools import pairwise, product
 from typing import TYPE_CHECKING, Final, Literal, NamedTuple
 
 from modelica.ir import nodes as ir
-from modelica.ir.clocks import partition
+from modelica.ir.clocks import as_when, partition, unhold
 from modelica.ir.evaluate import EvaluationError, at, evaluate
 from modelica.ir.flat import (
     ArrayEquation,
@@ -3546,19 +3546,28 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
         flattener.expand_connections()
     finally:
         _PARAMETERS.reset(token)
-    whens, samplers = _lower_samples(
-        _resolve_boolean_when_conditions(flattener.equations, flattener.whens),
-        {variable.name for variable in flattener.variables},
-    )
+    resolved = _resolve_boolean_when_conditions(flattener.equations, flattener.whens)
     equations = tuple(flattener.equations)
-    return partition(
+    flat = partition(
         FlatModel(
             loops=tuple(loop for loop in flattener.loops if loop.matches(equations)),
             name=found.cls.name,
-            variables=(*flattener.variables, *samplers),
+            variables=tuple(flattener.variables),
             equations=equations,
-            whens=whens,
+            whens=tuple(resolved),
             asserts=tuple(flattener.asserts),
             initial_equations=tuple(flattener.initial_equations),
         )
+    )
+    # A clocked partition runs as a `when sample(0, interval)` (`clocks.as_when`), so it takes
+    # the time-event path below like any other sample.
+    whens, samplers = _lower_samples(
+        (*flat.whens, *(as_when(p) for p in flat.partitions)),
+        {variable.name for variable in flat.variables},
+    )
+    return replace(
+        flat,
+        variables=(*flat.variables, *samplers),
+        equations=tuple(unhold(e) for e in flat.equations) if flat.partitions else flat.equations,
+        whens=whens,
     )
