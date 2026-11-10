@@ -142,7 +142,7 @@ class ArrayEquation:
         )
 
 
-def _integer(node: ir.Expr, cell: Mapping[str, int]) -> int:  # noqa: PLR0911 - one case per node
+def _integer(node: ir.Expr, cell: Mapping[str, int]) -> int:  # noqa: C901, PLR0911 - one case per node
     """The integer value of an index expression at ``cell``."""
     match node:
         case ir.IntLiteral(value=value):
