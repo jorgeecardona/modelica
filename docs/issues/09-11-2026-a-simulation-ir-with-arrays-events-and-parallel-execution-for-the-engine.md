@@ -566,3 +566,16 @@ uses `f + M (E z) / h`. `rhs` then computes `f`. Tests on the engine: `M = diag(
 `f = -y` gives `exp(-t / m)` within 1e-7; `x' = -y`, `0 = y - x`, `z' = 0` with
 `M = diag(1, 0, 1)` runs as an index-1 DAE and gives `x = y = exp(-t)`. A full (non-diagonal)
 mass matrix, as finite elements assemble, waits for step 14. Next: step 14.
+
+Step 14 done: `modelica.sim.fem` and `vm.spmv`. `fem.square(n)` cuts the unit square into
+triangles, `fem.assemble` builds the P1 stiffness as entries in row order and the lumped mass,
+and `fem.heat` writes `M u' = -K u + M s` on the interior points as a tape (with `Tape.mass` for
+`Program.mass`). `vm.spmv` is four array instructions: clear, gather by column, multiply,
+scatter-add by row. The plan named an `SPMV` opcode; like `LDU_AMUL` it is a composition. Tests:
+the stiffness is symmetric with rows summing to 0 and the lumped mass sums to the area; Poisson
+with `u = sin(pi x) sin(pi y)` has nodal errors 5.30e-2, 1.30e-2, 3.22e-3 on 4, 8 and 16 cells
+(rate 2.0 each halving); the engine gives the same bits as `vm.evaluate`.
+
+Plan steps 1 to 14 are done, except 12b (iterative solvers, waiting for a profile) and 6b (the
+clocked path). Not yet: a model written in Modelica that lowers to the mesh tapes; today `fv` and
+`fem` tapes are built in Python and spliced into a program by hand in the tests.

@@ -6,6 +6,7 @@ source of truth and is bumped automatically when shipped source changes.
 
 ## Unreleased
 
+- `modelica.sim.fem` writes linear finite elements on triangles as an engine tape, with `vm.spmv` for the sparse product; Poisson converges at second order.
 - Radau on the engine solves `M y' = f` with a diagonal mass matrix (`Program.mass`); a zero entry makes the row algebraic, so index-1 DAEs run.
 - Radau stores its matrices in band storage built from the Jacobian pattern; a 10000-state heat grid runs in 364 MB, where dense storage needed 800 MB per matrix.
 - The Jacobian tape writes only its nonzeros (`Program.pattern`); TorusHeat writes 320 values instead of 4096.

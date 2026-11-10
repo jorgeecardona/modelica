@@ -1281,6 +1281,37 @@ def ldu_amul(  # noqa: PLR0913, PLR0917 - the operands of OpenFOAM's ``Amul``
     return code
 
 
+def spmv(  # noqa: PLR0913, PLR0917 - the arrays of a CSR product
+    rows: Sequence[int],
+    columns: Sequence[int],
+    y: int,
+    x: int,
+    values: int,
+    zero: int,
+    tables: list[int],
+    register: Callable[[int], int],
+) -> list[Instr]:
+    """Instructions for ``y = A x`` with ``A`` given entry by entry (plan step 14).
+
+    Entry ``k`` is ``A[rows[k], columns[k]]``, its value in register ``values + k``. ``y`` and
+    ``x`` are runs; ``zero`` is a register holding 0, broadcast to clear ``y``. Four array
+    instructions: clear, gather ``x`` by column, multiply by the values, scatter-add by row, in
+    entry order. A CSR matrix gives its entries in row order.
+    """
+    count, n = len(rows), max(rows, default=-1) + 1
+    code = [Instr(Op.VBROADCAST, y, zero, 0, n)]
+    gathered = register(count)
+    offset = len(tables)
+    tables.extend(x + column for column in columns)
+    code.append(Instr(Op.VGATHER, gathered, offset, 0, count))
+    product = register(count)
+    code.append(Instr(Op.VMUL, product, values, gathered, count))
+    offset = len(tables)
+    tables.extend(y + row for row in rows)
+    code.append(Instr(Op.VSCATTER_ADD, 0, offset, product, count))
+    return code
+
+
 def _jacobian(lowering: _Lowering, mode: Mode, rhs: Function) -> Function:
     """``mode``'s Jacobian tape from ``rhs``, array opcodes and all.
 
