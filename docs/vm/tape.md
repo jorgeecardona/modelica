@@ -16,11 +16,14 @@ how to read one.
 | `transition_prefix`, `transition` | what an event changes |
 | `parameters`, `initial`, `latch` | parameter vector, start values, relation latches |
 
-A `Function` has three fields:
+A `Function` has four fields:
 
 - `code`: a tuple of `Instr(op, dst, a, b, c)`.
 - `newton`: its Newton blocks, each a body of instructions run until the step is small.
 - `tables`: register numbers that gather and scatter opcodes read through.
+- `views`: the arrays the shaped opcodes name, each a `vm.View(base, shape, strides)`.
+  Element `index` is register `base + sum(index[k] * strides[k])`; a stride of 0 repeats one
+  register along that axis.
 
 ## Registers and constants
 
@@ -110,5 +113,18 @@ The array opcodes work on *runs*: `n` consecutive registers from a first one.
 | `VSCATTER_ADD` | `r[tables[a + k]] += b[k]`, `k < c`, in order; a table may name one register twice |
 | `VLOAD_Y` | `dst[k] = y[a + k]`, `k < c`; written only by `_fuse`, in `rhs` |
 | `VSTORE_OUT` | `out[a + k] = b[k]`, `k < c`; written only by `_fuse`, in `rhs` |
+
+The shaped opcodes name views by index in `Function.views`. The destination view sets the
+shape; each opcode runs over it in row-major order, the last axis fastest.
+
+| Opcode | Meaning |
+|---|---|
+| `TBINARY` | `dst = a op b` elementwise; `c` is the scalar opcode (`ADD` to `OR`) |
+| `TCALL2` | `dst = f(a, b)` elementwise; `c` names `f` |
+| `TUNARY` | `dst = -a`, `not a`, or `f(a)`: `c` is `NEG`, `NOT` or `CALL1`, and `b` names `f` |
+| `TSELECT` | `dst = b where a != 0 else c`; all four are views |
+| `TREDUCE` | `dst = a` folded along axis `b` by `vm.Reduce` `c`, in row-major order |
+| `TINDEX` | `dst` = the 1-based index along axis `a` |
+| `ROLL` | `dst = np.roll(a, c, axis=b)`; `dst` must not overlap `a` |
 
 [Array models](arrays.md) shows them in a real tape.

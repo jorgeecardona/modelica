@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org/); the version is `__version__` in
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
+## Unreleased
+
+- Array states with a shape (`Real T[nx, ny, nz]`) run on the engine as views of one block: a stencil read is a slice or a roll, with no gather table. TorusHeat's `rhs` is 14 instructions, was 18 with 384 table entries.
+- Array loops with `if`, relations, `^`, `max`, `min`, `mod`, `not` and the loop index as a value run as shaped opcodes, bit for bit the scalar result.
+- The jacobian of an array loop is built from the shaped tape and stores each stencil offset in one instruction; TorusHeat's is 31 instructions, was 1090 from scalar blocks.
+- A 3-D insulated box (`max` and `min` in indices) matches the finite-volume tape and solves with the iterative solver.
+- Fixed: the jacobian of a product of two terms of one state (`r u (1 - u)`) lost one partial in every cell but the first.
+
 ## 0.1.0 (2026-11-10)
 
 The first release with a stated promise: install, parse, simulate on the precompiled engine,

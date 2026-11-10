@@ -1,6 +1,6 @@
 ---
 title: Shaped arrays on the tape, so n-dimensional states run without flattening
-status: open
+status: done
 kind: idea
 scope: L
 owner: jorgeecardona
@@ -8,7 +8,7 @@ filed: 2026-11-10
 area: sim
 verify: test
 blocked_by: null
-fixed_in: null
+fixed_in: 0.1.7
 ---
 
 A state written `Real T[nx, ny, nz]` should reach the engine as one array with a shape, and
@@ -121,3 +121,19 @@ front-end time: `flatten` and `causalize` stay per cell. Phase 2 keeps the array
 
 Deferred: phase 2, `GEMM`, clamp and zero reads, threads inside one opcode, moving `fv` and
 `fem` off the `V*` opcodes.
+
+## Result (2026-11-10)
+
+Steps 1 to 9 are done. Changes from the plan: views live on `Function` beside `tables`, so the
+register passes see them; a read that is neither a slice nor a roll is gathered inside the
+shaped path; runs that name one state in one cell are added there, so a clamped face read
+keeps the shaped jacobian.
+
+| Model | `rhs` | `jacobian` (scalar) |
+|---|---|---|
+| TorusHeat 8 x 8 | 14, no table | 31 (1090) |
+| Plate 7 x 7, interior slices | 58, interior 6 | 76 (499) |
+| Box 13 x 13 x 13, clamped faces | 18 | 1262 (14368), iterative solver |
+
+Left for later: the gather tables of a clamped read (13,182 entries in the box `rhs`), and
+phase 2 (arrays through `causalize`).
