@@ -44,8 +44,8 @@ Mechanics.Translational and Rotational, Thermal.HeatTransfer, and a subset of Bl
   (`__version__` must be greater than `origin/main` when `src/` changed).
 - `moon run :test-python-floor` — proves the package imports and tests pass on Python 3.12
   (the `requires-python` floor) in an isolated environment.
-- Some simulation tests compile generated C; they are skipped automatically when no C compiler
-  is on `PATH`.
+- Engine tests build `engine/src` with `rustc` once when no engine wheel is installed; they are
+  skipped when neither is available.
 
 ## Style
 
