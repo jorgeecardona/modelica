@@ -1002,3 +1002,17 @@ def test_a_wide_band_picks_the_iterative_solver() -> None:
     wide = causalize(flat([parse(source.replace("Integer n = 8", "Integer n = 50"))], "TorusHeat"))
     assert vm.lower(wide).iterative
     assert not vm.lower(_system(EXAMPLES / "models" / "TorusHeat.mo")).iterative
+
+
+def test_phase_change_fires_the_same_events_in_the_same_order(engine: Path) -> None:
+    """``T > Ms`` and ``T < Ms`` cross at one instant: both backends fire the lower index first."""
+    from modelica.sim import simulate  # noqa: PLC0415 - only the engine tests need it
+    from modelica.sim import engine as native  # noqa: PLC0415
+
+    system = _system(EXAMPLES / "models" / "PhaseChange.mo")
+    reference = simulate(system, stop=1000.0, backend="python")
+    run = native.simulate(system, stop=1000.0, path=engine, every=True)
+    assert [e.index for e in run.event_list] == [e.index for e in reference.events]
+    np.testing.assert_allclose(
+        [e.time for e in run.event_list], [e.time for e in reference.events], rtol=1e-9
+    )

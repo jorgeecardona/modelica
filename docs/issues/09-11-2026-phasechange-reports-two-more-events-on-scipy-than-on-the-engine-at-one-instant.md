@@ -1,6 +1,6 @@
 ---
 title: PhaseChange reports two more events on SciPy than on the engine at one instant
-status: open
+status: done
 kind: bug
 scope: S
 owner: jorgeecardona
@@ -8,7 +8,7 @@ filed: 2026-11-09
 area: sim
 verify: test
 blocked_by: null
-fixed_in: null
+fixed_in: 0.0.266
 ---
 
 PhaseChange over its `stop` gives 14 events on `backend="python"` and 12 on `backend="engine"`.
@@ -27,3 +27,10 @@ already settled, or the other misses a real re-fire.
 
 To do: find which one is right against the model's `when` semantics, make both agree, and add a
 test that compares the event lists for PhaseChange on both backends.
+
+## Fixed
+
+The count already agreed (12 and 12). The order at t = 709.749 differed: `T > Ms` and `T < Ms`
+cross at one instant, and the engine took the root one ULP earlier. Both backends now treat
+roots within 8 ULPs as one instant and fire the lower index first.
+`tests/test_vm.py::test_phase_change_fires_the_same_events_in_the_same_order`.

@@ -1427,7 +1427,10 @@ fn md_integrate(
                 } else {
                     md_locate(k, t, h, &y, &quad, p, w, rearm[k], g0, &mut ev_y, &mut z_ev)
                 };
-                if x < fired_x {
+                // Roots a few ULPs apart are one instant: the lower index fires first, as on
+                // the SciPy path, so the order does not depend on rounding in md_locate.
+                let tie = 8.0 * f64::EPSILON * t.abs().max(1.0) / h.abs().max(f64::MIN_POSITIVE);
+                if x < fired_x && !(fired >= 0 && x > fired_x - tie) {
                     fired_x = x;
                     fired = k as isize;
                 }

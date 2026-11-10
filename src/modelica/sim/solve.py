@@ -702,7 +702,11 @@ class _Run:
         candidates = [
             (float(found[-1]), index) for index, found in enumerate(segment.t_events) if len(found)
         ]
-        at, when = min(candidates)
+        at = min(time for time, _ in candidates)
+        # Roots a few ULPs apart are one instant: the lower index fires first, as on the engine.
+        tie = 8.0 * np.finfo(float).eps * max(abs(at), 1.0)
+        when = min(index for time, index in candidates if time - at <= tie)
+        at = float(segment.t_events[when][-1])
         return when, at, np.asarray(segment.y_events[when][-1], dtype=float)
 
     # -- output ------------------------------------------------------------------------
