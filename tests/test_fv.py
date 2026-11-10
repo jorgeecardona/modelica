@@ -105,3 +105,40 @@ def test_the_engine_runs_the_tape_as_python_does() -> None:
     loaded.call(loaded.encoded.rhs(0), 0.0, t, np.array(p), np.zeros(0), out)
     loaded.close()
     np.testing.assert_array_equal(out, expected)
+
+
+def test_the_jacobian_of_a_mesh_tape_is_its_matrix() -> None:
+    """`vm._Tangents` differentiates `fv.heat` through its scatter-adds: ``J = V^-1 A``."""
+    source = (EXAMPLES / "models" / "Lorenz.mo").read_text(encoding="utf-8")
+    base = vm.lower(causalize(flatten(parse(source), "Lorenz")))
+    lowering = vm._Lowering(None)  # type: ignore[arg-type] # noqa: SLF001 - no emitter is read
+    lowering.registers = base.registers
+    for index, value in enumerate(base.constants):
+        lowering.constants.setdefault(value, index)
+    box = mesh.box((6, 3, 1), (1.0, 0.5, 0.1))
+    rules = {"xmin": fv.FixedValue(100.0), "xmax": fv.FixedGradient(-80.0), **WALLS}
+    tape = fv.heat(box, 2.5, rules, lowering.register)
+    rhs = vm.Function(tape.code, (), tape.tables)
+    n = box.cells
+    tangents = vm._Tangents(lowering, n)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    jacobian = tangents.function(rhs)
+    pool = tuple(sorted(lowering.constants, key=lowering.constants.__getitem__))
+    program = dataclasses.replace(
+        base,
+        rhs=(rhs,),
+        jacobian=(jacobian,),
+        registers=lowering.registers + len(pool),
+        constants=pool,
+    )
+    p = list(tape.parameters)
+
+    def evaluate(function: vm.Function, t: NDArray[np.float64], size: int) -> NDArray[np.float64]:
+        out = [0.0] * size
+        vm.evaluate(program, function, 0.0, list(t), p, [], out)
+        return np.array(out)
+
+    t = np.linspace(20.0, 100.0, n)
+    b = evaluate(rhs, np.zeros(n), n)
+    matrix = np.column_stack([evaluate(rhs, np.eye(n)[j], n) - b for j in range(n)])
+    got = evaluate(jacobian, t, n * n).reshape(n, n)
+    np.testing.assert_allclose(got, matrix, rtol=1e-13, atol=1e-12)

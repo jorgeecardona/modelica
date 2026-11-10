@@ -744,6 +744,8 @@ class _Tangents:
     code: list[Instr] = field(default_factory=list[Instr])
     dots: dict[int, dict[int, int]] = field(default_factory=dict[int, dict[int, int]])
     runs: dict[int, _Runs] = field(default_factory=dict[int, "_Runs"])
+    owner: dict[int, tuple[int, int]] = field(default_factory=dict[int, tuple[int, int]])
+    """For each register an array opcode wrote: the first register of its run, and its place."""
     tables: list[int] = field(default_factory=list[int])
     scope: _Scope = field(default_factory=lambda: _Scope([], {}, {}, []))
 
@@ -801,15 +803,28 @@ class _Tangents:
 
     def vstep(self, i: Instr) -> None:  # noqa: C901, PLR0912 - one case per array opcode
         """The partials of one array opcode, as runs keyed by the state each cell reads."""
-        runs, n = self.runs, i.c
-        a, b = runs.get(i.a, {}), runs.get(i.b, {})
+        runs, n = self.runs, (i.b if i.op is Op.VCALL1 else i.c)
+        reads_runs = i.op not in (Op.VGATHER, Op.VBROADCAST, Op.VSCATTER, Op.VSCATTER_ADD)
+        a = self.run_of(i.a, n) if reads_runs else {}
+        b = self.run_of(i.b, n) if i.op in _VECTOR_TO_SCALAR else {}
         out: _Runs
         if i.op is Op.VGATHER:
-            out = self.gather([self.dots.get(r, {}) for r in self.tables[i.a : i.a + n]])
+            out = self.gather([self.element(r) for r in self.tables[i.a : i.a + n]])
         elif i.op is Op.VSCATTER_ADD:
-            raise _Scalar
+            # r[t] += b[k], cell by cell: each target's partials gain the source cell's.
+            for k, target in enumerate(self.tables[i.a : i.a + n]):
+                source = self.element(i.b + k)
+                if not source:
+                    continue
+                current = dict(self.element(target))
+                self.release(target)
+                for j, d in sorted(source.items()):
+                    current[j] = self.emit(Op.ADD, current[j], d) if j in current else d
+                self.dots[target] = current
+            return
         elif i.op is Op.VSCATTER:
             for k, target in enumerate(self.tables[i.a : i.a + n]):
+                self.release(target)
                 cell = {key[k]: run + k for key, run in self.runs.get(i.b, {}).items()}
                 cell.pop(None, None)  # type: ignore[call-overload]
                 if cell:
@@ -818,9 +833,7 @@ class _Tangents:
                     self.dots.pop(target, None)
             return
         elif i.op is Op.VBROADCAST:
-            out = {
-                (j,) * n: self.vemit(Op.VBROADCAST, n, d) for j, d in self.dots.get(i.a, {}).items()
-            }
+            out = {(j,) * n: self.vemit(Op.VBROADCAST, n, d) for j, d in self.element(i.a).items()}
         elif i.op is Op.VNEG:
             out = {key: self.vemit(Op.VNEG, n, d) for key, d in a.items()}
         elif i.op in (Op.VADD, Op.VSUB):
@@ -837,6 +850,11 @@ class _Tangents:
             raise _Scalar
         else:
             out = {}
+        for k in range(n):
+            if i.dst + k in self.owner:
+                self.release(i.dst + k)
+            self.dots.pop(i.dst + k, None)
+            self.owner[i.dst + k] = (i.dst, k)
         if out:
             runs[i.dst] = out
         else:
@@ -876,10 +894,45 @@ class _Tangents:
                 self.code.append(i)
             self.step(function, i)
 
+    def element(self, register: int) -> dict[int, int]:
+        """The scalar partials of ``register``, read from its run when an array opcode wrote it."""
+        if register in self.dots:
+            return self.dots[register]
+        place = self.owner.get(register)
+        if place is None or place[0] not in self.runs:
+            return {}
+        start, k = place
+        found: dict[int, int] = {}
+        for key, run in self.runs[start].items():
+            state = key[k]
+            if state is not None:
+                found[state] = run + k
+        return found
+
+    def run_of(self, start: int, n: int) -> _Runs:
+        """The partials of the run ``start .. start + n`` as runs, regathered when needed."""
+        if start in self.runs and all(self.owner.get(start + k) == (start, k) for k in range(n)):
+            return self.runs[start]
+        cells = [self.element(start + k) for k in range(n)]
+        return self.gather(cells) if any(cells) else {}
+
+    def release(self, register: int) -> None:
+        """Keep the other cells of ``register``'s run as scalars, before ``register`` changes."""
+        place = self.owner.pop(register, None)
+        if place is None or place[0] not in self.runs:
+            return
+        start = place[0]
+        for other, (first, _) in list(self.owner.items()):
+            if first == start and other not in self.dots:
+                self.set(other, self.element(other))
+        del self.runs[start]
+
     def step(self, function: Function, i: Instr) -> None:  # noqa: C901, PLR0912 - one case per opcode
         dots = self.dots
         op = i.op
-        a, b = dots.get(i.a, {}), dots.get(i.b, {})
+        if op in _REMOVABLE and i.dst in self.owner:
+            self.release(i.dst)
+        a, b = self.element(i.a), self.element(i.b)
         if op is Op.LOAD_Y:
             dots[i.dst] = {i.a: self.constant(1.0)}
         elif op is Op.MOVE:
@@ -888,7 +941,7 @@ class _Tangents:
             else:
                 dots.pop(i.dst, None)
         elif op is Op.STORE_OUT:
-            for j, d in sorted(dots.get(i.b, {}).items()):
+            for j, d in sorted(self.element(i.b).items()):
                 self.code.append(Instr(Op.STORE_OUT, 0, i.a * self.width + j, d))
         elif op in (Op.ADD, Op.SUB):
             dots[i.dst] = self.combine(op, a, b)

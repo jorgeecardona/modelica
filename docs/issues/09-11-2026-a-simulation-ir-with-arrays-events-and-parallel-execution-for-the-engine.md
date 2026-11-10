@@ -514,3 +514,12 @@ scalar today) and add the scatter-add tangent rule if slow; 1, the Jacobian patt
 and the FFI, with a dense view so tests compare unchanged; 2, band storage in Radau, test: the
 100 x 100 grid runs and reaches its steady profile within 1e-8 (12a gate); 3, a workspace so the
 time loop allocates nothing; 4 and 5, the iterative solver (12b).
+
+Step 12 commit 0 done: `_Tangents` differentiates `VSCATTER_ADD`. Each target register gains the
+source cell's partials; `_Tangents.element` reads a run cell's partials as scalars,
+`_Tangents.run_of` regathers scalars into runs when an array opcode reads them, and
+`_Tangents.release` turns a run into scalars before one of its cells changes. Test: the jacobian
+of an `fv.heat` tape (fixed value and fixed gradient walls) equals its matrix within 1e-13. On
+the 100 x 100 box the jacobian tape takes 0.87 s to build (99845 instructions, 49600 of them
+`out` stores); `mesh.box` geometry takes 6.4 s in Python loops, the larger front-end cost.
+Next: commit 1, the Jacobian pattern on the tape.
