@@ -5,7 +5,10 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "frontend_bench.py"
 
@@ -27,3 +30,26 @@ def test_lower_makes_at_most_todays_per_cell_calls_on_a_small_box() -> None:
     """
     stages = _bench().measure(6, run=False)
     assert stages.cell_calls_in_lower <= 14 * 6**3 + 4
+
+
+def test_alias_detection_does_not_differentiate_a_grid_cell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each box cell reads seven unknowns, so `_affine` gives up before any ``d_dx``."""
+    from modelica.ir import causalize as module  # noqa: PLC0415 - patched below
+    from modelica.lang import parse  # noqa: PLC0415
+    from modelica.sim import flatten  # noqa: PLC0415
+
+    flat = flatten([parse(_bench().BOX.format(n=4), "Box.mo")], "Box")
+    calls = 0
+    original = module.d_dx
+
+    def counted(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "d_dx", counted)
+    work = module._start(flat)  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+    module._eliminate_aliases(work)  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+    assert calls == 0

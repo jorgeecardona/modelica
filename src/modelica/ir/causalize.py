@@ -148,8 +148,14 @@ class _Work:
     # of `variables` moves through `declare`/`forget`, so keeping the set here cannot fall behind.
     _constants: set[str] = field(default_factory=set[str])
     _constants_frozen: frozenset[str] | None = field(default=None)
+    # `incidence` by equation object, with the equation kept so its id stays its own. Cleared
+    # whenever a variable is declared or forgotten, since that changes what is unknown.
+    _incidence: dict[int, tuple[ir.Equal, list[str]]] = field(
+        default_factory=dict[int, tuple[ir.Equal, list[str]]]
+    )
 
     def declare(self, variable: FlatVariable) -> None:
+        self._incidence.clear()
         self.variables[variable.name] = variable
         self.order[variable.name] = self.counter
         self.counter += 1
@@ -162,6 +168,7 @@ class _Work:
             self._constants_frozen = None
 
     def forget(self, name: str) -> None:
+        self._incidence.clear()
         self.variables.pop(name, None)
         self.order.pop(name, None)
         if name in self._constants:
@@ -187,9 +194,14 @@ class _Work:
         return self._constants_frozen
 
     def incidence(self, index: int) -> list[str]:
+        """The unknowns equation ``index`` reads, in first-seen order. A new list each call."""
         equation = self.equations[index]
-        reads = _unique([*names(equation.lhs), *names(equation.rhs)])
-        return [name for name in reads if self.is_unknown(name)]
+        cached = self._incidence.get(id(equation))
+        if cached is None or cached[0] is not equation:
+            reads = _unique([*names(equation.lhs), *names(equation.rhs)])
+            cached = (equation, [name for name in reads if self.is_unknown(name)])
+            self._incidence[id(equation)] = cached
+        return list(cached[1])
 
     def chain(self, name: str) -> Iterator[str]:
         """``name``, then what it is the derivative of, and so on down to the state.
@@ -326,7 +338,10 @@ def _affine(work: _Work, equation: ir.Equal) -> _Affine | None:  # noqa: PLR0911
     """
     expression = residual(equation)
     appearing = [name for name in _unique(names(expression)) if work.is_unknown(name)]
-    if not appearing:
+    # An alias has at most two unknowns. Three or more names rule it out before any
+    # derivative: on a grid model that is every cell. A name that cancels (``x - x + y``)
+    # is then missed, which leaves a larger system, never a wrong one.
+    if not appearing or len(appearing) > 2:  # noqa: PLR2004 - two is the alias case
         return None
     unknowns: list[str] = []
     coefficients: list[ir.Expr] = []
