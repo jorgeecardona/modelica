@@ -917,8 +917,9 @@ class _Lowering:
         events = self.emitter.events()
 
         def body(scope: _Scope) -> None:
-            self.unpack(scope, mode)
+            # With no events nothing is read: no unpack (8000 loads `_prune` would drop).
             if events:
+                self.unpack(scope, mode)
                 self.blocks(scope, mode)
             for k, event in enumerate(events):
                 live = event.origin in (None, position)
@@ -932,8 +933,8 @@ class _Lowering:
         emitter = self.emitter
         events = emitter.events()
         prefix = _Scope([], {}, {}, [])
-        self.unpack(prefix, mode)
         if events:
+            self.unpack(prefix, mode)
             self.blocks(prefix, mode)
         prefix.code.append(Instr(Op.COPY_Y_OUT))
         states = {name: slot for slot, name in enumerate(mode.states)}
