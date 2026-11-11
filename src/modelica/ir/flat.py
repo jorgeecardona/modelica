@@ -14,6 +14,7 @@ demand, so they are properties here rather than fields filled in by a pass.
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass
 from functools import cached_property
 from typing import TYPE_CHECKING, Literal
@@ -131,14 +132,15 @@ class ArrayEquation:
         expression, so a periodic stencil needs no special case, and ``x[i + 1]`` at the last
         cell is an error instead of a silent wrap.
         """
+        return tuple(self.at(cell) for cell in self.cells())
+
+    def at(self, cell: Mapping[str, int]) -> ir.Equal:
+        """The scalar equation at one ``cell``. Raises `CellError` for a read outside its array."""
         shapes, constants = dict(self.shapes), dict(self.constants)
-        return tuple(
-            ir.Equal(
-                at_cell(self.equation.lhs, cell, shapes, constants),
-                at_cell(self.equation.rhs, cell, shapes, constants),
-                self.equation.span,
-            )
-            for cell in self.cells()
+        return ir.Equal(
+            at_cell(self.equation.lhs, cell, shapes, constants),
+            at_cell(self.equation.rhs, cell, shapes, constants),
+            self.equation.span,
         )
 
 
@@ -241,16 +243,20 @@ class Loop:
         A cheap check that a ``dataclasses.replace`` of the equations, or a later stage that
         moved them, has not left the loop pointing at something else.
         """
+        loop = self.equation
+        size = math.prod(len(index) for index in loop.indices)
+        last = self.first + size - 1
+        if size == 0 or last >= len(equations):
+            return False
+        ends = (
+            {index.name: index.start for index in loop.indices},
+            {index.name: index.stop for index in loop.indices},
+        )
         try:
-            cells = self.equation.scalarize()
+            first_cell, last_cell = (loop.at(cell) for cell in ends)
         except CellError:
             return False
-        last = self.first + len(cells) - 1
-        return (
-            last < len(equations)
-            and equations[self.first] == cells[0]
-            and equations[last] == cells[-1]
-        )
+        return equations[self.first] == first_cell and equations[last] == last_cell
 
 
 @dataclass(frozen=True)
