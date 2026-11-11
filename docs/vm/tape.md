@@ -126,5 +126,6 @@ shape; each opcode runs over it in row-major order, the last axis fastest.
 | `TREDUCE` | `dst = a` folded along axis `b` by `vm.Reduce` `c`, in row-major order |
 | `TINDEX` | `dst` = the 1-based index along axis `a` |
 | `ROLL` | `dst = np.roll(a, c, axis=b)`; `dst` must not overlap `a` |
+| `SHIFT` | `dst[i] = a[clamp(i - c, 0, n - 1)]` along axis `b`: the edges repeat; no overlap |
 
 [Array models](arrays.md) shows them in a real tape.

@@ -100,7 +100,7 @@ fn shaped(op: i32, dst: i64, a: i64, b: i64, c: i64, views: &[View]) -> bool {
                 && d.shape.iter().eq(v.shape.iter().enumerate().filter(|&(k, _)| k != axis).map(|(_, n)| n))
         }),
         48 => a >= 0 && (a as usize) < d.shape.len(),
-        49 => get(a).is_some_and(|v| {
+        49 | 50 => get(a).is_some_and(|v| {
             // The destination must not overlap the operand: compared by their register hulls.
             let apart = match (d.last(), v.last()) {
                 (Some(dl), Some(vl)) => dl < v.base || vl < d.base,
@@ -308,7 +308,7 @@ fn valid(code: &[i32], range: (usize, usize), registers: usize, constants: usize
             40 => span(dst, c) && a >= 0,
             42 => span(b, c) && table(a, c),
             41 => span(b, c) && a >= 0,
-            43..=49 => shaped(op, dst, a, b, c, views),
+            43..=50 => shaped(op, dst, a, b, c, views),
             _ => false,
         }
     })
@@ -389,7 +389,7 @@ impl Program {
                 }
                 40 => f.r[dst..dst + c as usize].copy_from_slice(&f.y[a..a + c as usize]),
                 41 => f.out[a..a + c as usize].copy_from_slice(&f.r[b..b + c as usize]),
-                43..=49 => self.shaped(op, dst, a, b, c, f.r),
+                43..=50 => self.shaped(op, dst, a, b, c, f.r),
                 _ => unreachable!("opcode {op} is not in vm.Op"),
             }
         }
@@ -429,6 +429,17 @@ impl Program {
                 View::each(&d.shape, |i| {
                     source[..i.len()].copy_from_slice(i);
                     source[b] = (i[b] as i64 - c as i64).rem_euclid(n) as usize;
+                    set(d.at(i), get(v.at(&source[..i.len()])));
+                });
+            }
+            50 => {
+                // A clamped read: the edge element repeats (`T[max(i - 1, 1)]`).
+                let v = &views[a];
+                let last = v.shape[b] as i64 - 1;
+                let mut source = [0usize; DIMS];
+                View::each(&d.shape, |i| {
+                    source[..i.len()].copy_from_slice(i);
+                    source[b] = (i[b] as i64 - c as i64).clamp(0, last) as usize;
                     set(d.at(i), get(v.at(&source[..i.len()])));
                 });
             }
@@ -537,7 +548,7 @@ fn writes(code: &[i32], range: (usize, usize), function: &Function, tables: &[i3
         let (op, dst, a, b, c) = (i[0], i[1] as usize, i[2] as usize, i[3] as usize, i[4] as usize);
         match op {
             0..=4 | 7..=25 => out.push(dst),
-            43..=49 => views[dst].elements(out),
+            43..=50 => views[dst].elements(out),
             31 | 33..=38 => out.extend(dst..dst + c),
             32 | 42 => out.extend(tables[a..a + c].iter().map(|&r| r as usize)),
             39 => out.extend(dst..dst + b),
@@ -565,7 +576,7 @@ fn reads(code: &[i32], range: (usize, usize), function: &Function, tables: &[i32
                 views[a].elements(out);
                 views[b].elements(out);
             }
-            45 | 47 | 49 => views[a].elements(out),
+            45 | 47 | 49 | 50 => views[a].elements(out),
             46 => {
                 views[a].elements(out);
                 views[b].elements(out);

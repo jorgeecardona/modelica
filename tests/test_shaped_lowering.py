@@ -220,6 +220,22 @@ end Box;
 """
 
 
+def _same_on_the_engine(program: vm.Program, y: list[float]) -> None:
+    """The engine's ``rhs`` gives the same bits as `vm.evaluate`; skipped with no engine."""
+    from modelica.sim.engine import installed, load  # noqa: PLC0415 - only this check
+
+    if installed() is None and shutil.which("rustc") is None:
+        return
+    p = [0.0] * len(program.layout.parameters)
+    vm.evaluate(program, program.parameters, 0.0, [], [], [], p)
+    loaded = load(program)
+    out = np.zeros(len(y))
+    work = np.zeros(program.layout.workspace)
+    loaded.call(loaded.encoded.rhs(0), 0.0, np.array(y), np.array(p), work, out)
+    loaded.close()
+    np.testing.assert_array_equal(out, _rhs(program, y))
+
+
 def test_a_3d_box_matches_the_finite_volume_tape_and_solves_iteratively() -> None:
     """``Real T[n, n, n]`` with zero-gradient faces is `fv.heat` on `mesh.box`, cell for cell.
 
@@ -241,6 +257,11 @@ def test_a_3d_box_matches_the_finite_volume_tape_and_solves_iteratively() -> Non
     expected = [0.0] * len(y)
     vm.evaluate(reference, function, 0.0, y, p, [], expected)  # pyright: ignore[reportUnknownArgumentType]
     np.testing.assert_allclose(_rhs(program, y), expected, rtol=1e-12, atol=1e-9)
+    # Each clamped read is a view and one SHIFT, not a gather table of every cell.
+    rhs = program.rhs[0]
+    assert not rhs.tables
+    assert sum(i.op is vm.Op.SHIFT for i in rhs.code) == 6
+    _same_on_the_engine(program, y)
     # The clamped reads name the centre state at a face; the jacobian adds both partials there.
     scalar = vm.lower(system, arrays=False)
     assert len(program.jacobian[0].code) < len(scalar.jacobian[0].code) // 10

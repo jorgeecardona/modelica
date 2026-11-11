@@ -119,6 +119,7 @@ class Op(IntEnum):
     TREDUCE = 47  # dst = a folded along axis b by `Reduce` c, in row-major order
     TINDEX = 48  # dst = the 1-based index along axis a
     ROLL = 49  # dst = np.roll(a, c, axis=b); dst must not overlap a
+    SHIFT = 50  # dst[i] = a[clamp(i - c, 0, n - 1)] along axis b: edges repeat; no overlap
 
 
 class Reduce(IntEnum):
@@ -268,7 +269,7 @@ class Function:
     tables: tuple[int, ...] = ()
     """Register numbers that ``VGATHER`` and ``VSCATTER`` read through, by offset."""
     views: tuple[View, ...] = ()
-    """The arrays the shaped opcodes (`Op.TBINARY` to `Op.ROLL`) name, by index."""
+    """The arrays the shaped opcodes (`Op.TBINARY` to `Op.SHIFT`) name, by index."""
 
 
 @dataclass(frozen=True)
@@ -584,9 +585,10 @@ class _Lowering:
         Each array the loop reads is copied once into a dense block (`dense`). A subscript whose
         every index is ``i + k`` of one loop index, or a constant, is a view of that block (a
         slice; a transpose when the axes are in another order). The periodic form
-        ``mod(i + k - 1, n) + 1`` over the whole axis is a view and a `Op.ROLL`. A part that
-        reads no subscript is computed once and read through a stride-0 view. Each cell does
-        the operations its scalar block would, in the same order: the same bits.
+        ``mod(i + k - 1, n) + 1`` over the whole axis is a view and a `Op.ROLL`, the clamped form
+        ``max(i - 1, 1)`` a view and a `Op.SHIFT`. A part that reads no subscript is computed
+        once and read through a stride-0 view. Each cell does the operations its scalar block
+        would, in the same order: the same bits.
         """
         equation = array.equation
         cells = list(equation.cells())
@@ -690,10 +692,10 @@ class _Lowering:
                     shape = shapes[name]
                     first = self.dense(scope, name, shape)
                     result = self.view(scope, plan.view(first, shape, domain))
-                    for axis, offset in plan.rolls:
-                        rolled = fresh()
-                        scope.code.append(Instr(Op.ROLL, rolled, result, axis, offset))
-                        result = rolled
+                    for move, axis, offset in plan.moves:
+                        moved = fresh()
+                        scope.code.append(Instr(move, moved, result, axis, offset))
+                        result = moved
                     return result
                 case ir.Binary(op=op, lhs=lhs, rhs=rhs):
                     left, right = go(lhs), go(rhs)
@@ -1074,13 +1076,10 @@ class _Tangents:
         start = out_registers[0]
         op = i.op
         out: _Runs = {}
-        if op is Op.ROLL:
+        if op in (Op.ROLL, Op.SHIFT):
             source = views[i.a]
-            axis, shift = i.b, i.c
             moved = [
-                source.at(
-                    (*index[:axis], (index[axis] - shift) % source.shape[axis], *index[axis + 1 :])
-                )
+                source.at(_moved(op, index, i.b, i.c, source.shape))
                 for index in _indices(dst.shape)
             ]
             out = self.view_runs(moved)
@@ -1879,13 +1878,14 @@ class _Read:
     """How one subscript reads its array over the loop domain.
 
     Per array axis: the loop axis it follows (``None`` for a constant index) and the 0-based
-    element it reads at that loop axis's first value. ``rolls`` are the `Op.ROLL` operands
-    ``(loop axis, offset)`` a periodic index adds.
+    element it reads at that loop axis's first value. ``moves`` are the ``(opcode, loop axis,
+    offset)`` a periodic index (`Op.ROLL`) or a clamped one (`Op.SHIFT`, ``max(i - 1, 1)``)
+    adds.
     """
 
     follows: tuple[int | None, ...]
     first: tuple[int, ...]
-    rolls: tuple[tuple[int, int], ...]
+    moves: tuple[tuple[Op, int, int], ...]
 
     def view(self, base: int, shape: tuple[int, ...], domain: tuple[int, ...]) -> View:
         """The subscript as a view of the dense block of ``shape`` at ``base``."""
@@ -1899,6 +1899,15 @@ class _Read:
         return View(start, domain, tuple(strides))
 
 
+def _moved(
+    op: Op, index: tuple[int, ...], axis: int, offset: int, shape: tuple[int, ...]
+) -> tuple[int, ...]:
+    """The source index `Op.ROLL` (wrapped) or `Op.SHIFT` (clamped) reads for ``index``."""
+    k = index[axis] - offset
+    k = k % shape[axis] if op is Op.ROLL else min(max(k, 0), shape[axis] - 1)
+    return (*index[:axis], k, *index[axis + 1 :])
+
+
 def _read_plan(  # noqa: C901 - a slice, a constant or a roll per axis
     node: ir.Subscript, equation: ArrayEquation, cells: Sequence[Mapping[str, int]]
 ) -> _Read | None:
@@ -1910,7 +1919,7 @@ def _read_plan(  # noqa: C901 - a slice, a constant or a roll per axis
     values = [indices_at(node, cell, constants) for cell in cells]
     follows: list[int | None] = []
     first: list[int] = []
-    rolls: list[tuple[int, int]] = []
+    moves: list[tuple[Op, int, int]] = []
     used: set[int] = set()
     for axis, extent in enumerate(shape):
         column = [at[axis] for at in values]
@@ -1940,7 +1949,23 @@ def _read_plan(  # noqa: C901 - a slice, a constant or a roll per axis
                     ):
                         follows.append(loop)
                         first.append(0)
-                        rolls.append((loop, -k if 2 * k <= extent else extent - k))
+                        moves.append((Op.ROLL, loop, -k if 2 * k <= extent else extent - k))
+                        used.add(loop)
+                        found = True
+                        break
+                # Clamped: min(max(i + k, 1), n), the edge cell reading itself.
+                for k in range(1 - extent, extent):
+                    if (
+                        not found
+                        and k
+                        and all(
+                            at == min(max(cell[name] + k, 1), extent)
+                            for at, cell in zip(column, cells, strict=True)
+                        )
+                    ):
+                        follows.append(loop)
+                        first.append(0)
+                        moves.append((Op.SHIFT, loop, -k))
                         used.add(loop)
                         found = True
                         break
@@ -1948,7 +1973,7 @@ def _read_plan(  # noqa: C901 - a slice, a constant or a roll per axis
                 break
         if not found:
             return None
-    return _Read(tuple(follows), tuple(first), tuple(rolls))
+    return _Read(tuple(follows), tuple(first), tuple(moves))
 
 
 def _reals(node: ir.Expr) -> ir.Expr:
@@ -2193,6 +2218,7 @@ _VIEW_READS: Final = {
     Op.TREDUCE: ("a",),
     Op.TINDEX: (),
     Op.ROLL: ("a",),
+    Op.SHIFT: ("a",),
 }
 
 
@@ -2750,11 +2776,9 @@ class _Machine:
                     total = value if total is None else fold(total, value)
                 r[register] = float(total)
             return
-        if op is Op.ROLL:
-            n = a.shape[i.b]
+        if op in (Op.ROLL, Op.SHIFT):
             for register, index in zip(out, _indices(dst.shape), strict=True):
-                source = (*index[: i.b], (index[i.b] - i.c) % n, *index[i.b + 1 :])
-                r[register] = r[a.at(source)]
+                r[register] = r[a.at(_moved(op, index, i.b, i.c, a.shape))]
             return
         left = elements(a)
         if op is Op.TUNARY:
@@ -2866,7 +2890,7 @@ def _indices(shape: tuple[int, ...]) -> Iterator[tuple[int, ...]]:
 
 
 _SHAPED: Final = frozenset(
-    {Op.TBINARY, Op.TCALL2, Op.TUNARY, Op.TSELECT, Op.TREDUCE, Op.TINDEX, Op.ROLL}
+    {Op.TBINARY, Op.TCALL2, Op.TUNARY, Op.TSELECT, Op.TREDUCE, Op.TINDEX, Op.ROLL, Op.SHIFT}
 )
 _FOLD: Final[dict[Reduce, Callable[[Any, Any], Any]]] = {
     Reduce.SUM: lambda a, b: a + b,
@@ -3126,7 +3150,8 @@ def _shaped_line(  # noqa: PLR0911 - one case per opcode
     if op is Op.TINDEX:
         return f"{dst} = index(axis={i.a})"
     del program
-    return f"{dst} = roll({view(i.a)}, {i.c}, axis={i.b})"
+    name = "roll" if op is Op.ROLL else "shift"
+    return f"{dst} = {name}({view(i.a)}, {i.c}, axis={i.b})"
 
 
 def _line(  # noqa: C901, PLR0911, PLR0912 - one case per opcode

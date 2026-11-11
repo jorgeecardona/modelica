@@ -71,7 +71,9 @@ Each subscript is classified by its values over the loop variables:
 - `T[i + k, j]` or a constant index is a view of the array's block: a slice, or a transpose
   when the axes come in another order. No instruction.
 - `T[mod(i + k - 1, n) + 1, j]` over the whole axis is a view and a `ROLL`.
-- Anything else (`T[max(i - 1, 1), j]`) is a `VGATHER` into a fresh block.
+- `T[max(i - 1, 1), j]` or `T[min(i + 1, n), j]` over the whole axis is a view and a `SHIFT`:
+  the edge cell reads itself.
+- Anything else is a `VGATHER` into a fresh block.
 
 A part that does not vary (`a`, `4.0`) is computed once and read through a view with stride 0.
 Every scalar operator is `TBINARY`, an `if` is `TSELECT`, `max`, `min` and `mod` are `TCALL2`,

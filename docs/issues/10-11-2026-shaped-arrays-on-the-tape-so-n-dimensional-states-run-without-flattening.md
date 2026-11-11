@@ -135,5 +135,8 @@ keeps the shaped jacobian.
 | Plate 7 x 7, interior slices | 58, interior 6 | 76 (499) |
 | Box 13 x 13 x 13, clamped faces | 18 | 1262 (14368), iterative solver |
 
-Left for later: the gather tables of a clamped read (13,182 entries in the box `rhs`), and
-phase 2 (arrays through `causalize`).
+Left for later: phase 2 (arrays through `causalize`).
+
+Done 2026-11-11: a clamped read (`T[max(i - 1, 1)]`, `T[min(i + 1, n)]` over the whole axis) is
+a view and one `SHIFT` (opcode 50, edges repeat), not a gather table. The box `rhs` had 13,182
+table entries; it now has none, still 18 instructions, the same bits on the engine.
