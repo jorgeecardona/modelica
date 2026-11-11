@@ -837,30 +837,40 @@ class _Lowering:
 
         return self.function(body)
 
+    def observed_start(self, scope: _Scope, name: str) -> int:
+        """The register holding an observed variable's value before the first step."""
+        system = self.emitter.system
+        if any(variable.name == name for variable in system.parameters):
+            return self.ref(scope, name)
+        if name in system and system[name].start is not None:
+            return self.expr(scope, system[name].start or ir.RealLiteral(0.0))
+        return self.constant(scope, 0.0)
+
     def initial(self) -> Function:
         """The start values into ``y`` and the workspace, as `Emitter.initial`."""
         emitter = self.emitter
         system = emitter.system
-        constant = {variable.name for variable in system.parameters}
 
         def start(scope: _Scope, name: str) -> int:
             return self.expr(scope, system[name].start or ir.RealLiteral(0.0))
 
         def body(scope: _Scope) -> None:
+            conditions = emitter.conditions()
+            # A state an initial equation sets is stored there; its start value would be
+            # stored first and overwritten, one dead store per cell of a loop.
+            set_later = {name for name, _ in conditions}
             for slot, variable in enumerate(system.parameters):
                 scope.names[variable.name] = self.emit(scope, Op.LOAD_P, slot)
             for slot, name in enumerate(system.states):
-                scope.code.append(Instr(Op.STORE_OUT, 0, slot, start(scope, name)))
+                if name not in set_later:
+                    scope.code.append(Instr(Op.STORE_OUT, 0, slot, start(scope, name)))
             for name in emitter.observed:
-                if name in constant:
-                    source = self.ref(scope, name)
-                elif name in system and system[name].start is not None:
-                    source = start(scope, name)
-                else:
-                    source = self.constant(scope, 0.0)
-                scope.code.append(Instr(Op.STORE_W, 0, emitter.slots[name], source))
+                if name not in set_later:
+                    scope.code.append(
+                        Instr(Op.STORE_W, 0, emitter.slots[name], self.observed_start(scope, name))
+                    )
             states = {name: slot for slot, name in enumerate(system.states)}
-            for name, value in emitter.conditions():
+            for name, value in conditions:
                 self.assign(scope, name, value)
                 source = self.ref(scope, name)
                 scope.code.append(Instr(Op.STORE_OUT, 0, states[name], source))
