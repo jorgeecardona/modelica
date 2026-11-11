@@ -57,3 +57,18 @@ twice n = 13, and the per-cell calls in `lower` do not grow with n.
 - Every reader of `mode.blocks` (SciPy fallback, events, diagrams) must be found before step 2.
 - Boundary cells written by separate equations make `x` partly loop-owned: refuse and expand.
 - Bit equality is the test oracle in every step.
+
+## Progress (2026-11-11, evening)
+
+Done, each with the same `System` and tape over the corpus: `Loop.matches` builds two cells
+(f6a2c5c); `_affine` gives up on more than two unknowns and incidence is cached (82b5734);
+`_read_plan` evaluates an index along its loop (2ccd849); no unpack without events (a0ae68e);
+`initial` skips start stores an initial equation overwrites (c495ffd). Box n = 20, wall, loaded
+machine: `flatten` about 2 s, `causalize` about 2.6 s, `lower` about 5.6 s.
+
+Tried and parked: `_fuse` at the end of `_fold` (pass input is 136k instructions on the box, 75%
+single `LOAD_Y`/`STORE_OUT`). It gives the same tape on the box but not on 26 corpus models:
+`_compact` numbers a fused range's registers as one block on first touch, so later loads are
+numbered apart and the final `_fuse` no longer joins them (Lorenz `jacobian`: 27 against 25
+instructions). Also `_hoist` makes loads adjacent that were not at `_fold`. A fix must make
+`_compact` number a range in the order the late path would, or accept different tapes.
