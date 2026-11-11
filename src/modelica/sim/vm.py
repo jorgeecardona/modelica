@@ -16,6 +16,7 @@ instruction (`Op.NEWTON`): the engine runs its body until the step is below `TOL
 
 from __future__ import annotations
 
+import functools
 import itertools
 import math
 from dataclasses import dataclass, field, replace
@@ -152,8 +153,21 @@ class View:
 
 
 def elements(view: View) -> list[int]:
-    """The registers of ``view`` in row-major order, the last index fastest."""
-    return [view.at(index) for index in itertools.product(*(range(n) for n in view.shape))]
+    """The registers of ``view`` in row-major order, the last index fastest.
+
+    A new list each call, from one cached tuple: a caller may change its copy.
+    """
+    return list(_elements(view))
+
+
+@functools.lru_cache(maxsize=256)
+def _elements(view: View) -> tuple[int, ...]:
+    registers = np.full(view.shape, view.base, dtype=np.int64)
+    for axis, (n, stride) in enumerate(zip(view.shape, view.strides, strict=True)):
+        step = [1] * len(view.shape)
+        step[axis] = n
+        registers += (np.arange(n, dtype=np.int64) * stride).reshape(step)
+    return tuple(registers.ravel().tolist())
 
 
 class Builtin(IntEnum):
