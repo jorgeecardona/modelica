@@ -125,6 +125,20 @@
     white-space: pre !important;
   }
 
+  /* Input code wraps instead. A phone reader does not find a hidden sideways scroll, so a
+     line cut at the edge reads as missing code. A wrapped Python line stays correct. */
+  .jupyter-wrapper .jp-InputArea-editor pre,
+  .jupyter-wrapper .jp-InputArea-editor .highlight pre,
+  .md-typeset pre > code {
+    white-space: pre-wrap !important;
+    overflow-wrap: anywhere;
+  }
+
+  /* The copy button sits on top of the first line; give that line room. */
+  .jupyter-wrapper .jp-InputArea-editor pre {
+    padding-right: 2rem;
+  }
+
   /* A figure drawn 8.4 in wide has axis labels sized for 8.4 in. Letting it use the full
      column is the difference between legible and not. */
   .jupyter-wrapper .jp-OutputArea img,
