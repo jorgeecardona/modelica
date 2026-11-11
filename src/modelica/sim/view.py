@@ -239,6 +239,15 @@ _PAGE = """<!doctype html>
   .event { stroke: var(--dim); stroke-dasharray: 4 3; }
   .cursor { stroke: var(--dim); }
   .band { fill: var(--dim); opacity: .18; }
+  .head { flex-wrap: wrap; }
+  .note { white-space: nowrap; }
+  @media (max-width: 520px) {
+    .tools { margin-left: 0; width: 100%; }
+    .body { flex-direction: column; }
+    .legend { width: auto; max-height: 30%; border-left: 0; border-top: 1px solid var(--line);
+              display: flex; flex-wrap: wrap; }
+    .row .value { display: none; }
+  }
 </style>
 <div class="head">
   <span class="title" id="title"></span>
