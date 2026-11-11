@@ -27,7 +27,7 @@ import numpy as np
 
 from modelica.ir import nodes as ir
 from modelica.ir.derive import simplify
-from modelica.ir.flat import at_cell, element, indices_at
+from modelica.ir.flat import at_cell, element, index_at, indices_at
 from modelica.ir.rewrite import names, residual, substitute
 from modelica.sim.emit import (
     ITERATIONS,
@@ -1922,30 +1922,70 @@ def _moved(
     return (*index[:axis], k, *index[axis + 1 :])
 
 
-def _read_plan(  # noqa: C901 - a slice, a constant or a roll per axis
+def _loops_read(index: ir.Expr, loop_names: Sequence[str]) -> list[int]:
+    """The loop axes whose index ``index`` names."""
+    read = set(names(index))
+    return [k for k, name in enumerate(loop_names) if name in read]
+
+
+def _axis_column(
+    index: ir.Expr,
+    axis: int,
+    equation: ArrayEquation,
+    cells: Sequence[Mapping[str, int]],
+    values: Sequence[tuple[int, ...]] | None,
+) -> tuple[list[int], Sequence[Mapping[str, int]], range]:
+    """The values of one subscript index, the cells they belong to, and the loops to try.
+
+    An index that names one loop index (``i + 1``, ``max(i - 1, 1)``) is evaluated along that
+    loop only: over a full product of ranges its value at every cell follows from those ``n``
+    values. An index that names two loop indices is read from ``values``, its value at every
+    cell.
+    """
+    constants = dict(equation.constants)
+    loop_names = [i.name for i in equation.indices]
+    loops = _loops_read(index, loop_names)
+    if len(loops) == 1:
+        (only,) = loops
+        span = equation.indices[only]
+        line = [{loop_names[only]: v} for v in range(span.start, span.stop + 1)]
+        column = [index_at(index, {**constants, **at}) for at in line]
+        return column, line, range(only, only + 1)
+    if not loops:
+        return [index_at(index, constants)], cells, range(len(loop_names))
+    assert values is not None  # noqa: S101 - the caller computes them for this case
+    return [at[axis] for at in values], cells, range(len(loop_names))
+
+
+def _read_plan(  # noqa: C901, PLR0912 - a slice, a constant, a roll or a shift per axis
     node: ir.Subscript, equation: ArrayEquation, cells: Sequence[Mapping[str, int]]
 ) -> _Read | None:
-    """How ``node`` reads its array, from its values at every cell; ``None`` for a gather."""
+    """How ``node`` reads its array, from its index values (`_axis_column`); ``None`` for a gather."""
     constants = dict(equation.constants)
     shape = dict(equation.shapes)[".".join(node.base.parts)]
-    names = [index.name for index in equation.indices]
+    loop_names = [index.name for index in equation.indices]
     starts = [index.start for index in equation.indices]
-    values = [indices_at(node, cell, constants) for cell in cells]
+    values: Sequence[tuple[int, ...]] | None = None
     follows: list[int | None] = []
     first: list[int] = []
     moves: list[tuple[Op, int, int]] = []
     used: set[int] = set()
     for axis, extent in enumerate(shape):
-        column = [at[axis] for at in values]
+        if values is None and len(_loops_read(node.indices[axis], loop_names)) > 1:
+            values = [indices_at(node, cell, constants) for cell in cells]
+        column, axis_cells, candidates = _axis_column(
+            node.indices[axis], axis, equation, cells, values
+        )
         if len(set(column)) == 1:
             follows.append(None)
             first.append(column[0] - 1)
             continue
         found = False
-        for loop, name in enumerate(names):
+        for loop in candidates:
+            name = loop_names[loop]
             if loop in used:
                 continue
-            shifts = {at - cell[name] for at, cell in zip(column, cells, strict=True)}
+            shifts = {at - cell[name] for at, cell in zip(column, axis_cells, strict=True)}
             if len(shifts) == 1:
                 (k,) = shifts
                 follows.append(loop)
@@ -1959,7 +1999,7 @@ def _read_plan(  # noqa: C901 - a slice, a constant or a roll per axis
                 for k in range(1, extent):
                     if all(
                         at == (cell[name] + k - 1) % extent + 1
-                        for at, cell in zip(column, cells, strict=True)
+                        for at, cell in zip(column, axis_cells, strict=True)
                     ):
                         follows.append(loop)
                         first.append(0)
@@ -1974,7 +2014,7 @@ def _read_plan(  # noqa: C901 - a slice, a constant or a roll per axis
                         and k
                         and all(
                             at == min(max(cell[name] + k, 1), extent)
-                            for at, cell in zip(column, cells, strict=True)
+                            for at, cell in zip(column, axis_cells, strict=True)
                         )
                     ):
                         follows.append(loop)

@@ -172,6 +172,11 @@ def _integer(node: ir.Expr, cell: Mapping[str, int]) -> int:  # noqa: C901, PLR0
             raise CellError(message)
 
 
+def index_at(index: ir.Expr, known: Mapping[str, int]) -> int:
+    """The integer value of one index expression, with ``known`` giving every name it reads."""
+    return _integer(index, known)
+
+
 def indices_at(
     node: ir.Subscript, cell: Mapping[str, int], constants: Mapping[str, int] | None = None
 ) -> tuple[int, ...]:

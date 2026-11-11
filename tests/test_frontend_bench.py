@@ -23,13 +23,14 @@ def _bench() -> Any:
     return module
 
 
-def test_lower_makes_at_most_todays_per_cell_calls_on_a_small_box() -> None:
-    """216 cells, 14 subscripts each: 3024 ``indices_at`` calls today, plus 4 ``at_cell``.
+def test_lower_makes_no_per_cell_calls_on_the_box() -> None:
+    """Each subscript reads one loop index, so `_read_plan` evaluates it along that loop only.
 
-    The array-node plan lowers this number toward a constant; it must never grow.
+    What is left is 4 ``at_cell`` calls (the two end cells of each loop), at every size.
     """
-    stages = _bench().measure(6, run=False)
-    assert stages.cell_calls_in_lower <= 14 * 6**3 + 4
+    bench = _bench()
+    assert bench.measure(4, run=False).cell_calls_in_lower == 4
+    assert bench.measure(6, run=False).cell_calls_in_lower == 4
 
 
 def test_alias_detection_does_not_differentiate_a_grid_cell(
