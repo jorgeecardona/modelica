@@ -1,0 +1,59 @@
+---
+title: An explicit loop stays one array node from flatten to the tape
+status: open
+kind: story
+scope: L
+owner: jorgeecardona
+filed: 2026-11-11
+area: ir
+verify: test
+blocked_by: null
+fixed_in: null
+---
+
+# An explicit loop stays one array node from flatten to the tape
+
+Goal: a `for` loop over a state array goes through `flatten`, `causalize` and `vm.lower` as one
+node, not as one scalar equation per cell. This is phase 2 of the shaped-arrays note, kept
+narrow. It is not general array-aware Pantelides.
+
+## Why
+
+The front end costs more than integration. `scripts/frontend_bench.py`, wall time, on the
+engine, `stop=0.01` (`simulate` includes a second `lower`):
+
+| Box | `flatten` | `causalize` | `lower` | `simulate` | per-cell calls in `lower` |
+|---|---|---|---|---|---|
+| n = 13, 2197 states | 1.27 s | 2.04 s | 2.45 s | 2.83 s | |
+| n = 20, 8000 states | 5.05 s | 8.53 s | 11.19 s | 10.41 s | 112,004 |
+
+The cost is per cell. `causalize` builds 8000 scalar blocks, `_array_blocks` finds them again by
+position, and `vm.lower` reads every subscript at every cell (`_read_plan` calls `indices_at`
+14 times per cell).
+
+Done when: on the n = 20 box, `flatten + causalize + lower` is under 2 s, n = 20 costs less than
+twice n = 13, and the per-cell calls in `lower` do not grow with n.
+
+## Plan (Fable, 2026-11-11), one commit each, same bits as today in every step
+
+1. Benchmark script and a bound test on the per-cell calls (`tests/test_frontend_bench.py`).
+2. `Mode` holds the loop and expands its scalar blocks only on demand (SciPy path, diagrams).
+   Test: the expanded blocks equal today's for the box and TorusHeat.
+3. Coarse matching: a loop `der(x[i..]) = f`, with `x` written by no other equation, is one node
+   matched to `der(x)`. Anything else expands as today. Test: the same states and block order
+   across the corpus.
+4. BLT on the coarse graph; a cycle through an array node expands it. Test: a model with an
+   algebraic loop through an array gives the same `System`.
+5. `vm.lower` lowers from the loop template: no per-cell comparison or reads. Test: the same
+   tape and the same bits on the engine.
+6. The shaped Jacobian without the scalar path. Test: the same entries on the box.
+7. `flatten` keeps the loop instead of writing one equation per cell. Test: the `examples/`
+   twins still flatten equal.
+
+## Traps
+
+- `causalize` attaches arrays only when no alias was removed and nothing was differentiated.
+  Step 3 keeps that rule or carries a real index map; position does not survive.
+- Every reader of `mode.blocks` (SciPy fallback, events, diagrams) must be found before step 2.
+- Boundary cells written by separate equations make `x` partly loop-owned: refuse and expand.
+- Bit equality is the test oracle in every step.
