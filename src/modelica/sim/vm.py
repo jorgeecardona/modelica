@@ -1551,13 +1551,19 @@ def bandwidth_order(sparsity: Sequence[Sequence[int]]) -> tuple[int, ...]:
 
 
 def lower(
-    system: System, *, hoist: bool = True, arrays: bool = True, shaped: bool = True
+    system: System,
+    *,
+    hoist: bool = True,
+    arrays: bool = True,
+    shaped: bool = True,
+    early: bool = True,
 ) -> Program:
     """Write ``system``'s kernel functions as tapes.
 
     ``hoist=False`` leaves out `_hoist`, ``arrays=False`` writes every `ArrayBlock` as
-    scalar blocks, and ``shaped=False`` writes them with flat array opcodes instead of views,
-    so a test can check each changes no result.
+    scalar blocks, ``shaped=False`` writes them with flat array opcodes instead of views, and
+    ``early=False`` joins loads and stores (`_fuse`) only at the end, so a test can check each
+    changes no result.
 
     Raises `EmitError` for what the tape cannot express yet, with the emitter's message where
     the emitter would refuse too.
@@ -1598,7 +1604,7 @@ def lower(
         order=bandwidth_order(system.modes[0].sparsity),
         times=tuple(at) if any(slot >= 0 for slot in at) else (),
     )
-    program = _fold(program, lowering.constants)
+    program = _fold(program, lowering.constants, fuse=arrays and early)
     pool = sorted(lowering.constants, key=lowering.constants.__getitem__)
     program = _preload(program, lowering.registers)
     if hoist:
@@ -1804,25 +1810,39 @@ def dense(program: Program, values: Sequence[float], n: int) -> list[float]:
     return out
 
 
-def _fuse(function: Function) -> Function:
+def _fuse(function: Function, *, constant: frozenset[int] = frozenset()) -> Function:
     """``function`` with runs of adjacent ``LOAD_Y`` or ``STORE_OUT`` as one vector opcode.
 
     A run is instructions next to each other whose ``y`` or ``out`` slot and register both go up
     by one. It runs last, so no pass that reads register sets sees the vector forms. Newton
     bodies are left as they are. ``rhs``, ``observe`` and ``jacobian`` are fused.
+
+    A store of a register in ``constant`` stays alone: `_preload` later moves its source to
+    the constant pool, which would break the run.
     """
+    loads, stores = (Op.LOAD_Y, Op.VLOAD_Y), (Op.STORE_OUT, Op.VSTORE_OUT)
+
+    def size(i: Instr) -> int:
+        return i.c if i.op in (Op.VLOAD_Y, Op.VSTORE_OUT) else 1
+
     code: list[Instr] = []
     for i in function.code:
         last = code[-1] if code else None
-        if last is not None and i.op is Op.LOAD_Y and last.op in (Op.LOAD_Y, Op.VLOAD_Y):
-            n = 1 if last.op is Op.LOAD_Y else last.c
+        if last is not None and i.op in loads and last.op in loads:
+            n = size(last)
             if i.a == last.a + n and i.dst == last.dst + n:
-                code[-1] = Instr(Op.VLOAD_Y, last.dst, last.a, 0, n + 1)
+                code[-1] = Instr(Op.VLOAD_Y, last.dst, last.a, 0, n + size(i))
                 continue
-        if last is not None and i.op is Op.STORE_OUT and last.op in (Op.STORE_OUT, Op.VSTORE_OUT):
-            n = 1 if last.op is Op.STORE_OUT else last.c
+        if (
+            last is not None
+            and i.op in stores
+            and last.op in stores
+            and i.b not in constant
+            and last.b not in constant
+        ):
+            n = size(last)
             if i.a == last.a + n and i.b == last.b + n:
-                code[-1] = Instr(Op.VSTORE_OUT, 0, last.a, last.b, n + 1)
+                code[-1] = Instr(Op.VSTORE_OUT, 0, last.a, last.b, n + size(i))
                 continue
         code.append(i)
     return replace(function, code=tuple(code))
@@ -2303,6 +2323,8 @@ def _reads(i: Instr, function: Function) -> list[int]:  # noqa: PLR0911 - one re
         return list(_operands(i))
     if i.op in (Op.STORE_OUT, Op.STORE_W):
         return [i.b]
+    if i.op is Op.VSTORE_OUT:
+        return list(range(i.b, i.b + i.c))
     if i.op is Op.SOLVE:
         return [*range(i.a, i.a + i.c * i.c), *range(i.b, i.b + i.c)]
     if i.op is Op.NEWTON:
@@ -2457,7 +2479,7 @@ def _writes(i: Instr, function: Function) -> list[int]:
         return _array_writes(i, function.tables)
     if i.op in _REMOVABLE:
         return [i.dst]
-    if i.op is Op.SOLVE:
+    if i.op is Op.SOLVE or i.op is Op.VLOAD_Y:
         return list(range(i.dst, i.dst + i.c))
     if i.op is Op.NEWTON:
         block = function.newton[i.a]
@@ -2539,7 +2561,7 @@ def register_fields(i: Instr) -> tuple[str, ...]:
     return _FIELDS.get(i.op, ())
 
 
-def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901, PLR0912 - one walk
+def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901, PLR0912, PLR0915 - one walk
     """``program`` with its registers numbered in the order the functions first use them.
 
     `rhs` comes first, then the other functions the integrator calls, so what one `rhs` call
@@ -2594,6 +2616,11 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
             for i in code:
                 for name in register_fields(i):
                     touch(getattr(i, name))
+                if i.op in (Op.VLOAD_Y, Op.VSTORE_OUT):
+                    # Element by element, as the single loads and stores would be.
+                    first = i.dst if i.op is Op.VLOAD_Y else i.b
+                    for k in range(i.c):
+                        touch(first + k)
                 if i.op in (Op.VGATHER, Op.VSCATTER, Op.VSCATTER_ADD):
                     for r in function.tables[i.a : i.a + i.c]:
                         touch(r)
@@ -2621,6 +2648,17 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
             at(i.c) if "c" in fields else i.c,
         )
 
+    def instrs(code: Sequence[Instr]) -> tuple[Instr, ...]:
+        out: list[Instr] = []
+        for i in code:
+            if i.op is Op.VLOAD_Y:
+                out += [Instr(Op.LOAD_Y, at(i.dst + k), i.a + k) for k in range(i.c)]
+            elif i.op is Op.VSTORE_OUT:
+                out += [Instr(Op.STORE_OUT, 0, i.a + k, at(i.b + k)) for k in range(i.c)]
+            else:
+                out.append(instr(i))
+        return tuple(out)
+
     def move(function: Function) -> Function:
         newton = tuple(
             replace(
@@ -2634,7 +2672,7 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
             for block in function.newton
         )
         return Function(
-            tuple(instr(i) for i in function.code),
+            instrs(function.code),
             newton,
             tuple(at(r) for r in function.tables),
             tuple(replace(view, base=at(view.base)) for view in function.views),
@@ -2703,7 +2741,7 @@ def _peephole(function: Function) -> Function:
     return Function(tuple(code), function.newton, function.tables, function.views)
 
 
-def _fold(program: Program, pool: dict[float, int]) -> Program:
+def _fold(program: Program, pool: dict[float, int], *, fuse: bool = False) -> Program:
     """Fold constant subexpressions, then drop instructions whose result nothing reads.
 
     Compiled Rust gets both from LLVM. On the tape they are dispatches: on vowel_i a third of
@@ -2734,7 +2772,23 @@ def _fold(program: Program, pool: dict[float, int]) -> Program:
 
     program = every(lambda f: _peephole(_fold_function(f, pool)), program)
     pruned = iter(_prune(functions(program)))
-    return every(lambda _: next(pruned), program)
+    program = every(lambda _: next(pruned), program)
+    if not fuse:
+        return program
+
+    # Joined after `_prune` and `_peephole`, so the later passes walk about a quarter of the
+    # instructions; `_compact` numbers a joined run register by register and splits it again
+    # where the numbers stop going up by one, so the tape is the one the final `_fuse` gives.
+    def early(function: Function) -> Function:
+        held = frozenset(i.dst for i in function.code if i.op is Op.CONST)
+        return _fuse(function, constant=held)
+
+    return replace(
+        program,
+        rhs=tuple(early(f) for f in program.rhs),
+        observe=tuple(early(f) for f in program.observe),
+        jacobian=tuple(early(f) for f in program.jacobian),
+    )
 
 
 # --------------------------------------------------------------------------------------
