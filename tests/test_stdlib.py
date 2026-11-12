@@ -229,3 +229,54 @@ def test_every_shipped_domain_instantiates() -> None:
     for domain, decl in probes.items():
         flat = flatten([lib, parse(f"model P {decl} equation end P;")], "P")
         assert flat.variables, f"{domain} instantiated nothing"
+
+
+BUNDLED = Path(__file__).resolve().parent.parent / "src" / "modelica" / "stdlib" / "Modelica.mo"
+
+RC = """
+model RC
+  Modelica.Electrical.Analog.Basic.Resistor r(R=1000);
+  Modelica.Electrical.Analog.Basic.Capacitor c(C=1e-3, v(start=1));
+  Modelica.Electrical.Analog.Basic.Ground g;
+equation
+  connect(r.p, c.p);
+  connect(r.n, c.n);
+  connect(c.n, g.p);
+end RC;
+"""
+
+
+def test_a_model_on_msl_names_flattens_with_no_library_given() -> None:
+    """`flatten` adds the bundled ``Modelica`` package: the RC discharge is ``exp(-t / RC)``."""
+    system = causalize(flatten([parse(RC, "RC.mo")], "RC"))
+    result = simulate(system, stop=1.0, times=np.linspace(0.0, 1.0, 11))
+    np.testing.assert_allclose(result["c.v"], np.exp(-np.linspace(0.0, 1.0, 11)), rtol=1e-4)
+
+
+def test_a_users_own_modelica_package_wins_over_the_bundled_one() -> None:
+    """A program that defines ``Modelica`` resolves names in it, not in the bundled slice."""
+    own = """
+package Modelica
+  package Electrical
+    package Analog
+      package Basic
+        model Source
+          Real v(start = 2);
+        equation
+          der(v) = -v;
+        end Source;
+      end Basic;
+    end Analog;
+  end Electrical;
+end Modelica;
+model Use
+  Modelica.Electrical.Analog.Basic.Source s;
+end Use;
+"""
+    flat = flatten([parse(own, "Own.mo")], "Use")
+    assert [v.name for v in flat.variables if not v.name.startswith("der")] == ["s.v"]
+
+
+def test_the_wheel_and_the_editor_ship_the_same_slice() -> None:
+    """``editors/vscode/stdlib`` is a copy of the packaged file; the two must not drift."""
+    assert BUNDLED.read_text(encoding="utf-8") == STDLIB.read_text(encoding="utf-8")

@@ -126,7 +126,9 @@ print(picture.to_dot())           # or source for Graphviz
   FMI calling sequence as a state machine. Importing or exporting a whole FMU is not done.
 - **A bundled Modelica Standard Library slice** under the real `Modelica.*` names: `Units.SI`,
   `Electrical.Analog`, `Mechanics.Translational` and `Rotational`, `Thermal.HeatTransfer`, and
-  a piece of `Blocks`. A curated subset, not the whole library.
+  a piece of `Blocks`. A curated subset, not the whole library. It ships in the wheel and
+  `flatten` adds it on its own, so `Modelica.Electrical.Analog.Basic.Resistor` resolves after
+  `pip install modelica`; a `Modelica` package you pass yourself is used instead.
 
 ## The layers
 

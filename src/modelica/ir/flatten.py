@@ -32,6 +32,8 @@ from __future__ import annotations
 import math
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
+from functools import cache
+from importlib.resources import files
 from itertools import pairwise, product
 from typing import TYPE_CHECKING, Final, Literal, NamedTuple
 
@@ -3441,10 +3443,27 @@ class _Flattener:
 
 
 def _with_prelude(program: ir.Program) -> ir.Program:
-    """The program with the predefined enumerations added, where it does not define them itself."""
+    """The program with the predefined enumerations and the bundled ``Modelica`` package added.
+
+    Each is added only where the program does not define a class of that name, so a user's own
+    ``Modelica`` package (a full MSL, say) is the one that resolves.
+    """
     defined = {cls.name for cls in program.classes}
-    missing = tuple(cls for cls in _PRELUDE if cls.name not in defined)
+    missing = tuple(cls for cls in (*_PRELUDE, *_bundled()) if cls.name not in defined)
     return ir.Program(missing + program.classes) if missing else program
+
+
+@cache
+def _bundled() -> tuple[ir.Class, ...]:
+    """The bundled slice of the Modelica Standard Library (``modelica/stdlib/Modelica.mo``).
+
+    Parsed once per process. It holds real MSL names (``Modelica.Electrical.Analog.Basic.
+    Resistor``), so a model written against the MSL flattens after ``pip install modelica``.
+    """
+    from modelica.lang import parse  # noqa: PLC0415 - the parser imports this package
+
+    text = (files("modelica") / "stdlib" / "Modelica.mo").read_text(encoding="utf-8")
+    return parse(text, "Modelica.mo").classes
 
 
 _CROSSING_OPS = frozenset({"<", "<=", ">", ">="})

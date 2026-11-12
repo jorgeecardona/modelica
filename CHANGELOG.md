@@ -6,6 +6,8 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
+- The bundled Modelica Standard Library slice ships in the wheel and `flatten` adds it on its own: a model on `Modelica.*` names runs after `pip install modelica` with no library argument. Before, it was only in the VS Code extension.
+- `vm.lower` is faster on large array models: the 8000-cell box front end takes 9.1 s, was about 25 s.
 - Array states with a shape (`Real T[nx, ny, nz]`) run on the engine as views of one block: a stencil read is a slice or a roll, with no gather table. TorusHeat's `rhs` is 14 instructions, was 18 with 384 table entries.
 - Array loops with `if`, relations, `^`, `max`, `min`, `mod`, `not` and the loop index as a value run as shaped opcodes, bit for bit the scalar result.
 - The jacobian of an array loop is built from the shaped tape and stores each stencil offset in one instruction; TorusHeat's is 31 instructions, was 1090 from scalar blocks.
