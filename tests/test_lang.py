@@ -535,7 +535,7 @@ def test_a_leading_dot_in_an_expression_is_global_scope() -> None:
     a, y = program.classes[0].components
     assert a.modification.value == ir.Ref(("Modelica", "Constants", "pi"))
     assert isinstance(y.modification.value, ir.Call)
-    assert y.modification.value.name == "sqrt"
+    assert y.modification.value.name == ".sqrt"  # a call keeps the dot: global scope
 
 
 def test_an_output_list_statement_takes_subscripted_targets() -> None:

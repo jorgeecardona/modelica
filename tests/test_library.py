@@ -106,3 +106,34 @@ def test_an_rc_model_runs_on_the_real_msl() -> None:
         model, libraries=[MSL / "Modelica", MSL / "ModelicaServices"], stop=1.0, times=[0, 1]
     )
     np.testing.assert_allclose(result["c.v"], [1.0, np.exp(-1.0)], rtol=1e-4)
+
+
+@pytest.mark.skipif(not (MSL / "Modelica" / "package.mo").exists(), reason="no MSL 4.1.0 cache")
+def test_msl_math_functions_call_the_builtin_not_themselves() -> None:
+    """``Modelica.Math.sin`` is ``y := .sin(u)``: the dot names the built-in, not the function."""
+    import numpy as np  # noqa: PLC0415
+
+    from modelica.sim import causalize, simulate  # noqa: PLC0415
+
+    model = (
+        "model M\n  Real a = Modelica.Math.sin(time);\n  Real b = Modelica.Math.exp(time);\n"
+        "  Real c = Modelica.Math.atan2(time, 1.0);\nend M;\n"
+    )
+    library = closure([MSL / "Modelica", MSL / "ModelicaServices"], [model])
+    system = causalize(flatten([library, parse(model)], "M"))
+    result = simulate(system, stop=1.0, times=[0.0, 0.5, 1.0])
+    t = np.array([0.0, 0.5, 1.0])
+    np.testing.assert_allclose(result["a"], np.sin(t), rtol=1e-12)
+    np.testing.assert_allclose(result["b"], np.exp(t), rtol=1e-12)
+    np.testing.assert_allclose(result["c"], np.arctan2(t, 1.0), rtol=1e-12)
+
+
+def test_a_global_call_inside_a_function_of_the_same_name_is_the_builtin() -> None:
+    """A user ``function sin`` whose body is ``y := .sin(u)`` does not call itself."""
+    source = (
+        "package P\n  function sin\n    input Real u;\n    output Real y;\n  algorithm\n"
+        "    y := .sin(u);\n  end sin;\nend P;\n"
+        "model M\n  Real a = P.sin(1.0);\nend M;\n"
+    )
+    flat = flatten([parse(source)], "M")
+    assert "sin" in repr(flat.equations[0])

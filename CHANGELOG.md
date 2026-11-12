@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
+- Fixed: a call with a leading dot (`.sin(u)`) is the global function or the built-in, so `Modelica.Math.sin` no longer calls itself. It blocked 54 MSL examples.
 - A model on the real Modelica Standard Library 4.1.0 runs: `run(model, libraries=[".../Modelica", ".../ModelicaServices"])`. An RC circuit reads 24 library files and loads in about 3 s.
 - `modelica.lang.library.closure` reads a library stored as `package.mo` directories, parsing only the files a model's names reach (lexical lookup, followed per class); `load` reads the whole tree. `run` takes such a directory in `paths` or `libraries=[...]`; a `Modelica` directory replaces the bundled slice. `python -m modelica.sim` takes `--lib DIR` and `--modelicapath`.
 - `end` in a subscript (`x[end]`, `x[end - 1]`, `x[2:end]`) is the size of the dimension it indexes; a leading dot in an expression name (`.Modelica.Constants.pi`) is global scope. Both are written in the Modelica Standard Library. An output list in an algorithm takes subscripted targets, `(e[:, 1], info) := f(A);`.

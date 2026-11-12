@@ -1488,7 +1488,12 @@ def _inline_calls(  # noqa: C901, PLR0911 -- one case per node type, as its neig
             call = ir.Call(name, tuple(go(a) for a in args), tuple((k, go(v)) for k, v in named))
             if name == "homotopy":
                 call = _homotopy_positional(call)
-            found = scope.function(name)
+            if name.startswith("."):
+                # Global scope: a top-level function of that name, else the built-in.
+                found = Scope(scope.program).function(name[1:])
+                call = ir.Call(name[1:], call.args, call.named)
+            else:
+                found = scope.function(name)
             return call if found is None else _inline(found, scope, call, depth)
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             return ir.Binary(op, go(lhs), go(rhs))

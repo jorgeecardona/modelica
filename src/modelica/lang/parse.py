@@ -337,10 +337,15 @@ class _Parser:
                 args, named = self._arguments()
                 return ir.Call(token.text, args, named)
             case Kind.OP if token.text == "." and self._ahead(1).kind is Kind.NAME:
-                # `.Modelica.Constants.pi`, `.sqrt(x)`: a leading dot means global scope, which
-                # the name already is here, as in a type name (`_dotted`).
+                # `.Modelica.Constants.pi`, `.sin(u)`: a leading dot means global scope. A name
+                # reads the same either way here; a call keeps the dot (`.sin`), because
+                # `Modelica.Math.sin` calls the built-in `.sin` from inside a function of the
+                # same name, and lexical lookup would find the function itself.
                 self.at += 1
-                return self._primary()
+                inner = self._primary()
+                if isinstance(inner, ir.Call):
+                    return ir.Call(f".{inner.name}", inner.args, inner.named)
+                return inner
             case Kind.NAME:
                 where = self._at(token)
                 parts = self._dotted()
