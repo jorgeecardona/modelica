@@ -1,5 +1,7 @@
 """Run a model: flatten it, causalize it, simulate it.
 
+* `run`: ``.mo`` files in, a `Result` out, in one call; stop time from the model's
+  ``experiment`` annotation when not given.
 * `flatten`: source, class or package in, a `FlatModel` out.
 * `causalize`: flat model in, a `System` out (states and blocks in evaluation order).
 * `simulate`: system in, a `Result` out. It runs on the precompiled engine when installed,

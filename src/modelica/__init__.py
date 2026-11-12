@@ -21,6 +21,6 @@ standards it implements. This is an independent open-source implementation, not
 affiliated with or endorsed by the Modelica Association.
 """
 
-__version__ = "0.1.22"
+__version__ = "0.1.23"
 
 __all__ = ["__version__"]

@@ -22,6 +22,7 @@ SURFACE = {
     "flatten",
     "grid",
     "read",
+    "run",
     "simulate",
     "steady",
     "sweep",
