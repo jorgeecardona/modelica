@@ -100,3 +100,13 @@ def test_the_command_line_prints_csv_without_an_output_file(tmp_path: Path) -> N
     lines = subprocess.run(command, check=True, capture_output=True, text=True).stdout.splitlines()  # noqa: S603
     assert lines[0].split(",")[0] == "time"
     assert len(lines) == 4
+
+
+def test_import_modelica_loads_no_numpy_and_run_is_there() -> None:
+    """``modelica.run`` is loaded on first use; the bare import stays NumPy-free."""
+    code = (
+        "import sys, modelica\n"
+        "assert 'numpy' not in sys.modules\n"
+        "assert modelica.run.__module__ == 'modelica.sim.files'\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)  # noqa: S603

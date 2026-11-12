@@ -59,7 +59,7 @@ def _parameters(pairs: list[str]) -> dict[str, float]:
 def _csv(result: Result, stream: TextIO) -> None:
     table = np.vstack([result.time, result.values]).T
     header = ",".join(("time", *result.names))
-    np.savetxt(stream, table, delimiter=",", header=header, comments="")
+    np.savetxt(stream, table, fmt="%.10g", delimiter=",", header=header, comments="")
 
 
 def main(argv: list[str] | None = None) -> None:

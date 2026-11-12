@@ -62,7 +62,41 @@ not promised: `modelica.fmi`, `modelica.ssp`, and the `modelica.sim` modules not
 
 ## Quickstart
 
-From Modelica source to a trajectory in four values. Each line is a stage you can stop at.
+One call from a `.mo` file to a trajectory. Save this as `Cooling.mo`:
+
+```modelica
+model NewtonCooling "A hot object cooling toward ambient"
+  parameter Real T_amb = 25;
+  parameter Real k = 0.5;
+  Real T(start = 90, fixed = true);
+equation
+  der(T) = -k * (T - T_amb);
+  annotation(experiment(StopTime = 10));
+end NewtonCooling;
+```
+
+```python
+import modelica
+
+result = modelica.run("Cooling.mo", parameters={"k": 1.0}, times=[0, 10])
+print(result["T"])   # [90.         25.00295111]
+```
+
+The stop time comes from `experiment(StopTime = 10)`; pass `stop=` to change it. The same run
+from the shell, as CSV (`-o out.mat` writes a Dymola `.mat`):
+
+```bash
+python -m modelica.sim Cooling.mo --points 3 --set k=1
+```
+
+```text
+time,T_amb,k,T,der_T
+0,25,1,90,-65
+5,25,1,25.43796545,-0.4379654537
+10,25,1,25.00295111,-0.00295111351
+```
+
+Under `run` are four stages, and each is a value you can stop at and inspect:
 
 ```python
 from modelica.lang import parse

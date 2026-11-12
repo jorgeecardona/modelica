@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
+- `modelica.run` is the same `run`, loaded on first use: `import modelica` still loads no NumPy. The README quickstart starts with it.
 - `modelica.sim.run(*paths, model=None, stop=...)` reads `.mo` files and returns the `Result` in one call; the libraries go in `paths` too, and `model` can be left out when the files hold one model. `stop`, `start` and `tolerance` default to the model's `experiment(StopTime, StartTime, Tolerance)` annotation. `parameters={"r.R": 2.0}` overrides parameters by name.
 - `python -m modelica.sim model.mo --stop 1 --set k=2 -o out.mat` simulates from the shell; `.csv` by suffix, CSV to stdout with no `-o`.
 - An unknown parameter name is refused with the close names (`did you mean k?`).
