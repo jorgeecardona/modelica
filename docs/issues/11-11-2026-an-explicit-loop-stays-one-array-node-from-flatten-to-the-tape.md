@@ -72,3 +72,28 @@ single `LOAD_Y`/`STORE_OUT`). It gives the same tape on the box but not on 26 co
 numbered apart and the final `_fuse` no longer joins them (Lorenz `jacobian`: 27 against 25
 instructions). Also `_hoist` makes loads adjacent that were not at `_fold`. A fix must make
 `_compact` number a range in the order the late path would, or accept different tapes.
+
+## Where the incremental track stops (2026-11-12)
+
+Since the evening entry: early fusion done (9f94220, `_compact` numbers a joined run register by
+register, tapes identical on the corpus) and `_compact` numbers a group in one update (3be1452).
+
+Box n = 20, quiet machine, wall: `flatten` 1.90 s, `causalize` 2.28 s, `lower` 4.94 s,
+integration about 0.6 s. Total 9.1 s, from about 25 s on 2026-11-11. n = 13: 0.52, 0.49,
+1.24 s.
+
+`lower` by pass (cProfile, Fable): `_fold` 1.13 s, `_jacobian` 1.06 s, `_compact` 0.88 s,
+`_fuse` 0.24 s. Pass input: jacobian 64k instructions (53,600 stores, one per nonzero), initial
+32k, observe 24k, rhs 16k.
+
+Parked, with the reason:
+
+- Vectorising `initial`: removing it entirely saves at most 0.47 s. Do it after step 7, when the
+  initial loop arrives as an array node.
+- `rhs` and `observe` writing `VLOAD_Y`/`VSTORE_OUT` directly: about 0.3 to 0.4 s, because the
+  jacobian stores stay one per nonzero, and `_prune` would need a rule to split a partly read
+  `VLOAD_Y` to keep tapes identical.
+
+What is left is structural, each estimated at 1 to 2 s: step 6 first (`_Tangents` seeds a
+`VLOAD_Y` run and stores runs through `VSCATTER`; test: the same jacobian entries on the box),
+then steps 2 and 3.
