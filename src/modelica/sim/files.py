@@ -9,6 +9,7 @@ from modelica.ir.causalize import causalize
 from modelica.ir.evaluate import evaluate
 from modelica.ir.source import flatten, only_model
 from modelica.lang import parse
+from modelica.lang.library import closure
 from modelica.sim.solve import SimulationError, simulate
 from modelica.sim.sweep import vector
 
@@ -26,13 +27,18 @@ def run(
     *paths: str | Path,
     model: str | None = None,
     stop: float | None = None,
+    libraries: Sequence[str | Path] = (),
     parameters: Mapping[str, float] | None = None,
     **options: Any,  # noqa: ANN401 - passed to `simulate` unchanged
 ) -> Result:
     """Simulate a model read from ``paths`` and return its `Result`.
 
-    Give the libraries as well as the model, as `modelica.diagram.of` takes them. ``model``
-    names the class; leave it out when the files hold one model. ``options`` go to
+    Give the libraries as well as the model, as `modelica.diagram.of` takes them: a ``.mo``
+    file, or a directory holding a ``package.mo`` tree (the layout of the Modelica Standard
+    Library), in ``paths`` or in ``libraries``. Only the files of a directory library that the
+    model's names reach are parsed (`modelica.lang.library.closure`). A ``Modelica`` directory
+    replaces the bundled slice. ``model`` names the class; leave it out when the files hold
+    one model. ``options`` go to
     `simulate` unchanged (``start``, ``tolerance``, ``times``, ``backend``, ...).
 
     ``stop``, ``start`` and ``tolerance`` not given are taken from the model's
@@ -45,9 +51,14 @@ def run(
         SimulationError: no ``stop``, and the model has no ``experiment(StopTime)``.
         EmitError: a name in ``parameters`` is not a parameter; the message lists close ones.
     """
-    programs = [parse(Path(path).read_text(encoding="utf-8"), str(path)) for path in paths]
+    files = [Path(path) for path in paths if not Path(path).is_dir()]
+    roots = [Path(path) for path in (*paths, *libraries) if Path(path).is_dir()]
+    texts = [path.read_text(encoding="utf-8") for path in files]
+    programs = [parse(text, str(path)) for text, path in zip(texts, files, strict=True)]
     if model is None:
-        model = only_model(programs, ", ".join(str(path) for path in paths))
+        model = only_model(programs, ", ".join(str(path) for path in files))
+    if roots:
+        programs.append(closure(roots, texts))
     given = {**options, **({} if stop is None else {"stop": stop})}
     settings: dict[str, Any] = {**experiment(programs, model), **given}
     if "stop" not in settings:

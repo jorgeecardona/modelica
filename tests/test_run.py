@@ -110,3 +110,20 @@ def test_import_modelica_loads_no_numpy_and_run_is_there() -> None:
         "assert modelica.run.__module__ == 'modelica.sim.files'\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True)  # noqa: S603
+
+
+def test_a_model_on_a_directory_library_equals_its_single_file_form(tmp_path: Path) -> None:
+    """``Lib/package.mo`` + ``Lib/Decay.mo`` as a directory gives the run a one-file ``Lib`` gives."""
+    (tmp_path / "Lib").mkdir()
+    (tmp_path / "Lib" / "package.mo").write_text("package Lib\nend Lib;\n")
+    (tmp_path / "Lib" / "Decay.mo").write_text("within Lib;\n" + DECAY)
+    (tmp_path / "Lib" / "Broken.mo").write_text("never read")
+    single = tmp_path / "single.mo"
+    single.write_text("package Lib\n" + DECAY + "end Lib;\n")
+    use = tmp_path / "use.mo"
+    use.write_text("model Use\n  Lib.Decay d(k = 2);\nend Use;\n")
+    times = [0.0, 0.5, 1.0]
+    from_directory = run(use, libraries=[tmp_path / "Lib"], stop=1.0, times=times)
+    from_file = run(use, single, model="Use", stop=1.0, times=times)
+    np.testing.assert_array_equal(from_directory["d.x"], from_file["d.x"])
+    assert run(use, tmp_path / "Lib", stop=1.0, times=times)["d.x"][-1] == from_directory["d.x"][-1]

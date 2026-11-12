@@ -6,7 +6,7 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
-- `modelica.lang.library.closure` reads a library stored as `package.mo` directories, parsing only the files a model's names reach (lexical lookup on the file tree); `load` reads the whole tree.
+- `modelica.lang.library.closure` reads a library stored as `package.mo` directories, parsing only the files a model's names reach (lexical lookup on the file tree); `load` reads the whole tree. `run` takes such a directory in `paths` or `libraries=[...]`; a `Modelica` directory replaces the bundled slice.
 - `end` in a subscript (`x[end]`, `x[end - 1]`, `x[2:end]`) is the size of the dimension it indexes; a leading dot in an expression name (`.Modelica.Constants.pi`) is global scope. Both are written in the Modelica Standard Library.
 - `modelica.run` is the same `run`, loaded on first use: `import modelica` still loads no NumPy. The README quickstart starts with it.
 - `modelica.sim.run(*paths, model=None, stop=...)` reads `.mo` files and returns the `Result` in one call; the libraries go in `paths` too, and `model` can be left out when the files hold one model. `stop`, `start` and `tolerance` default to the model's `experiment(StopTime, StartTime, Tolerance)` annotation. `parameters={"r.R": 2.0}` overrides parameters by name.
