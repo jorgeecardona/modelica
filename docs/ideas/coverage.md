@@ -42,6 +42,35 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-11-12, through `run` and the per-class library closure
+
+Measured with `scripts/reach.py`: each example is loaded the way a user loads it, with
+`modelica.lang.library.closure` reading only the files its names reach, then flattened,
+causalized and simulated on the default backend. The numbers are not comparable one to one
+with the rows below: those parsed the whole library first, so a broken file anywhere did not
+stop an example that never used it, while a file the closure reaches must parse whole.
+
+| last stage reached | models | of 430 |
+| ------------------ | -----: | -----: |
+| nothing loads      |    175 | 40.7 % |
+| loaded             |    194 | 45.1 % |
+| flattened          |     29 |  6.7 % |
+| causalized         |      8 |  1.9 % |
+| simulated          |     24 |  5.6 % |
+
+Median load 2.21 s. All 24 simulated on SciPy (`backend="python"`), none on the engine.
+
+Blockers, most examples first (refusal text with model names blanked):
+
+| examples | blocker |
+| -------: | ------- |
+| 95 | a subscript on an inner component is not supported yet (`a[i].b`) |
+| 54 | `sin` is called more than N deep; is it recursive? |
+| 53 | nothing named `Clock` is in scope (the synchronous `Clock` type) |
+| 41 | a subscript inside a connect endpoint must be on the last name |
+| 38 | expected `;`, found operator `[` |
+| 19 | array equations are not supported yet |
+
 ### 2026-09-11, after a relation differentiates to zero for a variable it does not contain
 
 A Jacobian entry is taken for each variable a torn algebraic block solves for. When a residual carries
