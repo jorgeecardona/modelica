@@ -42,6 +42,24 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-11-12, after a call with a leading dot reaches the built-in
+
+`Modelica.Math.sin` is written `y := .sin(u)`. The leading dot was dropped, so the call found
+the function itself and recursed. A dotted call now resolves from the top level, then to the
+built-in.
+
+| last stage reached | models | of 430 |
+| ------------------ | -----: | -----: |
+| nothing loads      |    175 | 40.7 % |
+| loaded             |    167 | 38.8 % |
+| flattened          |     39 |  9.1 % |
+| causalized         |     14 |  3.3 % |
+| simulated          |     35 |  8.1 % |
+
+Measured in a source checkout with no engine wheel installed, so `backend="auto"` ran all 35 on
+SciPy. Top blockers now: 95 a subscript on an inner component, 66 `Clock`, 41 a subscript in a
+connect endpoint, 38 `expected ';', found '['`.
+
 ### 2026-11-12, through `run` and the per-class library closure
 
 Measured with `scripts/reach.py`: each example is loaded the way a user loads it, with
