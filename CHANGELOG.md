@@ -7,6 +7,7 @@ All notable changes to this project are documented here. Versions follow
 ## Unreleased
 
 - `modelica.sim.run(*paths, model=None, stop=...)` reads `.mo` files and returns the `Result` in one call; the libraries go in `paths` too, and `model` can be left out when the files hold one model. `stop`, `start` and `tolerance` default to the model's `experiment(StopTime, StartTime, Tolerance)` annotation. `parameters={"r.R": 2.0}` overrides parameters by name.
+- `python -m modelica.sim model.mo --stop 1 --set k=2 -o out.mat` simulates from the shell; `.csv` by suffix, CSV to stdout with no `-o`.
 - An unknown parameter name is refused with the close names (`did you mean k?`).
 - The bundled Modelica Standard Library slice ships in the wheel and `flatten` adds it on its own: a model on `Modelica.*` names runs after `pip install modelica` with no library argument. Before, it was only in the VS Code extension.
 - A `Modelica.*` class the slice does not carry (`Modelica.Fluid...`) is refused with a message that names what the slice has and says to pass the full library.

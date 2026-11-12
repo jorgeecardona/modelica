@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -9,7 +11,7 @@ import pytest
 
 from modelica.ir.source import AmbiguousModelError
 from modelica.lang import parse
-from modelica.sim import SimulationError, causalize, flatten, run, simulate
+from modelica.sim import SimulationError, causalize, flatten, read, run, simulate
 from modelica.sim.emit import EmitError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,3 +78,25 @@ def test_a_misspelled_parameter_is_refused_with_the_close_name(tmp_path: Path) -
     source.write_text(DECAY)
     with pytest.raises(EmitError, match="did you mean k"):
         run(source, stop=1.0, parameters={"kk": 2.0})
+
+
+def test_the_command_line_writes_a_mat_file_read_back_equal(tmp_path: Path) -> None:
+    """``python -m modelica.sim ... -o out.mat`` writes what `read` loads, with ``--set`` applied."""
+    source = tmp_path / "decay.mo"
+    source.write_text(DECAY)
+    out = tmp_path / "decay.mat"
+    command = [sys.executable, "-m", "modelica.sim", str(source), "--stop", "1"]
+    subprocess.run([*command, "--set", "k=2", "--points", "11", "-o", str(out)], check=True)  # noqa: S603
+    loaded = read(out)
+    expected = run(source, stop=1.0, points=11, parameters={"k": 2.0})
+    np.testing.assert_allclose(loaded["x"], expected["x"], rtol=1e-12)
+
+
+def test_the_command_line_prints_csv_without_an_output_file(tmp_path: Path) -> None:
+    """No ``-o``: a ``time`` column, then the variables, one row per point."""
+    source = tmp_path / "decay.mo"
+    source.write_text(DECAY)
+    command = [sys.executable, "-m", "modelica.sim", str(source), "--stop", "1", "--points", "3"]
+    lines = subprocess.run(command, check=True, capture_output=True, text=True).stdout.splitlines()  # noqa: S603
+    assert lines[0].split(",")[0] == "time"
+    assert len(lines) == 4
