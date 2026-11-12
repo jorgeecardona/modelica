@@ -2605,9 +2605,9 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
         if r >= base or r in number:
             return
         if r in group:
+            # A group is numbered whole on its first touch, so none of it is numbered yet.
             first, last = group[r]
-            for k in range(first, last):
-                number.setdefault(k, len(number))
+            number.update(zip(range(first, last), itertools.count(len(number))))
         else:
             number[r] = len(number)
 
@@ -2619,8 +2619,9 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
                 if i.op in (Op.VLOAD_Y, Op.VSTORE_OUT):
                     # Element by element, as the single loads and stores would be.
                     first = i.dst if i.op is Op.VLOAD_Y else i.b
-                    for k in range(i.c):
-                        touch(first + k)
+                    for k in range(first, first + i.c):
+                        if k not in number:
+                            touch(k)
                 if i.op in (Op.VGATHER, Op.VSCATTER, Op.VSCATTER_ADD):
                     for r in function.tables[i.a : i.a + i.c]:
                         touch(r)
