@@ -14,8 +14,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from modelica.ir.causalize import causalize
+from modelica.ir.flatten import FlattenError
 from modelica.lang import parse
 from modelica.sim import flatten, simulate
 
@@ -280,3 +282,10 @@ end Use;
 def test_the_wheel_and_the_editor_ship_the_same_slice() -> None:
     """``editors/vscode/stdlib`` is a copy of the packaged file; the two must not drift."""
     assert BUNDLED.read_text(encoding="utf-8") == STDLIB.read_text(encoding="utf-8")
+
+
+def test_a_class_outside_the_slice_says_the_slice_is_partial() -> None:
+    """``Modelica.Fluid`` is real MSL that the slice does not carry; the error says so."""
+    model = "model M\n  Modelica.Fluid.Pipes.StaticPipe p;\nend M;\n"
+    with pytest.raises(FlattenError, match="not in the bundled slice"):
+        flatten([parse(model, "M.mo")], "M")

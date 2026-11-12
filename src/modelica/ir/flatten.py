@@ -140,6 +140,14 @@ class Scope:
         for part in rest:
             nested = next((c for c in found.cls.classes if c.name == part), None)
             if nested is None:
+                if any(found.chain[-1] is cls for cls in _bundled()):
+                    raise FlattenError(
+                        f"{name!r} is not in the bundled slice of the Modelica Standard Library"
+                        f" ({found.cls.name!r} has no {part!r}). The slice has Units.SI,"
+                        " Electrical.Analog, Mechanics.Translational and Rotational,"
+                        " Thermal.HeatTransfer and part of Blocks; pass the full library as a"
+                        " source to use the rest."
+                    )
                 raise FlattenError(f"{found.cls.name!r} has no nested class {part!r}")
             found = Found(nested, (nested, *found.chain))
         return found
