@@ -523,3 +523,16 @@ def test_a_short_class_carries_its_base_prefix_causality() -> None:
     assert cls.causality == "input"
     assert parse(unparse(program)) == program
     assert unparse(program) == source
+
+
+def test_a_leading_dot_in_an_expression_is_global_scope() -> None:
+    """``.Modelica.Constants.pi`` and ``.sqrt(x)`` (MSL writes both) read as the plain names."""
+    from modelica.ir import nodes as ir  # noqa: PLC0415
+
+    program = parse(
+        "model M\n  parameter Real a = .Modelica.Constants.pi;\n  Real y = .sqrt(4.0);\nend M;\n"
+    )
+    a, y = program.classes[0].components
+    assert a.modification.value == ir.Ref(("Modelica", "Constants", "pi"))
+    assert isinstance(y.modification.value, ir.Call)
+    assert y.modification.value.name == "sqrt"

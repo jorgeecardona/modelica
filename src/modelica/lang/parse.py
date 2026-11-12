@@ -331,6 +331,11 @@ class _Parser:
                 self.at += 1
                 args, named = self._arguments()
                 return ir.Call(token.text, args, named)
+            case Kind.OP if token.text == "." and self._ahead(1).kind is Kind.NAME:
+                # `.Modelica.Constants.pi`, `.sqrt(x)`: a leading dot means global scope, which
+                # the name already is here, as in a type name (`_dotted`).
+                self.at += 1
+                return self._primary()
             case Kind.NAME:
                 where = self._at(token)
                 parts = self._dotted()
