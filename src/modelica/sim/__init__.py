@@ -34,6 +34,7 @@ from modelica.sim.sweep import sweep as sweep
 from modelica.sim.view import View as View
 
 if TYPE_CHECKING:
+    from modelica.sim.files import run as run
     from modelica.sim.solve import EngineFallbackWarning as EngineFallbackWarning
     from modelica.sim.solve import SimulationError as SimulationError
     from modelica.sim.solve import simulate as simulate
@@ -54,6 +55,7 @@ __all__ = [
     "flatten",
     "grid",
     "read",
+    "run",
     "simulate",
     "steady",
     "sweep",
@@ -64,6 +66,10 @@ _LAZY = frozenset({"EngineFallbackWarning", "SimulationError", "simulate"})
 
 def __getattr__(name: str) -> Any:  # noqa: ANN401 - a module __getattr__ is untyped by nature
     """Defer the SciPy-backed names so importing this package stays dependency-free."""
+    if name == "run":
+        from modelica.sim.files import run  # noqa: PLC0415 - it imports the solver
+
+        return run
     if name in _LAZY:
         from modelica.sim import solve  # noqa: PLC0415 - the whole point of the indirection
 

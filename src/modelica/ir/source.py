@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
     from modelica.ir.flat import FlatModel
 
-__all__ = ["Source", "flatten", "to_program"]
+__all__ = ["AmbiguousModelError", "Source", "flatten", "only_model", "to_program"]
 
 type Source = ir.Program | ir.Class | build.Package | build.TypeRef
 """Anything that names classes: an IR value, or a :mod:`modelica.build` class or package."""
@@ -61,3 +61,26 @@ def flatten(source: Source | Sequence[Source], model: str) -> FlatModel:
     ``"Electrical.Examples.Charging"``.
     """
     return _flatten(to_program(source), model)
+
+
+class AmbiguousModelError(Exception):
+    """The files hold no model, or more than one, and no model name was given."""
+
+
+def only_model(programs: Sequence[ir.Program], where: str) -> str:
+    """The name of the one model or block in ``programs``; ``where`` names them in the error.
+
+    Raises:
+        AmbiguousModelError: there is none, or more than one. The message lists the choices.
+    """
+    names = [
+        cls.name
+        for program in programs
+        for cls in program.classes
+        if cls.restriction in ("model", "block")
+    ]
+    if len(names) == 1:
+        return names[0]
+    if not names:
+        raise AmbiguousModelError(f"no model is defined in {where}")
+    raise AmbiguousModelError(f"{where} defines {len(names)} models; name one of {names}")

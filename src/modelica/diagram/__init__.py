@@ -33,7 +33,6 @@ This package adds no dependency. It draws the SVG itself.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from modelica.diagram.build import blocks as blocks
 from modelica.diagram.build import incidence as incidence
@@ -45,10 +44,9 @@ from modelica.diagram.graph import Port as Port
 from modelica.diagram.render import dot as dot
 from modelica.diagram.render import mermaid as mermaid
 from modelica.diagram.render import svg as svg
+from modelica.ir.source import AmbiguousModelError as AmbiguousModelError
+from modelica.ir.source import only_model
 from modelica.lang import parse
-
-if TYPE_CHECKING:
-    from modelica.ir import nodes as ir
 
 __all__ = [
     "Edge",
@@ -65,10 +63,6 @@ __all__ = [
 ]
 
 
-class AmbiguousModelError(Exception):
-    """The files hold more than one model and you did not say which one to draw."""
-
-
 def of(*paths: str | Path, model: str | None = None, depth: int = 1) -> Graph:
     """Read Modelica files and draw one model from them.
 
@@ -83,21 +77,5 @@ def of(*paths: str | Path, model: str | None = None, depth: int = 1) -> Graph:
     """
     programs = [parse(Path(path).read_text(encoding="utf-8"), str(path)) for path in paths]
     if model is None:
-        model = _only_model(programs, paths)
+        model = only_model(programs, ", ".join(str(path) for path in paths))
     return schematic(programs, model, depth=depth)
-
-
-def _only_model(programs: list[ir.Program], paths: tuple[str | Path, ...]) -> str:
-    """Find the one model in the files, or say what the choices are."""
-    names = [
-        cls.name
-        for program in programs
-        for cls in program.classes
-        if cls.restriction in ("model", "block")
-    ]
-    if len(names) == 1:
-        return names[0]
-    where = ", ".join(str(path) for path in paths)
-    if not names:
-        raise AmbiguousModelError(f"no model is defined in {where}")
-    raise AmbiguousModelError(f"{where} defines {len(names)} models; name one of {names}")
