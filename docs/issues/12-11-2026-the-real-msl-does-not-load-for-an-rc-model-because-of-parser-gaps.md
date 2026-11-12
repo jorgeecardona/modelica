@@ -1,6 +1,6 @@
 ---
 title: The real MSL does not load for an RC model, because of parser gaps
-status: open
+status: done
 kind: story
 scope: M
 owner: jorgeecardona
@@ -8,7 +8,7 @@ filed: 2026-11-12
 area: lang
 verify: test
 blocked_by: null
-fixed_in: null
+fixed_in: 0.1.x
 ---
 
 # The real MSL does not load for an RC model, because of parser gaps
@@ -50,3 +50,13 @@ on the RC path:
 Close the gaps parse-only, in the order the RC model hits them. Stop when RC loads, or after
 five gaps. Test: with the MSL cache present, the RC model simulates through `run(...,
 libraries=[msl])` to `exp(-t / RC)`.
+
+## Result (2026-11-12)
+
+Done. `closure` now follows names per class: a class is scanned only when a name the model
+reaches resolves to it, so `Blocks.Examples.Rectifier12pulseFFT` pulls in nothing. The RC
+model on MSL 4.1.0 (`libraries=[.../Modelica, .../ModelicaServices]`) reads 24 files, nothing
+under `Machines` or `Blocks`, loads in 2.95 s (most of it parsing the 11,705-line
+`Math/package.mo`) and gives `c.v(1) = exp(-1)`. Test: `tests/test_library.py`, skipped
+without the MSL cache. Three parser gaps were closed on the way; the others listed above stay
+open for models that reach them.

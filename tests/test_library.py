@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 from modelica.lang import parse
 from modelica.lang.library import closure, load
 from modelica.sim import flatten
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 FILES = {
     "Lib/package.mo": "package Lib\nend Lib;\n",
@@ -74,3 +71,38 @@ def test_load_reads_everything_and_records_what_does_not_parse(library: Path) ->
     lib = load(library, skipped)
     assert {c.name for c in lib.classes} == {"Basic", "Examples", "Interfaces", "Units"}
     assert [path.name for path in skipped] == ["Resistor.mo"]
+
+
+def test_an_example_beside_a_used_class_pulls_in_nothing(tmp_path: Path) -> None:
+    """A model on ``Lib.Good`` never reads a broken file that only an inline example extends.
+
+    Names are followed per class, so ``Examples.Bad`` beside ``Good`` pulls in nothing.
+    """
+    (tmp_path / "Lib" / "Far").mkdir(parents=True)
+    (tmp_path / "Lib" / "package.mo").write_text(
+        "package Lib\n  model Good\n    Real x(start = 1);\n  equation\n    der(x) = -x;\n"
+        "  end Good;\n  package Examples\n    model Bad\n      extends Lib.Far.Broken;\n"
+        "    end Bad;\n  end Examples;\nend Lib;\n"
+    )
+    (tmp_path / "Lib" / "Far" / "package.mo").write_text("within Lib;\npackage Far\nend Far;\n")
+    (tmp_path / "Lib" / "Far" / "Broken.mo").write_text("this file does not parse")
+    model = "model Use\n  Lib.Good g;\nend Use;\n"
+    flat = flatten([closure([tmp_path / "Lib"], [model]), parse(model)], "Use")
+    assert "g.x" in {v.name for v in flat.variables}
+
+
+MSL = Path(__file__).resolve().parents[1] / ".cache" / "msl" / "v4.1.0"
+
+
+@pytest.mark.skipif(not (MSL / "Modelica" / "package.mo").exists(), reason="no MSL 4.1.0 cache")
+def test_an_rc_model_runs_on_the_real_msl() -> None:
+    """Resistor, Capacitor and Ground from MSL 4.1.0: ``exp(-t / RC)``, nothing from Machines."""
+    import numpy as np  # noqa: PLC0415
+
+    from modelica.sim import run  # noqa: PLC0415
+
+    model = Path(__file__).resolve().parent / "data" / "msl_rc.mo"
+    result = run(
+        model, libraries=[MSL / "Modelica", MSL / "ModelicaServices"], stop=1.0, times=[0, 1]
+    )
+    np.testing.assert_allclose(result["c.v"], [1.0, np.exp(-1.0)], rtol=1e-4)
