@@ -87,6 +87,26 @@ print(result.time)     # the solver's own steps
 print(result["T"])     # the trajectory, indexed by the name you wrote
 ```
 
+Components from the Modelica Standard Library work under their real names. The bundled slice
+ships in the wheel, so nothing else needs to be passed:
+
+```python
+source = """
+model RC "A charged capacitor discharging through a resistor"
+  Modelica.Electrical.Analog.Basic.Resistor r(R = 1000);
+  Modelica.Electrical.Analog.Basic.Capacitor c(C = 1e-3, v(start = 1));
+  Modelica.Electrical.Analog.Basic.Ground g;
+equation
+  connect(r.p, c.p);
+  connect(r.n, c.n);
+  connect(c.n, g.p);
+end RC;
+"""
+
+result = simulate(causalize(flatten([parse(source)], "RC")), stop=1.0, times=[0.0, 1.0])
+print(result["c.v"])   # [1.         0.36787944], exp(-t / RC) at t = 1
+```
+
 `result.plot()` returns an interactive chart that writes itself to a self-contained HTML
 page with no CDN behind it (`result.plot().save("cooling.html")`), and in a notebook it
 renders when it is the last line of a cell. `result.write("cooling.mat")` writes a
