@@ -8,7 +8,9 @@ standard output as CSV (a ``time`` column, then one column per variable)::
     python -m modelica.sim Decay.mo --stop 1 --set k=2 -o decay.mat
     python -m modelica.sim Decay.mo --points 11 > decay.csv
 
-``--stop`` defaults to the model's ``experiment(StopTime=...)`` annotation.
+``--stop`` defaults to the model's ``experiment(StopTime=...)`` annotation. ``--lib DIR``
+adds a library stored as ``package.mo`` directories; ``--modelicapath`` adds the ones the
+``MODELICAPATH`` variable lists.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from typing import TYPE_CHECKING, Any, TextIO
 
 import numpy as np
 
+from modelica.lang.library import modelicapath
 from modelica.sim.files import run
 
 if TYPE_CHECKING:
@@ -40,6 +43,19 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME=VALUE",
         help="override a parameter; repeat for several",
+    )
+    parser.add_argument(
+        "--lib",
+        action="append",
+        default=[],
+        type=Path,
+        metavar="DIR",
+        help="a library directory (package.mo tree); repeat for several",
+    )
+    parser.add_argument(
+        "--modelicapath",
+        action="store_true",
+        help="also use the libraries the MODELICAPATH variable lists",
     )
     parser.add_argument("-o", "--output", type=Path, help="a .mat or .csv file; default: CSV out")
     return parser
@@ -73,6 +89,7 @@ def main(argv: list[str] | None = None) -> None:
         model=args.model,
         stop=args.stop,
         parameters=_parameters(args.set) or None,
+        libraries=[*args.lib, *(modelicapath() if args.modelicapath else [])],
         **options,
     )
     if args.output is None:

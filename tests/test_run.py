@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ import pytest
 
 from modelica.ir.source import AmbiguousModelError
 from modelica.lang import parse
+from modelica.lang.library import modelicapath
 from modelica.sim import SimulationError, causalize, flatten, read, run, simulate
 from modelica.sim.emit import EmitError
 
@@ -127,3 +129,34 @@ def test_a_model_on_a_directory_library_equals_its_single_file_form(tmp_path: Pa
     from_file = run(use, single, model="Use", stop=1.0, times=times)
     np.testing.assert_array_equal(from_directory["d.x"], from_file["d.x"])
     assert run(use, tmp_path / "Lib", stop=1.0, times=times)["d.x"][-1] == from_directory["d.x"][-1]
+
+
+def _directory_library(tmp_path: Path) -> Path:
+    (tmp_path / "libs" / "Lib").mkdir(parents=True)
+    (tmp_path / "libs" / "Lib" / "package.mo").write_text("package Lib\nend Lib;\n")
+    (tmp_path / "libs" / "Lib" / "Decay.mo").write_text("within Lib;\n" + DECAY)
+    use = tmp_path / "use.mo"
+    use.write_text("model Use\n  Lib.Decay d(k = 2);\nend Use;\n")
+    return use
+
+
+def test_the_command_line_takes_a_library_directory(tmp_path: Path) -> None:
+    """``--lib DIR`` and ``--modelicapath`` with ``MODELICAPATH`` set both find ``Lib``."""
+    use = _directory_library(tmp_path)
+    base = [sys.executable, "-m", "modelica.sim", str(use), "--stop", "1", "--points", "2"]
+    by_lib = subprocess.run(  # noqa: S603
+        [*base, "--lib", str(tmp_path / "libs" / "Lib")], check=True, capture_output=True, text=True
+    ).stdout
+    environment = {**os.environ, "MODELICAPATH": str(tmp_path / "libs")}
+    by_path = subprocess.run(  # noqa: S603
+        [*base, "--modelicapath"], check=True, capture_output=True, text=True, env=environment
+    ).stdout
+    assert by_lib == by_path
+    assert "d.x" in by_lib.splitlines()[0]
+
+
+def test_modelicapath_lists_package_directories(tmp_path: Path) -> None:
+    """An entry is a package itself, or a directory of packages; other entries add nothing."""
+    _directory_library(tmp_path)
+    value = os.pathsep.join([str(tmp_path / "libs"), str(tmp_path / "libs" / "Lib"), "/no/such"])
+    assert modelicapath(value) == [tmp_path / "libs" / "Lib", tmp_path / "libs" / "Lib"]

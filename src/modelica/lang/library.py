@@ -23,7 +23,7 @@ from modelica.lang.parse import parse
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-__all__ = ["closure", "load"]
+__all__ = ["closure", "load", "modelicapath"]
 
 type _Path = tuple[str, ...]
 
@@ -111,6 +111,26 @@ class _Reach:
                 found = inner
             self.read(found, f"{'.'.join(name)!r}, named in {where}")
             return
+
+
+def modelicapath(value: str | None = None) -> list[Path]:
+    """The library directories ``MODELICAPATH`` lists: every package directory in each entry.
+
+    ``value`` is the variable's text; ``None`` reads the environment. Entries are separated by
+    the platform's path separator. Nothing reads this unless asked: an OpenModelica install
+    puts a full Modelica Standard Library there, which would replace the bundled slice.
+    """
+    import os  # noqa: PLC0415 - one function reads the environment
+
+    text = os.environ.get("MODELICAPATH", "") if value is None else value
+    found: list[Path] = []
+    for entry in filter(None, text.split(os.pathsep)):
+        base = Path(entry)
+        if (base / "package.mo").exists():
+            found.append(base)
+        elif base.is_dir():
+            found.extend(d for d in sorted(base.iterdir()) if (d / "package.mo").exists())
+    return found
 
 
 def closure(roots: Sequence[Path], sources: Iterable[str]) -> ir.Program:
