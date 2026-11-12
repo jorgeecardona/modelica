@@ -134,6 +134,8 @@ class _Parser:
         self.filename = filename
         self.tokens = tokenize(source, filename)
         self.at = 0
+        self.subscripts = 0
+        """How many ``[...]`` subscripts the cursor is inside; ``end`` is an index only there."""
 
     # -- cursor ---------------------------------------------------------------------
 
@@ -327,6 +329,9 @@ class _Parser:
             case Kind.KEYWORD if token.text in ("true", "false"):
                 self.at += 1
                 return ir.BoolLiteral(token.text == "true")
+            case Kind.KEYWORD if token.text == "end" and self.subscripts:
+                self.at += 1
+                return ir.End()
             case Kind.KEYWORD if token.text in ("der", "initial"):
                 self.at += 1
                 args, named = self._arguments()
@@ -416,7 +421,11 @@ class _Parser:
         if self._check(Kind.OP, ":"):
             self.at += 1
             return ir.Colon()
-        return self.expression()
+        self.subscripts += 1
+        try:
+            return self.expression()
+        finally:
+            self.subscripts -= 1
 
     def _arguments(self) -> tuple[tuple[ir.Expr, ...], tuple[tuple[str, ir.Expr], ...]]:
         """The arguments of a call, positional first and then the ones given by name.

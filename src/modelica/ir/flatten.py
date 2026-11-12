@@ -884,6 +884,58 @@ def _expand_comprehension(
     return build({}, ranges)
 
 
+def _ends(indices: tuple[ir.Expr, ...], path: _Path) -> tuple[ir.Expr, ...]:
+    """``indices`` with each ``end`` replaced by the size of the dimension it indexes.
+
+    An ``end`` inside a nested subscript belongs to that subscript and is left for it.
+    """
+
+    def fill(node: ir.Expr, size: int) -> ir.Expr:  # noqa: PLR0911 - one case per node
+        match node:
+            case ir.End():
+                return ir.IntLiteral(size)
+            case ir.Subscript():
+                return node
+            case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+                return ir.Binary(op, fill(lhs, size), fill(rhs, size))
+            case ir.Unary(op=op, operand=operand):
+                return ir.Unary(op, fill(operand, size))
+            case ir.Range(start=start, stop=stop, step=step):
+                return ir.Range(
+                    fill(start, size), fill(stop, size), None if step is None else fill(step, size)
+                )
+            case ir.Call(name=name, args=args, named=named):
+                return ir.Call(name, tuple(fill(a, size) for a in args), named)
+            case _:
+                return node
+
+    if not any(_has_end(index) for index in indices):
+        return indices
+    shape = _SHAPES.get().get(path)
+    if shape is None or len(shape) < len(indices):
+        message = f"`end` in a subscript of {'.'.join(path)!r}, whose shape is not known here"
+        raise FlattenError(message)
+    return tuple(fill(index, size) for index, size in zip(indices, shape, strict=False))
+
+
+def _has_end(node: ir.Expr) -> bool:  # noqa: PLR0911 - one case per node
+    match node:
+        case ir.End():
+            return True
+        case ir.Subscript():
+            return False
+        case ir.Binary(lhs=lhs, rhs=rhs):
+            return _has_end(lhs) or _has_end(rhs)
+        case ir.Unary(operand=operand):
+            return _has_end(operand)
+        case ir.Range(start=start, stop=stop, step=step):
+            return _has_end(start) or _has_end(stop) or (step is not None and _has_end(step))
+        case ir.Call(args=args):
+            return any(_has_end(a) for a in args)
+        case _:
+            return False
+
+
 def _slice(
     path: _Path,
     indices: tuple[ir.Expr, ...],
@@ -965,6 +1017,7 @@ def _prefix_expr(  # noqa: C901, PLR0911, PLR0912, PLR0913 -- one case per node 
             if values is None:
                 raise FlattenError("subscripted references are not expanded here")
             path = _prefix_ref(base, prefix, local, strict=strict, outer=outer).parts
+            indices = _ends(indices, path)
             if any(isinstance(i, ir.Range) for i in indices):
                 # A range subscript is a slice -- a sub-array, not one element -- so it becomes an
                 # array literal (one level per range dimension), which the equation split then reads
@@ -1745,6 +1798,8 @@ def _run(  # noqa: PLR0911 - one case per statement form
 
 
 _PARAMETERS: ContextVar[Mapping[str, float]] = ContextVar("_PARAMETERS", default={})  # noqa: B039
+_SHAPES: ContextVar[Mapping[_Path, tuple[int, ...]]] = ContextVar("_SHAPES", default={})  # noqa: B039
+"""The declared array shapes, by flat path, so ``end`` in a subscript can read its size."""
 """The parameter values known so far, so a loop bound in an inlined function can name one (#2).
 
 Set by `flatten` for the duration of one flattening. Keys are flat dotted names, so only a
@@ -3567,12 +3622,14 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
         raise FlattenError(f"{model!r} is a {found.cls.restriction}, not a model")
     flattener = _Flattener(program)
     token = _PARAMETERS.set(flattener.values)
+    shapes_token = _SHAPES.set(flattener.shapes)
     try:
         flattener.instantiate(found, scope, (), ir.EMPTY, "continuous")
         flattener.resolve_deferred_ifs()
         flattener.expand_connections()
     finally:
         _PARAMETERS.reset(token)
+        _SHAPES.reset(shapes_token)
     resolved = _resolve_boolean_when_conditions(flattener.equations, flattener.whens)
     equations = tuple(flattener.equations)
     flat = partition(

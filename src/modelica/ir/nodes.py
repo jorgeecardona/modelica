@@ -191,6 +191,15 @@ class Comprehension:
 
 
 @dataclass(frozen=True, slots=True)
+class End:
+    """``end`` inside a subscript: the size of the dimension it indexes, as in ``x[end]``.
+
+    In ``a[b[end]]`` it is the size of ``b``: the subscript it sits in directly. `flatten`
+    replaces it with that size; it never reaches a flat model.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class Colon:
     """The bare ``:`` subscript -- every index of its dimension, as in ``A[:, 1]``.
 
@@ -304,6 +313,7 @@ type Expr = (
     | Matrix
     | Comprehension
     | Colon
+    | End
     | Subscript
     | Range
     | Binary

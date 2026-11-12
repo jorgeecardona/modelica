@@ -86,6 +86,8 @@ def _render_expr(node: ir.Expr) -> str:  # noqa: C901, PLR0911, PLR0912 -- one p
             return f"{{{unparse_expr(body)} for {spans}}}"
         case ir.Colon():
             return ":"
+        case ir.End():
+            return "end"
         case ir.Subscript(base=base, indices=indices):
             return f"{base.name}[{', '.join(unparse_expr(i) for i in indices)}]"
         case ir.Range(start=start, stop=stop, step=step):

@@ -377,7 +377,7 @@ def _derive(  # noqa: C901, PLR0911 -- one case per node type
             return leaf(node)
         case ir.RealLiteral() | ir.IntLiteral() | ir.BoolLiteral() | ir.StringLiteral():
             return ZERO
-        case ir.Array() | ir.Subscript() | ir.Range() | ir.Colon():
+        case ir.Array() | ir.Subscript() | ir.Range() | ir.Colon() | ir.End():
             raise DerivativeError("array equations are not supported yet")
         case ir.Matrix():
             raise DerivativeError("matrix expressions are not supported yet")

@@ -71,6 +71,9 @@ from modelica.ir.nodes import (
     ConnectorKind as ConnectorKind,
 )
 from modelica.ir.nodes import (
+    End as End,
+)
+from modelica.ir.nodes import (
     Equal as Equal,
 )
 from modelica.ir.nodes import (
@@ -187,6 +190,7 @@ __all__ = [
     "Comprehension",
     "Connect",
     "ConnectorKind",
+    "End",
     "Equal",
     "Equation",
     "Expr",
