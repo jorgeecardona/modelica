@@ -10,9 +10,10 @@ from modelica.ir.evaluate import evaluate
 from modelica.ir.source import flatten, only_model
 from modelica.lang import parse
 from modelica.sim.solve import SimulationError, simulate
+from modelica.sim.sweep import vector
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from modelica.ir import nodes as ir
     from modelica.sim.result import Result
@@ -25,6 +26,7 @@ def run(
     *paths: str | Path,
     model: str | None = None,
     stop: float | None = None,
+    parameters: Mapping[str, float] | None = None,
     **options: Any,  # noqa: ANN401 - passed to `simulate` unchanged
 ) -> Result:
     """Simulate a model read from ``paths`` and return its `Result`.
@@ -34,11 +36,14 @@ def run(
     `simulate` unchanged (``start``, ``tolerance``, ``times``, ``backend``, ...).
 
     ``stop``, ``start`` and ``tolerance`` not given are taken from the model's
-    ``annotation(experiment(StopTime, StartTime, Tolerance))``.
+    ``annotation(experiment(StopTime, StartTime, Tolerance))``. ``parameters`` overrides
+    parameters by name (``{"r.R": 2.0}``); a parameter written in terms of another is
+    recomputed from the new value.
 
     Raises:
         AmbiguousModelError: no ``model`` given, and the files hold none or several.
         SimulationError: no ``stop``, and the model has no ``experiment(StopTime)``.
+        EmitError: a name in ``parameters`` is not a parameter; the message lists close ones.
     """
     programs = [parse(Path(path).read_text(encoding="utf-8"), str(path)) for path in paths]
     if model is None:
@@ -48,7 +53,10 @@ def run(
     if "stop" not in settings:
         message = f"{model}: give stop=..., the model has no experiment(StopTime=...) annotation"
         raise SimulationError(message)
-    return simulate(causalize(flatten(programs, model)), **settings)
+    system = causalize(flatten(programs, model))
+    if parameters is not None:
+        settings["parameters"] = vector(system, parameters)
+    return simulate(system, **settings)
 
 
 def experiment(programs: Sequence[ir.Program], model: str) -> dict[str, float]:

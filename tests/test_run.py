@@ -10,6 +10,7 @@ import pytest
 from modelica.ir.source import AmbiguousModelError
 from modelica.lang import parse
 from modelica.sim import SimulationError, causalize, flatten, run, simulate
+from modelica.sim.emit import EmitError
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL = ROOT / "examples" / "models" / "RLCCircuit.mo"
@@ -56,3 +57,22 @@ def test_run_without_stop_or_annotation_says_what_is_missing(tmp_path: Path) -> 
     source.write_text("model Plain\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend Plain;\n")
     with pytest.raises(SimulationError, match="StopTime"):
         run(source)
+
+
+DECAY = "model Decay\n  parameter Real k = 1;\n  Real x(start = 1);\nequation\n  der(x) = -k * x;\nend Decay;\n"
+
+
+def test_a_parameter_set_by_name_changes_the_trajectory(tmp_path: Path) -> None:
+    """``k = 2`` halves the time constant: ``x(1) = exp(-2)``."""
+    source = tmp_path / "decay.mo"
+    source.write_text(DECAY)
+    result = run(source, stop=1.0, times=[0.0, 1.0], parameters={"k": 2.0}, tolerance=1e-10)
+    np.testing.assert_allclose(result["x"][-1], np.exp(-2.0), rtol=1e-6)
+
+
+def test_a_misspelled_parameter_is_refused_with_the_close_name(tmp_path: Path) -> None:
+    """``kk`` is not a parameter; the error suggests ``k``."""
+    source = tmp_path / "decay.mo"
+    source.write_text(DECAY)
+    with pytest.raises(EmitError, match="did you mean k"):
+        run(source, stop=1.0, parameters={"kk": 2.0})

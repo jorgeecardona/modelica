@@ -71,6 +71,7 @@ side several times per step.
 
 from __future__ import annotations
 
+import difflib
 import keyword
 import re
 from dataclasses import dataclass, field, replace
@@ -2018,7 +2019,9 @@ def settings(system: System, values: Mapping[str, float] | None = None) -> dict[
     known = {variable.name for variable in system.parameters}
     for name in given:
         if name not in known:
-            message = f"{system.name} has no parameter {name!r}"
+            close = difflib.get_close_matches(name, sorted(known), n=3)
+            hint = f"; did you mean {', '.join(close)}?" if close else ""
+            message = f"{system.name} has no parameter {name!r}{hint}"
             raise EmitError(message)
     environment: dict[str, Value] = {}
     for variable in Emitter(system).ordered():
