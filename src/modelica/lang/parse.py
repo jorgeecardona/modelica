@@ -856,12 +856,14 @@ class _Parser:
             # either operator is accepted here, exactly as the scalar assignment below does.
             where = self._at(self.token)
             self.at += 1
-            targets: list[ir.Ref | None] = []
+            targets: list[ir.Ref | ir.Subscript | None] = []
             while True:
                 if self._check(Kind.OP, ",") or self._check(Kind.OP, ")"):
                     targets.append(None)
                 else:
-                    targets.append(self._reference())
+                    target = self._reference()
+                    indices = self._bracketed()
+                    targets.append(ir.Subscript(target, indices) if indices else target)
                 if not self._accept(Kind.OP, ","):
                     break
             self._expect(Kind.OP, ")")

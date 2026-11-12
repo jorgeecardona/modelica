@@ -446,10 +446,11 @@ class CallStatement:
     """``(a, b) := f(x);`` -- the statement twin of :class:`CallEquation`.
 
     The only way an algorithm reads two results from one call, and the same rule about
-    skipped outputs: ``targets`` may hold ``None``.
+    skipped outputs: ``targets`` may hold ``None``. A target may be subscripted,
+    ``(a[:, 1], info) := f(x)``, as the MSL writes it.
     """
 
-    targets: tuple[Ref | None, ...]
+    targets: tuple[Ref | Subscript | None, ...]
     call: Call
     span: Span | None = field(default=None, compare=False, repr=False)
 

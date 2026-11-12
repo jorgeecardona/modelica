@@ -189,7 +189,7 @@ def unparse_statement(  # noqa: C901, PLR0911, PLR0912 -- one arm per statement 
         case ir.CallStatement(targets=(), call=call):
             return [f"{pad}{unparse_expr(call)};"]
         case ir.CallStatement(targets=targets, call=call):
-            named = ", ".join("" if t is None else t.name for t in targets)
+            named = ", ".join("" if t is None else unparse_expr(t) for t in targets)
             return [f"{pad}({named}) := {unparse_expr(call)};"]
         case ir.When(branches=branches):
             lines: list[str] = []
@@ -253,7 +253,7 @@ def unparse_equation(  # noqa: C901, PLR0911 -- one arm and one return per equat
         case ir.CallEquation(targets=(), call=call):
             return [f"{pad}{unparse_expr(call)};"]
         case ir.CallEquation(targets=targets, call=call):
-            named = ", ".join("" if t is None else t.name for t in targets)
+            named = ", ".join("" if t is None else unparse_expr(t) for t in targets)
             return [f"{pad}({named}) = {unparse_expr(call)};"]
         case ir.Assert(condition=condition, message=message, level=level):
             arguments = [unparse_expr(condition), unparse_expr(message)]

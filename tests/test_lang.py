@@ -536,3 +536,20 @@ def test_a_leading_dot_in_an_expression_is_global_scope() -> None:
     assert a.modification.value == ir.Ref(("Modelica", "Constants", "pi"))
     assert isinstance(y.modification.value, ir.Call)
     assert y.modification.value.name == "sqrt"
+
+
+def test_an_output_list_statement_takes_subscripted_targets() -> None:
+    """``(e[:, 1], e[:, 2], info) := f(A);`` parses, as ``Modelica.Math`` writes it."""
+    from modelica.ir import nodes as ir  # noqa: PLC0415
+    from modelica.lang.unparse import unparse  # noqa: PLC0415
+
+    source = (
+        "function F\n  input Real A;\n  output Real e[2, 2];\n  output Integer info;\n"
+        "algorithm\n  (e[:, 1], e[:, 2], info) := G(A);\nend F;\n"
+    )
+    program = parse(source)
+    statement = program.classes[0].algorithms[0][0]
+    assert isinstance(statement, ir.CallStatement)
+    assert isinstance(statement.targets[0], ir.Subscript)
+    assert isinstance(statement.targets[2], ir.Ref)
+    assert "(e[:, 1], e[:, 2], info) := G(A);" in unparse(program)

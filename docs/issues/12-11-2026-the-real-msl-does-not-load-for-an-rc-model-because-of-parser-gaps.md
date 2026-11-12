@@ -25,9 +25,17 @@ it blocks it, even when the model never uses the class with the gap.
 1. Fixed (c330daa): a leading dot in an expression, `.Modelica.Blocks.Types.SimpleController.PID`,
    `.sqrt(x)`.
 2. Fixed (062bef3): `end` in a subscript, `a[end]` (`Blocks/Continuous.mo`, line 1147).
-3. Open: an output list whose targets have subscripts and colons,
+3. Fixed (this commit): an output list whose targets have subscripts and colons,
    `(eigenvalues[:, 1], eigenvalues[:, 2], info) := LAPACK.dgeev_eigenValues(A);`
    (`Math/package.mo`, line 1690). RC needs this file for `Modelica.Math.exp`.
+
+After these three, all 29 files the RC model reaches parse, given both roots `Modelica` and
+`ModelicaServices` (`Modelica.Constants.eps` is `ModelicaServices.Machine.eps`). The next stop
+is over-reading, not a need: `Blocks/package.mo` holds its examples inline, and
+`Blocks.Examples.Rectifier12pulseFFT` extends
+`Modelica.Electrical.Machines.Examples.Transformers.Rectifier12pulse`, whose file has a
+subscript on an inner component (line 55). `closure` scans a whole file once it reads it; it
+would have to follow names per class, not per file, to skip that example.
 
 Known from the eager load (`library.load` with `skipped`: 59 of the MSL files refuse), not yet
 on the RC path:
