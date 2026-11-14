@@ -162,3 +162,23 @@ def test_a_relation_does_not_solve_for_the_variable_inside_it() -> None:
     s = ir.Ref(("s",))
     residual = ir.Binary("-", ir.Ref(("off",)), ir.Binary("<", s, ir.RealLiteral(0.0)))
     assert solve_for(residual, "s") is None
+
+
+def test_a_variable_read_through_a_boolean_condition_follows_it() -> None:
+    """``y = if b then 1 else 0`` with ``b = x < 0`` switches when ``b`` does.
+
+    Alias elimination read the equation as ``y`` alone (``b`` has no slope there) and set ``b``
+    to zero in the offset, so ``y`` stayed 0 for the whole run.
+    """
+    from modelica.ir.causalize import causalize  # noqa: PLC0415
+    from modelica.ir.flatten import flatten  # noqa: PLC0415
+    from modelica.lang import parse  # noqa: PLC0415
+    from modelica.sim import simulate  # noqa: PLC0415
+
+    source = (
+        "model E\n  Real x(start = 0.3, fixed = true);\n  Real y;\n  Boolean b;\n"
+        "equation\n  der(x) = -1;\n  b = x < 0;\n  y = if b then 1 else 0;\nend E;\n"
+    )
+    result = simulate(causalize(flatten(parse(source), "E")), stop=1.0, points=5)
+    assert float(result["y"][0]) == 0.0
+    assert float(result["y"][-1]) == 1.0

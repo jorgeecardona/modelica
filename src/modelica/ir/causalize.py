@@ -364,7 +364,10 @@ def _affine(work: _Work, equation: ir.Equal) -> _Affine | None:  # noqa: PLR0911
             return None
     if not unknowns:
         return None
-    offset = simplify(substitute(expression, dict.fromkeys(appearing, ZERO)))
+    # Only the unknowns with a slope are set to zero. A name whose slope is zero but which is
+    # still there -- `b` in `y = if b then 1 else 0`, a condition held fixed by `d_dx` -- stays
+    # in the offset, so the check below refuses the equation instead of folding `b` to 0.
+    offset = simplify(substitute(expression, dict.fromkeys(unknowns, ZERO)))
     if any(work.is_unknown(name) for name in names(offset)):
         return None
     return _Affine(tuple(unknowns), tuple(coefficients), offset)
