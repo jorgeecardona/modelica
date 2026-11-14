@@ -1,5 +1,5 @@
 site_name: modelica
-site_description: Pure-Python Modelica toolchain — parse, flatten, simulate, and exchange via FMI 3.0 and SSP 2.0.
+site_description: "A library for reading and simulating Modelica models in Python."
 site_url: https://cardona-oss.gitlab.io/pymodelica/
 repo_url: https://gitlab.com/cardona-oss/pymodelica
 repo_name: cardona-oss/pymodelica
@@ -87,6 +87,20 @@ plugins:
       include_source: true
       include_requirejs: true
       ignore_h1_titles: true
+  - llmstxt:
+      markdown_description: "modelica parses .mo source, flattens it to a DAE and simulates it on a precompiled engine, and every stage up to simulation is a Python value you can read and change."
+      full_output: llms-full.txt
+      sections:
+        Usage documentation:
+          - index.md
+          - examples.md
+          - architecture.md
+          - diverging.md
+          - engine.md
+        Internals:
+          - vm/*.md
+        Optional:
+          - ideas/*.md
 
 nav:
   - Home: index.md
