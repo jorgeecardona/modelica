@@ -149,3 +149,16 @@ def test_a_boolean_latch_that_reads_its_own_pre_value_is_isolated() -> None:
     end M;
     """
     assert emit(system(source)).source  # causalizes and emits, where before it raised
+
+
+def test_a_relation_does_not_solve_for_the_variable_inside_it() -> None:
+    """``off = s < 0`` has no slope in ``s``, so ``solve_for`` declines it and the search moves on.
+
+    The thyristor rectifiers (`PowerConverters.Examples.ACDC`) stopped causalizing on it.
+    """
+    from modelica import ir  # noqa: PLC0415
+    from modelica.ir.rewrite import solve_for  # noqa: PLC0415
+
+    s = ir.Ref(("s",))
+    residual = ir.Binary("-", ir.Ref(("off",)), ir.Binary("<", s, ir.RealLiteral(0.0)))
+    assert solve_for(residual, "s") is None

@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from modelica.ir import nodes as ir
-from modelica.ir.derive import ONE, ZERO, d_dx, div, neg, simplify, sub
+from modelica.ir.derive import ONE, ZERO, DerivativeError, d_dx, div, neg, simplify, sub
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -139,7 +139,11 @@ def solve_for(residual: ir.Expr, name: str) -> ir.Expr | None:
     direct = isolated(residual, name)
     if direct is not None:
         return direct[0]
-    slope = simplify(d_dx(residual, name))
+    try:
+        slope = simplify(d_dx(residual, name))
+    except DerivativeError:
+        # `off = s < 0` does not come out for `s`: the relation has no slope to divide by.
+        return None
     if slope == ZERO or contains(slope, name):
         return None
     intercept = simplify(substitute(residual, {name: ZERO}))
