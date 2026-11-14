@@ -1079,6 +1079,26 @@ FIRST_STEP: Final = (
 #: what a run that switches state sets is compared on -- and returns the run's counters, events
 #: included.
 _INTEGRATE_SRC = """\
+// A latched relation that sits exactly on its zero (`time < startTime` at t = 0) is held on
+// its latch's side, so a step leaving 0.0 is not read as a crossing. `solve.py`'s
+// `_hold_on_threshold`, applied at the start of the run and after each event.
+macro_rules! md_hold_on_threshold {
+    ($t:expr, $y:expr, $p:expr, $w:expr, $z:expr, $rearm:expr, $latches:expr, $times:expr, $nevents:expr) => {
+        if $nevents > 0 {
+            indicators($t, &$y, $p, $w, &mut $z);
+            for j in 0..$nevents {
+                if $latches[j] < 0 || $rearm[j] != 0.0 || $z[j] != 0.0 {
+                    continue;
+                }
+                if $times.get(j).is_some_and(|&at| at >= 0) {
+                    continue;
+                }
+                $rearm[j] = if $w[$latches[j] as usize] > MD_HELD { MD_REARM } else { -MD_REARM };
+            }
+        }
+    };
+}
+
 // Locate, along one accepted step's dense polynomial, where indicator `k` crosses zero.
 // The step is y(x) = y + x*(q0 + x*(q1 + x*q2)) for x in [0, 1], and g(x) = z_k(y(x)) + nudge
 // is the crossing function the loop watches. Called only when the segment ends bracket a
@@ -1260,6 +1280,7 @@ fn md_integrate(
     let mut chatter = 0usize;
     let mut stalled_at = t0;
 
+    md_hold_on_threshold!(t, y, p, w, z0, rearm, latches, times, nevents);
     let mut cursor = 0usize;
     while cursor < points && grid[cursor] <= t0 {
         md_row(&mut rows, t_out, out, obs, grid[cursor], &y, p, w);
@@ -1543,6 +1564,7 @@ fn md_integrate(
             }
             t = te;
             for q in 0..n { y[q] = ev_y[q]; }
+            md_hold_on_threshold!(t, y, p, w, z0, rearm, latches, times, nevents);
             // The right side of the event: the state after the transition and the latches.
             if every {
                 md_row(&mut rows, t_out, out, obs, te, &ev_y, p, w);
