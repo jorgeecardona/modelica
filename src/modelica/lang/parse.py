@@ -1202,7 +1202,9 @@ class _Parser:
                 causality = "input"
             elif self._accept(Kind.KEYWORD, "output"):
                 causality = "output"
-            base = ir.Extends(self._type_name(), self._modification())
+            base_name = self._type_name()
+            dimensions = self._bracketed()
+            base = ir.Extends(base_name, self._modification())
             # Read here rather than by the caller, because the short form owns its own
             # semicolon and the constraining clause sits in front of it.
             constraining = self._constraining()
@@ -1220,6 +1222,7 @@ class _Parser:
                 comment=comment,
                 annotation=annotation,
                 extends=(base,),
+                dimensions=dimensions,
             )
         return self._long_definition(name, restriction, partial=partial, expandable=expandable)
 

@@ -2357,6 +2357,8 @@ class _Flattener:
     component is removed with it, which is the one reference the specification allows to
     outlive the removal.
     """
+    typed_arrays: set[_Path] = field(default_factory=set[_Path])
+    """Components whose class added its shape (`type Axis = Real[3]`), so elements skip it."""
     deferred_ifs: list[_DeferredIf] = field(default_factory=list["_DeferredIf"])
     """Structural if-equations whose condition could not be evaluated where they were met.
 
@@ -2602,6 +2604,8 @@ class _Flattener:
             if not held:
                 self.disabled.add(path)
                 return
+        member = self._with_type_shape(member, path)
+        component = member.component
         if component.dimensions:
             self._array(member, path, outer, floor, local, writer=writer, inners=inners)
             return
@@ -2643,6 +2647,23 @@ class _Flattener:
             return
         base, attributes = _base_of(resolved, member.scope)
         self._leaf(component, path, _merge(attributes, total), base, variability)
+
+    def _with_type_shape(self, member: Member, path: _Path) -> Member:
+        """``type Axis = Real[3]; Axis a[2];`` declares ``a[2, 3]``: the type's shape goes last.
+
+        The elements still name ``Axis``, so the path is recorded and the shape is added once.
+        """
+        component = member.component
+        typed = member.scope.resolve(component.type_name)
+        if (
+            not isinstance(typed, Found)
+            or not typed.cls.dimensions
+            or (*path[:-1], path[-1].split("[", 1)[0]) in self.typed_arrays
+        ):
+            return member
+        self.typed_arrays.add(path)
+        shaped = replace(component, dimensions=(*component.dimensions, *typed.cls.dimensions))
+        return replace(member, component=shaped)
 
     def _array(  # noqa: PLR0913 -- the writer's scope travels with every component
         self,

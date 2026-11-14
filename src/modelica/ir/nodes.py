@@ -720,6 +720,11 @@ class Class:
     defines a new type rather than renaming one.
     """
     extends: tuple[Extends, ...] = ()
+    dimensions: tuple[Expr, ...] = ()
+    """``type Axis = Real[3]`` -- the shape a short definition gives every instance.
+
+    An instance ``Axis a[2]`` has shape ``[2, 3]``: the component's dimensions come first.
+    """
     redeclarations: tuple[Component, ...] = ()
     """``redeclare Capacitor element;`` written as an element, under an ``extends``.
 

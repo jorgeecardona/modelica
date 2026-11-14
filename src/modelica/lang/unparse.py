@@ -442,7 +442,10 @@ def unparse_class(node: ir.Class, indent: int = 0) -> list[str]:
         comment = _comment(node.comment)
         annotation = _annotation(node.annotation)
         body = f"{modification}{constraining}{comment}{annotation}"
-        return [f"{pad}{head}{keyword} {node.name} = {prefix}{base.type_name}{body};"]
+        shape = (
+            f"[{', '.join(unparse_expr(d) for d in node.dimensions)}]" if node.dimensions else ""
+        )
+        return [f"{pad}{head}{keyword} {node.name} = {prefix}{base.type_name}{shape}{body};"]
 
     partial = "partial " if node.partial else ""
     expandable = "expandable " if node.expandable else ""
