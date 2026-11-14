@@ -3708,6 +3708,26 @@ def _assigned(body: Sequence[ir.Statement]) -> set[str]:
     return found
 
 
+def _der_arguments(node: ir.Expr) -> Iterator[ir.Ref]:
+    """The references ``der`` is applied to inside ``node``."""
+    match node:
+        case ir.Call(name="der", args=(ir.Ref() as argument,)):
+            yield argument
+        case ir.Binary(lhs=lhs, rhs=rhs):
+            yield from _der_arguments(lhs)
+            yield from _der_arguments(rhs)
+        case ir.Unary(operand=operand):
+            yield from _der_arguments(operand)
+        case ir.Call(args=args):
+            for argument in args:
+                yield from _der_arguments(argument)
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            for part in (condition, then, otherwise):
+                yield from _der_arguments(part)
+        case _:
+            pass
+
+
 def _when_assigned(whens: Sequence[ir.When]) -> set[str]:
     """Every name a ``when`` assigns: discrete, with the prefix or without it.
 
@@ -3754,7 +3774,16 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
         (*flat.whens, *(as_when(p) for p in flat.partitions)),
         {variable.name for variable in flat.variables},
     )
-    assigned = _when_assigned(whens)
+    # A state is reset with `reinit`, and a name an equation also defines is a conflict the
+    # emitter refuses with its remedy; neither becomes discrete here.
+    defined = {e.lhs.name for e in flat.equations if isinstance(e.lhs, ir.Ref)}
+    states = {
+        argument.name
+        for e in flat.equations
+        for side in (e.lhs, e.rhs)
+        for argument in _der_arguments(side)
+    }
+    assigned = _when_assigned(whens) - defined - states
     variables = tuple(
         replace(v, variability="discrete")
         if v.name in assigned and v.variability == "continuous"
