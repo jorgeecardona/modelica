@@ -42,6 +42,24 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-11-14, after subscripts on inner components and shaped short classes
+
+`r[1].n` names element 1 of the array `r`, in equations and in `connect`. A short class may give
+a shape (`type Axis = Real[3]`), which the MultiBody types use.
+
+| last stage reached | models | of 430 |
+| ------------------ | -----: | -----: |
+| nothing loads      |     10 |  2.3 % |
+| loaded             |    317 | 73.7 % |
+| flattened          |     48 | 11.2 % |
+| causalized         |     16 |  3.7 % |
+| simulated          |     39 |  9.1 % |
+
+Measured with `scripts/reach.py --workers 1`, all 39 on SciPy (no engine wheel). Parse failures
+fell from 175 to 10. Top blockers now: 66 `Clock`, 36 a function output not assigned on every
+branch, 30 array equations with an unknown shape, 30 "subscripted references are not expanded
+here", 24 `Complex`.
+
 ### 2026-11-12, after a call with a leading dot reaches the built-in
 
 `Modelica.Math.sin` is written `y := .sin(u)`. The leading dot was dropped, so the call found

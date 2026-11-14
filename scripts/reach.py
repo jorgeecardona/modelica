@@ -8,6 +8,7 @@ examples blocked first, which is the order to fix them in.
 
     uv run python scripts/reach.py              # every example, 4 worker processes
     uv run python scripts/reach.py --limit 20   # a quick sample
+    uv run python scripts/reach.py --workers 1  # on a box short of memory
 
 The MSL is the cached 4.1.0 tree that ``scripts/coverage.py`` downloads. Output:
 ``reach.json`` beside this script's repository root.
@@ -92,9 +93,10 @@ def main() -> None:
     """Measure, write ``reach.json``, print the stage counts and the blockers."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, help="measure only the first N examples")
+    parser.add_argument("--workers", type=int, default=WORKERS, help="worker processes")
     args = parser.parse_args()
     examples = enumerate_examples(CACHE)[: args.limit]
-    with ProcessPoolExecutor(max_workers=WORKERS) as pool:
+    with ProcessPoolExecutor(max_workers=args.workers) as pool:
         rows = list(
             pool.map(
                 measure,
