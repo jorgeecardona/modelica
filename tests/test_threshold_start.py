@@ -8,6 +8,7 @@ was counted as a crossing, and toggled its latch. Three of them toggled each oth
 from __future__ import annotations
 
 import shutil
+from typing import Literal
 
 import pytest
 
@@ -33,7 +34,7 @@ end M;
 
 
 @pytest.mark.parametrize("backend", ["python", "engine"])
-def test_three_relations_on_their_threshold_at_the_start_settle(backend: str) -> None:
+def test_three_relations_on_their_threshold_at_the_start_settle(backend: Literal["python", "engine"]) -> None:
     if backend == "engine":
         from modelica.sim import engine  # noqa: PLC0415 - only this case needs it
 
