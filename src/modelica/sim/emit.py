@@ -676,6 +676,13 @@ def _remembered(system: System) -> tuple[str, ...]:
         and isinstance(statement.target, ir.Ref)
         and statement.target.name not in states
     }
+    # A discrete variable an initial equation sets and no `when` changes (a `fixed = false`
+    # parameter, a `sample` start that reads one) holds that value for the whole run.
+    found |= {
+        equation.lhs.name
+        for equation in system.initial_equations
+        if isinstance(equation.lhs, ir.Ref)
+    } & {v.name for v in system.variables if v.variability == "discrete"}
     return tuple(name for name in (v.name for v in system.variables) if name in found)
 
 

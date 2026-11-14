@@ -3699,8 +3699,8 @@ def _resolve_boolean_when_conditions(
 
 
 def _lower_samples(
-    whens: Sequence[ir.When], taken: set[str]
-) -> tuple[tuple[ir.When, ...], tuple[FlatVariable, ...]]:
+    whens: Sequence[ir.When], taken: set[str], initialized: set[str] | frozenset[str] = frozenset()
+) -> tuple[tuple[ir.When, ...], tuple[FlatVariable, ...], tuple[ir.Equal, ...]]:
     """Rewrite ``when sample(start, interval)`` as a time event on a hidden discrete variable.
 
     ``sample`` (specification 3.7.5) is true at ``start + k * interval``. Each branch whose
@@ -3709,8 +3709,13 @@ def _lower_samples(
     ``next = pre(next) + interval``. This is the relation form that the event code already
     handles. A ``sample`` inside a larger condition (``sample(...) or b``) is not rewritten,
     and emit refuses it as before.
+
+    A ``start`` that reads a name in ``initialized`` (a value an initial equation sets) is not
+    known when the start attributes are stored, so ``next`` gets an initial equation instead,
+    ordered after the one it reads.
     """
     added: list[FlatVariable] = []
+    seeded: list[ir.Equal] = []
     lowered: list[ir.When] = []
     for when in whens:
         branches: list[ir.WhenBranch] = []
@@ -3722,10 +3727,14 @@ def _lower_samples(
                         index += 1
                     name = f"_sample{index}"
                     taken.add(name)
-                    added.append(
-                        FlatVariable(name, variability="discrete", start=start, fixed=True)
-                    )
                     ref = ir.Ref((name,))
+                    if initialized.intersection(names(start)):
+                        added.append(FlatVariable(name, variability="discrete"))
+                        seeded.append(ir.Equal(ref, start))
+                    else:
+                        added.append(
+                            FlatVariable(name, variability="discrete", start=start, fixed=True)
+                        )
                     advance = ir.Assign(ref, ir.Binary("+", ir.Call("pre", (ref,)), interval))
                     branches.append(
                         ir.WhenBranch(
@@ -3735,7 +3744,7 @@ def _lower_samples(
                 case _:
                     branches.append(branch)
         lowered.append(ir.When(tuple(branches)))
-    return tuple(lowered), tuple(added)
+    return tuple(lowered), tuple(added), tuple(seeded)
 
 
 def _assigned(body: Sequence[ir.Statement]) -> set[str]:
@@ -3820,10 +3829,30 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
     )
     # A clocked partition runs as a `when sample(0, interval)` (`clocks.as_when`), so it takes
     # the time-event path below like any other sample.
-    whens, samplers = _lower_samples(
+    # `parameter Real t0(fixed = false); initial equation t0 = time;` (Blocks.Math.Mean): a
+    # value fixed at the initial point. It lives in the workspace as a discrete variable that
+    # nothing changes after the start, so the parameter vector stays what the user set.
+    targets = {e.lhs.name for e in flat.initial_equations if isinstance(e.lhs, ir.Ref)}
+    demoted = {
+        v.name
+        for v in flat.variables
+        if v.variability == "parameter" and v.fixed is False and v.name in targets
+    }
+    if demoted:
+        flat = replace(
+            flat,
+            variables=tuple(
+                replace(v, variability="discrete", binding=None) if v.name in demoted else v
+                for v in flat.variables
+            ),
+        )
+    whens, samplers, seeded = _lower_samples(
         (*flat.whens, *(as_when(p) for p in flat.partitions)),
         {variable.name for variable in flat.variables},
+        demoted,
     )
+    if seeded:
+        flat = replace(flat, initial_equations=(*flat.initial_equations, *seeded))
     # A state is reset with `reinit`, and a name an equation also defines is a conflict the
     # emitter refuses with its remedy; neither becomes discrete here.
     defined = {e.lhs.name for e in flat.equations if isinstance(e.lhs, ir.Ref)}
