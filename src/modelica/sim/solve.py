@@ -571,6 +571,7 @@ class _Run:
         use for it and SciPy warns about arguments a solver ignores, which is a warning
         worth keeping meaningful.
         """
+        self._hold_on_threshold(t, y)
         chosen = self.sparse_slope if self.sparse else self.slope
         implicit: dict[str, Any] = {"jac": chosen} if self.method in _IMPLICIT else {}
         try:
@@ -662,6 +663,23 @@ class _Run:
             if (offset := self._offset(self.kernel.code.events[index])) is not None
         }
         return y
+
+    def _hold_on_threshold(self, t: float, y: NDArray[np.float64]) -> None:
+        """Keep a latched relation that starts exactly on its zero on its latch's side.
+
+        ``time < startTime`` with ``startTime = 0`` reads 0.0 at t = 0. SciPy counts a step
+        from 0.0 as a crossing, and the transition toggles the latch, which is then wrong.
+        With three such relations the toggles never settled (the MSL ``Rectifier``).
+        """
+        if not self.kernel.events:
+            return
+        z = self.kernel.indicators(t, y, self.p, self.w, np.empty(self.kernel.events))
+        for index, trigger in enumerate(self.kernel.code.events):
+            if trigger.latch is None or index in self.rearm or z[index] != 0.0:
+                continue
+            offset = self._offset(trigger)
+            if offset is not None:
+                self.rearm[index] = offset
 
     def _offset(self, trigger: Trigger) -> float | None:
         """Which side of its own zero a crossing that just fired restarts on.
