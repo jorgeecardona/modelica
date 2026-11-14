@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- A variable assigned in a `when` is discrete without the `discrete` prefix, as `Blocks.Sources.Pulse` writes it.
 - A statement target may have a subscript on an inner component (`a.b[1].c := 1`). An algorithm that assigns through one is refused by name.
 - A short class definition may have a shape (`type Axis = Real[3]`); `Axis a[2]` is `a[2, 3]`.
 - A subscript on an inner component (`r[1].n`) names that element, in equations and in `connect`.

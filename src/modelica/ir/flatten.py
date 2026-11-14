@@ -3688,6 +3688,34 @@ def _lower_samples(
     return tuple(lowered), tuple(added)
 
 
+def _assigned(body: Sequence[ir.Statement]) -> set[str]:
+    """The names a statement list assigns, through ``if`` branches and loops."""
+    found: set[str] = set()
+    for statement in body:
+        match statement:
+            case ir.Assign(target=ir.Ref(name=name)):
+                found.add(name)
+            case ir.CallStatement(targets=targets):
+                found.update(t.name for t in targets if isinstance(t, ir.Ref))
+            case ir.IfStatement(branches=branches, otherwise=otherwise):
+                for branch in branches:
+                    found |= _assigned(branch.body)
+                found |= _assigned(otherwise)
+            case ir.ForStatement(body=inner) | ir.WhileStatement(body=inner):
+                found |= _assigned(inner)
+            case _:
+                pass
+    return found
+
+
+def _when_assigned(whens: Sequence[ir.When]) -> set[str]:
+    """Every name a ``when`` assigns: discrete, with the prefix or without it.
+
+    A ``reinit`` is not an assignment, so a state it resets stays continuous.
+    """
+    return {name for when in whens for branch in when.branches for name in _assigned(branch.body)}
+
+
 def flatten(program: ir.Program, model: str) -> FlatModel:
     """Flatten class ``model`` (a dotted name) as found in ``program``."""
     program = _with_prelude(program)
@@ -3726,9 +3754,16 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
         (*flat.whens, *(as_when(p) for p in flat.partitions)),
         {variable.name for variable in flat.variables},
     )
+    assigned = _when_assigned(whens)
+    variables = tuple(
+        replace(v, variability="discrete")
+        if v.name in assigned and v.variability == "continuous"
+        else v
+        for v in flat.variables
+    )
     return replace(
         flat,
-        variables=(*flat.variables, *samplers),
+        variables=(*variables, *samplers),
         equations=tuple(unhold(e) for e in flat.equations) if flat.partitions else flat.equations,
         whens=whens,
     )
