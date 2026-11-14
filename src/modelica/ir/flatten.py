@@ -3335,6 +3335,10 @@ class _Flattener:
         parameter is in. On that final pass ``defer`` is off, so a condition that *still* does not
         resolve is the genuine run-time one, and ``_boolean`` refuses it.
         """
+        if not defer and (paired := self._run_time_if(node, prefix, local, scope, outer)):
+            for equation in paired:
+                self._equation(equation, prefix, local, scope=scope, outer=outer, initial=initial)
+            return
         body = node.otherwise
         for branch in node.branches:
             # The full expression rewrite, not a bare prefix: the condition may name an enumeration
@@ -3355,6 +3359,49 @@ class _Flattener:
                 break
         for inner in body:
             self._equation(inner, prefix, local, scope=scope, outer=outer, initial=initial)
+
+    def _run_time_if(
+        self,
+        node: ir.IfEquation,
+        prefix: _Path,
+        local: frozenset[str],
+        scope: Scope,
+        outer: Mapping[str, _Path] | None,
+    ) -> list[ir.Equal] | None:
+        """An if-equation whose condition changes during the run, as if-expressions; else None.
+
+        Each branch must hold the same number of plain equations and an ``else``. The equations
+        are paired by position: ``if c then y = a; else y = b;`` is ``y = if c then a else b``,
+        and a pair with different left sides becomes ``0 = if c then l1 - r1 else l2 - r2``.
+        None when a condition is known now, so the structural reading above applies.
+        """
+        try:
+            for branch in node.branches:
+                evaluate(self._carry(branch.condition, prefix, local, scope, outer), self.values)
+        except (EvaluationError, FlattenError):
+            pass
+        else:
+            return None
+        bodies = [branch.body for branch in node.branches]
+        bodies.append(node.otherwise)
+        if not node.otherwise or any(
+            len(body) != len(node.otherwise) or not all(isinstance(e, ir.Equal) for e in body)
+            for body in bodies
+        ):
+            return None
+        paired: list[ir.Equal] = []
+        for position in range(len(node.otherwise)):
+            arms = [body[position] for body in bodies]
+            if not all(isinstance(e, ir.Equal) for e in arms):
+                return None
+            equals = [e for e in arms if isinstance(e, ir.Equal)]
+            same = all(e.lhs == equals[0].lhs for e in equals) and isinstance(equals[0].lhs, ir.Ref)
+            values = [e.rhs if same else ir.Binary("-", e.lhs, e.rhs) for e in equals]
+            combined = values[-1]
+            for branch, value in zip(reversed(node.branches), reversed(values[:-1]), strict=True):
+                combined = ir.IfExpr(branch.condition, value, combined)
+            paired.append(ir.Equal(equals[0].lhs if same else ir.IntLiteral(0), combined))
+        return paired
 
     def resolve_deferred_ifs(self) -> None:
         """Resolve the if-equations held because a parameter in their condition was not yet known.

@@ -22,7 +22,7 @@ standards it implements. This is an independent open-source implementation, not
 affiliated with or endorsed by the Modelica Association.
 """
 
-__version__ = "0.1.40"
+__version__ = "0.1.41"
 
 from typing import TYPE_CHECKING, Any
 
