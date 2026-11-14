@@ -54,6 +54,11 @@ def unparse_expr(node: ir.Expr, *, minimum: int = IF) -> str:
 
 def _render_expr(node: ir.Expr) -> str:  # noqa: C901, PLR0911, PLR0912 -- one per node type
     match node:
+        case ir.Ref(parts=parts, subscripts=subscripts) if subscripts:
+            return ".".join(
+                f"{part}[{', '.join(_render_expr(i) for i in each)}]" if each else part
+                for part, each in zip(parts, subscripts, strict=True)
+            )
         case ir.Ref(parts=parts):
             return ".".join(parts)
         case ir.RealLiteral(value=value):
@@ -89,7 +94,7 @@ def _render_expr(node: ir.Expr) -> str:  # noqa: C901, PLR0911, PLR0912 -- one p
         case ir.End():
             return "end"
         case ir.Subscript(base=base, indices=indices):
-            return f"{base.name}[{', '.join(unparse_expr(i) for i in indices)}]"
+            return f"{unparse_expr(base)}[{', '.join(unparse_expr(i) for i in indices)}]"
         case ir.Range(start=start, stop=stop, step=step):
             # The step is the middle term, which is the one thing about `a:s:b` that
             # everybody gets wrong once.

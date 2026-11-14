@@ -118,10 +118,16 @@ class Span:
 
 @dataclass(frozen=True, slots=True)
 class Ref:
-    """A reference to a variable, possibly qualified: ``c.v`` is ``Ref(("c", "v"))``."""
+    """A reference to a variable, possibly qualified: ``c.v`` is ``Ref(("c", "v"))``.
+
+    ``subscripts`` holds the indices on each part when a part other than the last has some:
+    ``r[1].n`` is ``Ref(("r", "n"), subscripts=((IntLiteral(1),), ()))``. It is empty
+    otherwise; indices on the last part are a `Subscript` around the reference, as before.
+    """
 
     parts: tuple[str, ...]
     span: Span | None = field(default=None, compare=False, repr=False)
+    subscripts: tuple[tuple[Expr, ...], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.parts:

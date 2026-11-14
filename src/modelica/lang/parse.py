@@ -347,17 +347,11 @@ class _Parser:
                     return ir.Call(f".{inner.name}", inner.args, inner.named)
                 return inner
             case Kind.NAME:
-                where = self._at(token)
-                parts = self._dotted()
-                if self._check(Kind.OP, "("):
+                reference = self._component_reference()
+                if isinstance(reference, ir.Ref) and self._check(Kind.OP, "("):
                     args, named = self._arguments()
-                    return ir.Call(".".join(parts), args, named)
-                indices = self._bracketed()
-                if not indices:
-                    return ir.Ref(parts, where)
-                if self._check(Kind.OP, "."):
-                    raise self._error("a subscript on an inner component is not supported yet")
-                return ir.Subscript(ir.Ref(parts, where), indices)
+                    return ir.Call(reference.name, args, named)
+                return reference
             case _:
                 self._refuse_unsupported()
         raise self._error(f"expected an expression, found {token.describe()}")
@@ -804,19 +798,30 @@ class _Parser:
     def _endpoint(self) -> ir.Ref | ir.Subscript:
         """One side of a ``connect``, which is a component and not an expression.
 
-        A trailing subscript names one element of an array of connectors --
-        ``connect(p[k], q)`` -- and parses to a :class:`~modelica.ir.Subscript` on the
-        reference. A subscript anywhere but the end is still refused by name.
+        ``connect(p[k], q)`` and ``connect(r[1].n, r[2].p)``: subscripts may sit on any part.
         """
-        reference = self._reference()
-        if self._check(Kind.OP, "["):
-            indices = self._bracketed()
-            if self._check(Kind.OP, "."):
-                raise self._error(
-                    "a subscript inside a connect endpoint must be on the last name",
-                )
-            return ir.Subscript(reference, indices)
-        return reference
+        return self._component_reference()
+
+    def _component_reference(self) -> ir.Ref | ir.Subscript:
+        """``a.b``, ``a[i].b``, ``a[i].b[j]``: a dotted name with subscripts on any part.
+
+        Indices on the last part become a `Subscript` around the reference; indices on an
+        earlier part go in `Ref.subscripts`, one tuple per part.
+        """
+        where = self._at(self.token)
+        self._accept(Kind.OP, ".")  # a leading dot is global scope; nothing to record
+        parts: list[str] = []
+        indices: list[tuple[ir.Expr, ...]] = []
+        while True:
+            parts.append(self._expect(Kind.NAME).text)
+            indices.append(self._bracketed())
+            if not (self._check(Kind.OP, ".") and self._ahead(1).kind is Kind.NAME):
+                break
+            self.at += 1
+        inner = indices[:-1]
+        subscripts = (*inner, ()) if any(inner) else ()
+        reference = ir.Ref(tuple(parts), where, subscripts)
+        return ir.Subscript(reference, indices[-1]) if indices[-1] else reference
 
     def _when(self) -> ir.When:
         opening = self.token

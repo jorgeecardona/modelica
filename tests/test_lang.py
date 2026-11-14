@@ -369,7 +369,6 @@ def test_the_step_of_a_range_is_the_middle_term() -> None:
 # tests/test_slices.py pins the new behaviour.
 ARRAY_REFUSALS = [
     ("several indices", "model M\nequation\n  for i, j in 1:3 loop\n  end for;\nend M;\n"),
-    ("inner subscript", "a[1].b"),
 ]
 
 
@@ -553,3 +552,25 @@ def test_an_output_list_statement_takes_subscripted_targets() -> None:
     assert isinstance(statement.targets[0], ir.Subscript)
     assert isinstance(statement.targets[2], ir.Ref)
     assert "(e[:, 1], e[:, 2], info) := G(A);" in unparse(program)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["a[i].b", "a[2].b[3]", "r[1].n.v", "x.y[2].z"],
+)
+def test_a_subscript_on_any_part_of_a_reference_parses_and_unparses(text: str) -> None:
+    """MSL writes ``a[i].b`` (95 examples were blocked on it); the text comes back the same."""
+    from modelica.lang import parse_expression  # noqa: PLC0415
+    from modelica.lang.unparse import unparse_expr  # noqa: PLC0415
+
+    assert unparse_expr(parse_expression(text)) == text
+
+
+def test_a_connect_endpoint_takes_a_subscript_on_an_inner_part() -> None:
+    """``connect(r[1].n, r[2].p)`` joins element 1's ``n`` to element 2's ``p``."""
+    from modelica.ir import nodes as ir  # noqa: PLC0415
+
+    model = "model M\nequation\n  connect(r[1].n, r[2].p);\nend M;\n"
+    connect = parse(model).classes[0].equations[0]
+    assert isinstance(connect, ir.Connect)
+    assert connect.a == ir.Ref(("r", "n"), subscripts=((ir.IntLiteral(1),), ()))

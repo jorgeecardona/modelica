@@ -117,6 +117,8 @@ def test_a_connect_reaches_a_connector_on_each_element_of_an_array_of_components
     assert ir.Equal(ir.Ref(("lamp[2]", "p", "v")), ir.Ref(("plug[2]", "v"))) in flat.equations
 
 
-def test_a_mid_path_subscript_is_refused_by_name() -> None:
-    with pytest.raises(Exception, match="must be on the last name"):
-        parse(LIB + "model M\nequation\n  connect(a[1].p, b);\nend M;\n")
+def test_a_mid_path_subscript_parses_and_flatten_refuses_it_by_name() -> None:
+    """``connect(a[1].p, b)`` parses; flattening a subscript on an inner part is not done yet."""
+    program = parse(LIB + "model M\nequation\n  connect(a[1].p, b);\nend M;\n")
+    with pytest.raises(FlattenError, match="subscript on an inner component"):
+        flatten(program, "M")

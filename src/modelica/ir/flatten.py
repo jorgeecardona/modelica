@@ -441,6 +441,8 @@ def _prefix_ref(
     prefix -- it takes the path the matching ``inner`` was declared at, whole. Checking it
     after ``local`` would qualify it into a variable that no declaration ever created.
     """
+    if ref.subscripts:
+        raise FlattenError(f"{ref.name!r}: a subscript on an inner component is not supported yet")
     head = ref.parts[0]
     if outer and head in outer:
         return ir.Ref((*outer[head], *ref.parts[1:]))
