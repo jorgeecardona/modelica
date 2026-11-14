@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- `initial equation pre(x) = v` gives a discrete variable its value before the first event (`Blocks.Logical.Timer`).
 - A `fixed = false` parameter set by an initial equation (`t0 = time` in `Blocks.Math.Mean`) takes its value at the start, and a `sample` may start from it.
 - An initial equation may set a discrete variable a `when` assigns, and may read `time` (`count = integer((time - startTime) / period)` in `Blocks.Sources.Pulse`).
 - Fixed: a relation exactly on its threshold at the start (`time < startTime` with `startTime = 0`) no longer counts as a crossing. Three of them made a run chatter at t = 0.

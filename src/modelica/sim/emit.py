@@ -1569,6 +1569,12 @@ class Emitter:
         pending: list[tuple[str, ir.Expr]] = []
         for equation in self.system.initial_equations:
             match equation:
+                # `pre(entryTime) = 0` (Blocks.Logical.Timer): the value a discrete variable
+                # holds before the first event, which is the value it starts with here.
+                case ir.Equal(lhs=ir.Call(name="pre", args=(ir.Ref() as target,)), rhs=value) if (
+                    target.name in self.remembered
+                ):
+                    pending.append((target.name, value))
                 case ir.Equal(lhs=ir.Ref() as target, rhs=value) if target.name in states:
                     pending.append((target.name, value))
                 case ir.Equal(lhs=value, rhs=ir.Ref() as target) if target.name in states:
