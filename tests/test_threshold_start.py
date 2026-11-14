@@ -34,7 +34,9 @@ end M;
 
 
 @pytest.mark.parametrize("backend", ["python", "engine"])
-def test_three_relations_on_their_threshold_at_the_start_settle(backend: Literal["python", "engine"]) -> None:
+def test_three_relations_on_their_threshold_at_the_start_settle(
+    backend: Literal["python", "engine"],
+) -> None:
     if backend == "engine":
         from modelica.sim import engine  # noqa: PLC0415 - only this case needs it
 
