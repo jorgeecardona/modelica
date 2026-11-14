@@ -23,17 +23,17 @@ engine wheel exists, the pure-Python wheel simulates with SciPy instead. See [th
 Python has the two ends of a Modelica toolchain and little of the middle.
 [FMPy](https://github.com/CATIA-Systems/FMPy) and
 [PyFMI](https://github.com/modelon-community/PyFMI) *run* an FMU that some other tool
-compiled. The tools that compile Modelica — **OpenModelica** (and its `OMPython` bridge),
-**Dymola**, **JModelica** — are large programs, and none of them is Python. If you want a
+compiled. The tools that compile Modelica (**OpenModelica** and its `OMPython` bridge,
+**Dymola**, **JModelica**) are large programs, and none of them is Python. If you want a
 mature, near-complete Modelica compiler for production, reach for one of those; this is not
 that yet.
 
 So the gap is narrow and specific, and it is two things:
 
-- **Nothing in Python takes Modelica source to a trajectory the way a *hybrid* model needs**
-  — adaptive stiff integration, index reduction, and events the solver stops at.
-- **Nothing treats the model itself as an ordinary Python value** — the flat equations, the
-  incidence structure, the index — that you can read, inspect and change.
+- **Nothing in Python takes Modelica source to a trajectory the way a *hybrid* model needs**:
+  adaptive stiff integration, index reduction, and events the solver stops at.
+- **Nothing treats the model itself as an ordinary Python value** (the flat equations, the
+  incidence structure, the index) that you can read, inspect and change.
 
 That gap is the project. Choose `modelica` when you want Modelica semantics *as a library*:
 to inspect the flat DAE, script the toolchain, or embed a solver in your own Python. Choose
@@ -174,7 +174,7 @@ print(picture.to_dot())           # or source for Graphviz
 - **Hybrid simulation.** Adaptive stiff integration (Radau on the engine; Radau, BDF and LSODA
   via SciPy), state and time
   events with `reinit`, a sparse Jacobian, and asserts checked along the trajectory.
-- **Diagrams with no extra program.** Any layer draws to SVG, Mermaid or DOT — components and
+- **Diagrams with no extra program.** Any layer draws to SVG, Mermaid or DOT: components and
   connections, the incidence of equations against variables, or blocks in solution order.
 - **FMI 3.0, started.** `modelica.fmi` writes a model's `modelDescription.xml` and holds the
   FMI calling sequence as a state machine. Importing or exporting a whole FMU is not done.

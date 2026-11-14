@@ -8,7 +8,7 @@
 # historical name; the import package matches the distribution.
 name = "modelica"
 dynamic = ["version"]  # the single source of truth is __version__ in src/modelica/__init__.py (see [tool.hatch.version])
-description = "Modelica toolchain for Python: parse, flatten, simulate on a precompiled engine, and exchange via FMI 3.0 and SSP 2.0"
+description = "A library for reading and simulating Modelica models in Python"
 readme = "README.md"
 # 3.12+, no compatibility shims: this is a full rewrite of a 2010 Python 2 codebase, and
 # the modelling layer leans on the modern typing surface (Self, StrEnum, exception groups

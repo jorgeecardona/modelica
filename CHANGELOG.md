@@ -4,8 +4,9 @@ All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org/); the version is `__version__` in
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
-## Unreleased
+## 0.1.34 (2026-11-14)
 
+- The PyPI summary now says what the package is: a library for reading and simulating Modelica models in Python.
 - Fixed: a call with a leading dot (`.sin(u)`) is the global function or the built-in, so `Modelica.Math.sin` no longer calls itself. It blocked 54 MSL examples.
 - A model on the real Modelica Standard Library 4.1.0 runs: `run(model, libraries=[".../Modelica", ".../ModelicaServices"])`. An RC circuit reads 24 library files and loads in about 3 s.
 - `modelica.lang.library.closure` reads a library stored as `package.mo` directories, parsing only the files a model's names reach (lexical lookup, followed per class); `load` reads the whole tree. `run` takes such a directory in `paths` or `libraries=[...]`; a `Modelica` directory replaces the bundled slice. `python -m modelica.sim` takes `--lib DIR` and `--modelicapath`.
