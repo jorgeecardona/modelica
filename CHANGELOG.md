@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- A statement target may have a subscript on an inner component (`a.b[1].c := 1`). An algorithm that assigns through one is refused by name.
 - A short class definition may have a shape (`type Axis = Real[3]`); `Axis a[2]` is `a[2, 3]`.
 - A subscript on an inner component (`r[1].n`) names that element, in equations and in `connect`.
 - The PyPI summary now says what the package is: a library for reading and simulating Modelica models in Python.

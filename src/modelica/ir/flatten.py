@@ -1808,6 +1808,13 @@ def _run(  # noqa: PLR0911 - one case per statement form
     such merge unless its trip count is known, and an early exit has no merge at all.
     """
     match statement:
+        case ir.Assign(target=ir.Ref(subscripts=subscripts) as target) if subscripts:
+            # The environment is keyed by dotted name, which has no slot for `lamp[2]`; keying it
+            # as `lamp.p.v` would assign a variable that does not exist.
+            raise FlattenError(
+                f"{where}: an assignment to {target.name!r} through a subscripted component is"
+                " not supported yet"
+            )
         case ir.Assign(target=ir.Ref(name=name), value=value):
             return {
                 **environment,

@@ -162,3 +162,12 @@ def test_an_inner_subscript_in_an_equation_reads_the_element() -> None:
     source = LIB + "model M\n  Lamp lamp[2];\n  Real x;\nequation\n  x = lamp[2].p.v;\nend M;\n"
     flat = flatten(parse(source), "M")
     assert ir.Equal(ir.Ref(("x",)), ir.Ref(("lamp[2]", "p", "v"))) in flat.equations
+
+
+def test_an_inner_subscript_on_a_statement_target_parses_and_flatten_refuses_it() -> None:
+    """``lamp[2].p.v := 1`` parses; an algorithm cannot assign through it yet, and says so."""
+    source = LIB + "model M\n  Lamp lamp[2];\nalgorithm\n  lamp[2].p.v := 1;\nend M;\n"
+    program = parse(source)
+    assert parse(unparse(program)) == program
+    with pytest.raises(FlattenError, match="through a subscripted component"):
+        flatten(program, "M")
