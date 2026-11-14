@@ -1979,9 +1979,28 @@ def _merge_branches(
     environment: Mapping[str, ir.Expr],
     where: str,
 ) -> dict[str, ir.Expr]:
-    """Run every arm against its own copy, then reconcile what they disagree about."""
-    conditions = [_substitute(branch.condition, environment) for branch in branches]
-    arms = [_sequence(branch.body, environment, where) for branch in branches]
+    """Run every arm against its own copy, then reconcile what they disagree about.
+
+    An arm whose condition is known (a constant, or a parameter value, as a loop bound is (#2))
+    is decided here: a false one is dropped, and
+    a true one is the answer with the arms after it. `symmetricOrientation(m)` assigns its
+    output only in the arm that `mod(m, 2) == 0` picks, so running every arm refused it.
+    """
+    kept: list[ir.StatementBranch] = []
+    for branch in branches:
+        condition = _substitute(branch.condition, environment)
+        try:
+            known = evaluate(condition, _PARAMETERS.get())
+        except EvaluationError:
+            kept.append(ir.StatementBranch(condition, branch.body))
+            continue
+        if known:
+            otherwise = branch.body
+            break
+    if not kept:
+        return _sequence(otherwise, environment, where)
+    conditions = [branch.condition for branch in kept]
+    arms = [_sequence(branch.body, environment, where) for branch in kept]
     fallback = _sequence(otherwise, environment, where)
 
     def chosen(arm: Mapping[str, ir.Expr], key: str) -> ir.Expr:
