@@ -814,6 +814,17 @@ class _Tarjan:
         return self.result
 
 
+def _is_relation(node: ir.Expr) -> bool:
+    """Whether ``node`` is a relation or a logical expression: Boolean-valued, with no slope."""
+    match node:
+        case ir.Binary(op="<" | "<=" | ">" | ">=" | "==" | "<>" | "and" | "or"):
+            return True
+        case ir.Unary(op="not"):
+            return True
+        case _:
+            return False
+
+
 def _tear(unknowns: tuple[str, ...], equations: tuple[ir.Equal, ...]) -> Block:
     """Split a simultaneous block into the part a solver iterates on and the part that follows.
 
@@ -853,9 +864,19 @@ def _tear(unknowns: tuple[str, ...], equations: tuple[ir.Equal, ...]) -> Block:
                 found = (index, reachable[0], answer)
                 break
         if found is None:
-            # Nothing comes apart, so guess the variable the most equations are waiting on.
+            # Nothing comes apart, so guess the variable the most equations are waiting on. A
+            # Boolean that a relation defines (`off = s < 0`) is never the guess: a Newton step
+            # needs a slope, and a relation has none. Guessing `s` instead makes `off` an
+            # assignment, folded into the residual as the condition it is.
             counts = {name: sum(contains(residuals[i], name) for i in unused) for name in pending}
-            chosen = max(sorted(pending), key=lambda name: counts[name])
+            relational = {
+                name
+                for name in pending
+                for i in unused
+                if (direct := isolated(residuals[i], name)) is not None and _is_relation(direct[0])
+            }
+            candidates = sorted(pending - relational) or sorted(pending)
+            chosen = max(candidates, key=lambda name: counts[name])
             torn.append(chosen)
             pending.discard(chosen)
             continue

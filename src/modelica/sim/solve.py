@@ -211,6 +211,8 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     grid = _grid(start, stop, times, points)
     p, y, w = kernel.start(start, parameters)
     plan = _Run(kernel, p, w, tolerance, absolute if absolute is not None else tolerance, method)
+    if grid is not None and len(grid) > 1:
+        plan.max_step = float(np.min(np.diff(grid)))
     result = plan.run(start, stop, y, grid)
     # A `System` carries the model's asserts; a pre-built `Code`/`Kernel` does not expose them,
     # so `getattr` leaves those callers unchecked rather than reaching for a field they lack.
@@ -365,6 +367,13 @@ class _Run:
         method: str,
     ) -> None:
         self.kernel = kernel
+        self.max_step = np.inf
+        """The longest step taken while a crossing is watched: the output spacing.
+
+        SciPy tests an indicator's sign only at step ends. A stiff mode lets Radau take a
+        step longer than an interval where a relation is true, so the crossing in and the
+        crossing out are both skipped (the ideal diode's ``s < 0``).
+        """
         self.p = p
         self.w = w
         pattern = kernel.code.sparsity
@@ -576,6 +585,7 @@ class _Run:
                     atol=self.absolute,
                     dense_output=True,
                     events=self.triggers or None,
+                    max_step=self.max_step if self.triggers else np.inf,
                     **implicit,
                 ),
             )
