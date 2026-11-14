@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- An array binding set from outside (`A a(final v = fill(v0, m))`) gives each element its own value.
 - An equation like `off = s < 0` is no longer chosen to compute `s`, so the thyristor rectifier examples causalize.
 - An if-equation whose condition changes during the run becomes one if-expression per equation, when every branch has the same number of equations and an `else`.
 - A variable assigned in a `when` is discrete without the `discrete` prefix, as `Blocks.Sources.Pulse` writes it.

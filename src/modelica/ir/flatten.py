@@ -2740,6 +2740,9 @@ class _Flattener:
                 array_binding = _infer_shape(shaped.value, local_shapes) == tuple(sizes)
             except FlattenError:
                 array_binding = False  # a shape this pass cannot read keeps the old path
+        # The enclosing class's modification (`A a(final v = fill(v0, m))`) is shaped and indexed
+        # the same way, or every element would carry the whole array as its binding.
+        outer_shaped = _shape_modification(outer, tuple(sizes), path, self.values)
         for indices in product(*(range(1, size + 1) for size in sizes)):
             if array_binding and shaped.value is not None:
                 one = replace(shaped, value=_element(shaped.value, indices, local_shapes))
@@ -2747,7 +2750,7 @@ class _Flattener:
             self._component(
                 replace(member, component=_element_of(scalar, indices, path)),
                 (*here, element(component.name, indices)),
-                outer,
+                _index_modification(outer_shaped, indices, path),
                 floor,
                 local,
                 writer=writer,
