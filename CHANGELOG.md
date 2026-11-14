@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- A function called in a component's binding reads that component's parameters for its `if` arms and shapes (`so(m)` inside `c` reads `c.m`).
 - An `if` in a function whose condition is known when it is inlined runs only the arm it picks, so an arm that leaves an output unset is no longer refused when it is not picked.
 - `initial equation pre(x) = v` gives a discrete variable its value before the first event (`Blocks.Logical.Timer`).
 - A `fixed = false` parameter set by an initial equation (`t0 = time` in `Blocks.Math.Mean`) takes its value at the start, and a `sample` may start from it.

@@ -30,6 +30,7 @@ not build. They resolve names and merge classes. They produce no equations.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from functools import cache
@@ -54,7 +55,7 @@ from modelica.ir.flat import (
 from modelica.ir.rewrite import names, substitute
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Sequence
 
 __all__ = [
     "Effective",
@@ -2639,7 +2640,12 @@ class _Flattener:
         # written *here*, so they are prefixed here, against the path of the class that
         # holds them -- everything in `path` except this component's own name.
         here = path[:-1]
-        resolved_literals = _literal_modification(component.modification, member.scope, local)
+        # An inlined call reads this instance's parameters by their local names.
+        token = _PARAMETERS.set(_LocalValues(self.values, here, local))
+        try:
+            resolved_literals = _literal_modification(component.modification, member.scope, local)
+        finally:
+            _PARAMETERS.reset(token)
         own = _prefix_modification(resolved_literals, here, local)
         inherited = tuple(_prefix_modification(mod, here, local) for mod in member.mods)
         total = _merged(own, *inherited, outer)
@@ -2735,7 +2741,12 @@ class _Flattener:
         # it would from a written `{...}` (the whole call reached the emitter untranslated otherwise).
         # Function calls in the binding are inlined first, so a call that returns an array
         # (`A = areas(0.1, N)`) arrives here as the literal array it computes (#2).
-        inlined = _literal_modification(component.modification, member.scope, local)
+        view = _LocalValues(self.values, here, local)
+        token = _PARAMETERS.set(view)
+        try:
+            inlined = _literal_modification(component.modification, member.scope, local)
+        finally:
+            _PARAMETERS.reset(token)
         if inlined.value is not None and "cat" in _call_names(inlined.value):
             here_shapes = {
                 key[len(here) :]: shape
@@ -2743,7 +2754,7 @@ class _Flattener:
                 if len(key) > len(here) and key[: len(here)] == here
             }
             inlined = replace(inlined, value=_expand_cat(inlined.value, here_shapes))
-        shaped = _shape_modification(inlined, tuple(sizes), path, self.values)
+        shaped = _shape_modification(inlined, tuple(sizes), path, view)
         scalar = replace(component, dimensions=(), modification=shaped)
         # A binding that is an expression over whole arrays -- `C = A * dx / k` -- is read out
         # element by element, as an array equation is (#3). The shapes are keyed by flat path,
@@ -3764,6 +3775,35 @@ def _lower_samples(
                     branches.append(branch)
         lowered.append(ir.When(tuple(branches)))
     return tuple(lowered), tuple(added), tuple(seeded)
+
+
+class _LocalValues(Mapping[str, float]):
+    """The known parameter values, read by the names the enclosing class writes.
+
+    A call in a binding is inlined before its names are prefixed, so ``so(m)`` inside component
+    ``c`` reads ``m`` while the value is stored as ``c.m``. A key whose first segment is a local
+    name is looked up under the instance path; any other key is looked up as written.
+    """
+
+    def __init__(self, values: Mapping[str, float], here: _Path, local: frozenset[str]) -> None:
+        self.known = values
+        self.here = here
+        self.local = local
+
+    def _key(self, key: str) -> str:
+        return ".".join((*self.here, key)) if key.split(".", 1)[0] in self.local else key
+
+    def __getitem__(self, key: str) -> float:
+        return self.known[self._key(key)]
+
+    def __contains__(self, key: object) -> bool:
+        return isinstance(key, str) and self._key(key) in self.known
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.known)
+
+    def __len__(self) -> int:
+        return len(self.known)
 
 
 def _assigned(body: Sequence[ir.Statement]) -> set[str]:
