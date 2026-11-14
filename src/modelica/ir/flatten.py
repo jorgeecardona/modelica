@@ -2641,11 +2641,13 @@ class _Flattener:
         # holds them -- everything in `path` except this component's own name.
         here = path[:-1]
         # An inlined call reads this instance's parameters by their local names.
-        token = _PARAMETERS.set(_LocalValues(self.values, here, local))
+        view = _LocalValues(self.values, here, local)
+        token = _PARAMETERS.set(view)
         try:
             resolved_literals = _literal_modification(component.modification, member.scope, local)
         finally:
             _PARAMETERS.reset(token)
+        resolved_literals = _expanded_comprehensions(resolved_literals, view)
         own = _prefix_modification(resolved_literals, here, local)
         inherited = tuple(_prefix_modification(mod, here, local) for mod in member.mods)
         total = _merged(own, *inherited, outer)
@@ -3775,6 +3777,42 @@ def _lower_samples(
                     branches.append(branch)
         lowered.append(ir.When(tuple(branches)))
     return tuple(lowered), tuple(added), tuple(seeded)
+
+
+def _expand_inside(node: ir.Expr, values: Mapping[str, float]) -> ir.Expr:  # noqa: PLR0911 - one case per node type
+    """``node`` with each comprehension whose ranges can be read expanded; the rest unchanged."""
+    match node:
+        case ir.Comprehension():
+            try:
+                return _expand_comprehension(node, lambda expr: expr, values)
+            except (FlattenError, EvaluationError):
+                return node
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, _expand_inside(lhs, values), _expand_inside(rhs, values))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _expand_inside(operand, values))
+        case ir.Call(name=name, args=args, named=named):
+            return ir.Call(name, tuple(_expand_inside(a, values) for a in args), named)
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(
+                condition, _expand_inside(then, values), _expand_inside(otherwise, values)
+            )
+        case _:
+            return node
+
+
+def _expanded_comprehensions(mod: ir.Modification, values: Mapping[str, float]) -> ir.Modification:
+    """Each comprehension in a modification's values, as the array it stands for.
+
+    An inlined call can return one (``symmetricOrientation`` writes ``{... for k in 1:m}``), and
+    the modification is prefixed next, where a comprehension is not expanded. A comprehension
+    whose range cannot be read yet is left as it is.
+    """
+    value = None if mod.value is None else _expand_inside(mod.value, values)
+    entries = {key: _expanded_comprehensions(entry, values) for key, entry in mod.entries.items()}
+    if value is mod.value and all(entries[k] is e for k, e in mod.entries.items()):
+        return mod
+    return replace(mod, value=value, entries=entries)
 
 
 class _LocalValues(Mapping[str, float]):

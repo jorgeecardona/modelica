@@ -73,3 +73,14 @@ def test_a_call_in_a_component_reads_the_component_parameter() -> None:
     assert evaluate(second, {"c.m": 3.0}) == 2 * 3.14 / 3
     five = flatten(parse(COMPONENT.replace("C c;", "C c(m = 5);")), "M")
     assert "c.o[5]" in {v.name for v in five.variables}
+
+
+def test_a_call_in_an_outer_modification_returns_a_comprehension_that_is_expanded() -> None:
+    """``C c(o = so(m))`` from the enclosing class: the result reaches each element of ``c.o``."""
+    source = COMPONENT.replace(
+        "model M\n  C c;\nend M;",
+        "model D\n  parameter Integer m = 3;\n  C c(m = m, o = -so(m));\nend D;\n"
+        "model M\n  D d;\nend M;",
+    )
+    flat = flatten(parse(source), "M")
+    assert "d.c.o[3]" in {v.name for v in flat.variables}
