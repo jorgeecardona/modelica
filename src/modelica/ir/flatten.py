@@ -426,13 +426,14 @@ def _signal_base(found: Found, scope: Scope) -> tuple[BaseType, ir.Modification]
 # --------------------------------------------------------------------------------------
 
 
-def _prefix_ref(
+def _prefix_ref(  # noqa: PLR0913 - values and outer are optional context
     ref: ir.Ref,
     prefix: _Path,
     local: frozenset[str],
     *,
     strict: bool = True,
     outer: Mapping[str, _Path] | None = None,
+    values: Mapping[str, float] | None = None,
 ) -> ir.Ref:
     """The flat name of a written one: qualified by the instance path that holds it.
 
@@ -442,8 +443,12 @@ def _prefix_ref(
     after ``local`` would qualify it into a variable that no declaration ever created.
     """
     if ref.subscripts:
-        raise FlattenError(f"{ref.name!r}: a subscript on an inner component is not supported yet")
-    head = ref.parts[0]
+        if values is None:
+            raise FlattenError(
+                f"{ref.name!r}: a subscript on an inner component is not supported yet"
+            )
+        ref = _elements(ref, prefix, local, values, outer)
+    head = ref.parts[0].split("[", 1)[0]
     if outer and head in outer:
         return ir.Ref((*outer[head], *ref.parts[1:]))
     if head in local:
@@ -451,6 +456,37 @@ def _prefix_ref(
     if ref.parts == ("time",) or not strict:
         return ref
     raise FlattenError(f"unknown name {ref.name!r} in an equation{at(ref.span)}")
+
+
+def _elements(
+    ref: ir.Ref,
+    prefix: _Path,
+    local: frozenset[str],
+    values: Mapping[str, float],
+    outer: Mapping[str, _Path] | None,
+) -> ir.Ref:
+    """``r[1].n`` as the parts the array expansion declared: ``("r[1]", "n")``.
+
+    Each index is structural, like a dimension: it picks which element the name means, so it
+    is evaluated now against the parameters declared so far.
+    """
+    parts = tuple(
+        element(
+            part,
+            tuple(
+                _integer(
+                    _prefix_expr(i, prefix, local, values=values, outer=outer),
+                    values,
+                    f"the subscript of {part!r} in {ref.name!r}",
+                )
+                for i in indices
+            ),
+        )
+        if indices
+        else part
+        for part, indices in zip(ref.parts, ref.subscripts, strict=True)
+    )
+    return ir.Ref(parts)
 
 
 def _unary(op: ir.UnaryOp, operand: ir.Expr) -> ir.Expr:
@@ -1003,7 +1039,7 @@ def _prefix_expr(  # noqa: C901, PLR0911, PLR0912, PLR0913 -- one case per node 
 
     match node:
         case ir.Ref():
-            return _prefix_ref(node, prefix, local, strict=strict, outer=outer)
+            return _prefix_ref(node, prefix, local, strict=strict, outer=outer, values=values)
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             return ir.Binary(op, go(lhs), go(rhs))
         case ir.Unary(op=op, operand=operand):
@@ -1018,7 +1054,7 @@ def _prefix_expr(  # noqa: C901, PLR0911, PLR0912, PLR0913 -- one case per node 
             # name, never an index -- which is the whole point of scalarising here.
             if values is None:
                 raise FlattenError("subscripted references are not expanded here")
-            path = _prefix_ref(base, prefix, local, strict=strict, outer=outer).parts
+            path = _prefix_ref(base, prefix, local, strict=strict, outer=outer, values=values).parts
             indices = _ends(indices, path)
             if any(isinstance(i, ir.Range) for i in indices):
                 # A range subscript is a slice -- a sub-array, not one element -- so it becomes an
@@ -3317,7 +3353,7 @@ class _Flattener:
     def _severed(self, end: ir.Ref | ir.Subscript, prefix: _Path, local: frozenset[str]) -> bool:
         """Whether this connect endpoint sits inside a disabled conditional component."""
         ref = end.base if isinstance(end, ir.Subscript) else end
-        path = _prefix_ref(ref, prefix, local).parts
+        path = _prefix_ref(ref, prefix, local, values=self.values).parts
         return any(path[:length] in self.disabled for length in range(1, len(path) + 1))
 
     def _connect_pairs(
@@ -3367,7 +3403,13 @@ class _Flattener:
         parts = end.parts
         role: _Role = "outside" if len(parts) == 1 else "inside"
         for split in range(len(parts)):
-            head = _prefix_ref(ir.Ref(parts[: split + 1]), prefix, local, strict=False).parts
+            head = _prefix_ref(
+                ir.Ref(parts[: split + 1], subscripts=end.subscripts[: split + 1]),
+                prefix,
+                local,
+                strict=False,
+                values=self.values,
+            ).parts
             shape = self.shapes.get(tuple(head))
             if shape is None or len(shape) != 1:
                 continue
@@ -3384,7 +3426,7 @@ class _Flattener:
         self, end: ir.Ref | ir.Subscript, prefix: _Path, local: frozenset[str]
     ) -> _Endpoint:
         ref = end.base if isinstance(end, ir.Subscript) else end
-        path = _prefix_ref(ref, prefix, local).parts
+        path = _prefix_ref(ref, prefix, local, values=self.values).parts
         if isinstance(end, ir.Subscript):
             # A subscript picks one element of an array of connectors, and the element it
             # names is the one `_array` already declared -- so the index is structural,

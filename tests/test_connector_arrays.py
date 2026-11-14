@@ -117,8 +117,48 @@ def test_a_connect_reaches_a_connector_on_each_element_of_an_array_of_components
     assert ir.Equal(ir.Ref(("lamp[2]", "p", "v")), ir.Ref(("plug[2]", "v"))) in flat.equations
 
 
-def test_a_mid_path_subscript_parses_and_flatten_refuses_it_by_name() -> None:
-    """``connect(a[1].p, b)`` parses; flattening a subscript on an inner part is not done yet."""
-    program = parse(LIB + "model M\nequation\n  connect(a[1].p, b);\nend M;\n")
-    with pytest.raises(FlattenError, match="subscript on an inner component"):
-        flatten(program, "M")
+CHAIN = """\
+model Chain
+  Modelica.Electrical.Analog.Basic.Resistor r[2](each R = 1);
+  Modelica.Electrical.Analog.Sources.ConstantVoltage s(V = 2);
+  Modelica.Electrical.Analog.Basic.Ground g;
+equation
+  connect(s.p, r[1].p); connect(r[1].n, r[2].p);
+  connect(r[2].n, s.n); connect(s.n, g.p);
+end Chain;
+"""
+
+FLAT_CHAIN = """\
+model Chain
+  Modelica.Electrical.Analog.Basic.Resistor r1(R = 1);
+  Modelica.Electrical.Analog.Basic.Resistor r2(R = 1);
+  Modelica.Electrical.Analog.Sources.ConstantVoltage s(V = 2);
+  Modelica.Electrical.Analog.Basic.Ground g;
+equation
+  connect(s.p, r1.p); connect(r1.n, r2.p);
+  connect(r2.n, s.n); connect(s.n, g.p);
+end Chain;
+"""
+
+
+def test_a_subscript_on_an_inner_component_names_the_element() -> None:
+    """``connect(r[1].n, r[2].p)`` joins the pins of two elements of an array of components."""
+    flat = flatten(parse(CHAIN), "Chain")
+    renamed = flatten(parse(FLAT_CHAIN), "Chain")
+    assert repr(flat.equations).replace("r[1]", "r1").replace("r[2]", "r2") == repr(
+        renamed.equations
+    )
+
+
+def test_the_chain_divides_the_voltage() -> None:
+    from modelica.ir.causalize import causalize  # noqa: PLC0415
+    from modelica.sim import simulate  # noqa: PLC0415
+
+    result = simulate(causalize(flatten(parse(CHAIN), "Chain")), stop=1.0)
+    assert abs(float(result["r[2].v"][-1]) - 1.0) < 1e-9
+
+
+def test_an_inner_subscript_in_an_equation_reads_the_element() -> None:
+    source = LIB + "model M\n  Lamp lamp[2];\n  Real x;\nequation\n  x = lamp[2].p.v;\nend M;\n"
+    flat = flatten(parse(source), "M")
+    assert ir.Equal(ir.Ref(("x",)), ir.Ref(("lamp[2]", "p", "v"))) in flat.equations

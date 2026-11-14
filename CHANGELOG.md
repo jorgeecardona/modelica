@@ -5,7 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
-
+- A subscript on an inner component (`r[1].n`) names that element, in equations and in `connect`.
 - The PyPI summary now says what the package is: a library for reading and simulating Modelica models in Python.
 - Fixed: a call with a leading dot (`.sin(u)`) is the global function or the built-in, so `Modelica.Math.sin` no longer calls itself. It blocked 54 MSL examples.
 - A model on the real Modelica Standard Library 4.1.0 runs: `run(model, libraries=[".../Modelica", ".../ModelicaServices"])`. An RC circuit reads 24 library files and loads in about 3 s.
