@@ -72,7 +72,7 @@ class _Point:
         self.p = self.module.parameters(np.zeros(len(code.parameters)))
         self.y = np.zeros(len(code.states))
         self.w = np.zeros(code.workspace)
-        self.module.initial(self.p, self.y, self.w)
+        self.module.initial(0.0, self.p, self.y, self.w)
         self.module.latch(0.0, self.y, self.p, self.w)
         self.code = code
 

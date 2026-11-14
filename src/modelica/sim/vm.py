@@ -846,7 +846,7 @@ class _Lowering:
             return self.expr(scope, system[name].start or ir.RealLiteral(0.0))
         return self.constant(scope, 0.0)
 
-    def initial(self) -> Function:
+    def initial(self) -> Function:  # noqa: C901 - one store per kind of start value
         """The start values into ``y`` and the workspace, as `Emitter.initial`."""
         emitter = self.emitter
         system = emitter.system
@@ -873,7 +873,8 @@ class _Lowering:
             for name, value in conditions:
                 self.assign(scope, name, value)
                 source = self.ref(scope, name)
-                scope.code.append(Instr(Op.STORE_OUT, 0, states[name], source))
+                if name in states:
+                    scope.code.append(Instr(Op.STORE_OUT, 0, states[name], source))
                 scope.code.append(Instr(Op.STORE_W, 0, emitter.slots[name], source))
             if emitter.switching is not None:
                 zero = self.constant(scope, 0.0)

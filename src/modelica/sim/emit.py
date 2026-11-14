@@ -9,7 +9,7 @@ rather than returning a new one, so that the step loop allocates as little as it
 
 ``parameters(p)``
     Evaluate the parameter bindings, in dependency order.
-``initial(p, y, w)``
+``initial(t, p, y, w)``
     Fill the state vector from the ``start`` attributes, and seed the workspace.
 ``latch(t, y, p, w)``
     Record which relations hold at the initial point -- see below.
@@ -1556,7 +1556,9 @@ class Emitter:
         Ordered by what each one reads, so ``x = 1; y = x + 1`` runs the right way round, and
         a cycle between two of them is refused rather than resolved by luck.
         """
-        states = set(self.system.states)
+        # A discrete variable a `when` assigns may be set by an initial equation too:
+        # `Blocks.Sources.Pulse` writes `count = integer((time - startTime) / period)`.
+        states = set(self.system.states) | set(self.remembered)
         pending: list[tuple[str, ir.Expr]] = []
         for equation in self.system.initial_equations:
             match equation:
@@ -1567,7 +1569,7 @@ class Emitter:
                 case _:
                     raise EmitError(
                         f"{self.system.name}: this initial equation is not an explicit value"
-                        f" for a state, and solving one is not implemented:"
+                        f" for a state or a discrete variable, and solving one is not implemented:"
                         f" {unparse_expr(equation.lhs)} = {unparse_expr(equation.rhs)}"
                     )
         ordered: list[tuple[str, ir.Expr]] = []
@@ -1621,11 +1623,12 @@ class Emitter:
             # slot is what `observe` reports at t = 0, and leaving it holding the `start`
             # attribute would make the first sample of the run disagree with the run.
             body.append(f"{self.symbols[name]} = {self.expr(value)}")
-            body.append(f"y[{slots[name]}] = {self.symbols[name]}")
+            if name in slots:
+                body.append(f"y[{slots[name]}] = {self.symbols[name]}")
             body.append(f"w[{self.slots[name]}] = {self.symbols[name]}")
         if self.switching is not None:
             body.append(f"w[{self.switching}] = 0.0")
-        return _function("initial", "p, y, w", [*body, "return y"])
+        return _function("initial", "t, p, y, w", [*body, "return y"])
 
     def latches(self) -> str:
         """Freeze each watched relation at whatever it says at the initial point.

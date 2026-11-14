@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- An initial equation may set a discrete variable a `when` assigns, and may read `time` (`count = integer((time - startTime) / period)` in `Blocks.Sources.Pulse`).
 - Fixed: a relation exactly on its threshold at the start (`time < startTime` with `startTime = 0`) no longer counts as a crossing. Three of them made a run chatter at t = 0.
 - An ideal diode (`off = s < 0` inside an algebraic loop) simulates and switches. On SciPy, a model with crossings now steps at most the output spacing, so a stiff mode no longer skips a short interval.
 - Fixed: `y = if b then 1 else 0` followed `b` only at the start; alias elimination froze `b` at zero.

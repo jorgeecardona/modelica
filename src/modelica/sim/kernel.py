@@ -44,7 +44,12 @@ class _Prepare(Protocol):
 
 class _Initial(Protocol):
     def __call__(
-        self, p: NDArray[np.float64], y: NDArray[np.float64], w: NDArray[np.float64], /
+        self,
+        t: float,
+        p: NDArray[np.float64],
+        y: NDArray[np.float64],
+        w: NDArray[np.float64],
+        /,
     ) -> NDArray[np.float64]: ...
 
 
@@ -195,7 +200,7 @@ class Kernel:
         )
         y = np.zeros(self.states)
         w = np.zeros(self.code.workspace)
-        self.initial(p, y, w)
+        self.initial(t, p, y, w)
         self.latch(t, y, p, w)
         return p, y, w
 
