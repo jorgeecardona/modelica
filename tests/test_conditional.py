@@ -231,14 +231,15 @@ def test_an_if_equation_condition_resolves_an_enumeration_literal() -> None:
     assert "9.0" not in eqs
 
 
-def test_an_if_equation_on_a_continuous_variable_is_refused() -> None:
+def test_an_if_equation_on_a_continuous_variable_is_an_if_expression() -> None:
+    """The run-time form pairs the branches (tests/test_run_time_if.py has the rest)."""
     source = (
         "model M\n  Real x(start = 1, fixed = true);\n  Real y;\n"
         "equation\n  if x > 0 then\n    y = 2 * x;\n  else\n    y = -x;\n  end if;\n"
         "  der(x) = -y;\nend M;\n"
     )
-    with pytest.raises(FlattenError, match="condition of an if-equation must be known"):
-        flatten(parse(source), "M")
+    flat = flatten(parse(source), "M")
+    assert any(isinstance(e.rhs, ir.IfExpr) for e in flat.equations)
 
 
 DEFERRED_IF = """\
