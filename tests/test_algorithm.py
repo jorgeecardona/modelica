@@ -396,9 +396,14 @@ def test_a_loop_on_constant_input_unrolls(what: str, body: str) -> None:
 
 
 def test_a_variable_assigned_on_only_one_path_is_refused() -> None:
-    """Without an ``else`` there is no value to merge against, and no honest guess."""
+    """Without an ``else`` there is no value to merge against, and no honest guess.
+
+    The argument is ``time``, so the condition is not known when the call is inlined; a known
+    one picks its arm instead (tests/test_function_known_branch.py).
+    """
+    body = "  if u > 0.0 then\n    y := 1.0;\n  end if;\n"
     with pytest.raises(FlattenError, match="on some paths and not on others"):
-        flatten(parse(_function("  if u > 0.0 then\n    y := 1.0;\n  end if;\n")), "M")
+        flatten(parse(_function(body, argument="time")), "M")
 
 
 def test_a_two_output_function_in_an_expression_yields_its_first_output() -> None:
