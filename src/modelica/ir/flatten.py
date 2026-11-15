@@ -284,6 +284,13 @@ class Effective:
     members: dict[str, Member] = field(default_factory=dict[str, "Member"])
     equations: list[ir.Equation] = field(default_factory=list[ir.Equation])
     initial_equations: list[ir.Equation] = field(default_factory=list[ir.Equation])
+    writers: dict[int, Scope] = field(default_factory=dict[int, Scope])
+    """The scope of the base class that wrote an inherited equation, by ``id`` of the equation.
+
+    ``Adaptors`` writes ``u = Functions.state1({f, u1}, time)``: ``Functions`` resolves in the
+    package of the base, not of a derived class in another package. An equation the class
+    itself writes is not here.
+    """
 
 
 def _same_declaration(a: ir.Component, b: ir.Component) -> bool:
@@ -345,6 +352,9 @@ def effective(found: Found, scope: Scope) -> Effective:  # noqa: C901 -- extends
             result.members[name] = _extends_member(member, picked_up, inner, name)
         result.equations += base_effective.equations
         result.initial_equations += base_effective.initial_equations
+        base_inner = inner.inside(base)
+        for equation in (*base_effective.equations, *base_effective.initial_equations):
+            result.writers[id(equation)] = base_effective.writers.get(id(equation), base_inner)
     for replacement in found.cls.redeclarations:
         # Applied here and nowhere else: this is the first moment the base chain is folded,
         # so it is the first moment there is an inherited member to replace. The other
@@ -1946,6 +1956,10 @@ def _read_elements(  # noqa: PLR0911 - one case per node type, as its neighbours
             known = _constant_indices(indices, environment)
             if known is not None and (key := _element_key(name, known)) in environment:
                 return environment[key]
+            # An input bound to an array literal (`state1({f, u1}, time)`): `u[2]` is `u1`.
+            picked = _array_element(environment.get(name), known)
+            if picked is not None:
+                return picked
             return ir.Subscript(node.base, tuple(go(i) for i in indices))
         case ir.Binary(op=op, lhs=lhs, rhs=rhs):
             return ir.Binary(op, go(lhs), go(rhs))
@@ -1959,6 +1973,17 @@ def _read_elements(  # noqa: PLR0911 - one case per node type, as its neighbours
             return ir.Array(tuple(go(e) for e in elements))
         case _:
             return node
+
+
+def _array_element(value: ir.Expr | None, indices: tuple[int, ...] | None) -> ir.Expr | None:
+    """The element of an array literal at 1-based ``indices``, or ``None`` if it is not one."""
+    if value is None or indices is None:
+        return None
+    for index in indices:
+        if not isinstance(value, ir.Array) or not 1 <= index <= len(value.elements):
+            return None
+        value = value.elements[index - 1]
+    return value
 
 
 def _assembled(name: str, environment: Mapping[str, ir.Expr]) -> ir.Expr | None:
@@ -2620,9 +2645,13 @@ class _Flattener:
                 inners=visible,
             )
         for equation in merged.equations:
-            self._equation(equation, prefix, local, scope=inner, outer=resolved_outer)
+            writer = merged.writers.get(id(equation), inner)
+            self._equation(equation, prefix, local, scope=writer, outer=resolved_outer)
         for equation in merged.initial_equations:
-            self._equation(equation, prefix, local, scope=inner, outer=resolved_outer, initial=True)
+            writer = merged.writers.get(id(equation), inner)
+            self._equation(
+                equation, prefix, local, scope=writer, outer=resolved_outer, initial=True
+            )
         for section in found.cls.algorithms:
             for equation in _section_equations(section, found.cls.name):
                 self._equation(equation, prefix, local, scope=inner, outer=resolved_outer)
