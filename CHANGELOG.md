@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- `Modelica.Utilities.Strings.substring` (an external C function) is computed when its arguments are known, so the transformers' `VectorGroup` choice works.
 - A String parameter or constant is resolved when the model is flattened, and a comparison on it (`C1 == "D"`) folds. Its value is fixed then and cannot be changed at simulate time.
 - A comprehension returned by a call in a nested component's modification (`-symmetricOrientation(m)`) is expanded before it is prefixed.
 - A function called in a component's binding reads that component's parameters for its `if` arms and shapes (`so(m)` inside `c` reads `c.m`).

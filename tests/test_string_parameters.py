@@ -37,3 +37,39 @@ def test_a_string_parameter_chooses_the_branch(group: str, rate: float) -> None:
     assert all(v.base_type != "String" for v in flat.variables)
     result = simulate(causalize(flat), stop=1.0, backend="python")
     assert float(result["s.x"][-1]) == pytest.approx(math.exp(-rate), rel=1e-4)
+
+
+SUBSTRING = """\
+package Modelica
+  package Utilities
+    package Strings
+      function substring
+        input String string;
+        input Integer startIndex;
+        input Integer endIndex;
+        output String result;
+        external "C" result = ModelicaStrings_substring(string, startIndex, endIndex);
+      end substring;
+    end Strings;
+  end Utilities;
+end Modelica;
+model S
+  parameter String group = "Dy05";
+  constant String c1 = Modelica.Utilities.Strings.substring(group, 1, 1);
+  parameter Real k = if c1 == "D" then 2 else 3;
+  Real x(start = 1, fixed = true);
+equation
+  der(x) = -k * x;
+end S;
+model M
+  S s(group = "{group}");
+end M;
+"""
+
+
+@pytest.mark.parametrize(("group", "rate"), [("Dy05", 2.0), ("Yy00", 3.0)])
+def test_substring_of_a_string_parameter_chooses_the_branch(group: str, rate: float) -> None:
+    """``substring(VectorGroup, 1, 1)`` as the transformers write it: an external C function."""
+    flat = flatten(parse(SUBSTRING.format(group=group)), "M")
+    result = simulate(causalize(flat), stop=1.0, backend="python")
+    assert float(result["s.x"][-1]) == pytest.approx(math.exp(-rate), rel=1e-4)

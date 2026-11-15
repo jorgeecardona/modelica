@@ -1555,6 +1555,10 @@ def _inline_calls(  # noqa: C901, PLR0911 -- one case per node type, as its neig
             return node
 
 
+_EXTERNAL_INTRINSICS: Final = frozenset({"Modelica.Utilities.Strings.substring"})
+"""External functions kept as calls, by qualified name, for `evaluate` to compute."""
+
+
 def _inline(found: Found, scope: Scope, call: ir.Call, depth: int) -> ir.Expr:
     """One call, replaced by the expression its body assigns to the output."""
     name = found.cls.name
@@ -1564,6 +1568,10 @@ def _inline(found: Found, scope: Scope, call: ir.Call, depth: int) -> ir.Expr:
     merged = effective(found, inner)
     if merged.equations or merged.initial_equations:
         raise FlattenError(f"function {name!r} has an equation section; a function has a body")
+    qualified = ".".join(c.name for c in reversed(found.chain))
+    if not found.cls.algorithms and qualified in _EXTERNAL_INTRINSICS:
+        # Written in C, so there is no body; `evaluate` computes it once its arguments are known.
+        return ir.Call(qualified, tuple(_inline_calls(a, scope, depth + 1) for a in call.args))
     if len(found.cls.algorithms) != 1:
         raise FlattenError(
             f"function {name!r} needs exactly one algorithm section, not {len(found.cls.algorithms)}"

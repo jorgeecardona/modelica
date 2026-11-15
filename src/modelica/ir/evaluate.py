@@ -132,7 +132,7 @@ def _lookup(name: str, env: Mapping[str, Value], where: ir.Span | None = None) -
         raise EvaluationError(f"nothing in the environment answers {name!r}{at(where)}") from None
 
 
-def _call(node: ir.Call, env: Mapping[str, Value]) -> Value:  # noqa: PLR0911 -- one rule per operator family
+def _call(node: ir.Call, env: Mapping[str, Value]) -> Value:  # noqa: C901, PLR0911 -- one rule per operator family
     # `der`/`pre` are lookups of synthetic names, not computations: their values are
     # decided by causalization and event handling, never by the expression itself.
     if node.name in ("der", "pre"):
@@ -150,6 +150,11 @@ def _call(node: ir.Call, env: Mapping[str, Value]) -> Value:  # noqa: PLR0911 --
         # actual one; with no continuation run its value is the actual, which is what it is once
         # initialisation is done. The FIRST argument, the opposite end from noEvent/smooth.
         return evaluate(node.args[0], env)
+    if node.name == "Modelica.Utilities.Strings.substring":
+        text, start, end = (evaluate(a, env) for a in node.args)
+        if not isinstance(text, str):
+            raise EvaluationError(f"substring() needs a String, got {text!r}")
+        return text[int(_number(start, node.args[1])) - 1 : int(_number(end, node.args[2]))]
     args = [_number(evaluate(a, env), a) for a in node.args]
     if node.name == "sign":
         (x,) = args
