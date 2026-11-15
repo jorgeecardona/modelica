@@ -83,7 +83,7 @@ code does. The `.ipynb` pages carry figures and sliders, and they are meant to b
 The `.ipynb` pages read their models from `examples/`, so you need a checkout to run them:
 
 ```bash
-git clone https://gitlab.com/jorgeecardona/pymodelica && cd pymodelica
+git clone https://gitlab.com/cardona-oss/modelica && cd modelica
 pip install modelica matplotlib ipywidgets
 jupyter lab docs/notebooks/
 ```

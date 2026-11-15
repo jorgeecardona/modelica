@@ -38,8 +38,8 @@ ci:
   # exchanges it for a one-shot PyPI token. The `pypi` environment matches the PyPI
   # publisher config (it is also recorded on non-publishing runs -- cosmetic only).
   #
-  # NOTE: the DISTRIBUTION is `modelica`; the repo is `pymodelica`. PyPI's pending-publisher
-  # entry must name project `modelica`, namespace `jorgeecardona`, project `pymodelica`,
+  # PyPI's trusted-publisher entry must name project `modelica`, namespace `cardona-oss`,
+  # project `modelica`,
   # top-level pipeline file `.gitlab-ci.yml`, environment `pypi`.
   id_tokens:
     PYPI_ID_TOKEN:

@@ -7,8 +7,8 @@ Guidance for AI coding agents working in this repo. Humans: read README.md and C
 `modelica` (distribution name) is a Modelica toolchain for Python: parse `.mo` source files,
 flatten them to a DAE, simulate, and draw them. FMI 3.0 and SSP 2.0 are started, not usable. The front end is Python. Simulation defaults to a precompiled Rust
 engine (`engine/`, a bytecode VM shipped in platform wheels; see `docs/vm/index.md`) and falls
-back to SciPy where no engine is installed. The git repo is named `pymodelica`; the import package and PyPI
-distribution are both `modelica`. Version 0.1 (tested, API not frozen). Python 3.12+. `pip install modelica` brings NumPy
+back to SciPy where no engine is installed. The repo, the import package and the PyPI
+distribution are all `modelica`. Version 0.1 (tested, API not frozen). Python 3.12+. `pip install modelica` brings NumPy
 and SciPy and simulates; the `sim` extra is kept empty so old install commands still work.
 
 Layers under `src/modelica/` — each usable without the ones above it:
@@ -65,8 +65,8 @@ Mechanics.Translational and Rotational, Thermal.HeatTransfer, and a subset of Bl
   `pyproject.toml` never disagrees). The pre-commit hook auto-bumps the patch version
   whenever a file under `src/**/*.py` is staged. Never hand-edit it; never commit with
   `--no-verify` on a src change — `scripts/ci-version-guard` will fail the pipeline anyway.
-- **Distribution name vs. repo name:** the package is `modelica`, not `pymodelica`. PyPI's
-  `pymodelica` is an abandoned upload; don't reference it.
+- **The name is `modelica` everywhere** (repo, package, distribution). PyPI's `modelica` is
+  an unrelated abandoned Modelon/JModelica.org upload; don't reference it.
 - **Docs notebooks are executed at build time** (`make docs` / `moon run :docs` with
   `mkdocs build --strict`). A notebook that stops working fails the build. Narrative pages are
   `.py` jupytext percent format (diffable); interactive pages are committed `.ipynb` with output

@@ -15,8 +15,8 @@ verify: inspect
   Modelica Association. FMI and SSP are also its trademarks. This page uses those names to
   identify the language this software reads and the standards it implements."
 - The distribution on PyPI is named `modelica` (`README.md:7`), which is the trademark itself as
-  a package name. The repository keeps the older name `pymodelica` because PyPI holds that one
-  for an abandoned Modelon/JModelica.org upload.
+  a package name. The repository was renamed from `modelica` to `modelica` on 2026-11-15, so
+  the trademark is now also the repository name.
 - Emailing `board@modelica.org` was raised on 2026-07-28 and **deferred by Jorge**, in his words:
   "lets make it great before emailing them" (`logs/2026-07-28.md`, open items). It has not been
   raised since.

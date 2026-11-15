@@ -15,7 +15,7 @@ result from yours:
   finds *before* opening the MR, not leave it for review.
 - **Don't let it bypass the hooks.** The patch version auto-bumps on `src/` changes and CI's
   version-guard enforces it; a `--no-verify` commit fails the pipeline.
-- **The distribution is `modelica`, not `pymodelica`** (see AGENTS.md); keep the diff small and
+- Keep the diff small and
   typed, add a `CHANGELOG.md` entry, and don't reformat unrelated files.
 
 ## Setup
@@ -61,7 +61,7 @@ step.
 - Code: `ruff` and `pyright` in strict mode, both enforced by `make check`.
 - Prose (docs, comments, commit messages): no em-dashes; claim first, then evidence;
   concrete names and paths over qualitative words. The docs follow ASD-STE100 Simplified
-  Technical English, described on the [style page](https://jorgeecardona.gitlab.io/pymodelica/style/).
+  Technical English, described on the [style page](https://jorgeecardona.gitlab.io/modelica/style/).
 
 ## Merge requests
 

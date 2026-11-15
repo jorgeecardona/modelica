@@ -6,7 +6,7 @@
     ([engine](../engine.md)). The page is kept as a record.
 
 !!! note "Tracked in the register"
-    The work this page points at is tracked in [`docs/issues`](https://gitlab.com/jorgeecardona/pymodelica/-/tree/main/docs/issues): the ensemble driver first, then the SPIR-V spike, the method-of-lines path, and JAX as the other vehicle for the same workload. This page is the argument; the register is what is owed.
+    The work this page points at is tracked in [`docs/issues`](https://gitlab.com/cardona-oss/modelica/-/tree/main/docs/issues): the ensemble driver first, then the SPIR-V spike, the method-of-lines path, and JAX as the other vehicle for the same workload. This page is the argument; the register is what is owed.
 
 `compute-ml` is a raw-Vulkan compute library in the next directory. The obvious question is
 whether this project can borrow it and run simulations on the GPU. This page records the

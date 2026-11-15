@@ -1,4 +1,4 @@
-# pymodelica Simulation Scope (VS Code)
+# modelica Simulation Scope (VS Code)
 
 Simulate the Modelica `.mo` file you are editing and read its trajectory in an interactive
 chart beside the editor. The same chart engine as the notebook widget (`modelica.sim.view`),
@@ -7,15 +7,15 @@ Python simulator (`modelica.sim`, the reference tier), nothing is compiled per m
 
 ## Use it
 
-Open a `.mo` file and run **pymodelica: Simulate This Model**: the `⧗` button in the editor
+Open a `.mo` file and run **modelica: Simulate This Model**: the `⧗` button in the editor
 title bar, the right-click menu, or the command palette (`Cmd/Ctrl+Shift+P`). The Scope opens
 beside the editor with the model integrated to its own stop time. Turn on
-**pymodelica.simulateOnSave** to re-run on every save while the panel is open.
+**modelica.simulateOnSave** to re-run on every save while the panel is open.
 
-**pymodelica: Open Simulation Scope (corpus gallery)** opens the bundled gallery of the
+**modelica: Open Simulation Scope (corpus gallery)** opens the bundled gallery of the
 example models instead, each integrated to its reference points.
 
-**pymodelica: Overlay a Measured Log (CSV)…** puts measured data on the chart (see below).
+**modelica: Overlay a Measured Log (CSV)…** puts measured data on the chart (see below).
 
 A model that references the real **Modelica Standard Library** names resolves against a
 bundled slice, loaded automatically: `Modelica.Electrical.Analog`, `Modelica.Mechanics.
@@ -24,14 +24,14 @@ whose connectors carry a potential and a flow -- and `Modelica.Blocks`, the caus
 domain (`Sources.Constant`, `Math.Gain`/`Feedback`, `Continuous.Integrator`/`FirstOrder`), wired
 by the real-valued `RealInput`/`RealOutput` connectors. It is a curated subset, not the whole
 MSL, so a model reaching for a part that is not there fails by name (`Modelica has no nested
-class X`); turn it off with **pymodelica.standardLibrary**.
+class X`); turn it off with **modelica.standardLibrary**.
 
 The model's sibling `<name>.toml`, when there is one, sets the run: `[simulate].stop`,
 `method` and `absolute` are honoured, and its `tolerance` is the **exact** speed below. A
 `library/` folder holding the components a model uses is loaded automatically, whether it sits
 beside the `.mo` or one directory up (the corpus keeps it at `examples/library`, a sibling of
 `examples/models`, so a component model like `BumpStop.mo` resolves with nothing configured);
-**pymodelica.library** adds more files or folders.
+**modelica.library** adds more files or folders.
 
 ## The panel
 
@@ -61,7 +61,7 @@ absolute tolerance (E5's 1.7e-24) are kept at every speed.
   plot: drag it outward to extend.
 - **`→ event`** runs on to the next event past the current stop, with a small tail so the
   event line is visible. **`⇥ settle`** runs until every state stays within 1 % of its final
-  value. Both probe a doubling horizon bounded by **pymodelica.autoStopMax** (0 means ten
+  value. Both probe a doubling horizon bounded by **modelica.autoStopMax** (0 means ten
   times the current stop) and say in the footer what they found, or that nothing was found
   before the cap. The probes run at a coarse tolerance, since the question is only whether
   something happened; the run that is then shown uses the model's own.
@@ -291,17 +291,17 @@ image; what is saved is the plot as drawn, at its current zoom, scale and units.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `pymodelica.runtime` | `auto` | Which runtime simulates. `auto` picks the fastest available (Python today; a Rust/C interpreter later). |
-| `pymodelica.python` | `["uv","run","--extra","sim","python"]` | Command that runs a Python with `modelica` importable. The simulator script and arguments are appended. |
-| `pymodelica.stop` | `0` | Stop time. `0` means the model's own: its sibling `.toml`'s `[simulate].stop`, else 10. Changeable live in the panel. |
-| `pymodelica.autoStopMax` | `0` | How far `→ event` and `⇥ settle` may probe past the current stop. `0` means ten times the current stop. |
-| `pymodelica.library` | `[]` | Extra `.mo` files or folders for dependencies (a sibling `library/` is loaded automatically). `examples/library` for the corpus models. |
-| `pymodelica.cwd` | `""` | Working directory for the simulator. Empty means the workspace folder of the `.mo` file. |
-| `pymodelica.simulateOnSave` | `false` | Re-simulate when you save a `.mo`, while the Scope is open. |
+| `modelica.runtime` | `auto` | Which runtime simulates. `auto` picks the fastest available (Python today; a Rust/C interpreter later). |
+| `modelica.python` | `["uv","run","--extra","sim","python"]` | Command that runs a Python with `modelica` importable. The simulator script and arguments are appended. |
+| `modelica.stop` | `0` | Stop time. `0` means the model's own: its sibling `.toml`'s `[simulate].stop`, else 10. Changeable live in the panel. |
+| `modelica.autoStopMax` | `0` | How far `→ event` and `⇥ settle` may probe past the current stop. `0` means ten times the current stop. |
+| `modelica.library` | `[]` | Extra `.mo` files or folders for dependencies (a sibling `library/` is loaded automatically). `examples/library` for the corpus models. |
+| `modelica.cwd` | `""` | Working directory for the simulator. Empty means the workspace folder of the `.mo` file. |
+| `modelica.simulateOnSave` | `false` | Re-simulate when you save a `.mo`, while the Scope is open. |
 
 The simulator needs a Python where `modelica` imports with its simulation extra. The default
-command assumes the pymodelica repository is the workspace (`uv run --extra sim python`); point
-**pymodelica.python** at another interpreter otherwise.
+command assumes the modelica repository is the workspace (`uv run --extra sim python`); point
+**modelica.python** at another interpreter otherwise.
 
 ## Install it locally
 

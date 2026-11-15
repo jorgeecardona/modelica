@@ -6,7 +6,7 @@
     ([engine](../engine.md)). The page is kept as a record.
 
 !!! note "Tracked in the register"
-    The work this page argues for is tracked in [`docs/issues`](https://gitlab.com/jorgeecardona/pymodelica/-/tree/main/docs/issues): the C emitter, common-subexpression elimination, tearing, kernel caching, the two parameter modes, the fused-step JIT, differential debugging, and the sparse Jacobian. This page is the argument; the register is what is owed.
+    The work this page argues for is tracked in [`docs/issues`](https://gitlab.com/cardona-oss/modelica/-/tree/main/docs/issues): the C emitter, common-subexpression elimination, tearing, kernel caching, the two parameter modes, the fused-step JIT, differential debugging, and the sparse Jacobian. This page is the argument; the register is what is owed.
 
 OpenModelica has this pipeline: `.mo` to generated C, then a C compiler, then an
 executable, then run it. It works, and it is fast, and it makes debugging genuinely

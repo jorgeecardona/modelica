@@ -40,7 +40,7 @@ STATUS = {
 def default_cache() -> Path:
     """``$PYMODELICA_CACHE/rust``, else the user's cache directory."""
     root = os.environ.get("PYMODELICA_CACHE")
-    base = Path(root) if root else Path.home() / ".cache" / "pymodelica"
+    base = Path(root) if root else Path.home() / ".cache" / "modelica"
     return base / "rust"
 
 

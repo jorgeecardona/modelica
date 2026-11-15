@@ -1,13 +1,13 @@
 {
-  "name": "pymodelica-scope",
-  "displayName": "pymodelica Simulation Scope",
+  "name": "modelica-scope",
+  "displayName": "modelica Simulation Scope",
   "description": "Simulate the Modelica .mo file you are editing and see its trajectory, in an interactive chart inside VS Code.",
   "version": "0.1.139",
   "publisher": "JorgeCardona",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://gitlab.com/jorgeecardona/pymodelica.git",
+    "url": "https://gitlab.com/cardona-oss/modelica.git",
     "directory": "editors/vscode"
   },
   "engines": {
@@ -36,46 +36,46 @@
   "contributes": {
     "commands": [
       {
-        "command": "pymodelica.simulateModel",
-        "title": "pymodelica: Simulate This Model",
+        "command": "modelica.simulateModel",
+        "title": "modelica: Simulate This Model",
         "icon": "$(pulse)"
       },
       {
-        "command": "pymodelica.openScope",
-        "title": "pymodelica: Open Simulation Scope (corpus gallery)"
+        "command": "modelica.openScope",
+        "title": "modelica: Open Simulation Scope (corpus gallery)"
       },
       {
-        "command": "pymodelica.importLog",
-        "title": "pymodelica: Overlay a Measured Log (CSV)…"
+        "command": "modelica.importLog",
+        "title": "modelica: Overlay a Measured Log (CSV)…"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "pymodelica.simulateModel",
+          "command": "modelica.simulateModel",
           "when": "resourceExtname == .mo",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
-          "command": "pymodelica.simulateModel",
+          "command": "modelica.simulateModel",
           "when": "resourceExtname == .mo",
           "group": "z_commands"
         }
       ],
       "explorer/context": [
         {
-          "command": "pymodelica.simulateModel",
+          "command": "modelica.simulateModel",
           "when": "resourceExtname == .mo",
           "group": "z_commands"
         }
       ]
     },
     "configuration": {
-      "title": "pymodelica Simulation Scope",
+      "title": "modelica Simulation Scope",
       "properties": {
-        "pymodelica.runtime": {
+        "modelica.runtime": {
           "type": "string",
           "enum": [
             "auto",
@@ -84,7 +84,7 @@
           "default": "auto",
           "description": "Which runtime simulates the model. 'auto' picks the fastest available (Python today; a Rust/C interpreter later)."
         },
-        "pymodelica.python": {
+        "modelica.python": {
           "type": "array",
           "items": {
             "type": "string"
@@ -98,17 +98,17 @@
           ],
           "description": "Command that runs a Python with `modelica` importable. The simulator script and arguments are appended."
         },
-        "pymodelica.stop": {
+        "modelica.stop": {
           "type": "number",
           "default": 0,
           "description": "Stop time for the simulation. 0 means use the model's own (its sibling .toml's [simulate].stop, else 10). You can also change it live in the panel."
         },
-        "pymodelica.autoStopMax": {
+        "modelica.autoStopMax": {
           "type": "number",
           "default": 0,
           "description": "How far the automatic stops ('→ event', '⇥ settle') may probe past the current stop before giving up. 0 means ten times the current stop. A cap, so a model that never settles comes back in seconds."
         },
-        "pymodelica.library": {
+        "modelica.library": {
           "type": "array",
           "items": {
             "type": "string"
@@ -116,17 +116,17 @@
           "default": [],
           "description": "Extra .mo files or folders to load for dependencies (a sibling 'library/' folder is loaded automatically). E.g. 'examples/library' for the corpus models."
         },
-        "pymodelica.cwd": {
+        "modelica.cwd": {
           "type": "string",
           "default": "",
           "description": "Working directory to run the simulator in. Empty means the workspace folder of the .mo file."
         },
-        "pymodelica.simulateOnSave": {
+        "modelica.simulateOnSave": {
           "type": "boolean",
           "default": false,
           "description": "Re-simulate the model when you save a .mo file (only while the Scope panel is open)."
         },
-        "pymodelica.standardLibrary": {
+        "modelica.standardLibrary": {
           "type": "boolean",
           "default": true,
           "description": "Load the bundled slice of the Modelica Standard Library, so a model that references the real Modelica.* names (Electrical.Analog, Blocks, Mechanics, Thermal) resolves without configuration. A curated subset, not the whole MSL."

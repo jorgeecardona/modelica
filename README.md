@@ -1,9 +1,9 @@
 # modelica
 
-[![pipeline status](https://gitlab.com/cardona-oss/pymodelica/badges/main/pipeline.svg)](https://gitlab.com/cardona-oss/pymodelica/-/pipelines)
+[![pipeline status](https://gitlab.com/cardona-oss/modelica/badges/main/pipeline.svg)](https://gitlab.com/cardona-oss/modelica/-/pipelines)
 [![PyPI version](https://img.shields.io/pypi/v/modelica.svg)](https://pypi.org/project/modelica/)
 [![Python versions](https://img.shields.io/pypi/pyversions/modelica.svg)](https://pypi.org/project/modelica/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://gitlab.com/cardona-oss/modelica/-/blob/main/LICENSE)
 
 A Modelica toolchain for Python: parse `.mo` source, flatten it to a DAE, simulate it, and
 draw it. Every stage up to simulation is an
@@ -12,11 +12,7 @@ Modelica semantics inside Python rather than behind a separate compiler.
 
 Simulation runs on a precompiled engine: a virtual machine written in Rust that ships in the
 platform wheels and interprets the model as bytecode. Nothing is compiled per model. Where no
-engine wheel exists, the pure-Python wheel simulates with SciPy instead. See [the engine](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/docs/engine.md).
-
-> **Install name is `modelica`.** The git repository keeps its older name, `pymodelica`,
-> because PyPI's `pymodelica` holds an abandoned Modelon/JModelica.org upload. The import
-> package and the distribution are both `modelica`.
+engine wheel exists, the pure-Python wheel simulates with SciPy instead. See [the engine](https://gitlab.com/cardona-oss/modelica/-/blob/main/docs/engine.md).
 
 ## Why modelica
 
@@ -53,7 +49,7 @@ It brings NumPy and SciPy. Python 3.12 or later.
 | any other | SciPy |
 
 `Result.backend` says which one ran. The engine runs a `System` with `method="Radau"` (the
-default); other calls run on SciPy ([the engine](https://cardona-oss.gitlab.io/pymodelica/engine/)).
+default); other calls run on SciPy ([the engine](https://cardona-oss.gitlab.io/modelica/engine/)).
 
 **Status: 0.1.** Parsing, flattening, causalization, simulation and diagrams are tested and
 give the same numbers on the engine and on SciPy. The API can still change. Experimental and
@@ -203,7 +199,7 @@ Each layer is usable without the ones above it.
 The language is large, so the summary is a table. About 95 % of
 the Modelica Standard Library example models the project measures against parse; fewer
 simulate end to end. The per-model
-[coverage notes](https://cardona-oss.gitlab.io/pymodelica/ideas/coverage/) track the frontier.
+[coverage notes](https://cardona-oss.gitlab.io/modelica/ideas/coverage/) track the frontier.
 
 | Area | Handled | Not yet |
 | --- | --- | --- |
@@ -218,10 +214,10 @@ simulate end to end. The per-model
 
 ## Links
 
-- **Repository:** <https://gitlab.com/cardona-oss/pymodelica>
+- **Repository:** <https://gitlab.com/cardona-oss/modelica>
 - **PyPI:** <https://pypi.org/project/modelica/>
-- **Documentation:** <https://cardona-oss.gitlab.io/pymodelica/>
-- **Changelog:** [`CHANGELOG.md`](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/CHANGELOG.md)
+- **Documentation:** <https://cardona-oss.gitlab.io/modelica/>
+- **Changelog:** [`CHANGELOG.md`](https://gitlab.com/cardona-oss/modelica/-/blob/main/CHANGELOG.md)
 
 ## Contributing
 
@@ -233,12 +229,12 @@ make docs            # build the documentation site, strictly
 
 `.prototools` pins the toolchain (moon and uv); `proto install` brings it up. `moon.yml`
 holds every task and CI runs one command, `moon run :ci`. See
-[`AGENTS.md`](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/AGENTS.md) for the full build/test/convention detail and
-[`CONTRIBUTING.md`](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/CONTRIBUTING.md) for how to send a change.
+[`AGENTS.md`](https://gitlab.com/cardona-oss/modelica/-/blob/main/AGENTS.md) for the full build/test/convention detail and
+[`CONTRIBUTING.md`](https://gitlab.com/cardona-oss/modelica/-/blob/main/CONTRIBUTING.md) for how to send a change.
 
 ## License
 
-MIT © Jorge Cardona. See [LICENSE](https://gitlab.com/cardona-oss/pymodelica/-/blob/main/LICENSE).
+MIT © Jorge Cardona. See [LICENSE](https://gitlab.com/cardona-oss/modelica/-/blob/main/LICENSE).
 
 ## Trademarks
 

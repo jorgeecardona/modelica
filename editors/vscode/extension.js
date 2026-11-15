@@ -1,4 +1,4 @@
-// pymodelica Simulation Scope -- a VS Code webview over Modelica models.
+// modelica Simulation Scope -- a VS Code webview over Modelica models.
 //
 // Plain JavaScript on purpose: the extension host reads a self-contained HTML page and hands
 // it to a webview. No bundler, no framework, no build step -- the same choice
@@ -36,7 +36,7 @@ function ensurePanel(context) {
     return panel;
   }
   panel = vscode.window.createWebviewPanel(
-    "pymodelicaScope",
+    "modelicaScope",
     "Simulation Scope",
     { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
     { enableScripts: true, retainContextWhenHidden: true }
@@ -264,7 +264,7 @@ function runtimeCommand(context, cfg, file, opts) {
   // argument and the simulator reads JSON anyway. One file per call, in the OS temp dir.
   let resumeArgs = [];
   if (opts.resume && typeof opts.resume.t === "number") {
-    const ckpt = path.join(os.tmpdir(), `pymodelica-resume-${process.pid}-${++resumeCounter}.json`);
+    const ckpt = path.join(os.tmpdir(), `modelica-resume-${process.pid}-${++resumeCounter}.json`);
     fs.writeFileSync(ckpt, JSON.stringify(opts.resume));
     resumeArgs = ["--resume", ckpt];
   }
@@ -286,7 +286,7 @@ function runtimeCommand(context, cfg, file, opts) {
 }
 
 function runHelper(context, file, opts, done) {
-  const cfg = vscode.workspace.getConfiguration("pymodelica");
+  const cfg = vscode.workspace.getConfiguration("modelica");
   const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file));
   const cwd = cfg.get("cwd") || (folder && folder.uri.fsPath) || path.dirname(file);
   let plan;
@@ -323,7 +323,7 @@ function simulateActive(context, document) {
     return;
   }
   const file = doc.fileName;
-  const cfg = vscode.workspace.getConfiguration("pymodelica");
+  const cfg = vscode.workspace.getConfiguration("modelica");
   const stop = cfg.get("stop", 0);
   // The panel opens at the "fast" display tolerance so the first draw is quick even for a
   // chaotic model whose .toml asks for a tight reference tolerance; the speed control in the
@@ -340,14 +340,14 @@ function simulateActive(context, document) {
 
 function activate(context) {
   context.subscriptions.push(
-    vscode.commands.registerCommand("pymodelica.openScope", () => openScope(context)),
-    vscode.commands.registerCommand("pymodelica.simulateModel", () => simulateActive(context)),
-    vscode.commands.registerCommand("pymodelica.importLog", () => {
+    vscode.commands.registerCommand("modelica.openScope", () => openScope(context)),
+    vscode.commands.registerCommand("modelica.simulateModel", () => simulateActive(context)),
+    vscode.commands.registerCommand("modelica.importLog", () => {
       if (!panel) { vscode.window.showWarningMessage("Open the Simulation Scope first, then overlay a log."); return; }
       importLog();
     }),
     vscode.workspace.onDidSaveTextDocument((doc) => {
-      const cfg = vscode.workspace.getConfiguration("pymodelica");
+      const cfg = vscode.workspace.getConfiguration("modelica");
       if (cfg.get("simulateOnSave", false) && doc.fileName.endsWith(".mo") && panel) {
         simulateActive(context, doc);
       }

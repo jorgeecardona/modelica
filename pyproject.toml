@@ -3,9 +3,8 @@
 # DAE, simulate it (on a precompiled Rust engine where the wheel has one, else SciPy), and interoperate with the two Modelica Association exchange standards
 # (FMI 3.0 for single components, SSP 2.0 for systems of them).
 #
-# The distribution name is `modelica`, not `pymodelica`: PyPI's `pymodelica` is held by an
-# abandoned Modelon/JModelica.org upload (version "trunk"). The git repo keeps the
-# historical name; the import package matches the distribution.
+# The repo, the import package and the distribution are all `modelica`. PyPI's `modelica`
+# is an unrelated abandoned Modelon/JModelica.org upload (version "trunk").
 name = "modelica"
 dynamic = ["version"]  # the single source of truth is __version__ in src/modelica/__init__.py (see [tool.hatch.version])
 description = "A library for reading and simulating Modelica models in Python"
@@ -85,11 +84,11 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://gitlab.com/cardona-oss/pymodelica"
-Repository = "https://gitlab.com/cardona-oss/pymodelica"
-Issues = "https://gitlab.com/cardona-oss/pymodelica/-/issues"
-Changelog = "https://gitlab.com/cardona-oss/pymodelica/-/blob/main/CHANGELOG.md"
-Documentation = "https://cardona-oss.gitlab.io/pymodelica/"
+Homepage = "https://gitlab.com/cardona-oss/modelica"
+Repository = "https://gitlab.com/cardona-oss/modelica"
+Issues = "https://gitlab.com/cardona-oss/modelica/-/issues"
+Changelog = "https://gitlab.com/cardona-oss/modelica/-/blob/main/CHANGELOG.md"
+Documentation = "https://cardona-oss.gitlab.io/modelica/"
 
 [tool.uv]
 # After the pre-commit hook auto-bumps __version__ in the package __init__, uv must treat the

@@ -65,4 +65,4 @@ if [ -z "$found" ]; then
   echo "  (do this in the SAME window you use -- stable and Insiders are separate installs)"
   exit 0
 fi
-echo "done. In VS Code: Cmd+Shift+P -> 'pymodelica: Open Simulation Scope'"
+echo "done. In VS Code: Cmd+Shift+P -> 'modelica: Open Simulation Scope'"

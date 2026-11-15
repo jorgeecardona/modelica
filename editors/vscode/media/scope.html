@@ -389,7 +389,7 @@
 <body>
 <div class="top">
   <h1>Simulation Scope</h1>
-  <span class="sub">the pymodelica corpus, integrated to its reference points</span>
+  <span class="sub">the modelica corpus, integrated to its reference points</span>
   <span class="count" id="count"></span>
   <span class="ver" title="the extension build that drew this panel; after upgrading, reload the window if this is old">v__VERSION__</span>
   <span class="ver" id="solver" title="the integrator this run used: the model's own [simulate] method and tolerance from its .toml, else Radau at 1e-6"></span>
@@ -404,8 +404,8 @@
         <span class="tools">
           <span id="stopwrap" class="stopwrap" hidden>
             <label title="simulation stop time -- Enter to re-run, or drag the marker on the plot">t&nbsp;&#8594;&nbsp;<input id="stop" type="number" step="any" min="0"><span class="unitlab" id="stopunit"></span></label>
-            <button type="button" id="nextev" title="continue until the next event (bounded by the pymodelica.autoStopMax setting)">&#8594; event</button>
-            <button type="button" id="settle" title="stop where the signals settle: every state within 1% of its final value (bounded by pymodelica.autoStopMax)">&#8677; settle</button>
+            <button type="button" id="nextev" title="continue until the next event (bounded by the modelica.autoStopMax setting)">&#8594; event</button>
+            <button type="button" id="settle" title="stop where the signals settle: every state within 1% of its final value (bounded by modelica.autoStopMax)">&#8677; settle</button>
             <select id="speed" title="how hard the integrator works: fast for looking, exact to reproduce the model's reference run. A chaotic model draws a different path at each -- the trajectory only means one thing at the tolerance its references were taken at.">
               <option value="1e-6">fast</option>
               <option value="1e-8">fine</option>
@@ -4506,7 +4506,7 @@ function load() {
 // in split-by-unit), and overriding that with a remembered scale would fight the per-model choice.
 // Stored per browser origin; wrapped in try/catch because storage can be unavailable or full, and a
 // remembered preference is never worth failing the panel over.
-const PREFS_KEY = "pymodelica.scope.prefs";
+const PREFS_KEY = "modelica.scope.prefs";
 function savePrefs() {
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify({ dispMode, angleMode, timeMode, speed, legendWidth }));
@@ -4537,7 +4537,7 @@ function loadPrefs() {
 // return to the same model in the gallery. Keyed by model name; select() restores a saved set that
 // is still valid (its variables still exist) over the model's own default, and falls back to the
 // default -- open on the states -- when there is none, so a model you never touched opens sensibly.
-const SELECTION_KEY = "pymodelica.scope.selection";
+const SELECTION_KEY = "modelica.scope.selection";
 function saveSelection() {
   if (!D || !D.model) return;
   try {
@@ -4561,7 +4561,7 @@ function loadSelection(model, names) {
 // How a model was last looked at -- the plot mode and its coordinate system -- kept per model
 // the way the drawn variables are, so an orbit reopens as its rosette and a step against time,
 // rather than every model inheriting whatever the last one happened to be in.
-const VIEW_KEY = "pymodelica.scope.view";
+const VIEW_KEY = "modelica.scope.view";
 function saveView() {
   if (!D || !D.model) return;
   try {
@@ -4581,7 +4581,7 @@ function loadView(model) {
 // The derive-box expressions, kept per model like the drawn set and the view. An expression is
 // written against a model's variables (`r*cos(phi)`), so it only means anything for the model it
 // was written on; a model reopens with the expressions it last carried, and no others.
-const DERIVED_KEY = "pymodelica.scope.derived";
+const DERIVED_KEY = "modelica.scope.derived";
 function saveDerived() {
   if (!D || !D.model) return;
   try {

@@ -4,6 +4,9 @@ All notable changes to this project are documented here. Versions follow
 [semantic versioning](https://semver.org/); the version is `__version__` in
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
+## Unreleased
+- The repository is renamed from `modelica` to `modelica`: <https://gitlab.com/cardona-oss/modelica>, docs at <https://cardona-oss.gitlab.io/modelica/>. The VS Code settings and commands are now `modelica.*`.
+
 ## 0.1.34 (2026-11-14)
 - `when edge(b)` and `when b` resolve `b` through Boolean aliases and `not` to the relation that defines it (`IdealSwitchWithArc` with `off = control`).
 - A run-time if-equation may hold an if-equation in a branch, and an `assert` statement in an algorithm assigns nothing (`DCPowerSupply` in `DemoPowerSupply`).
@@ -674,7 +677,7 @@ Project restart. The 2010 Python 2 / pyparsing prototype is retired (it remains 
 history); nothing from it is carried forward.
 
 - Claim the `modelica` distribution name on PyPI.
-- Repository moved from GitHub to GitLab (`gitlab.com/jorgeecardona/pymodelica`).
+- Repository moved from GitHub to GitLab (`gitlab.com/cardona-oss/modelica`).
 - Toolchain: uv + moon pinned via proto; ruff (`select = ["ALL"]`) and pyright strict.
 - Single-job GitLab CI driven by `moon run :ci`; PyPI releases via OIDC Trusted
   Publishing; docs on GitLab Pages.

@@ -1,4 +1,4 @@
-//! The pymodelica engine: runs a model handed over as a register tape (`modelica.sim.vm`).
+//! The modelica engine: runs a model handed over as a register tape (`modelica.sim.vm`).
 //!
 //! The tape is built in Python by `vm.lower` and packed by `vm.encode` into five flat arrays.
 //! This crate has no dependencies, so `rustc --crate-type cdylib` builds it without cargo; the

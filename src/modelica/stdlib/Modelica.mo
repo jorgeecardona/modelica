@@ -1,6 +1,6 @@
 package Modelica "A curated slice of the Modelica Standard Library, under its real names.
 
-  Not the whole MSL -- pymodelica does not bundle that -- but the components the panel's own
+  Not the whole MSL -- modelica does not bundle that -- but the components the panel's own
   examples are built from, re-homed under the real Modelica.* paths so an ordinary textbook
   model resolves and simulates without configuration. Every class here flattens and integrates;
   the domains are the physical ones, whose connectors carry a potential and a flow:

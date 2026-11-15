@@ -208,7 +208,7 @@ def _load(path: Path, name: str, libraries: list[str]) -> tuple[System, Kernel, 
     # A `library/` folder holding the components a model uses, found without configuration: beside
     # the model, and one level up, which is where the corpus keeps it -- `examples/library/` is a
     # sibling of `examples/models/`, so opening `examples/models/BumpStop.mo` resolves
-    # `Translational` with no `pymodelica.library` set.
+    # `Translational` with no `modelica.library` set.
     for folder in (path.parent / "library", path.parent.parent / "library"):
         if folder.is_dir() and folder not in search:
             search.append(folder)

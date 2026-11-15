@@ -1,4 +1,4 @@
-# prodc.toml: product needs for pymodelica. Run: prodc status
+# prodc.toml: product needs for modelica. Run: prodc status
 
 [prodc]
 needs = ["product/needs/*.yaml"]

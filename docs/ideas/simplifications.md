@@ -8,7 +8,7 @@
     every refusal. So the cost of a construct is not a matter of taste here: it is a count of
     how many real models it blocks and how much of the parser it took to accept. An idea that
     earns a place on this page comes with a number or a concrete pain. An idea that turns
-    actionable graduates to [`docs/issues`](https://gitlab.com/jorgeecardona/pymodelica/-/tree/main/docs/issues).
+    actionable graduates to [`docs/issues`](https://gitlab.com/cardona-oss/modelica/-/tree/main/docs/issues).
 
 ## How a change to Modelica actually happens
 
