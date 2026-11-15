@@ -1,5 +1,5 @@
 {
-  "name": "modelica-scope",
+  "name": "pymodelica-scope",
   "displayName": "modelica Simulation Scope",
   "description": "Simulate the Modelica .mo file you are editing and see its trajectory, in an interactive chart inside VS Code.",
   "version": "0.1.139",
