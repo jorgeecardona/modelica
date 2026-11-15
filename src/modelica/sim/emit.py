@@ -1688,9 +1688,9 @@ class Emitter:
             name: value for name, value in system.aliases.items() if name not in keep
         }
         for block in system.mode.blocks:
-            one = len(block.unknowns) == 1 and block.assignment is not None
-            if one and block.unknowns[0] not in keep:
-                mapping[block.unknowns[0]] = block.assignment
+            value = block.assignment
+            if len(block.unknowns) == 1 and value is not None and block.unknowns[0] not in keep:
+                mapping[block.unknowns[0]] = value
         known = {v.name for v in system.parameters} | keep | {"time"}
 
         def rewrite(node: ir.Expr, depth: int) -> ir.Expr:  # noqa: PLR0911 - one case per node type
