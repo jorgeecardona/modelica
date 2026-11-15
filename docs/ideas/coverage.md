@@ -42,6 +42,26 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-11-15, after implicit initial equations, nested connectors and extends modifiers
+
+Since the last row: an initial equation that is not an explicit value is solved for its one free
+state; connection sets join per scalar leaf, so a connect to a connector nested in the class's own
+connector joins the parent's set; a modification on an `extends` clause resolves calls and
+constants where it was written.
+
+| last stage reached | models | of 430 |
+| ------------------ | -----: | -----: |
+| nothing loads      |     10 |  2.3 % |
+| loaded             |    294 | 68.4 % |
+| flattened          |     19 |  4.4 % |
+| causalized         |     18 |  4.2 % |
+| simulated          |     89 | 20.7 % |
+
+Measured with `scripts/reach.py`, all on SciPy. Top blockers now: 67 `Clock`, 54 array equations
+whose shape is not known, 29 `Complex`, 23 a conditional component's condition, 21 a shape that
+reads an unknown name, 21 "does not satisfy 'Real'", 19 a `pin[...]` subscript, 11 index
+reduction that gives up.
+
 ### 2026-11-15, after pre(x) of equation Booleans, sample triggers and zero-order holds
 
 Since the last row: `pre(x)` of a Boolean set by an equation reads its value at the last event,
