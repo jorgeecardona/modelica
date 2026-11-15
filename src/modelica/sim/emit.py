@@ -80,7 +80,7 @@ from typing import TYPE_CHECKING, Final
 from modelica.ir import nodes as ir
 from modelica.ir.derive import ONE, ZERO, d_dx, mul, simplify, sub
 from modelica.ir.evaluate import EvaluationError, evaluate
-from modelica.ir.rewrite import contains, names, residual, substitute
+from modelica.ir.rewrite import contains, names, residual, solve_for, substitute
 from modelica.ir.share import share, substituted
 from modelica.lang.unparse import unparse_expr
 from modelica.sim.dialect import (
@@ -1630,6 +1630,7 @@ class Emitter:
         # `Blocks.Sources.Pulse` writes `count = integer((time - startTime) / period)`.
         states = set(self.system.states) | set(self.remembered)
         pending: list[tuple[str, ir.Expr]] = []
+        implicit: list[ir.Equal] = []
         for equation in self.system.initial_equations:
             match equation:
                 # `pre(entryTime) = 0` (Blocks.Logical.Timer): the value a discrete variable
@@ -1643,12 +1644,8 @@ class Emitter:
                 case ir.Equal(lhs=value, rhs=ir.Ref() as target) if target.name in states:
                     pending.append((target.name, value))
                 case _:
-                    raise EmitError(
-                        f"{self.system.name}: this initial equation is not an explicit value"
-                        f" for a state or a discrete variable, and solving one is not implemented:"
-                        f" {unparse_expr(equation.lhs)} = {unparse_expr(equation.rhs)}"
-                    )
-        pending = self._at_start(pending, states)
+                    implicit.append(equation)
+        pending = self._at_start(pending, states, implicit)
         ordered: list[tuple[str, ir.Expr]] = []
         placed: set[str] = set()
         # Only another initial equation's target is waited for; a state with no initial
@@ -1672,7 +1669,10 @@ class Emitter:
         return ordered
 
     def _at_start(  # noqa: C901 - the rewrite is one case per node type
-        self, pending: list[tuple[str, ir.Expr]], states: set[str]
+        self,
+        pending: list[tuple[str, ir.Expr]],
+        states: set[str],
+        implicit: Sequence[ir.Equal] = (),
     ) -> list[tuple[str, ir.Expr]]:
         """Each initial value with the explicit model equations inlined and ``pre(x)`` as a start.
 
@@ -1680,6 +1680,10 @@ class Emitter:
         under ``when initial()``: ``u`` comes from the model equations, and ``pre(ySample)`` at
         initialization is the start value. A name a block of several unknowns solves is
         refused by name.
+
+        An initial equation that is not an explicit value (``PI.y = PI.y_start``) is solved for
+        the one state it reads that no other initial equation sets and that is not
+        ``fixed = true``. Zero or several such states are refused by name.
         """
         system = self.system
         targets = {name for name, _ in pending}
@@ -1720,7 +1724,26 @@ class Emitter:
                 case _:
                     return node
 
-        return [(name, rewrite(value, 0)) for name, value in pending]
+        solved = [(name, rewrite(value, 0)) for name, value in pending]
+        for equation in implicit:
+            difference = rewrite(ir.Binary("-", equation.lhs, equation.rhs), 0)
+            candidates = [
+                (name, solution)
+                for name in dict.fromkeys(names(difference))
+                if name in states
+                and name not in targets
+                and (solution := solve_for(difference, name)) is not None
+            ]
+            free = [pair for pair in candidates if not system[pair[0]].fixed]
+            if len(free) != 1:
+                raise EmitError(
+                    f"{system.name}: this initial equation is not an explicit value for a state"
+                    f" or a discrete variable, and it does not solve for exactly one free state:"
+                    f" {unparse_expr(equation.lhs)} = {unparse_expr(equation.rhs)}"
+                )
+            targets.add(free[0][0])
+            solved.append(free[0])
+        return solved
 
     def initial(self) -> str:
         constant = {v.name for v in self.system.parameters}
