@@ -3647,10 +3647,15 @@ class _Flattener:
         Which end drives depends on the role as well as the prefix. A component's
         ``output`` drives the wire from inside the model. The enclosing model's own
         ``input`` drives it from outside, because the value arrives through the boundary.
+        Only the top-level model's ``input`` does: a component's own ``input`` seen from its
+        equations (``connect(r, rInt)`` in ``Potentiometer``) is driven by whatever drives
+        the component, which is already in the set.
         """
         scope = Scope(self.program)
         driving: list[str] = []
         for path, role in endpoints:
+            if role == "outside" and len(path) > 1:
+                continue
             drives: ir.Causality = "output" if role == "inside" else "input"
             driving += [
                 ".".join((*path, *leaf.path))
