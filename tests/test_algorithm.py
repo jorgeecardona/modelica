@@ -478,11 +478,10 @@ def test_an_output_list_assignment_is_read_and_round_trips() -> None:
     assert parse(unparse(program)) == program
 
 
-def test_both_are_refused_by_name_when_a_section_folds() -> None:
-    """A model's algorithm section becomes equations, and these two cannot yet."""
+def test_an_assert_statement_folds_to_no_equation() -> None:
+    """A model's algorithm section becomes equations; an ``assert`` in it assigns nothing."""
     source = 'model M\n  Real x;\nalgorithm\n  assert(x > 0, "gone");\nend M;\n'
-    with pytest.raises(FlattenError, match="uses 'assert'"):
-        flatten([parse(source)], "M")
+    assert flatten([parse(source)], "M").equations == ()
 
 
 WHEN_SECTION = """\

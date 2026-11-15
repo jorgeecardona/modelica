@@ -1873,6 +1873,9 @@ def _run(  # noqa: PLR0911 - one case per statement form
     such merge unless its trip count is known, and an early exit has no merge at all.
     """
     match statement:
+        # A check, not an assignment (`DCPowerSupply`): it changes no variable here.
+        case ir.Assert():
+            return {**environment}
         case ir.Assign(target=ir.Ref(subscripts=subscripts) as target) if subscripts:
             # The environment is keyed by dotted name, which has no slot for `lamp[2]`; keying it
             # as `lamp.p.v` would assign a variable that does not exist.
@@ -3522,8 +3525,21 @@ class _Flattener:
             pass
         else:
             return None
-        bodies = [branch.body for branch in node.branches]
-        bodies.append(node.otherwise)
+        flattened = [
+            self._branch_equations(body, prefix, local, scope, outer)
+            for body in (*(branch.body for branch in node.branches), node.otherwise)
+        ]
+        if any(body is None for body in flattened):
+            return None
+        bodies = [body for body in flattened if body is not None]
+        node = replace(
+            node,
+            branches=tuple(
+                replace(branch, body=body)
+                for branch, body in zip(node.branches, bodies, strict=False)
+            ),
+            otherwise=bodies[-1],
+        )
         if not node.otherwise or any(
             len(body) != len(node.otherwise) or not all(isinstance(e, ir.Equal) for e in body)
             for body in bodies
@@ -3542,6 +3558,47 @@ class _Flattener:
                 combined = ir.IfExpr(branch.condition, value, combined)
             paired.append(ir.Equal(equals[0].lhs if same else ir.IntLiteral(0), combined))
         return paired
+
+    def _branch_equations(
+        self,
+        body: Sequence[ir.Equation],
+        prefix: _Path,
+        local: frozenset[str],
+        scope: Scope,
+        outer: Mapping[str, _Path] | None,
+    ) -> tuple[ir.Equation, ...] | None:
+        """A branch body with each inner if-equation replaced by plain equations, or None.
+
+        An inner if whose condition is known now is its chosen body; one that changes during the
+        run is its own if-expressions. Anything else that is not an equation gives None.
+        """
+        out: list[ir.Equation] = []
+        for equation in body:
+            if isinstance(equation, ir.Equal):
+                out.append(equation)
+                continue
+            if not isinstance(equation, ir.IfEquation):
+                return None
+            chosen: Sequence[ir.Equation] | None = equation.otherwise
+            try:
+                for branch in equation.branches:
+                    condition = self._carry(branch.condition, prefix, local, scope, outer)
+                    if _boolean(condition, self.values, "the condition of an if-equation"):
+                        chosen = branch.body
+                        break
+            except (EvaluationError, FlattenError):
+                chosen = None
+            if chosen is None:
+                paired = self._run_time_if(equation, prefix, local, scope, outer)
+                if paired is None:
+                    return None
+                out.extend(paired)
+                continue
+            inner = self._branch_equations(chosen, prefix, local, scope, outer)
+            if inner is None:
+                return None
+            out.extend(inner)
+        return tuple(out)
 
     def resolve_deferred_ifs(self) -> None:
         """Resolve the if-equations held because a parameter in their condition was not yet known.
