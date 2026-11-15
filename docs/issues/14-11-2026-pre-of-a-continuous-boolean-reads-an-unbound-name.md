@@ -44,3 +44,16 @@ nothing loads it, and its workspace slot is written once, in `initial()`, and ne
   (`Code.previous`, `Kernel.remember`). The on-off latch simulates (tests/test_boolean_equations.py).
   Open: the VM/engine still refuses the model ("nothing computes 'on'"). `Thyristor1Pulse_R` now
   reaches simulate and chatters at t = 0.01.
+
+## Engine plan (Fable, 2026-11-15)
+
+1. `vm.py` `ref()`: a `$preN` name is a `LOAD_W` of its slot, beside the `$relation` case.
+2. `latch()` tape: run when there are pre reads too, and `STORE_W` each slot at the end.
+3. A new `remember` function slot after `latch` (do not renumber), FORMAT 2 -> 3 in `vm.py` and
+   `lib.rs`: unpack, blocks with held relations, `STORE_W` per slot, and `sum(abs(new - old))`
+   into `out[0]`, so no slot list crosses the ABI. Old wheels are refused by `md_vm_format()`;
+   check that the refusal falls back to SciPy.
+4. `rust_radau.py` INTEGRATE: after the event settle and before the rearm, call `remember` until
+   `out[0] == 0`, capped, failing with the existing error status. Regenerate `radau.rs`.
+5. Tests: `remember` on the tape equals `Kernel.remember`; the on-off latch test on both
+   backends; `b = not pre(b)` fails by name on both.
