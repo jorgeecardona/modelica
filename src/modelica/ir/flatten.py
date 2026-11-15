@@ -3732,15 +3732,23 @@ class _Flattener:
                 self._flow_sum(refs, [role for _, role in joined])
             else:
                 self.equations.extend(ir.Equal(a, b) for a, b in pairwise(refs))
+        self._unconnected_flows(leaves)
+
+    def _unconnected_flows(self, leaves: _Connections) -> None:
+        """``flow = 0`` for each flow leaf that no connection feeds from outside."""
         seen: set[_Path] = set()
         for path, found in self.connectors.items():
             # A component's connector nobody connected from outside: its flows have nowhere to
-            # go. A connector of the model itself (and the connectors nested in it) is not one.
-            if (path[0],) in self.connectors:
+            # go. A connector of the simulated model itself has no outside at all, so its flows
+            # are zero too; a connector nested in it is covered by its leaves.
+            top = len(path) == 1
+            if not top and (path[0],) in self.connectors:
                 continue
             for leaf in self._connector_leaves(found, Scope(self.program)):
                 flat = (*path, *leaf.path)
-                if leaf.kind != "flow" or flat in seen or leaves.connected((flat, "inside")):
+                if leaf.kind != "flow" or flat in seen:
+                    continue
+                if not top and leaves.connected((flat, "inside")):
                     continue
                 seen.add(flat)
                 self.equations.append(ir.Equal(ir.Ref(flat), ir.RealLiteral(0.0)))

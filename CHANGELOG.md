@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- A flow of a connector declared in the simulated model itself is zero (`OpAmps.DifferentialAmplifier`), so a model with its own pins is no longer one equation short.
 - An equation inherited from a base class resolves names in the class that wrote it, and an inlined function reads `u[k]` of an array literal argument (`Adaptors`: `Functions.state1({f, u1}, time)`).
 - An if-expression whose condition is a constant or an `Evaluate = true` parameter is replaced by its chosen branch (`InductorDC` with `quasiStatic`), so it is no longer solved for `der(i)` and divided by zero.
 - A modification on an `extends` clause resolves functions and constants where the clause was written (`extends Base(final Vi = 1 - P.conv(Ra, 2))`), as the DC machines need.

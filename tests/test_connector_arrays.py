@@ -49,7 +49,9 @@ def test_the_element_carries_the_wire_and_its_sibling_does_not() -> None:
     )
     flat = flatten(parse(source), "M")
     assert ir.Equal(ir.Ref(("p[2]", "v")), ir.Ref(("lamp", "p", "v"))) in flat.equations
-    assert "p[1]" not in repr(flat.equations)
+    # The sibling is in no connection; as a connector of the model itself, its flow is zero.
+    sibling = [e for e in flat.equations if "p[1]" in repr(e)]
+    assert sibling == [ir.Equal(ir.Ref(("p[1]", "i")), ir.RealLiteral(0.0))]
 
 
 def test_the_subscript_may_be_a_parameter() -> None:
