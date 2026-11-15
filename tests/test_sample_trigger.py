@@ -54,3 +54,62 @@ def test_an_array_condition_with_initial_fires_at_the_start_too(
     result = simulate(causalize(flatten(parse(source), "Z")), stop=1.0, backend=backend)
     assert float(result.at(0.05)["held"]) == pytest.approx(0.5, abs=1e-9)
     assert float(result.at(0.5)["held"]) == pytest.approx(0.85, abs=1e-6)
+
+
+HOLD = """\
+model Hold
+  parameter Real startTime = 0;
+  Real x(start = 1, fixed = true);
+  Real u;
+  Real ySample(start = 0, fixed = true);
+  Real y;
+equation
+  der(x) = -x;
+  u = if x > 0.5 then 2 * x else -7;
+  when {sample(startTime, 0.25), initial()} then
+    ySample = if time >= startTime then u else pre(ySample);
+  end when;
+  y = pre(ySample);
+end Hold;
+"""
+
+
+@pytest.mark.parametrize("backend", ["python", "engine"])
+@pytest.mark.parametrize(("start_time", "first"), [(0.0, 2.0), (0.1, 0.0)])
+def test_a_hold_started_by_initial_reads_the_model_equations(
+    backend: Literal["python", "engine"], start_time: float, first: float
+) -> None:
+    """``Blocks.Discrete.ZeroOrderHold``: the initial value reads ``u`` and ``pre(ySample)``."""
+    if backend == "engine":
+        from modelica.sim import engine  # noqa: PLC0415 - only this case needs it
+
+        if engine.installed() is None and shutil.which("rustc") is None:
+            pytest.skip("no engine in this install and no rustc to build one")
+    source = HOLD.replace("startTime = 0;", f"startTime = {start_time};")
+    result = simulate(causalize(flatten(parse(source), "Hold")), stop=1.0, backend=backend)
+    held = result["ySample"]
+    assert float(held[0]) == pytest.approx(first, abs=1e-9)
+    # x crosses 0.5 at t = ln 2, so the sample at 0.75 takes the else branch.
+    assert float(held[-1]) == pytest.approx(-7.0, abs=1e-9)
+
+
+@pytest.mark.parametrize("backend", ["python", "engine"])
+def test_an_initial_value_read_from_an_algebraic_loop_is_refused_by_name(
+    backend: Literal["python", "engine"],
+) -> None:
+    from modelica.sim.emit import EmitError  # noqa: PLC0415 - only this case needs it
+
+    if backend == "engine":
+        from modelica.sim import engine  # noqa: PLC0415 - only this case needs it
+
+        if engine.installed() is None and shutil.which("rustc") is None:
+            pytest.skip("no engine in this install and no rustc to build one")
+    source = (
+        HOLD.replace(
+            "u = if x > 0.5 then 2 * x else -7;", "u = x - v * v * v; v = u + sin(v);\n  Real v;"
+        )
+        .replace("  Real y;\nequation", "  Real y;\n  Real v;\nequation")
+        .replace("\n  Real v;\n  when", "\n  when")
+    )
+    with pytest.raises(EmitError, match="'u'"):
+        simulate(causalize(flatten(parse(source), "Hold")), stop=1.0, backend=backend)

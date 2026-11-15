@@ -890,7 +890,12 @@ class _Lowering:
                 if name not in set_later and name in read:
                     scope.names[name] = start(scope, name)
             for name, value in conditions:
-                self.assign(scope, name, value)
+                # Relations read live, as `Emitter.initial`: no latch is set yet.
+                held, emitter.held = emitter.held, {}
+                try:
+                    self.assign(scope, name, value)
+                finally:
+                    emitter.held = held
                 source = self.ref(scope, name)
                 if name in states:
                     scope.code.append(Instr(Op.STORE_OUT, 0, states[name], source))

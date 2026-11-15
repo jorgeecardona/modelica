@@ -873,6 +873,10 @@ def _function(name: str, arguments: str, body: Iterable[str]) -> str:
     return "\n".join(lines)
 
 
+# How deep a chain of explicit model equations is inlined into an initial value.
+_INLINE_DEPTH = 50
+
+
 @dataclass
 class Emitter:
     # Public since the C backend arrived. It was `_Emitter` while one module used it, and
@@ -1644,6 +1648,7 @@ class Emitter:
                         f" for a state or a discrete variable, and solving one is not implemented:"
                         f" {unparse_expr(equation.lhs)} = {unparse_expr(equation.rhs)}"
                     )
+        pending = self._at_start(pending, states)
         ordered: list[tuple[str, ir.Expr]] = []
         placed: set[str] = set()
         # Only another initial equation's target is waited for; a state with no initial
@@ -1665,6 +1670,57 @@ class Emitter:
             placed.update(name for name, _ in ready)
             pending = [pair for pair in pending if pair[0] not in placed]
         return ordered
+
+    def _at_start(  # noqa: C901 - the rewrite is one case per node type
+        self, pending: list[tuple[str, ir.Expr]], states: set[str]
+    ) -> list[tuple[str, ir.Expr]]:
+        """Each initial value with the explicit model equations inlined and ``pre(x)`` as a start.
+
+        ``ZeroOrderHold`` writes ``ySample = if time >= startTime then u else pre(ySample)``
+        under ``when initial()``: ``u`` comes from the model equations, and ``pre(ySample)`` at
+        initialization is the start value. A name a block of several unknowns solves is
+        refused by name.
+        """
+        system = self.system
+        targets = {name for name, _ in pending}
+        keep = targets | states
+        mapping: dict[str, ir.Expr] = {
+            name: value for name, value in system.aliases.items() if name not in keep
+        }
+        for block in system.mode.blocks:
+            one = len(block.unknowns) == 1 and block.assignment is not None
+            if one and block.unknowns[0] not in keep:
+                mapping[block.unknowns[0]] = block.assignment
+        known = {v.name for v in system.parameters} | keep | {"time"}
+
+        def rewrite(node: ir.Expr, depth: int) -> ir.Expr:  # noqa: PLR0911 - one case per node type
+            match node:
+                case ir.Call(name="pre", args=(ir.Ref() as ref,)):
+                    if ref.name in system:
+                        return system[ref.name].start or ir.RealLiteral(0.0)
+                    return ir.RealLiteral(0.0)
+                case ir.Ref(name=name) if name in mapping and depth < _INLINE_DEPTH:
+                    return rewrite(mapping[name], depth + 1)
+                case ir.Ref(name=name) if name not in known:
+                    raise EmitError(
+                        f"{system.name}: an initial equation reads {name!r}, which the model"
+                        f" equations solve together with other unknowns, and solving that at"
+                        f" the start is not implemented"
+                    )
+                case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+                    return ir.Binary(op, rewrite(lhs, depth), rewrite(rhs, depth))
+                case ir.Unary(op=op, operand=operand):
+                    return ir.Unary(op, rewrite(operand, depth))
+                case ir.Call(name=name, args=args):
+                    return ir.Call(name, tuple(rewrite(a, depth) for a in args))
+                case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+                    return ir.IfExpr(
+                        rewrite(condition, depth), rewrite(then, depth), rewrite(otherwise, depth)
+                    )
+                case _:
+                    return node
+
+        return [(name, rewrite(value, 0)) for name, value in pending]
 
     def initial(self) -> str:
         constant = {v.name for v in self.system.parameters}
@@ -1702,11 +1758,17 @@ class Emitter:
             for name, slot in slots.items()
             if name not in set_here and any(name in names(value) for _, value in conditions)
         )
-        for name, value in conditions:
+        # Relations in an initial value are read live: no latch is set before `latch()`.
+        held, self.held = self.held, {}
+        try:
+            values = [(name, self.expr(value)) for name, value in conditions]
+        finally:
+            self.held = held
+        for name, value in values:
             # Both, and in this order. `y` is what the solver integrates from; the workspace
             # slot is what `observe` reports at t = 0, and leaving it holding the `start`
             # attribute would make the first sample of the run disagree with the run.
-            body.append(f"{self.symbols[name]} = {self.expr(value)}")
+            body.append(f"{self.symbols[name]} = {value}")
             if name in slots:
                 body.append(f"y[{slots[name]}] = {self.symbols[name]}")
             body.append(f"w[{self.slots[name]}] = {self.symbols[name]}")
