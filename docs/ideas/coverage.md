@@ -42,6 +42,26 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-11-15, after pre(x) of equation Booleans, sample triggers and zero-order holds
+
+Since the last row: `pre(x)` of a Boolean set by an equation reads its value at the last event,
+on both backends; `b = sample(...)` triggers a `when`; `when {a, initial()}` fires on either
+element; an initial equation reads explicit model equations and `pre(x)` as the start value; a
+component's own `input` connected inside it is not a second source.
+
+| last stage reached | models | of 430 |
+| ------------------ | -----: | -----: |
+| nothing loads      |     10 |  2.3 % |
+| loaded             |    295 | 68.6 % |
+| flattened          |     31 |  7.2 % |
+| causalized         |     16 |  3.7 % |
+| simulated          |     78 | 18.1 % |
+
+Measured with `scripts/reach.py`, all 78 on SciPy (no engine wheel). Top blockers now: 67
+`Clock`, 53 array equations whose shape is not known, 29 `Complex`, 25 a conditional
+component's condition, 21 a shape that reads an unknown name, 21 "does not satisfy 'Real'", 19
+a `pin[...]` subscript in an array equation, 17 index reduction that gives up.
+
 ### 2026-11-15, after ideal diodes, String parameters and component-scoped function calls
 
 Since the last row: a `when`-assigned variable is discrete without the prefix; a run-time
