@@ -1053,7 +1053,9 @@ def _prefix_expr(  # noqa: C901, PLR0911, PLR0912, PLR0913 -- one case per node 
             # The base is prefixed the ordinary way and then *renamed*: `T[3]` becomes the
             # scalar variable the declaration created. Everything below this module sees a
             # name, never an index -- which is the whole point of scalarising here.
-            if values is None:
+            if values is None or (not strict and base.parts[0] not in local and not outer):
+                # Not strict, an unknown base would be kept and renamed into a name nothing
+                # declares (an inliner's leftover local `v_[1]`), so it is refused instead.
                 raise FlattenError("subscripted references are not expanded here")
             path = _prefix_ref(base, prefix, local, strict=strict, outer=outer, values=values).parts
             indices = _ends(indices, path)
@@ -2224,7 +2226,10 @@ def _check_constraint(
 
 
 def _prefix_modification(
-    mod: ir.Modification, prefix: _Path, local: frozenset[str]
+    mod: ir.Modification,
+    prefix: _Path,
+    local: frozenset[str],
+    values: Mapping[str, float] | None = None,
 ) -> ir.Modification:
     """Give a modification's expressions the path of the class that wrote them.
 
@@ -2241,9 +2246,12 @@ def _prefix_modification(
     if not prefix or not mod:
         return mod
     return ir.Modification(
-        value=None if mod.value is None else _prefix_expr(mod.value, prefix, local, strict=False),
+        value=None
+        if mod.value is None
+        else _prefix_expr(mod.value, prefix, local, strict=False, values=values),
         entries={
-            name: _prefix_modification(entry, prefix, local) for name, entry in mod.entries.items()
+            name: _prefix_modification(entry, prefix, local, values)
+            for name, entry in mod.entries.items()
         },
     )
 
@@ -2656,8 +2664,12 @@ class _Flattener:
         finally:
             _PARAMETERS.reset(token)
         resolved_literals = _expanded_comprehensions(resolved_literals, view)
-        own = _prefix_modification(resolved_literals, here, local)
-        inherited = tuple(_prefix_modification(mod, here, local) for mod in member.mods)
+        # With the values, a subscript in a binding (`u = if abs(n[1]) >= 0.99 then ...`,
+        # MultiBody's `World`) names the element its index picks.
+        own = _prefix_modification(resolved_literals, here, local, self.values)
+        inherited = tuple(
+            _prefix_modification(mod, here, local, self.values) for mod in member.mods
+        )
         total = _merged(own, *inherited, outer)
         resolved = member.scope.resolve(component.type_name)
         if (
