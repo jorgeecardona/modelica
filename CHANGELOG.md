@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- An if-expression whose condition is a constant or an `Evaluate = true` parameter is replaced by its chosen branch (`InductorDC` with `quasiStatic`), so it is no longer solved for `der(i)` and divided by zero.
 - A modification on an `extends` clause resolves functions and constants where the clause was written (`extends Base(final Vi = 1 - P.conv(Ra, 2))`), as the DC machines need.
 - A connect to a connector nested in the class's own connector (`connect(ra.heatPort, internalThermalPort.heatPortArmature)`) joins the parent's connection set. Before, the loss got the wrong sign and an extra `Q_flow = 0`.
 - An initial equation that is not an explicit value (`PI.y = PI.y_start`) is solved for the one state it reads that no other initial equation sets and that is not `fixed = true`, on both backends.

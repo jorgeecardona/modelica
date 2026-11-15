@@ -32,15 +32,15 @@ from __future__ import annotations
 import math
 from collections.abc import Iterator, Mapping
 from contextvars import ContextVar
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from functools import cache
 from importlib.resources import files
 from itertools import pairwise, product
-from typing import TYPE_CHECKING, Final, Literal, NamedTuple
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, cast
 
 from modelica.ir import nodes as ir
 from modelica.ir.clocks import as_when, partition, unhold
-from modelica.ir.evaluate import EvaluationError, at, evaluate
+from modelica.ir.evaluate import EvaluationError, Value, at, evaluate
 from modelica.ir.flat import (
     ArrayEquation,
     BaseType,
@@ -1457,6 +1457,38 @@ def _literals(  # noqa: C901, PLR0911, PLR0912 -- one case per node type, as its
             return node
 
 
+def _fold_ifs[T](node: T, known: Mapping[str, Value]) -> T:
+    """``node`` with each if-expression whose condition ``known`` decides replaced by its branch.
+
+    Walks any IR dataclass (equations, ``when`` bodies, expressions) by its fields.
+    """
+    if isinstance(node, ir.IfExpr):
+        try:
+            decided = evaluate(node.condition, known)
+        except EvaluationError:
+            decided = None
+        if isinstance(decided, bool):
+            return cast("T", _fold_ifs(node.then if decided else node.otherwise, known))
+    if not is_dataclass(node) or isinstance(node, type):
+        return node
+    changes: dict[str, object] = {}
+    for item in fields(node):
+        value: object = getattr(node, item.name)
+        if is_dataclass(value) and not isinstance(value, type):
+            folded = _fold_ifs(value, known)
+        elif isinstance(value, tuple) and value:
+            folded = tuple(
+                _fold_ifs(element, known) for element in cast("tuple[object, ...]", value)
+            )
+            if all(a is b for a, b in zip(folded, cast("tuple[object, ...]", value), strict=True)):
+                continue
+        else:
+            continue
+        if folded is not value:
+            changes[item.name] = folded
+    return cast("T", replace(node, **changes)) if changes else node  # pyright: ignore[reportArgumentType]
+
+
 def _literal_modification(
     mod: ir.Modification, scope: Scope, local: frozenset[str]
 ) -> ir.Modification:
@@ -2406,6 +2438,8 @@ class _Flattener:
     connections: _Connections = field(default_factory=_Connections)
     connectors: dict[_Path, Found] = field(default_factory=dict[_Path, "Found"])
     disabled: set[_Path] = field(default_factory=set[_Path])
+    structural: set[str] = field(default_factory=set[str])
+    """Constants and ``Evaluate = true`` parameters: an if-expression on them is folded."""
     """Conditional components whose condition came out false, by instance path.
 
     Read by the ``connect()`` handling: a connect whose endpoint sits inside a disabled
@@ -2855,6 +2889,11 @@ class _Flattener:
         variability: ir.Variability,
     ) -> None:
         name = ".".join(path)
+        evaluate_entry = component.annotation.entries.get("Evaluate")
+        if variability == "constant" or (
+            evaluate_entry is not None and evaluate_entry.value == ir.BoolLiteral(value=True)
+        ):
+            self.structural.add(name)
         unknown = set(total.entries) - _ATTRIBUTES
         if unknown:
             raise FlattenError(f"{name}: unknown attribute(s) {sorted(unknown)}")
@@ -3497,6 +3536,20 @@ class _Flattener:
                     defer=False,
                 )
 
+    def fold_known_ifs(self) -> None:
+        """Replace each if-expression whose condition is structural by its chosen branch.
+
+        ``InductorDC`` writes ``v = if quasiStatic then 0 else L*der(i)`` with ``quasiStatic``
+        marked ``Evaluate = true``. Kept, the if is solved for ``der(i)`` and divides by zero.
+        Only constants and ``Evaluate = true`` parameters count: a plain parameter may be
+        overridden at simulate time, so an if on it stays.
+        """
+        known = {name: value for name, value in self.values.items() if name in self.structural}
+        if not known:
+            return
+        self.equations[:] = [_fold_ifs(e, known) for e in self.equations]
+        self.initial_equations[:] = [_fold_ifs(e, known) for e in self.initial_equations]
+
     def _severed(self, end: ir.Ref | ir.Subscript, prefix: _Path, local: frozenset[str]) -> bool:
         """Whether this connect endpoint sits inside a disabled conditional component."""
         ref = end.base if isinstance(end, ir.Subscript) else end
@@ -4118,6 +4171,7 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
     try:
         flattener.instantiate(found, scope, (), ir.EMPTY, "continuous")
         flattener.resolve_deferred_ifs()
+        flattener.fold_known_ifs()
         flattener.expand_connections()
     finally:
         _PARAMETERS.reset(token)
