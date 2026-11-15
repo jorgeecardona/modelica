@@ -5,6 +5,9 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## Unreleased
+- A schematic draws text in an icon other than `%name` (the "+" of a source) inside the symbol, not as a second name caption.
+- The example electrical library draws IEC 60617 symbols: a rectangle for a resistor, a circle with a line through it for a voltage source.
+- The docs home page shows the RLC circuit as the schematic SVG, not as a Mermaid graph.
 - A `type` alias of a predefined type satisfies a slot declared with that type (`SalientInductance = Salient(redeclare SI.Inductance d)`).
 - The repository is renamed from `modelica` to `modelica`: <https://gitlab.com/cardona-oss/modelica>, docs at <https://cardona-oss.gitlab.io/modelica/>. The VS Code settings and commands are now `modelica.*`.
 

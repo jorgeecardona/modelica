@@ -572,6 +572,14 @@ def _icon_svg(box: Box) -> list[str]:
                     f'<ellipse class="mark" cx="{cx:.1f}" cy="{cy:.1f}" '
                     f'rx="{rx * scale:.1f}" ry="{ry * scale:.1f}"{stroke}{fill} />'
                 )
+            case Label(x=x, y=y, text=text, size=size) if "%name" not in text:
+                # A mark written as text, such as the "+" of a source. It belongs to the
+                # symbol, so it sits where the icon put it, but it stays upright.
+                tx, ty = at(x, y)
+                parts.append(
+                    f'<text class="small" x="{tx:.1f}" y="{ty + size * scale * 0.35:.1f}" '
+                    f'text-anchor="middle">{_escape(text)}</text>'
+                )
             case Label(text=text):
                 # A name is read, not drawn: it never turns with the symbol. A rotated
                 # component with its label on its side is how a schematic stops being

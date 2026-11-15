@@ -43,21 +43,7 @@ from modelica import diagram
 diagram.of("examples/models/RLCCircuit.mo", "examples/library/Electrical.mo")
 ```
 
-```mermaid
-graph LR
-  nsource["source<br/>ConstantVoltage"]
-  nr["r<br/>Resistor"]
-  nl["l<br/>Inductor"]
-  nc["c<br/>Capacitor"]
-  nground["ground<br/>Ground"]
-  n0(( ))
-  nsource ---|p p| nr
-  nr ---|n p| nl
-  nl ---|n p| nc
-  nc ---|n| n0
-  nsource ---|n| n0
-  nground ---|p| n0
-```
+--8<-- "assets/rlc.svg"
 
 The three connectors that meet at the bottom are one junction, and not three separate
 lines. That is what the flattener makes of them: one sum of currents, taken once.

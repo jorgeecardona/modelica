@@ -406,3 +406,29 @@ def test_the_command_reports_a_bad_file_without_a_traceback(tmp_path: Path) -> N
     bad = tmp_path / "Broken.mo"
     bad.write_text("model Broken\n  Real x\nend Broken;\n")
     assert main([str(bad)]) == 1
+
+
+# --------------------------------------------------------------------------------------
+# The picture on the docs home page
+# --------------------------------------------------------------------------------------
+
+DOCS_SCHEMATIC = EXAMPLES.parent / "docs" / "assets" / "rlc.svg"
+
+
+def test_docs_home_page_schematic_is_what_the_code_draws() -> None:
+    """The SVG that ``docs/index.md`` inlines is the one the code draws today.
+
+    Regenerate it when the drawing changes: ``python -m modelica.diagram
+    examples/models/RLCCircuit.mo examples/library/Electrical.mo > docs/assets/rlc.svg``.
+    """
+    drawn = of(MODELS / "RLCCircuit.mo", LIBRARY / "Electrical.mo").to_svg()
+    assert DOCS_SCHEMATIC.read_text(encoding="utf-8").strip() == drawn.strip()
+
+
+def test_icon_text_other_than_the_name_is_drawn_inside_the_symbol() -> None:
+    """The "+" of a source is part of the symbol, not a second copy of the caption."""
+    drawn = of(MODELS / "RLCCircuit.mo", LIBRARY / "Electrical.mo").to_svg()
+    plus = re.findall(r'<text class="small"[^>]*>\+</text>', drawn)
+    names = re.findall(r'<text class="name"[^>]*>source</text>', drawn)
+    assert len(plus) == 1
+    assert len(names) == 1

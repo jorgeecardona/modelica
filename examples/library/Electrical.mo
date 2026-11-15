@@ -27,7 +27,7 @@ package Electrical "Minimal analog electrical components, after Modelica.Electri
     parameter Resistance R = 1 "Resistance";
   equation
     v = R * i;
-    annotation(Icon(graphics = {Line(points = {{-90, 0}, {-52, 0}}), Line(points = {{-52, 0}, {-42, 22}, {-22, -22}, {-2, 22}, {18, -22}, {38, 22}, {48, 0}, {52, 0}}), Line(points = {{52, 0}, {90, 0}}), Text(extent = {{-100.0, 62.0}, {100.0, 40.0}}, textString = "%name")}));
+    annotation(Icon(graphics = {Line(points = {{-90, 0}, {-60, 0}}), Rectangle(extent = {{-60, 20}, {60, -20}}), Line(points = {{60, 0}, {90, 0}}), Text(extent = {{-100.0, 62.0}, {100.0, 40.0}}, textString = "%name")}));
   end Resistor;
 
   model HeatingResistor "A resistor whose resistance rises with its port temperature, losing v*i as heat"
@@ -41,7 +41,7 @@ package Electrical "Minimal analog electrical components, after Modelica.Electri
     R_actual = R_ref * (1 + alpha * (heat_port.T - T_ref));
     v = R_actual * i;
     heat_port.Q_flow = -v * i;
-    annotation(Icon(graphics = {Line(points = {{-90, 0}, {-52, 0}}), Line(points = {{-52, 0}, {-42, 22}, {-22, -22}, {-2, 22}, {18, -22}, {38, 22}, {48, 0}, {52, 0}}), Line(points = {{52, 0}, {90, 0}}), Line(points = {{0, -22}, {0, -58}}), Text(extent = {{-100.0, 62.0}, {100.0, 40.0}}, textString = "%name")}));
+    annotation(Icon(graphics = {Line(points = {{-90, 0}, {-60, 0}}), Rectangle(extent = {{-60, 20}, {60, -20}}), Line(points = {{60, 0}, {90, 0}}), Line(points = {{0, -20}, {0, -58}}), Text(extent = {{-100.0, 62.0}, {100.0, 40.0}}, textString = "%name")}));
   end HeatingResistor;
 
   model Capacitor "i = C*der(v) -- introduces one state, v"
@@ -65,7 +65,7 @@ package Electrical "Minimal analog electrical components, after Modelica.Electri
     parameter Voltage V = 1 "Source voltage";
   equation
     v = V;
-    annotation(Icon(graphics = {Line(points = {{-90, 0}, {-30, 0}}), Line(points = {{30, 0}, {90, 0}}), Ellipse(extent = {{-30, 30}, {30, -30}}), Line(points = {{-16, 0}, {-4, 0}}), Line(points = {{-10, -6}, {-10, 6}}), Line(points = {{4, 0}, {16, 0}}), Text(extent = {{-100.0, 62.0}, {100.0, 40.0}}, textString = "%name")}));
+    annotation(Icon(graphics = {Line(points = {{-90, 0}, {90, 0}}), Ellipse(extent = {{-30, 30}, {30, -30}}), Text(extent = {{-24, 22}, {-8, 6}}, textString = "+"), Text(extent = {{-100.0, 62.0}, {100.0, 40.0}}, textString = "%name")}));
   end ConstantVoltage;
 
   model SignalVoltage "A voltage source driven by a signal: the actuator a controller moves the circuit through"

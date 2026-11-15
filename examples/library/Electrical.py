@@ -75,21 +75,9 @@ class Resistor(OnePort):
     R = parameter(Resistance, 1, doc="Resistance")
 
     ICON = icon(
-        shape("Line", points=[(-90, 0), (-52, 0)]),
-        shape(
-            "Line",
-            points=[
-                (-52, 0),
-                (-42, 22),
-                (-22, -22),
-                (-2, 22),
-                (18, -22),
-                (38, 22),
-                (48, 0),
-                (52, 0),
-            ],
-        ),
-        shape("Line", points=[(52, 0), (90, 0)]),
+        shape("Line", points=[(-90, 0), (-60, 0)]),
+        shape("Rectangle", extent=[(-60, 20), (60, -20)]),
+        shape("Line", points=[(60, 0), (90, 0)]),
         shape("Text", extent=NAME, textString="%name"),
     )
 
@@ -107,22 +95,10 @@ class HeatingResistor(OnePort):
     heat_port = Thermal.HeatPort("Where the ohmic loss goes")
 
     ICON = icon(
-        shape("Line", points=[(-90, 0), (-52, 0)]),
-        shape(
-            "Line",
-            points=[
-                (-52, 0),
-                (-42, 22),
-                (-22, -22),
-                (-2, 22),
-                (18, -22),
-                (38, 22),
-                (48, 0),
-                (52, 0),
-            ],
-        ),
-        shape("Line", points=[(52, 0), (90, 0)]),
-        shape("Line", points=[(0, -22), (0, -58)]),
+        shape("Line", points=[(-90, 0), (-60, 0)]),
+        shape("Rectangle", extent=[(-60, 20), (60, -20)]),
+        shape("Line", points=[(60, 0), (90, 0)]),
+        shape("Line", points=[(0, -20), (0, -58)]),
         shape("Text", extent=NAME, textString="%name"),
     )
 
@@ -174,12 +150,9 @@ class ConstantVoltage(OnePort):
     V = parameter(Voltage, 1, doc="Source voltage")
 
     ICON = icon(
-        shape("Line", points=[(-90, 0), (-30, 0)]),
-        shape("Line", points=[(30, 0), (90, 0)]),
+        shape("Line", points=[(-90, 0), (90, 0)]),
         shape("Ellipse", extent=[(-30, 30), (30, -30)]),
-        shape("Line", points=[(-16, 0), (-4, 0)]),
-        shape("Line", points=[(-10, -6), (-10, 6)]),
-        shape("Line", points=[(4, 0), (16, 0)]),
+        shape("Text", extent=[(-24, 22), (-8, 6)], textString="+"),
         shape("Text", extent=NAME, textString="%name"),
     )
 
