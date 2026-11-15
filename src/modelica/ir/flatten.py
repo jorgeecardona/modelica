@@ -3994,6 +3994,39 @@ def _when_assigned(whens: Sequence[ir.When]) -> set[str]:
     return {name for when in whens for branch in when.branches for name in _assigned(branch.body)}
 
 
+def _inline_sample_triggers(flat: FlatModel) -> FlatModel:
+    """``b = sample(...); when b then`` as ``when sample(...) then``, with ``b`` false between.
+
+    ``Blocks.Interfaces.DiscreteBlock`` writes ``sampleTrigger = sample(startTime,
+    samplePeriod)`` and then ``when sampleTrigger``. A ``sample`` is true only at its instants,
+    so between events ``b`` is false, and the ``when`` is the sample's time event.
+    """
+    triggers = {
+        e.lhs.name: e.rhs
+        for e in flat.equations
+        if isinstance(e.lhs, ir.Ref) and isinstance(e.rhs, ir.Call) and e.rhs.name == "sample"
+    }
+    if not triggers:
+        return flat
+
+    def swap(node: ir.Expr) -> ir.Expr:
+        if isinstance(node, ir.Ref) and node.name in triggers:
+            return triggers[node.name]
+        return node
+
+    whens = [
+        ir.When(tuple(ir.WhenBranch(swap(b.condition), b.body) for b in when.branches))
+        for when in flat.whens
+    ]
+    equations = tuple(
+        replace(e, rhs=ir.BoolLiteral(value=False))
+        if isinstance(e.lhs, ir.Ref) and e.lhs.name in triggers
+        else e
+        for e in flat.equations
+    )
+    return replace(flat, whens=tuple(whens), equations=equations)
+
+
 def flatten(program: ir.Program, model: str) -> FlatModel:
     """Flatten class ``model`` (a dotted name) as found in ``program``."""
     program = _with_prelude(program)
@@ -4048,6 +4081,7 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
                 for v in flat.variables
             ),
         )
+    flat = _inline_sample_triggers(flat)
     whens, samplers, seeded = _lower_samples(
         (*flat.whens, *(as_when(p) for p in flat.partitions)),
         {variable.name for variable in flat.variables},
