@@ -259,12 +259,21 @@ def _merged(*mods: ir.Modification) -> ir.Modification:
 # --------------------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class Inherited:
+    """A modification an ``extends`` clause writes on a base member, and where it was written."""
+
+    modification: ir.Modification
+    scope: Scope
+    """The class holding the ``extends`` clause: a function or constant in the value resolves here."""
+
+
 @dataclass
 class Member:
     component: ir.Component
     scope: Scope
     """Where the component was declared -- its type name resolves here."""
-    mods: tuple[ir.Modification, ...] = ()
+    mods: tuple[Inherited, ...] = ()
     """Modifications picked up from ``extends`` clauses, weakest first."""
 
 
@@ -306,7 +315,7 @@ def _extends_member(
         return member
     if picked_up.redeclare is not None and not isinstance(picked_up.redeclare, ir.Class):
         return _redeclared(member, picked_up, writer, (name,))
-    return replace(member, mods=(*member.mods, picked_up))
+    return replace(member, mods=(*member.mods, Inherited(picked_up, writer)))
 
 
 def effective(found: Found, scope: Scope) -> Effective:  # noqa: C901 -- extends, redeclare, own members
@@ -2664,6 +2673,11 @@ class _Flattener:
         token = _PARAMETERS.set(view)
         try:
             resolved_literals = _literal_modification(component.modification, member.scope, local)
+            # `extends Base(final ViNominal = VaNominal - convertResistance(...))` (the DC
+            # machines): the call and the constants resolve where the clause was written.
+            inherited_literals = [
+                _literal_modification(mod.modification, mod.scope, local) for mod in member.mods
+            ]
         finally:
             _PARAMETERS.reset(token)
         resolved_literals = _expanded_comprehensions(resolved_literals, view)
@@ -2671,7 +2685,7 @@ class _Flattener:
         # MultiBody's `World`) names the element its index picks.
         own = _prefix_modification(resolved_literals, here, local, self.values)
         inherited = tuple(
-            _prefix_modification(mod, here, local, self.values) for mod in member.mods
+            _prefix_modification(mod, here, local, self.values) for mod in inherited_literals
         )
         total = _merged(own, *inherited, outer)
         resolved = member.scope.resolve(component.type_name)
