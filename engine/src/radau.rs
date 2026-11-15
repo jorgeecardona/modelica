@@ -1121,6 +1121,14 @@ fn md_integrate(
     // indicator vector for the bisection, the per-event rearm nudge, and the count. Empty for a
     // model with no indicators, so its stepping stays exactly what it was before events landed.
     let nevents = directions.len();
+    // A crossing is only seen where a step ends on its other side, so while one is watched the
+    // step is capped: the output spacing, and at most a hundredth of the run. A quiet mode
+    // (`der(x) = 0` while a thyristor is off) otherwise grows one step over several roots.
+    let mut h_max = if nevents > 0 { (t1 - t0) / 100.0 } else { f64::INFINITY };
+    for k in 1..grid.len() {
+        let spacing = grid[k] - grid[k - 1];
+        if nevents > 0 && spacing > 0.0 && spacing < h_max { h_max = spacing; }
+    }
     let mut z0 = vec![0.0f64; nevents];
     let mut z1 = vec![0.0f64; nevents];
     let mut z_ev = vec![0.0f64; nevents];
@@ -1173,7 +1181,7 @@ fn md_integrate(
         while !accepted {
             if h_abs < floor { status = TOO_SMALL; break; }
             h = h_abs;
-            t_new = (t + h).min(t1).min(md_next_time(t, w, times));
+            t_new = (t + h).min(t1).min(md_next_time(t, w, times)).min(t + h_max);
             h = t_new - t;
             h_abs = h;
 

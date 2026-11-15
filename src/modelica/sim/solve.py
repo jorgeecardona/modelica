@@ -211,8 +211,9 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
     grid = _grid(start, stop, times, points)
     p, y, w = kernel.start(start, parameters)
     plan = _Run(kernel, p, w, tolerance, absolute if absolute is not None else tolerance, method)
+    plan.max_step = (stop - start) / 100.0
     if grid is not None and len(grid) > 1:
-        plan.max_step = float(np.min(np.diff(grid)))
+        plan.max_step = min(plan.max_step, float(np.min(np.diff(grid))))
     result = plan.run(start, stop, y, grid)
     # A `System` carries the model's asserts; a pre-built `Code`/`Kernel` does not expose them,
     # so `getattr` leaves those callers unchecked rather than reaching for a field they lack.
@@ -368,7 +369,7 @@ class _Run:
     ) -> None:
         self.kernel = kernel
         self.max_step = np.inf
-        """The longest step taken while a crossing is watched: the output spacing.
+        """The longest step taken while a crossing is watched: the output spacing, at most 1/100 of the run.
 
         SciPy tests an indicator's sign only at step ends. A stiff mode lets Radau take a
         step longer than an interval where a relation is true, so the crossing in and the

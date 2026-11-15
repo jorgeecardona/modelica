@@ -9,6 +9,8 @@ they had already acted and flipped them back: "202 events at t = 0.01 without ad
 from __future__ import annotations
 
 import math
+import shutil
+from typing import Literal
 
 import pytest
 
@@ -35,7 +37,15 @@ end SharedRoot;
 """
 
 
-def test_crossings_at_one_root_do_not_chatter() -> None:
-    result = simulate(causalize(flatten(parse(SOURCE), "SharedRoot")), stop=0.05, backend="python")
+@pytest.mark.parametrize("backend", ["python", "engine"])
+def test_crossings_at_one_root_do_not_chatter(backend: Literal["python", "engine"]) -> None:
+    """On both backends; a quiet mode must not grow one step over the later roots."""
+    if backend == "engine":
+        from modelica.sim import engine  # noqa: PLC0415 - only this case needs it
+
+        if engine.installed() is None and shutil.which("rustc") is None:
+            pytest.skip("no engine in this install and no rustc to build one")
+    system = causalize(flatten(parse(SOURCE), "SharedRoot"))
+    result = simulate(system, stop=0.05, backend=backend)
     # Conducting on each of the three positive half periods: 2 / (100 pi) each.
     assert float(result.at(0.05)["x"]) == pytest.approx(3 * 2 / (100 * math.pi), rel=1e-4)
