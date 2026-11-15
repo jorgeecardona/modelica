@@ -3844,6 +3844,88 @@ class _LocalValues(Mapping[str, float]):
         return len(self.known)
 
 
+def _fold_strings(node: ir.Expr) -> ir.Expr:  # noqa: PLR0911 - one case per node type
+    """``"Dy" == "Dy"`` as ``true``, and an ``if`` on a literal as the branch it picks."""
+    match node:
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            left, right = _fold_strings(lhs), _fold_strings(rhs)
+            if (
+                op in ("==", "<>")
+                and isinstance(left, ir.StringLiteral)
+                and isinstance(right, ir.StringLiteral)
+            ):
+                return ir.BoolLiteral((left.value == right.value) == (op == "=="))
+            return ir.Binary(op, left, right)
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _fold_strings(operand))
+        case ir.Call(name=name, args=args, named=named):
+            return ir.Call(name, tuple(_fold_strings(a) for a in args), named)
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            test = _fold_strings(condition)
+            if isinstance(test, ir.BoolLiteral):
+                return _fold_strings(then if test.value else otherwise)
+            return ir.IfExpr(test, _fold_strings(then), _fold_strings(otherwise))
+        case _:
+            return node
+
+
+def _resolve_strings(flat: FlatModel, values: Mapping[str, float]) -> FlatModel:
+    """Each String parameter or constant as its literal, substituted and folded away.
+
+    A String cannot enter the parameter vector, which holds floats. Its uses are comparisons
+    (``C1 == "D"`` in the transformers), so once the value is known they fold to a Boolean and
+    the String variable is no longer needed. A String whose value cannot be found stays.
+    The value is fixed here: a String parameter cannot be changed at simulate time.
+    """
+    candidates = [
+        v
+        for v in flat.variables
+        if v.base_type == "String"
+        and v.variability in ("parameter", "constant")
+        and v.binding is not None
+    ]
+    if not candidates:
+        return flat
+    strings: dict[str, str] = {}
+    progress = True
+    while progress:
+        progress = False
+        for variable in candidates:
+            if variable.name in strings or variable.binding is None:
+                continue
+            try:
+                value = evaluate(variable.binding, {**values, **strings})
+            except EvaluationError:
+                continue
+            if isinstance(value, str):
+                strings[variable.name] = value
+                progress = True
+    if not strings:
+        return flat
+    mapping: dict[str, ir.Expr] = {k: ir.StringLiteral(v) for k, v in strings.items()}
+
+    def fold(node: ir.Expr | None) -> ir.Expr | None:
+        return None if node is None else _fold_strings(substitute(node, mapping))
+
+    variables = tuple(
+        replace(v, binding=fold(v.binding), start=fold(v.start))
+        for v in flat.variables
+        if v.name not in strings
+    )
+    return replace(
+        flat,
+        variables=variables,
+        equations=tuple(
+            replace(
+                e,
+                lhs=_fold_strings(substitute(e.lhs, mapping)),
+                rhs=_fold_strings(substitute(e.rhs, mapping)),
+            )
+            for e in flat.equations
+        ),
+    )
+
+
 def _assigned(body: Sequence[ir.Statement]) -> set[str]:
     """The names a statement list assigns, through ``if`` branches and loops."""
     found: set[str] = set()
@@ -3914,14 +3996,17 @@ def flatten(program: ir.Program, model: str) -> FlatModel:
     resolved = _resolve_boolean_when_conditions(flattener.equations, flattener.whens)
     equations = tuple(flattener.equations)
     flat = partition(
-        FlatModel(
-            loops=tuple(loop for loop in flattener.loops if loop.matches(equations)),
-            name=found.cls.name,
-            variables=tuple(flattener.variables),
-            equations=equations,
-            whens=tuple(resolved),
-            asserts=tuple(flattener.asserts),
-            initial_equations=tuple(flattener.initial_equations),
+        _resolve_strings(
+            FlatModel(
+                loops=tuple(loop for loop in flattener.loops if loop.matches(equations)),
+                name=found.cls.name,
+                variables=tuple(flattener.variables),
+                equations=equations,
+                whens=tuple(resolved),
+                asserts=tuple(flattener.asserts),
+                initial_equations=tuple(flattener.initial_equations),
+            ),
+            flattener.values,
         )
     )
     # A clocked partition runs as a `when sample(0, interval)` (`clocks.as_when`), so it takes

@@ -325,7 +325,9 @@ def test_the_same_element_inherited_through_two_extends_paths_is_merged() -> Non
         'record B\n  constant String CellType = "Cell" "type";\n  Real b;\nend B;\n'
         "model M\n  extends A;\n  extends B;\nequation\n  a = 1;\n  b = 2;\nend M;\n"
     )
-    assert [v.name for v in flatten(parse(source), "M").variables] == ["CellType", "a", "b"]
+    # Merged, not refused. A resolved String constant is folded away at the end of flattening
+    # (tests/test_string_parameters.py), so only the two Reals remain.
+    assert [v.name for v in flatten(parse(source), "M").variables] == ["a", "b"]
 
 
 def test_a_name_inherited_twice_with_a_difference_is_still_a_clash() -> None:
