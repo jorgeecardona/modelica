@@ -717,6 +717,45 @@ def _watched(system: System) -> tuple[ir.Binary, ...]:
     return tuple(found)
 
 
+def _pre_names(node: ir.Expr) -> Iterator[str]:
+    """The names ``pre`` is applied to inside ``node``."""
+    match node:
+        case ir.Call(name="pre", args=(ir.Ref() as ref,)):
+            yield ref.name
+        case ir.Binary(lhs=lhs, rhs=rhs):
+            yield from _pre_names(lhs)
+            yield from _pre_names(rhs)
+        case ir.Unary(operand=operand):
+            yield from _pre_names(operand)
+        case ir.Call(args=args):
+            for argument in args:
+                yield from _pre_names(argument)
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            for part in (condition, then, otherwise):
+                yield from _pre_names(part)
+        case _:
+            return
+
+
+def _read_pre(node: ir.Expr, reads: Mapping[str, ir.Expr]) -> ir.Expr:
+    """``node`` with each ``pre(x)`` in ``reads`` replaced by its workspace read."""
+    match node:
+        case ir.Call(name="pre", args=(ir.Ref() as ref,)) if ref.name in reads:
+            return reads[ref.name]
+        case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+            return ir.Binary(op, _read_pre(lhs, reads), _read_pre(rhs, reads))
+        case ir.Unary(op=op, operand=operand):
+            return ir.Unary(op, _read_pre(operand, reads))
+        case ir.Call(name=name, args=args, named=named):
+            return ir.Call(name, tuple(_read_pre(a, reads) for a in args), named)
+        case ir.IfExpr(condition=condition, then=then, otherwise=otherwise):
+            return ir.IfExpr(
+                _read_pre(condition, reads), _read_pre(then, reads), _read_pre(otherwise, reads)
+            )
+        case _:
+            return node
+
+
 def _before(node: ir.Expr) -> ir.Expr:
     """``pre(x)`` as ``x``, for differentiating a ``reinit`` with respect to where it came from.
 
@@ -797,6 +836,11 @@ class Code:
     only one -- which is most of them, and for those the generated source is unchanged."""
 
     remembered: tuple[str, ...] = ()
+    previous: tuple[int, ...] = ()
+    """Workspace slots that hold ``pre(x)`` for a variable no ``when`` assigns.
+
+    ``latch`` writes them; the run calls it again after each event until they stop changing.
+    """
     """The discrete-time variables, in `observed` order -- what a ``when`` body assigned and
     the model then carries between events.
 
@@ -935,6 +979,19 @@ class Emitter:
         self.slots = {name: slot for slot, name in enumerate(self.observed)}
         self.remembered = _remembered(self.system)
         self.watched = _watched(self.system)
+        # `off = s < 0 or pre(off) and not fire` (the thyristor): `pre(off)` is the value at the
+        # last event, kept in `off`'s own workspace slot, which `latch` writes.
+        states = set(self.system.states)
+        self.pre_reads: dict[str, ir.Expr] = {}
+        for expression in _rendered(self.system):
+            for name in _pre_names(expression):
+                if name in self.pre_reads or name in states or name in self.remembered:
+                    continue
+                if name not in self.slots:
+                    continue
+                held = f"$pre{len(self.pre_reads)}"
+                self.symbols[held] = f"w[{self.slots[name]}]"
+                self.pre_reads[name] = ir.Ref((held,))
         for position, relation in enumerate(self.watched):
             held = f"$relation{position}"  # `$` keeps it out of reach of Modelica names
             self.symbols[held] = f"w[{self.holding(position)}]"
@@ -957,6 +1014,8 @@ class Emitter:
         # every evaluation -- which is the exact failure the freezing exists to prevent, and
         # it showed up as `BumpStop` losing 2.3e-8 of a conserved energy.
         node = _latched(node, self.held)
+        if self.pre_reads:
+            node = _read_pre(node, self.pre_reads)
         if self.literals:
             # Before latching would be wrong: a relation is matched as a whole node, and one
             # whose sides have both folded to constants is a relation with nothing to watch.
@@ -1650,12 +1709,29 @@ class Emitter:
         there is no previous event to inherit a value from, so the live answer *is* the
         latched one.
         """
-        body = self.live(self.system.mode) if self.watched else []
+        body = self.live(self.system.mode) if self.watched or self.pre_reads else []
         body.extend(
             f"w[{self.holding(position)}] = 1.0 if {emit_expr(relation, self.symbols)} else 0.0"
             for position, relation in enumerate(self.watched)
         )
+        # After every read: the value now is what `pre` reads until the next event.
+        body.extend(
+            f"w[{self.slots[name]}] = float({self.symbols[name]})" for name in self.pre_reads
+        )
         return _function("latch", "t, y, p, w", [*body, "return w"])
+
+    def remember(self) -> str:
+        """Store each ``pre(x)`` slot from the values after an event, relations held.
+
+        `latch` re-decides every relation live, which is right at the start and wrong after an
+        event: there the transition has already set each latch, on the side its crossing left.
+        """
+        mode = self.system.mode
+        body = [*self.unpack(mode), *self.blocks(mode)]
+        body.extend(
+            f"w[{self.slots[name]}] = float({self.symbols[name]})" for name in self.pre_reads
+        )
+        return _function("remember", "t, y, p, w", [*body, "return w"])
 
     def rhs(self, mode: Mode) -> list[str]:
         body = [*self.unpack(mode), *self.sharing(lambda: self.blocks(mode))]
@@ -1937,6 +2013,7 @@ class Emitter:
             self.parameters(),
             self.initial(),
             self.latches(),
+            *([self.remember()] if self.pre_reads else []),
             self.dispatch("rhs", "t, y, p, w, dy", [self.rhs(m) for m in modes]),
             self.dispatch("jacobian", "t, y, p, w, out", [self.differentiate(m) for m in modes]),
             self.dispatch(
@@ -2008,6 +2085,7 @@ class Emitter:
             observed=self.observed,
             events=tuple(event.trigger for event in events),
             remembered=self.remembered,
+            previous=tuple(self.slots[name] for name in self.pre_reads),
             workspace=len(self.observed) + len(self.watched) + (0 if self.switching is None else 1),
             switching=self.switching,
             sparsity=self.system.mode.sparsity,

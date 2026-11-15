@@ -160,6 +160,8 @@ class Kernel:
     """
 
     transition_jacobian_parameters: _Transition
+    remember: _Latch | None = None
+    """Store the ``pre(x)`` slots after an event (`Code.previous`); None when there are none."""
     """``d(transition)/dp`` for one event, over `Code.sensitivity`.
 
     The other half, and not an optional one: `BouncingBall`'s ``reinit(v, -e * pre(v))`` puts
@@ -280,6 +282,7 @@ def _compiled(
         transition=namespace["transition"],
         transition_jacobian=namespace["transition_jacobian"],
         transition_jacobian_parameters=namespace["transition_jacobian_parameters"],
+        remember=namespace.get("remember"),
     )
 
 

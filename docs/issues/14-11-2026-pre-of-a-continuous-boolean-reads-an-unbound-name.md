@@ -36,3 +36,11 @@ nothing loads it, and its workspace slot is written once, in `initial()`, and ne
    idempotent).
 4. Test on both backends: a thyristor-like latch in an algebraic loop (`fire` a time window
    0.1 to 0.2, source `sin(2*pi*t)`), and make the on-off latch test simulate.
+
+## Progress
+
+- 2026-11-15: the python backend reads `pre(x)` from `x`'s workspace slot and stores it in
+  `latch()` and in a new `remember()` run after each event, repeated until the slots settle
+  (`Code.previous`, `Kernel.remember`). The on-off latch simulates (tests/test_boolean_equations.py).
+  Open: the VM/engine still refuses the model ("nothing computes 'on'"). `Thyristor1Pulse_R` now
+  reaches simulate and chatters at t = 0.01.

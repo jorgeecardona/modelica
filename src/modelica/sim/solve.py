@@ -657,6 +657,7 @@ class _Run:
                 )
                 raise SimulationError(message)
             pending = self._stale(at, y, fired)
+        self._settle_previous(at, y)
         self.rearm = {
             index: offset
             for index in fired
@@ -680,6 +681,25 @@ class _Run:
             offset = self._offset(trigger)
             if offset is not None:
                 self.rearm[index] = offset
+
+    def _settle_previous(self, at: float, y: NDArray[np.float64]) -> None:
+        """Bring each ``pre(x)`` slot to the value ``x`` has after the event, to a fixed point.
+
+        ``off = s < 0 or pre(off) and not fire`` changes ``off`` at the event, and the new value
+        is what ``pre(off)`` reads until the next one. ``b = not pre(b)`` never settles, and is
+        refused by name.
+        """
+        slots = list(self.kernel.code.previous)
+        remember = self.kernel.remember
+        if not slots or remember is None:
+            return
+        for _ in range(_ITERATIONS):
+            before = self.w[slots].copy()
+            remember(at, y, self.p, self.w)
+            if np.array_equal(before, self.w[slots]):
+                return
+        message = f"{self.kernel.name}: a pre() value did not settle at t = {at:.12g}"
+        raise SimulationError(message)
 
     def _offset(self, trigger: Trigger) -> float | None:
         """Which side of its own zero a crossing that just fired restarts on.
