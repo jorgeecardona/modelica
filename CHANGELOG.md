@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- `when edge(b)` and `when b` resolve `b` through Boolean aliases and `not` to the relation that defines it (`IdealSwitchWithArc` with `off = control`).
 - A run-time if-equation may hold an if-equation in a branch, and an `assert` statement in an algorithm assigns nothing (`DCPowerSupply` in `DemoPowerSupply`).
 - A flow of a connector declared in the simulated model itself is zero (`OpAmps.DifferentialAmplifier`), so a model with its own pins is no longer one equation short.
 - An equation inherited from a base class resolves names in the class that wrote it, and an inlined function reads `u[k]` of an array literal argument (`Adaptors`: `Functions.state1({f, u1}, time)`).

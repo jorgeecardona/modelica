@@ -3900,41 +3900,74 @@ def _bundled() -> tuple[ir.Class, ...]:
 
 
 _CROSSING_OPS = frozenset({"<", "<=", ">", ">="})
+_NEGATED: Final = {"<": ">=", "<=": ">", ">": "<=", ">=": "<"}
 
 
-def _resolve_boolean_when_conditions(
+def _resolve_boolean_when_conditions(  # noqa: C901 - two walks, one case per node type
     equations: Sequence[ir.Equation], whens: Sequence[ir.When]
 ) -> tuple[ir.When, ...]:
     """Inline a Boolean variable's defining relation into a ``when`` condition.
 
     ``Boolean b = x > 2.5; when b then ... end when;`` writes the crossing once and names it,
     which the event machinery cannot read: a ``when`` fires on a threshold crossing and needs the
-    relation itself, not a variable standing for it. Every continuous equation ``b = <relation>``
-    whose right-hand side is such a crossing is collected, and a ``when`` condition mentioning ``b``
-    gets the relation in its place, so ``when b`` becomes ``when x > 2.5`` -- the form the crossing
-    detector already handles, so the whole event pipeline (causalize, emit, the Rust loop) sees a
-    relation and nothing new. The defining equation stays, so ``b`` is still a variable of the model,
-    observable like any other. Only a single relation counts: a compound definition (``b and c``, an
-    equality ``==``) is not collected, so a condition that is not one crossing is left untouched and
-    still refused downstream. A ``b`` set inside a ``when`` body (a discrete latch) is not a
-    continuous equation and is not collected either -- that is edge/change territory, not this.
+    relation itself. A ``when`` condition mentioning ``b`` gets the relation in its place, so
+    ``when b`` becomes ``when x > 2.5``. The defining equation stays, so ``b`` is still a variable.
+
+    The definition may go through Boolean aliases and ``not``: ``OpenerWithArc`` writes
+    ``off = control``, a connection gives ``control = booleanStep.y``, and the step writes
+    ``y = time >= startTime``. ``edge(b)`` of such a ``b`` is the relation too, because a
+    ``when`` on a relation fires when it becomes true (``IdealSwitchWithArc``). A compound
+    definition (``b and c``, ``==``) is not resolved and is still refused downstream. A ``b``
+    set inside a ``when`` body is not a continuous equation and is not resolved either.
     """
-    relations: dict[str, ir.Expr] = {
-        equation.lhs.parts[0]: equation.rhs
-        for equation in equations
-        if isinstance(equation, ir.Equal)
-        and isinstance(equation.lhs, ir.Ref)
-        and len(equation.lhs.parts) == 1
-        and isinstance(equation.rhs, ir.Binary)
-        and equation.rhs.op in _CROSSING_OPS
-    }
-    if not relations:
-        return tuple(whens)
+    definitions: dict[str, list[ir.Expr]] = {}
+    for equation in equations:
+        if not isinstance(equation, ir.Equal):
+            continue
+        if isinstance(equation.lhs, ir.Ref):
+            definitions.setdefault(equation.lhs.name, []).append(equation.rhs)
+        if isinstance(equation.rhs, ir.Ref):
+            definitions.setdefault(equation.rhs.name, []).append(equation.lhs)
+
+    def relation(node: ir.Expr, seen: frozenset[str]) -> ir.Expr | None:
+        match node:
+            case ir.Binary(op=op) if op in _CROSSING_OPS:
+                return node
+            case ir.Unary(op="not", operand=operand):
+                inner = relation(operand, seen)
+                if isinstance(inner, ir.Binary):
+                    return replace(inner, op=_NEGATED[inner.op])
+                return None
+            case ir.Ref(name=name) if name not in seen:
+                for value in definitions.get(name, ()):
+                    found = relation(value, seen | {name})
+                    if found is not None:
+                        return found
+                return None
+            case _:
+                return None
+
+    def resolved(node: ir.Expr) -> ir.Expr:
+        match node:
+            case ir.Call(name="edge", args=(argument,)):
+                found = relation(argument, frozenset())
+                return found if found is not None else node
+            case ir.Ref():
+                found = relation(node, frozenset())
+                return found if found is not None else node
+            case ir.Binary(op=op, lhs=lhs, rhs=rhs):
+                return ir.Binary(op, resolved(lhs), resolved(rhs))
+            case ir.Unary(op=op, operand=operand):
+                return ir.Unary(op, resolved(operand))
+            case ir.Array(elements=elements):
+                return ir.Array(tuple(resolved(e) for e in elements))
+            case _:
+                return node
+
     return tuple(
         ir.When(
             tuple(
-                ir.WhenBranch(substitute(branch.condition, relations), branch.body)
-                for branch in when.branches
+                ir.WhenBranch(resolved(branch.condition), branch.body) for branch in when.branches
             )
         )
         for when in whens
