@@ -391,6 +391,8 @@ class _Run:
         self.absolute = absolute
         self.method = method
         self.rearm: dict[int, float] = {}
+        self.rearm_at = -np.inf
+        """The instant `rearm` was set at; a settle at another instant starts it afresh."""
         self.triggers = [self._trigger(k) for k in range(kernel.events)]
 
     # -- the functions SciPy calls ------------------------------------------------------
@@ -644,6 +646,11 @@ class _Run:
         :mod:`modelica.verify` earns its keep, because "the iteration converges" stops being
         obvious and becomes something to prove.
         """
+        # Several crossings can share one root (the thyristor's `s < 0` and its timer's `u`
+        # at a source zero). The nudges of an earlier settle at this same instant are kept,
+        # or that crossing is found again where it already acted and flips back.
+        if self.rearm_at != at:
+            self.rearm = {}
         fired: set[int] = set()
         pending: int | None = first
         while pending is not None:
@@ -660,9 +667,10 @@ class _Run:
         self._settle_previous(at, y)
         self.rearm = {
             index: offset
-            for index in fired
+            for index in fired | set(self.rearm)
             if (offset := self._offset(self.kernel.code.events[index])) is not None
         }
+        self.rearm_at = at
         return y
 
     def _hold_on_threshold(self, t: float, y: NDArray[np.float64]) -> None:
@@ -745,7 +753,9 @@ class _Run:
         for index, trigger in enumerate(self.kernel.code.events):
             if trigger.latch is None or index in fired:
                 continue
-            if bool(z[index] > 0.0) != bool(self.w[trigger.latch] > HELD):
+            if bool(z[index] + self.rearm.get(index, 0.0) > 0.0) != bool(
+                self.w[trigger.latch] > HELD
+            ):
                 return index
         return None
 

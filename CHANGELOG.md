@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- Fixed on SciPy: crossings that share one root (a thyristor's `s < 0` and its timer at a source zero) settle once instead of chattering.
 - `pre(x)` of a Boolean set by an equation (an on-off latch, the ideal thyristor) reads its value at the last event, on SciPy and on the engine. The engine tape format is now 3; an older engine is refused and SciPy runs instead.
 - A subscript in a nested component's binding (`if abs(n[1]) >= 0.99 then ...` in MultiBody's `World`) names the element its index picks.
 - `Modelica.Utilities.Strings.substring` (an external C function) is computed when its arguments are known, so the transformers' `VectorGroup` choice works.
