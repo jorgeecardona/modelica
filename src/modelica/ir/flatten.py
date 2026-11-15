@@ -2283,7 +2283,12 @@ def _check_constraint(
     constraint = declared.resolve(wanted)
     provided = writer.resolve(replacement.type_name)
     if isinstance(constraint, str) or isinstance(provided, str):
-        # A predefined type constrains by identity: `constrainedby Real` takes a Real.
+        # A predefined type constrains by identity: `constrainedby Real` takes a Real, and so
+        # does a `type` alias of it (`parameter SI.Inductance d` in a slot declared `Real`).
+        if isinstance(constraint, Found) and constraint.cls.restriction == "type":
+            constraint = _base_of(constraint, declared)[0]
+        if isinstance(provided, Found) and provided.cls.restriction == "type":
+            provided = _base_of(provided, writer)[0]
         if constraint != provided:
             raise FlattenError(f"{name}: {replacement.type_name!r} does not satisfy {wanted!r}")
         return

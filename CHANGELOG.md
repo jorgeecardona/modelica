@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## Unreleased
+- A `type` alias of a predefined type satisfies a slot declared with that type (`SalientInductance = Salient(redeclare SI.Inductance d)`).
 - The repository is renamed from `modelica` to `modelica`: <https://gitlab.com/cardona-oss/modelica>, docs at <https://cardona-oss.gitlab.io/modelica/>. The VS Code settings and commands are now `modelica.*`.
 
 ## 0.1.34 (2026-11-14)
