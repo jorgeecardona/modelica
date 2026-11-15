@@ -871,6 +871,12 @@ fn indicators(t: f64, y: &[f64], p: &[f64], w: &mut [f64], z: &mut [f64]) {
     m.call(2 * m.modes + k, None, t, y, p, w, z);
 }
 
+fn remember(t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]) {
+    // `vm.Encoded.remember`: after the per-event transitions, `parameters`, `initial`, `latch`.
+    let m = current();
+    m.call(5 * m.modes + m.modes * m.events + 3, None, t, y, p, w, out);
+}
+
 fn jacobian(t: f64, y: &[f64], p: &[f64], w: &mut [f64], out: &mut [f64]) {
     let m = current();
     let k = m.mode(w);

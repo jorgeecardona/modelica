@@ -1390,6 +1390,23 @@ fn md_integrate(
                     }
                 }
             }
+            // `pre(x)` of a variable no `when` assigns reads its slot until the next event, so the
+            // slot takes the value after this one (`solve.py`'s `_settle_previous`). `remember`
+            // reports in `moved[0]` how far the slots moved; repeat until they stop.
+            let mut moved = [0.0f64; 1];
+            let mut settled = false;
+            for _ in 0..MD_CHATTER {
+                moved[0] = 0.0;
+                remember(te, &ev_y, p, w, &mut moved);
+                if moved[0] == 0.0 {
+                    settled = true;
+                    break;
+                }
+            }
+            if !settled {
+                status = CHATTERING;
+                break;
+            }
             // Rearm every crossing that fired, on the side it settled: a latch-free `when` on the
             // true side (+), a latched relation on whichever side its latch was left holding.
             for e in rearm.iter_mut() { *e = 0.0; }

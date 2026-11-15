@@ -20,7 +20,8 @@ relation inside an equation is frozen between events, and a named one is no diff
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import shutil
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 
@@ -184,13 +185,21 @@ def test_a_variable_read_through_a_boolean_condition_follows_it() -> None:
     assert float(result["y"][-1]) == 1.0
 
 
-def test_an_on_off_latch_reads_its_value_at_the_last_event() -> None:
+@pytest.mark.parametrize("backend", ["python", "engine"])
+def test_an_on_off_latch_reads_its_value_at_the_last_event(
+    backend: Literal["python", "engine"],
+) -> None:
     """``on = pre(on) and x > 0.2 or x > 0.8`` swings ``x`` between 0.2 and 0.8.
 
     ``pre(on)`` reads ``on``'s workspace slot, written after each event; it used to print as
     ``on`` itself, a name nothing had assigned yet (docs/issues/14-11-2026-pre-of-a-continuous-
-    boolean-reads-an-unbound-name.md). The engine still refuses this model by name.
+    boolean-reads-an-unbound-name.md).
     """
+    if backend == "engine":
+        from modelica.sim import engine  # noqa: PLC0415 - only this case needs it
+
+        if engine.installed() is None and shutil.which("rustc") is None:
+            pytest.skip("no engine in this install and no rustc to build one")
     source = """model M
       Real x(start = 0, fixed = true);
       Boolean on(start = false);
@@ -199,7 +208,7 @@ def test_an_on_off_latch_reads_its_value_at_the_last_event() -> None:
       on = pre(on) and x > 0.2 or x > 0.8;
     end M;
     """
-    result = simulate(system(source), stop=3.0, backend="python")
+    result = simulate(system(source), stop=3.0, backend=backend)
     times = [round(event.time, 6) for event in result.events]
     assert times == [0.2, 0.8, 0.8, 1.4, 1.4, 2.0, 2.0, 2.6, 2.6]
     assert float(result.at(3.0)["x"]) == pytest.approx(0.6)

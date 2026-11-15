@@ -1,6 +1,6 @@
 ---
 title: "pre(x) of a Boolean that is not when-assigned reads an unbound name in the generated code"
-status: open
+status: done
 area: sim
 owner: null
 filed: 2026-11-14
@@ -57,3 +57,7 @@ nothing loads it, and its workspace slot is written once, in `initial()`, and ne
    `out[0] == 0`, capped, failing with the existing error status. Regenerate `radau.rs`.
 5. Tests: `remember` on the tape equals `Kernel.remember`; the on-off latch test on both
    backends; `b = not pre(b)` fails by name on both.
+
+- 2026-11-15: the engine reads the slot (`LOAD_W`), the latch tape stores it, and the Radau
+  event loop calls the new `remember` tape until the slots stop moving (format 3). The on-off
+  latch test runs on both backends.
