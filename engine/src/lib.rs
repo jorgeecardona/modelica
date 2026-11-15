@@ -18,7 +18,7 @@ const INSTR: usize = 5;
 const FUNCTION: usize = 4;
 const NEWTON: usize = 7;
 /// The tape format `vm.encode` writes and `md_vm_new` reads. 2 added shaped views.
-const FORMAT: u32 = 2;
+const FORMAT: u32 = 3;
 /// The most axes a view may have.
 const DIMS: usize = 8;
 

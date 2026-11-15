@@ -36,6 +36,7 @@ from modelica.sim.emit import (
     Emitter,
     Trigger,
     _latched,  # pyright: ignore[reportPrivateUsage] - the same latching rule, not a copy
+    _read_pre,  # pyright: ignore[reportPrivateUsage] - the same pre rule
     _unwrap,  # pyright: ignore[reportPrivateUsage]
     block_jacobian,
     is_terminate,
@@ -323,6 +324,11 @@ class Program:
     """Reads ``p``; writes the initial state into ``out`` and the workspace, as ``initial``."""
     latch: Function
     """Sets every latch from the relation's live value, as the emitted ``latch``."""
+    remember: Function
+    """Stores each ``pre(x)`` slot after an event, as the emitted ``remember``.
+
+    ``out[0]`` is the sum of how much the slots moved, so the integrator repeats it until 0.
+    """
     layout: Layout
     order: tuple[int, ...] = ()
     """The state order Radau factors its matrices in, `bandwidth_order` of the first mode.
@@ -390,7 +396,10 @@ class _Lowering:
 
     def expr(self, scope: _Scope, node: ir.Expr) -> int:
         """The register holding ``node`` after latching, as `Emitter.expr` renders it."""
-        return self.value(scope, _latched(node, self.emitter.held))
+        latched = _latched(node, self.emitter.held)
+        if self.emitter.pre_reads:
+            latched = _read_pre(latched, self.emitter.pre_reads)
+        return self.value(scope, latched)
 
     def value(self, scope: _Scope, node: ir.Expr) -> int:
         node = _unwrap(node)
@@ -460,6 +469,10 @@ class _Lowering:
         elif name.startswith("$relation"):
             slot = emitter.holding(int(name.removeprefix("$relation")))
             dst = self.emit(scope, Op.LOAD_W, slot)
+        elif name.startswith("$pre"):
+            # `pre(x)` of a variable no `when` assigns: its slot, written by `latch`/`remember`.
+            reads = {ref.name: x for x, ref in emitter.pre_reads.items() if isinstance(ref, ir.Ref)}
+            dst = self.emit(scope, Op.LOAD_W, emitter.slots[reads[name]])
         else:
             message = f"nothing computes {name!r}"
             raise EmitError(message)
@@ -887,7 +900,7 @@ class _Lowering:
         emitter = self.emitter
 
         def body(scope: _Scope) -> None:
-            if not emitter.watched:
+            if not emitter.watched and not emitter.pre_reads:
                 return
             held, emitter.held = emitter.held, {}
             try:
@@ -898,6 +911,33 @@ class _Lowering:
             for position, relation in enumerate(emitter.watched):
                 source = self.value(scope, relation)
                 scope.code.append(Instr(Op.STORE_W, 0, emitter.holding(position), source))
+            for name in emitter.pre_reads:
+                scope.code.append(Instr(Op.STORE_W, 0, emitter.slots[name], self.ref(scope, name)))
+
+        return self.function(body)
+
+    def remember(self) -> Function:
+        """Each ``pre(x)`` slot from the values after an event, relations held (`Emitter.remember`).
+
+        ``out[0]`` is the total change of the slots, so the integrator repeats it until it is 0.
+        """
+        emitter = self.emitter
+
+        def body(scope: _Scope) -> None:
+            if not emitter.pre_reads:
+                return
+            self.unpack(scope, emitter.system.mode)
+            self.blocks(scope, emitter.system.mode)
+            moved = self.constant(scope, 0.0)
+            for name in emitter.pre_reads:
+                slot = emitter.slots[name]
+                old = self.emit(scope, Op.LOAD_W, slot)
+                new = self.ref(scope, name)
+                change = self.emit(scope, Op.SUB, new, old)
+                size = self.emit(scope, Op.CALL1, change, 0, Builtin.ABS)
+                moved = self.emit(scope, Op.ADD, moved, size)
+                scope.code.append(Instr(Op.STORE_W, 0, slot, new))
+            scope.code.append(Instr(Op.STORE_OUT, 0, 0, moved))
 
         return self.function(body)
 
@@ -1586,6 +1626,7 @@ def lower(
         parameters=lowering.parameters(),
         initial=lowering.initial(),
         latch=lowering.latch(),
+        remember=lowering.remember(),
         layout=Layout(
             states=system.states,
             parameters=tuple(variable.name for variable in system.parameters),
@@ -2422,7 +2463,7 @@ def _preload(program: Program, base: int) -> Program:  # noqa: C901 - one walk p
     functions = [
         *program.rhs, *program.jacobian, *program.observe, *program.indicators,
         *program.transition_prefix, *(f for branches in program.transition for f in branches),
-        program.parameters, program.initial, program.latch,
+        program.parameters, program.initial, program.latch, program.remember,
     ]  # fmt: skip
     ranged: set[int] = set()
     for function in functions:
@@ -2469,6 +2510,7 @@ def _preload(program: Program, base: int) -> Program:  # noqa: C901 - one walk p
         parameters=move(program.parameters),
         initial=move(program.initial),
         latch=move(program.latch),
+        remember=move(program.remember),
     )
 
 
@@ -2574,7 +2616,7 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
     functions = [
         *program.rhs, *program.jacobian, *program.indicators, *program.observe,
         *program.transition_prefix, *(f for branches in program.transition for f in branches),
-        program.parameters, program.initial, program.latch,
+        program.parameters, program.initial, program.latch, program.remember,
     ]  # fmt: skip
     spans: list[tuple[int, int]] = []
     for function in functions:
@@ -2691,6 +2733,7 @@ def _compact(program: Program, base: int) -> tuple[Program, int]:  # noqa: C901,
         parameters=move(program.parameters),
         initial=move(program.initial),
         latch=move(program.latch),
+        remember=move(program.remember),
     )
     return compacted, size
 
@@ -2763,13 +2806,14 @@ def _fold(program: Program, pool: dict[float, int], *, fuse: bool = False) -> Pr
             parameters=fn(p.parameters),
             initial=fn(p.initial),
             latch=fn(p.latch),
+            remember=fn(p.remember),
         )
 
     def functions(p: Program) -> list[Function]:
         return [
             *p.rhs, *p.jacobian, *p.observe, *p.indicators, *p.transition_prefix,
             *(f for branches in p.transition for f in branches),
-            p.parameters, p.initial, p.latch,
+            p.parameters, p.initial, p.latch, p.remember,
         ]  # fmt: skip
 
     program = every(lambda f: _peephole(_fold_function(f, pool)), program)
@@ -3094,7 +3138,7 @@ def mode(program: Program, w: Sequence[float]) -> int:
 
 
 #: The tape format `encode` writes; the engine's ``md_vm_format`` must return the same.
-FORMAT: Final = 2
+FORMAT: Final = 3
 
 
 @dataclass(frozen=True)
@@ -3156,6 +3200,11 @@ class Encoded:
     def latch(self) -> int:
         """The function index of ``latch``."""
         return self.parameters + 2
+
+    @property
+    def remember(self) -> int:
+        """The function index of ``remember``."""
+        return self.parameters + 3
 
 
 def encode(program: Program) -> Encoded:  # noqa: C901 - one walk over every function
@@ -3220,7 +3269,7 @@ def encode(program: Program) -> Encoded:  # noqa: C901 - one walk over every fun
     for branches in program.transition:
         for function in branches:
             add(function)
-    for function in (program.parameters, program.initial, program.latch):
+    for function in (program.parameters, program.initial, program.latch, program.remember):
         add(function)
     return Encoded(
         registers=program.registers,

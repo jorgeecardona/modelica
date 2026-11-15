@@ -1033,3 +1033,40 @@ def test_phase_change_fires_the_same_events_in_the_same_order(engine: Path) -> N
     np.testing.assert_allclose(
         [e.time for e in run.event_list], [e.time for e in reference.events], rtol=1e-9
     )
+
+
+def test_remember_on_the_tape_equals_the_interpreter(engine: Path) -> None:
+    """``pre(x)`` of an equation-defined Boolean: the tape's ``remember`` stores what Python does.
+
+    Called at a point where ``on`` has changed since the last event, so the slot moves and
+    ``out[0]`` reports it; called again, nothing moves.
+    """
+    from modelica.ir.causalize import causalize  # noqa: PLC0415
+    from modelica.ir.flatten import flatten  # noqa: PLC0415
+    from modelica.lang import parse  # noqa: PLC0415
+    from modelica.sim.engine import load  # noqa: PLC0415
+    from modelica.sim.kernel import build  # noqa: PLC0415
+
+    source = (
+        "model M\n  Real x(start = 0, fixed = true);\n  Boolean on(start = false);\n"
+        "equation\n  der(x) = if on then -1 else 1;\n  on = pre(on) and x > 0.2 or x > 0.8;\n"
+        "end M;\n"
+    )
+    system = causalize(flatten(parse(source), "M"))
+    kernel = build(system)
+    assert kernel.remember is not None
+    loaded = load(vm.lower(system), engine)
+    try:
+        p, y, w = kernel.start(0.0)
+        y = np.array([0.9])
+        w[kernel.code.events[1].latch] = 1.0  # x > 0.8 has fired
+        expected = kernel.remember(0.0, y, p, w.copy())
+        got = w.copy()
+        out = np.zeros(1)
+        loaded.call(loaded.encoded.remember, 0.0, y, p, got, out)
+        np.testing.assert_array_equal(got, expected)
+        assert out[0] == 1.0
+        loaded.call(loaded.encoded.remember, 0.0, y, p, got, out)
+        assert out[0] == 0.0
+    finally:
+        loaded.close()
