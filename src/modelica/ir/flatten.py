@@ -3534,7 +3534,6 @@ class _Flattener:
         if isinstance(end, ir.Subscript):
             return None
         parts = end.parts
-        role: _Role = "outside" if len(parts) == 1 else "inside"
         for split in range(len(parts)):
             head = _prefix_ref(
                 ir.Ref(parts[: split + 1], subscripts=end.subscripts[: split + 1]),
@@ -3549,11 +3548,20 @@ class _Flattener:
             tail = parts[split + 1 :]
             if (*head[:-1], element(head[-1], (1,)), *tail) not in self.connectors:
                 continue
-            return [
-                ((*head[:-1], element(head[-1], (index,)), *tail), role)
-                for index in range(1, shape[0] + 1)
+            paths = [
+                (*head[:-1], element(head[-1], (index,)), *tail) for index in range(1, shape[0] + 1)
             ]
+            return [(path, self._role(path, len(parts))) for path in paths]
         return None
+
+    def _role(self, path: _Path, written: int) -> _Role:
+        """``outside`` when the first written part names a connector of the class itself.
+
+        ``connect(ra.heatPort, internal.armature)`` writes two parts on the right, and
+        ``internal`` is the class's own connector, so ``internal.armature`` is an outside
+        connector there (``PartialBasicMachine``), not a connector of a component.
+        """
+        return "outside" if path[: len(path) - written + 1] in self.connectors else "inside"
 
     def _endpoint(
         self, end: ir.Ref | ir.Subscript, prefix: _Path, local: frozenset[str]
@@ -3573,7 +3581,7 @@ class _Flattener:
                 for index in end.indices
             )
             path = (*path[:-1], element(path[-1], indices))
-        role: _Role = "outside" if len(ref.parts) == 1 else "inside"
+        role = self._role(path, len(ref.parts))
         if path not in self.connectors:
             if (*path[:-1], element(path[-1], (1,))) in self.connectors:
                 raise FlattenError(
@@ -3606,16 +3614,40 @@ class _Flattener:
         return leaves
 
     def expand_connections(self) -> None:
+        """The connection equations, one set per scalar leaf.
+
+        Sets are joined per leaf, not per connector: ``connect(ambient.port, internal)`` and
+        ``connect(ra.heatPort, internal.armature)`` put ``internal.armature.Q_flow`` in one
+        set, which a per-connector set split in two.
+        """
+        leaves = _Connections()
+        kinds: dict[_Endpoint, ir.ConnectorKind] = {}
         for endpoints in self.connections.sets():
-            self._expand_set(endpoints)
+            matched = self._matched_leaves(endpoints)
+            self._one_source_only(endpoints)
+            for leaf in matched:
+                ends: list[_Endpoint] = [((*path, *leaf.path), role) for path, role in endpoints]
+                for end in ends:
+                    leaves.join(ends[0], end)
+                    kinds[end] = leaf.kind
+        for joined in leaves.sets():
+            refs = [ir.Ref(path) for path, _ in joined]
+            if kinds[joined[0]] == "flow":
+                self._flow_sum(refs, [role for _, role in joined])
+            else:
+                self.equations.extend(ir.Equal(a, b) for a, b in pairwise(refs))
+        seen: set[_Path] = set()
         for path, found in self.connectors.items():
-            # An inside connector nobody connected: its flows have nowhere to go.
-            if len(path) > 1 and not self.connections.connected((path, "inside")):
-                for leaf in self._connector_leaves(found, Scope(self.program)):
-                    if leaf.kind == "flow":
-                        self.equations.append(
-                            ir.Equal(ir.Ref((*path, *leaf.path)), ir.RealLiteral(0.0))
-                        )
+            # A component's connector nobody connected from outside: its flows have nowhere to
+            # go. A connector of the model itself (and the connectors nested in it) is not one.
+            if (path[0],) in self.connectors:
+                continue
+            for leaf in self._connector_leaves(found, Scope(self.program)):
+                flat = (*path, *leaf.path)
+                if leaf.kind != "flow" or flat in seen or leaves.connected((flat, "inside")):
+                    continue
+                seen.add(flat)
+                self.equations.append(ir.Equal(ir.Ref(flat), ir.RealLiteral(0.0)))
 
     def _matched_leaves(self, endpoints: list[_Endpoint]) -> list[_ConnectorLeaf]:
         """The scalars a connection set joins, after checking every end has the same ones.
@@ -3667,16 +3699,6 @@ class _Flattener:
                 f"connect() joins {' and '.join(driving)}, which all write the signal; "
                 f"a signal has one source"
             )
-
-    def _expand_set(self, endpoints: list[_Endpoint]) -> None:
-        leaves = self._matched_leaves(endpoints)
-        self._one_source_only(endpoints)
-        for leaf in leaves:
-            refs = [ir.Ref((*path, *leaf.path)) for path, _ in endpoints]
-            if leaf.kind == "flow":
-                self._flow_sum(refs, [role for _, role in endpoints])
-            else:
-                self.equations.extend(ir.Equal(a, b) for a, b in pairwise(refs))
 
     def _flow_sum(self, refs: list[ir.Ref], roles: list[_Role]) -> None:
         total: ir.Expr | None = None
