@@ -42,6 +42,29 @@ text carries an `experiment` annotation, named by its path —
 
 ## The measurements, newest first
 
+### 2026-11-15, after ideal diodes, String parameters and component-scoped function calls
+
+Since the last row: a `when`-assigned variable is discrete without the prefix; a run-time
+if-equation becomes if-expressions; an ideal diode's `off = s < 0` is not torn and a watched
+crossing caps the step; a relation on its threshold at the start is not a crossing; initial
+equations may set discrete variables, read `time` and use `pre(x)`; a `fixed = false` parameter
+takes its value at the start; String parameters fold; `substring` is computed; a function call
+in a component reads that component's parameters; subscripts resolve in nested bindings.
+
+| last stage reached | models | of 430 |
+| ------------------ | -----: | -----: |
+| nothing loads      |     10 |  2.3 % |
+| loaded             |    303 | 70.5 % |
+| flattened          |     29 |  6.7 % |
+| causalized         |     33 |  7.7 % |
+| simulated          |     55 | 12.8 % |
+
+Measured with `scripts/reach.py --workers 1`, all 55 on SciPy (no engine wheel). Top blockers
+now: 67 `Clock`, 53 array equations whose shape is not known, 29 `Complex`, 27 a conditional
+component's condition, 22 a shape that reads an unknown name, 21 "does not satisfy 'Real'",
+19 a `pin[...]` subscript in an array equation, 12 the unbound `pre(x)` name
+(docs/issues/14-11-2026-pre-of-a-continuous-boolean-reads-an-unbound-name.md).
+
 ### 2026-11-14, after subscripts on inner components and shaped short classes
 
 `r[1].n` names element 1 of the array `r`, in equations and in `connect`. A short class may give
