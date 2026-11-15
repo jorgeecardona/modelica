@@ -5,6 +5,7 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## 0.1.34 (2026-11-14)
+- `when {a, initial()}` fires on either element; `when initial()` assignments become initial equations, which may read a state's start value (both backends).
 - `b = sample(...); when b then` fires at the sample instants (`Blocks.Interfaces.DiscreteBlock`).
 - While a crossing is watched, both backends step at most 1/100 of the run (or the output spacing, if smaller), so a quiet mode no longer steps over later crossings. The engine now matches SciPy on a thyristor-like model.
 - Fixed on SciPy: crossings that share one root (a thyristor's `s < 0` and its timer at a source zero) settle once instead of chattering.

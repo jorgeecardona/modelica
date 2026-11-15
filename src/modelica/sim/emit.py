@@ -1646,11 +1646,14 @@ class Emitter:
                     )
         ordered: list[tuple[str, ir.Expr]] = []
         placed: set[str] = set()
+        # Only another initial equation's target is waited for; a state with no initial
+        # equation already holds its start value.
+        targets = {name for name, _ in pending}
         while pending:
             ready = [
                 (name, value)
                 for name, value in pending
-                if not any(other in states and other not in placed for other in names(value))
+                if not any(other in targets and other not in placed for other in names(value))
             ]
             if not ready:
                 stuck = ", ".join(sorted(name for name, _ in pending))
@@ -1690,7 +1693,16 @@ class Emitter:
             for name in self.observed
         )
         slots = {name: slot for slot, name in enumerate(self.system.states)}
-        for name, value in self.conditions():
+        conditions = self.conditions()
+        set_here = {name for name, _ in conditions}
+        # A state no initial equation sets holds its start value, and another initial
+        # equation may read it (`when initial() then held = x`).
+        body.extend(
+            f"{self.symbols[name]} = y[{slot}]"
+            for name, slot in slots.items()
+            if name not in set_here and any(name in names(value) for _, value in conditions)
+        )
+        for name, value in conditions:
             # Both, and in this order. `y` is what the solver integrates from; the workspace
             # slot is what `observe` reports at t = 0, and leaving it holding the `start`
             # attribute would make the first sample of the run disagree with the run.

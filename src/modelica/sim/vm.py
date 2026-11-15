@@ -867,7 +867,7 @@ class _Lowering:
         def start(scope: _Scope, name: str) -> int:
             return self.expr(scope, system[name].start or ir.RealLiteral(0.0))
 
-        def body(scope: _Scope) -> None:
+        def body(scope: _Scope) -> None:  # noqa: C901 - one store per kind of start value
             conditions = emitter.conditions()
             # A state an initial equation sets is stored there; its start value would be
             # stored first and overwritten, one dead store per cell of a loop.
@@ -883,6 +883,12 @@ class _Lowering:
                         Instr(Op.STORE_W, 0, emitter.slots[name], self.observed_start(scope, name))
                     )
             states = {name: slot for slot, name in enumerate(system.states)}
+            # A state no initial equation sets holds its start value, which another initial
+            # equation may read (`when initial() then held = x`), as `Emitter.initial`.
+            read = {n for _, value in conditions for n in names(value)}
+            for name in states:
+                if name not in set_later and name in read:
+                    scope.names[name] = start(scope, name)
             for name, value in conditions:
                 self.assign(scope, name, value)
                 source = self.ref(scope, name)

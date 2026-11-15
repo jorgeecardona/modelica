@@ -1076,6 +1076,9 @@ def _prefix_expr(  # noqa: C901, PLR0911, PLR0912, PLR0913 -- one case per node 
                     return ir.Subscript(ir.Ref(path), carried)
                 raise
             return ir.Ref((*path[:-1], element(path[-1], resolved)))
+        case ir.Array(elements=elements):
+            # `when {sampleTrigger, initial()}`: each element is prefixed like any expression.
+            return ir.Array(tuple(go(e) for e in elements))
         case ir.Comprehension():
             if values is None:
                 raise FlattenError("a comprehension is not expanded here")
@@ -3997,6 +4000,9 @@ def _when_assigned(whens: Sequence[ir.When]) -> set[str]:
 def _inline_sample_triggers(flat: FlatModel) -> FlatModel:
     """``b = sample(...); when b then`` as ``when sample(...) then``, with ``b`` false between.
 
+    Also ``when {a, b}`` as one ``when`` per element, and ``when initial()`` as initial
+    equations, the forms the zero-order hold writes (``when {sampleTrigger, initial()}``).
+
     ``Blocks.Interfaces.DiscreteBlock`` writes ``sampleTrigger = sample(startTime,
     samplePeriod)`` and then ``when sampleTrigger``. A ``sample`` is true only at its instants,
     so between events ``b`` is false, and the ``when`` is the sample's time event.
@@ -4006,25 +4012,54 @@ def _inline_sample_triggers(flat: FlatModel) -> FlatModel:
         for e in flat.equations
         if isinstance(e.lhs, ir.Ref) and isinstance(e.rhs, ir.Call) and e.rhs.name == "sample"
     }
-    if not triggers:
-        return flat
 
     def swap(node: ir.Expr) -> ir.Expr:
         if isinstance(node, ir.Ref) and node.name in triggers:
             return triggers[node.name]
         return node
 
-    whens = [
-        ir.When(tuple(ir.WhenBranch(swap(b.condition), b.body) for b in when.branches))
-        for when in flat.whens
-    ]
+    whens: list[ir.When] = []
+    initial: list[ir.Equal] = []
+    for when in flat.whens:
+        first = when.branches[0].condition
+        conditions = (
+            first.elements if len(when.branches) == 1 and isinstance(first, ir.Array) else (None,)
+        )
+        for condition in conditions:
+            # `when {sampleTrigger, initial()}` fires on any element: one `when` per element.
+            branches = (
+                (ir.WhenBranch(condition, when.branches[0].body),)
+                if condition is not None
+                else when.branches
+            )
+            only = branches[0]
+            if (
+                len(branches) == 1
+                and only.condition == ir.Call("initial", ())
+                and all(
+                    isinstance(st, ir.Assign) and isinstance(st.target, ir.Ref) for st in only.body
+                )
+            ):
+                # `when initial()`: its assignments are the values at the start.
+                initial.extend(
+                    ir.Equal(st.target, st.value)
+                    for st in only.body
+                    if isinstance(st, ir.Assign) and isinstance(st.target, ir.Ref)
+                )
+                continue
+            whens.append(ir.When(tuple(ir.WhenBranch(swap(b.condition), b.body) for b in branches)))
     equations = tuple(
         replace(e, rhs=ir.BoolLiteral(value=False))
         if isinstance(e.lhs, ir.Ref) and e.lhs.name in triggers
         else e
         for e in flat.equations
     )
-    return replace(flat, whens=tuple(whens), equations=equations)
+    return replace(
+        flat,
+        whens=tuple(whens),
+        equations=equations,
+        initial_equations=(*flat.initial_equations, *initial),
+    )
 
 
 def flatten(program: ir.Program, model: str) -> FlatModel:
