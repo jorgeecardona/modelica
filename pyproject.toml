@@ -147,6 +147,7 @@ dev = [
     # package*, never about a caller's model.
     "hypothesis>=6.100",
     "pytest-parallex>=0.2.8",
+    "prodc>=0.11.4,<0.12",
 ]
 
 [tool.pytest.ini_options]
