@@ -1,5 +1,5 @@
 site_name: modelica
-site_description: "A library for reading and simulating Modelica models in Python."
+site_description: "Parse, flatten and simulate Modelica models in Python, with no external compiler."
 site_url: https://cardona-oss.gitlab.io/modelica/
 repo_url: https://gitlab.com/cardona-oss/modelica
 repo_name: cardona-oss/modelica

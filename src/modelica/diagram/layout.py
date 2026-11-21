@@ -4,7 +4,7 @@ The renderers need coordinates, and nothing in the standard library gives them. 
 module computes them, in one of two ways:
 
 * A **schematic** has no direction. A resistor does not come before a capacitor; they are
-  simply joined. So it gets a force layout: every box pushes every other box away, every
+  joined. So it gets a force layout: every box pushes every other box away, every
   connection pulls its two boxes together, and the arrangement settles.
 * A **block graph** and an **incidence graph** both have a direction. One block runs
   before another, and an equation is solved for a variable. So they get a layered layout:

@@ -1,4 +1,4 @@
-"""SSP 2.0 — systems of components, and the master that steps them.
+"""SSP 2.0: the protocol of the co-simulation master that steps a system of components.
 
 Like :mod:`modelica.fmi`, the part that comes first is the protocol rather than the
 numerics: :mod:`modelica.ssp.master` says what moves a co-simulation master may make and

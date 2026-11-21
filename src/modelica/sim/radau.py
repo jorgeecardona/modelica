@@ -17,7 +17,7 @@ Python boundary back exactly where this module exists to remove it.
 The two compile modes `docs/ideas/backends.md:66` asks for are the emitter's, not this
 module's: ``build(system, fold=True)`` burns the parameters in as literals and folds them,
 ``fold=False`` keeps them as an argument so one compiled artefact serves a sweep. Both reach
-here unchanged -- the folded kernel simply ignores the ``p`` it is handed.
+here unchanged: the folded kernel ignores the ``p`` it is handed.
 """
 
 from __future__ import annotations

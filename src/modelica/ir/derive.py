@@ -99,7 +99,7 @@ def _active(node: ir.Expr, leaf: Callable[[ir.Ref], ir.Expr]) -> bool:
 
     A relation or a boolean has no derivative rule, but its *value* only changes with the variables
     inside it. Asked for a Jacobian entry with respect to a variable that does not appear there, or a
-    time derivative of a relation on constants, the derivative is simply zero and there is nothing to
+    time derivative of a relation on constants, the derivative is zero and there is nothing to
     refuse. So the refusal is kept for the case that matters -- the variable being solved for actually
     sitting inside the relation -- and everything else it does not touch differentiates to zero.
     """

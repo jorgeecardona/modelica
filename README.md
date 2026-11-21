@@ -1,39 +1,40 @@
-# modelica
+<h1 align="center">modelica</h1>
 
-[![pipeline status](https://gitlab.com/cardona-oss/modelica/badges/main/pipeline.svg)](https://gitlab.com/cardona-oss/modelica/-/pipelines)
-[![PyPI version](https://img.shields.io/pypi/v/modelica.svg)](https://pypi.org/project/modelica/)
-[![Python versions](https://img.shields.io/pypi/pyversions/modelica.svg)](https://pypi.org/project/modelica/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://gitlab.com/cardona-oss/modelica/-/blob/main/LICENSE)
+<p align="center"><strong>Read Modelica source, flatten it to a DAE and simulate it from Python, with no OpenModelica or Dymola install.</strong></p>
 
-A Modelica toolchain for Python: parse `.mo` source, flatten it to a DAE, simulate it, and
-draw it. Every stage up to simulation is an
-ordinary Python value you can read and change. For engineers and researchers who want
-Modelica semantics inside Python rather than behind a separate compiler.
+<p align="center">
+  <a href="https://pypi.org/project/modelica/"><img alt="PyPI" src="https://img.shields.io/pypi/v/modelica?style=flat-square"></a>
+  <a href="https://pypi.org/project/modelica/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/modelica?style=flat-square"></a>
+  <a href="https://cardona-oss.gitlab.io/modelica/"><img alt="Docs" src="https://img.shields.io/badge/docs-cardona--oss.gitlab.io%2Fmodelica-blue?style=flat-square"></a>
+  <a href="https://gitlab.com/cardona-oss/modelica/-/pipelines"><img alt="Pipeline" src="https://img.shields.io/gitlab/pipeline-status/cardona-oss%2Fmodelica?branch=main&style=flat-square"></a>
+  <a href="https://gitlab.com/cardona-oss/modelica/-/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="https://cardona-oss.gitlab.io/modelica/notebooks/simulating/">Simulating a model</a> ·
+  <a href="https://cardona-oss.gitlab.io/modelica/engine/">The engine</a> ·
+  <a href="https://cardona-oss.gitlab.io/modelica/examples/">Examples</a> ·
+  <a href="https://cardona-oss.gitlab.io/modelica/ideas/coverage/">Coverage</a> ·
+  <a href="https://gitlab.com/cardona-oss/modelica/-/blob/main/CHANGELOG.md">Changelog</a>
+</p>
+
+---
+
+## Overview
+
+`modelica` parses `.mo` source, flattens it to a DAE, simulates it and draws it. Each stage
+before simulation (the AST, the flat model, the sorted system) is a Python value you can read
+and change. It needs no OpenModelica or Dymola install.
 
 Simulation runs on a precompiled engine: a virtual machine written in Rust that ships in the
 platform wheels and interprets the model as bytecode. Nothing is compiled per model. Where no
-engine wheel exists, the pure-Python wheel simulates with SciPy instead. See [the engine](https://gitlab.com/cardona-oss/modelica/-/blob/main/docs/engine.md).
+engine wheel exists, the pure-Python wheel simulates with SciPy. See
+[the engine](https://cardona-oss.gitlab.io/modelica/engine/).
 
-## Why modelica
-
-Python has the two ends of a Modelica toolchain and little of the middle.
-[FMPy](https://github.com/CATIA-Systems/FMPy) and
-[PyFMI](https://github.com/modelon-community/PyFMI) *run* an FMU that some other tool
-compiled. The tools that compile Modelica (**OpenModelica** and its `OMPython` bridge,
-**Dymola**, **JModelica**) are large programs, and none of them is Python. If you want a
-mature, near-complete Modelica compiler for production, reach for one of those; this is not
-that yet.
-
-So the gap is narrow and specific, and it is two things:
-
-- **Nothing in Python takes Modelica source to a trajectory the way a *hybrid* model needs**:
-  adaptive stiff integration, index reduction, and events the solver stops at.
-- **Nothing treats the model itself as an ordinary Python value** (the flat equations, the
-  incidence structure, the index) that you can read, inspect and change.
-
-That gap is the project. Choose `modelica` when you want Modelica semantics *as a library*:
-to inspect the flat DAE, script the toolchain, or embed a solver in your own Python. Choose
-OpenModelica or Dymola when you need breadth of language coverage today.
+Status: pre-alpha. Of the 430 example models in the Modelica Standard Library 4.1.0, 420 parse
+and 89 (21 %) simulate end to end (measured 2026-11-15, see the
+[coverage notes](https://cardona-oss.gitlab.io/modelica/ideas/coverage/)). The API can still
+change. Use OpenModelica or Dymola for full language coverage.
 
 ## Install
 
@@ -49,12 +50,13 @@ It brings NumPy and SciPy. Python 3.12 or later.
 | any other | SciPy |
 
 `Result.backend` says which one ran. The engine runs a `System` with `method="Radau"` (the
-default); other calls run on SciPy ([the engine](https://cardona-oss.gitlab.io/modelica/engine/)).
+default); other calls run on SciPy. See
+[which backend to use](https://cardona-oss.gitlab.io/modelica/engine/#which-backend-to-use).
 
-**Status: 0.1.** Parsing, flattening, causalization, simulation and diagrams are tested and
-give the same numbers on the engine and on SciPy. The API can still change. Experimental and
-not promised: `modelica.fmi`, `modelica.ssp`, and the `modelica.sim` modules not exported from
-`modelica.sim` (`fv`, `fem`, `mesh`, `sensitivity`, `compare`).
+Parsing, flattening, causalization, simulation and diagrams are tested and give the same numbers on
+the engine and on SciPy. Experimental and not promised: `modelica.fmi`, `modelica.ssp`, and the
+`modelica.sim` modules not exported from `modelica.sim` (`fv`, `fem`, `mesh`, `sensitivity`,
+`compare`).
 
 ## Quickstart
 
@@ -158,6 +160,22 @@ print(picture.to_mermaid())       # or text for a Markdown page
 print(picture.to_dot())           # or source for Graphviz
 ```
 
+## Why modelica
+
+[FMPy](https://github.com/CATIA-Systems/FMPy) and
+[PyFMI](https://github.com/modelon-community/PyFMI) run an FMU that another tool compiled.
+The tools that compile Modelica (OpenModelica and its `OMPython` bridge, Dymola, JModelica)
+are large programs, and none of them is Python. `modelica` does two things those do not:
+
+- It takes Modelica source to a trajectory inside Python, with what a hybrid model needs:
+  adaptive stiff integration, index reduction, and events the solver stops at.
+- It gives you the model as a Python value (the flat equations, the incidence structure, the
+  index) that you can read and change.
+
+Choose `modelica` to inspect the flat DAE, script the toolchain, or embed a solver in your own
+Python. Choose OpenModelica or Dymola for a mature compiler with near-complete language
+coverage.
+
 ## Key features
 
 - **Two front ends, one IR.** A hand-written lexer and recursive-descent parser carry source
@@ -167,9 +185,9 @@ print(picture.to_dot())           # or source for Graphviz
   into scalar variables and acausal equations; causalization does alias elimination, matching,
   Tarjan BLT sorting and Pantelides index reduction. States, candidate state sets, index and
   blocks are all readable off the `System`.
-- **Hybrid simulation.** Adaptive stiff integration (Radau on the engine; Radau, BDF and LSODA
-  via SciPy), state and time
-  events with `reinit`, a sparse Jacobian, and asserts checked along the trajectory.
+- **Hybrid simulation.** Adaptive stiff integration (Radau on the engine; Radau, BDF and LSODA via
+  SciPy), state and time events with `reinit`, a sparse Jacobian, and asserts checked along the
+  trajectory.
 - **Diagrams with no extra program.** Any layer draws to SVG, Mermaid or DOT: components and
   connections, the incidence of equations against variables, or blocks in solution order.
 - **FMI 3.0, started.** `modelica.fmi` writes a model's `modelDescription.xml` and holds the
@@ -196,10 +214,10 @@ Each layer is usable without the ones above it.
 
 ## What of Modelica it handles
 
-The language is large, so the summary is a table. About 95 % of
-the Modelica Standard Library example models the project measures against parse; fewer
-simulate end to end. The per-model
-[coverage notes](https://cardona-oss.gitlab.io/modelica/ideas/coverage/) track the frontier.
+The table lists what is handled. Of the 430 example models in the Modelica Standard Library
+4.1.0, 420 parse and 89 simulate end to end (measured 2026-11-15). The
+[coverage notes](https://cardona-oss.gitlab.io/modelica/ideas/coverage/) list each
+measurement and what blocks the rest.
 
 | Area | Handled | Not yet |
 | --- | --- | --- |
@@ -229,8 +247,10 @@ make docs            # build the documentation site, strictly
 
 `.prototools` pins the toolchain (moon and uv); `proto install` brings it up. `moon.yml`
 holds every task and CI runs one command, `moon run :ci`. See
-[`AGENTS.md`](https://gitlab.com/cardona-oss/modelica/-/blob/main/AGENTS.md) for the full build/test/convention detail and
-[`CONTRIBUTING.md`](https://gitlab.com/cardona-oss/modelica/-/blob/main/CONTRIBUTING.md) for how to send a change.
+[`AGENTS.md`](https://gitlab.com/cardona-oss/modelica/-/blob/main/AGENTS.md) for the build,
+test and convention detail and
+[`CONTRIBUTING.md`](https://gitlab.com/cardona-oss/modelica/-/blob/main/CONTRIBUTING.md) for
+how to send a change.
 
 ## License
 

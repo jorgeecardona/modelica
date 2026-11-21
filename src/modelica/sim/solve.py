@@ -163,14 +163,15 @@ def simulate(  # noqa: PLR0913 - a solver has knobs
 
     ``tolerance`` is the relative tolerance; ``absolute`` defaults to it. ``times`` asks
     for output at exactly those instants, ``points`` for a uniform grid of that many; with
-    neither, the solver's own steps are what comes back, which is the honest picture of
-    where it had to work hard.
+    neither, the solver's own steps are what comes back.
 
     Requested times are added to the solver's steps rather than replacing them, and are
     filled in from the integrator's own interpolant, so asking for a point costs nothing
     in accuracy and asking for a coarse grid still shows every bounce.
 
-    ``method`` goes straight to SciPy. The default is ``Radau`` because a model that came
+    ``method`` names the integrator. ``"Radau"`` runs on the engine when ``backend`` allows
+    it; every other name (``"BDF"``, ``"LSODA"``, ``"RK45"``) goes straight to SciPy. The
+    default is ``Radau`` because a model that came
     out of a Modelica flattener is stiff more often than not -- Robertson and van der Pol
     are both in the example set -- and an implicit method that is merely slower on an easy
     problem beats an explicit one that fails on a hard one.

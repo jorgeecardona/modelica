@@ -1,19 +1,21 @@
 [project]
-# modelica — a Modelica/FMI/SSP toolchain for Python: parse Modelica, flatten it to a
-# DAE, simulate it (on a precompiled Rust engine where the wheel has one, else SciPy), and interoperate with the two Modelica Association exchange standards
-# (FMI 3.0 for single components, SSP 2.0 for systems of them).
+# modelica: a Modelica toolchain for Python. It parses Modelica, flattens it to a DAE and
+# simulates it (on a precompiled Rust engine where the wheel has one, else SciPy). FMI 3.0 and
+# SSP 2.0 are started: `modelDescription.xml` and the two calling protocols, no FMU import or
+# export.
 #
-# The repo, the import package and the distribution are all `modelica`. PyPI's `modelica`
-# is an unrelated abandoned Modelon/JModelica.org upload (version "trunk").
+# The repo, the import package and the distribution are all `modelica`. The repo was named
+# `pymodelica` until 2026-11-15. PyPI's `pymodelica` is an unrelated abandoned
+# Modelon/JModelica.org upload (version "trunk").
 name = "modelica"
 dynamic = ["version"]  # the single source of truth is __version__ in src/modelica/__init__.py (see [tool.hatch.version])
-description = "A library for reading and simulating Modelica models in Python"
+description = "Parse, flatten and simulate Modelica models in Python, with no external compiler"
 readme = "README.md"
 # 3.12+, no compatibility shims: this is a full rewrite of a 2010 Python 2 codebase, and
 # the modelling layer leans on the modern typing surface (Self, StrEnum, exception groups
 # for multi-error diagnostics, tomllib) rather than back-porting it. The floor is 3.12 and
 # not 3.11 because of the `sim` extra: NumPy 2.4 requires 3.12 itself, and its stubs spell
-# `ArrayLike` with `collections.abc.Buffer` -- a name that does not exist earlier, and
+# `ArrayLike` with `collections.abc.Buffer`, a name that does not exist earlier, and
 # without which every array argument in this package types as partially unknown.
 requires-python = ">=3.12"
 license = "MIT"
@@ -35,9 +37,11 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
     "Typing :: Typed",
 ]
@@ -54,7 +58,7 @@ sim = []
 sundials = ["scikit-sundae>=1.0"]
 # Model-checking the discrete half of a model (`modelica.verify`). An extra rather than a
 # dev-only tool because "does this model's event iteration converge?" is a question about
-# *your* model, not about this package's tests -- but it stays out of the base install,
+# *your* model, not about this package's tests. But it stays out of the base install,
 # because a simulator that cannot run without a model checker would be an odd thing.
 verify = ["musil>=0.7"]
 #
@@ -172,7 +176,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # `scripts/` holds things somebody runs, not modules something imports. A benchmark whose
 # whole output is a table on stdout is the case: `print` is not a leftover here, it is the
-# product. The numeric rules relax for the same reason -- a measurement takes the knobs it
+# product. The numeric rules relax for the same reason: a measurement takes the knobs it
 # takes, and `scipy` and `Result` are typed loosely enough that `Any` at the boundary is
 # honest rather than lazy.
 "scripts/*.py" = [
@@ -183,7 +187,7 @@ ignore = [
     "PLR0917",
 ]
 
-# The pages under docs/notebooks are notebooks -- either jupytext percent format, where
+# The pages under docs/notebooks are notebooks: either jupytext percent format, where
 # `# %%` splits a `.py` into cells, or `.ipynb`. Both are executed by mkdocs-jupyter at build
 # time. A notebook is a script read top to bottom, not a module, so the rules that keep
 # modules tidy misread it.
@@ -204,7 +208,7 @@ ignore = [
     "RUF059",  # `fig, ax = plt.subplots()` is matplotlib's own idiom; renaming the figure
                # `_fig` in the cells that only touch the axes would be noise
     "PLR0913", "PLR0917",  # a direct-label helper takes an axes, a point, a string, a colour
-                           # and a nudge -- six arguments that are six separate things.
+                           # and a nudge: six arguments that are six separate things.
                            # Bundling them into a dataclass to satisfy a counter would make
                            # every call site longer than the annotate() it replaced
 ]
@@ -222,7 +226,7 @@ ignore = [
     "E741",    # `l` is the inductor, because `l` is the inductor in the `.mo` twin
     "SIM300",  # `self.E == kinetic + strain + contact` is not a comparison with a Yoda side.
                # `==` builds an equation here, the left-hand side is the variable it defines,
-               # and swapping the operands writes a different `.mo` -- which the twin test
+               # and swapping the operands writes a different `.mo`, which the twin test
                # then reports as a mismatch with no obvious cause
 ]
 "tests/*" = [
@@ -246,7 +250,7 @@ include = ["src", "tests"]
 extraPaths = ["src"]
 # Kept equal to the `requires-python` floor: checking against a version the project does not
 # claim to support proves nothing about the version it does. (The two disagreed briefly, and
-# it showed -- read as 3.11, NumPy's `ArrayLike` refers to `collections.abc.Buffer`, which
+# it showed: read as 3.11, NumPy's `ArrayLike` refers to `collections.abc.Buffer`, which
 # does not exist there, and every array argument in the package became partially unknown.)
 pythonVersion = "3.12"
 typeCheckingMode = "strict"

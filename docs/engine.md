@@ -25,8 +25,19 @@ from modelica.sim import EngineFallbackWarning
 warnings.simplefilter("error", EngineFallbackWarning)
 ```
 
-Platform wheels exist for Linux x86_64, Linux aarch64, Windows x86_64 and macOS arm64. On other platforms,
-`pip install modelica` installs the pure wheel, and `simulate()` uses SciPy.
+Platform wheels exist for Linux x86_64, Linux aarch64, Windows x86_64 and macOS arm64. On other
+platforms, `pip install modelica` installs the pure wheel, and `simulate()` uses SciPy.
+
+## Which backend to use
+
+- Keep `backend="auto"` (the default) and install a platform wheel. This is the choice for a
+  large or stiff model. Check that `result.backend == "engine"`.
+- Pass `backend="engine"` in tests and batch jobs. A call that the engine cannot run raises
+  an error, where `"auto"` would run it on SciPy.
+- Pass `backend="python"` to compare the two backends, or to debug the emitted Python.
+- Pass `method="BDF"`, `"LSODA"` or `"RK45"` to use that SciPy integrator. These always run
+  on SciPy, and `result.backend` is `"python"`. With `backend="engine"` they raise a
+  `SimulationError`.
 
 ## Check which one ran
 

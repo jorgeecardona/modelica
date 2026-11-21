@@ -5,64 +5,136 @@ All notable changes to this project are documented here. Versions follow
 `src/modelica/__init__.py`, and it is bumped automatically when shipped source changes.
 
 ## Unreleased
-- A schematic draws text in an icon other than `%name` (the "+" of a source) inside the symbol, not as a second name caption.
-- The example electrical library draws IEC 60617 symbols: a rectangle for a resistor, a circle with a line through it for a voltage source.
-- The docs home page shows the RLC circuit as the schematic SVG, not as a Mermaid graph.
-- A `type` alias of a predefined type satisfies a slot declared with that type (`SalientInductance = Salient(redeclare SI.Inductance d)`).
-- The repository is renamed from `modelica` to `modelica`: <https://gitlab.com/cardona-oss/modelica>, docs at <https://cardona-oss.gitlab.io/modelica/>. The VS Code settings and commands are now `modelica.*`.
 
-## 0.1.34 (2026-11-14)
-- `when edge(b)` and `when b` resolve `b` through Boolean aliases and `not` to the relation that defines it (`IdealSwitchWithArc` with `off = control`).
-- A run-time if-equation may hold an if-equation in a branch, and an `assert` statement in an algorithm assigns nothing (`DCPowerSupply` in `DemoPowerSupply`).
-- A flow of a connector declared in the simulated model itself is zero (`OpAmps.DifferentialAmplifier`), so a model with its own pins is no longer one equation short.
-- An equation inherited from a base class resolves names in the class that wrote it, and an inlined function reads `u[k]` of an array literal argument (`Adaptors`: `Functions.state1({f, u1}, time)`).
-- An if-expression whose condition is a constant or an `Evaluate = true` parameter is replaced by its chosen branch (`InductorDC` with `quasiStatic`), so it is no longer solved for `der(i)` and divided by zero.
-- A modification on an `extends` clause resolves functions and constants where the clause was written (`extends Base(final Vi = 1 - P.conv(Ra, 2))`), as the DC machines need.
-- A connect to a connector nested in the class's own connector (`connect(ra.heatPort, internalThermalPort.heatPortArmature)`) joins the parent's connection set. Before, the loss got the wrong sign and an extra `Q_flow = 0`.
-- An initial equation that is not an explicit value (`PI.y = PI.y_start`) is solved for the one state it reads that no other initial equation sets and that is not `fixed = true`, on both backends.
-- A component's own `input` connected inside it (`connect(r, rInt)` in `Potentiometer`) no longer counts as a second source on the signal.
-- An initial equation may read variables that the model equations compute explicitly, and `pre(x)`, which is its start value there (`Blocks.Discrete.ZeroOrderHold`, both backends). A variable that an algebraic loop computes is refused by name.
-- `when {a, initial()}` fires on either element; `when initial()` assignments become initial equations, which may read a state's start value (both backends).
+- A schematic draws text in an icon other than `%name` (the "+" of a source) inside the symbol, not
+  as a second name caption.
+- The example electrical library draws IEC 60617 symbols: a rectangle for a resistor, a circle with
+  a line through it for a voltage source.
+- The docs home page shows the RLC circuit as the schematic SVG, not as a Mermaid graph.
+- A `type` alias of a predefined type satisfies a slot declared with that type (`SalientInductance =
+  Salient(redeclare SI.Inductance d)`).
+- The repository is renamed from `pymodelica` to `modelica`:
+  <https://gitlab.com/cardona-oss/modelica>, docs at <https://cardona-oss.gitlab.io/modelica/>. The
+  VS Code settings and commands are now `modelica.*`.
+
+## 0.1.35 to 0.1.74 (2026-11-14 to 2026-11-15)
+
+- `when edge(b)` and `when b` resolve `b` through Boolean aliases and `not` to the relation that
+  defines it (`IdealSwitchWithArc` with `off = control`).
+- A run-time if-equation may hold an if-equation in a branch, and an `assert` statement in an
+  algorithm assigns nothing (`DCPowerSupply` in `DemoPowerSupply`).
+- A flow of a connector declared in the simulated model itself is zero
+  (`OpAmps.DifferentialAmplifier`), so a model with its own pins is no longer one equation short.
+- An equation inherited from a base class resolves names in the class that wrote it, and an inlined
+  function reads `u[k]` of an array literal argument (`Adaptors`: `Functions.state1({f, u1},
+  time)`).
+- An if-expression whose condition is a constant or an `Evaluate = true` parameter is replaced by
+  its chosen branch (`InductorDC` with `quasiStatic`), so it is no longer solved for `der(i)` and
+  divided by zero.
+- A modification on an `extends` clause resolves functions and constants where the clause was
+  written (`extends Base(final Vi = 1 - P.conv(Ra, 2))`), as the DC machines need.
+- A connect to a connector nested in the class's own connector (`connect(ra.heatPort,
+  internalThermalPort.heatPortArmature)`) joins the parent's connection set. Before, the loss got
+  the wrong sign and an extra `Q_flow = 0`.
+- An initial equation that is not an explicit value (`PI.y = PI.y_start`) is solved for the one
+  state it reads that no other initial equation sets and that is not `fixed = true`, on both
+  backends.
+- A component's own `input` connected inside it (`connect(r, rInt)` in `Potentiometer`) no longer
+  counts as a second source on the signal.
+- An initial equation may read variables that the model equations compute explicitly, and `pre(x)`,
+  which is its start value there (`Blocks.Discrete.ZeroOrderHold`, both backends). A variable that
+  an algebraic loop computes is refused by name.
+- `when {a, initial()}` fires on either element; `when initial()` assignments become initial
+  equations, which may read a state's start value (both backends).
 - `b = sample(...); when b then` fires at the sample instants (`Blocks.Interfaces.DiscreteBlock`).
-- While a crossing is watched, both backends step at most 1/100 of the run (or the output spacing, if smaller), so a quiet mode no longer steps over later crossings. The engine now matches SciPy on a thyristor-like model.
-- Fixed on SciPy: crossings that share one root (a thyristor's `s < 0` and its timer at a source zero) settle once instead of chattering.
-- `pre(x)` of a Boolean set by an equation (an on-off latch, the ideal thyristor) reads its value at the last event, on SciPy and on the engine. The engine tape format is now 3; an older engine is refused and SciPy runs instead.
-- A subscript in a nested component's binding (`if abs(n[1]) >= 0.99 then ...` in MultiBody's `World`) names the element its index picks.
-- `Modelica.Utilities.Strings.substring` (an external C function) is computed when its arguments are known, so the transformers' `VectorGroup` choice works.
-- A String parameter or constant is resolved when the model is flattened, and a comparison on it (`C1 == "D"`) folds. Its value is fixed then and cannot be changed at simulate time.
-- A comprehension returned by a call in a nested component's modification (`-symmetricOrientation(m)`) is expanded before it is prefixed.
-- A function called in a component's binding reads that component's parameters for its `if` arms and shapes (`so(m)` inside `c` reads `c.m`).
-- An `if` in a function whose condition is known when it is inlined runs only the arm it picks, so an arm that leaves an output unset is no longer refused when it is not picked.
-- `initial equation pre(x) = v` gives a discrete variable its value before the first event (`Blocks.Logical.Timer`).
-- A `fixed = false` parameter set by an initial equation (`t0 = time` in `Blocks.Math.Mean`) takes its value at the start, and a `sample` may start from it.
-- An initial equation may set a discrete variable a `when` assigns, and may read `time` (`count = integer((time - startTime) / period)` in `Blocks.Sources.Pulse`).
-- Fixed: a relation exactly on its threshold at the start (`time < startTime` with `startTime = 0`) no longer counts as a crossing. Three of them made a run chatter at t = 0.
-- An ideal diode (`off = s < 0` inside an algebraic loop) simulates and switches. On SciPy, a model with crossings now steps at most the output spacing, so a stiff mode no longer skips a short interval.
-- Fixed: `y = if b then 1 else 0` followed `b` only at the start; alias elimination froze `b` at zero.
+- While a crossing is watched, both backends step at most 1/100 of the run (or the output spacing,
+  if smaller), so a quiet mode no longer steps over later crossings. The engine now matches SciPy on
+  a thyristor-like model.
+- Fixed on SciPy: crossings that share one root (a thyristor's `s < 0` and its timer at a source
+  zero) settle once instead of chattering.
+- `pre(x)` of a Boolean set by an equation (an on-off latch, the ideal thyristor) reads its value at
+  the last event, on SciPy and on the engine. The engine tape format is now 3; an older engine is
+  refused and SciPy runs instead.
+- A subscript in a nested component's binding (`if abs(n[1]) >= 0.99 then ...` in MultiBody's
+  `World`) names the element its index picks.
+- `Modelica.Utilities.Strings.substring` (an external C function) is computed when its arguments are
+  known, so the transformers' `VectorGroup` choice works.
+- A String parameter or constant is resolved when the model is flattened, and a comparison on it
+  (`C1 == "D"`) folds. Its value is fixed then and cannot be changed at simulate time.
+- A comprehension returned by a call in a nested component's modification
+  (`-symmetricOrientation(m)`) is expanded before it is prefixed.
+- A function called in a component's binding reads that component's parameters for its `if` arms and
+  shapes (`so(m)` inside `c` reads `c.m`).
+- An `if` in a function whose condition is known when it is inlined runs only the arm it picks, so
+  an arm that leaves an output unset is no longer refused when it is not picked.
+- `initial equation pre(x) = v` gives a discrete variable its value before the first event
+  (`Blocks.Logical.Timer`).
+- A `fixed = false` parameter set by an initial equation (`t0 = time` in `Blocks.Math.Mean`) takes
+  its value at the start, and a `sample` may start from it.
+- An initial equation may set a discrete variable a `when` assigns, and may read `time` (`count =
+  integer((time - startTime) / period)` in `Blocks.Sources.Pulse`).
+- Fixed: a relation exactly on its threshold at the start (`time < startTime` with `startTime = 0`)
+  no longer counts as a crossing. Three of them made a run chatter at t = 0.
+- An ideal diode (`off = s < 0` inside an algebraic loop) simulates and switches. On SciPy, a model
+  with crossings now steps at most the output spacing, so a stiff mode no longer skips a short
+  interval.
+- Fixed: `y = if b then 1 else 0` followed `b` only at the start; alias elimination froze `b` at
+  zero.
 - An array binding set from outside (`A a(final v = fill(v0, m))`) gives each element its own value.
-- An equation like `off = s < 0` is no longer chosen to compute `s`, so the thyristor rectifier examples causalize.
-- An if-equation whose condition changes during the run becomes one if-expression per equation, when every branch has the same number of equations and an `else`.
-- A variable assigned in a `when` is discrete without the `discrete` prefix, as `Blocks.Sources.Pulse` writes it.
-- A statement target may have a subscript on an inner component (`a.b[1].c := 1`). An algorithm that assigns through one is refused by name.
+- An equation like `off = s < 0` is no longer chosen to compute `s`, so the thyristor rectifier
+  examples causalize.
+- An if-equation whose condition changes during the run becomes one if-expression per equation, when
+  every branch has the same number of equations and an `else`.
+- A variable assigned in a `when` is discrete without the `discrete` prefix, as
+  `Blocks.Sources.Pulse` writes it.
+- A statement target may have a subscript on an inner component (`a.b[1].c := 1`). An algorithm that
+  assigns through one is refused by name.
 - A short class definition may have a shape (`type Axis = Real[3]`); `Axis a[2]` is `a[2, 3]`.
 - A subscript on an inner component (`r[1].n`) names that element, in equations and in `connect`.
-- The PyPI summary now says what the package is: a library for reading and simulating Modelica models in Python.
-- Fixed: a call with a leading dot (`.sin(u)`) is the global function or the built-in, so `Modelica.Math.sin` no longer calls itself. It blocked 54 MSL examples.
-- A model on the real Modelica Standard Library 4.1.0 runs: `run(model, libraries=[".../Modelica", ".../ModelicaServices"])`. An RC circuit reads 24 library files and loads in about 3 s.
-- `modelica.lang.library.closure` reads a library stored as `package.mo` directories, parsing only the files a model's names reach (lexical lookup, followed per class); `load` reads the whole tree. `run` takes such a directory in `paths` or `libraries=[...]`; a `Modelica` directory replaces the bundled slice. `python -m modelica.sim` takes `--lib DIR` and `--modelicapath`.
-- `end` in a subscript (`x[end]`, `x[end - 1]`, `x[2:end]`) is the size of the dimension it indexes; a leading dot in an expression name (`.Modelica.Constants.pi`) is global scope. Both are written in the Modelica Standard Library. An output list in an algorithm takes subscripted targets, `(e[:, 1], info) := f(A);`.
-- `modelica.run` is the same `run`, loaded on first use: `import modelica` still loads no NumPy. The README quickstart starts with it.
-- `modelica.sim.run(*paths, model=None, stop=...)` reads `.mo` files and returns the `Result` in one call; the libraries go in `paths` too, and `model` can be left out when the files hold one model. `stop`, `start` and `tolerance` default to the model's `experiment(StopTime, StartTime, Tolerance)` annotation. `parameters={"r.R": 2.0}` overrides parameters by name.
-- `python -m modelica.sim model.mo --stop 1 --set k=2 -o out.mat` simulates from the shell; `.csv` by suffix, CSV to stdout with no `-o`.
+
+## 0.1.34 (2026-11-14)
+
+- The PyPI summary now says what the package is: a library for reading and simulating Modelica
+  models in Python.
+- Fixed: a call with a leading dot (`.sin(u)`) is the global function or the built-in, so
+  `Modelica.Math.sin` no longer calls itself. It blocked 54 MSL examples.
+- A model on the real Modelica Standard Library 4.1.0 runs: `run(model, libraries=[".../Modelica",
+  ".../ModelicaServices"])`. An RC circuit reads 24 library files and loads in about 3 s.
+- `modelica.lang.library.closure` reads a library stored as `package.mo` directories, parsing only
+  the files a model's names reach (lexical lookup, followed per class); `load` reads the whole tree.
+  `run` takes such a directory in `paths` or `libraries=[...]`; a `Modelica` directory replaces the
+  bundled slice. `python -m modelica.sim` takes `--lib DIR` and `--modelicapath`.
+- `end` in a subscript (`x[end]`, `x[end - 1]`, `x[2:end]`) is the size of the dimension it indexes;
+  a leading dot in an expression name (`.Modelica.Constants.pi`) is global scope. Both are written
+  in the Modelica Standard Library. An output list in an algorithm takes subscripted targets, `(e[:,
+  1], info) := f(A);`.
+- `modelica.run` is the same `run`, loaded on first use: `import modelica` still loads no NumPy. The
+  README quickstart starts with it.
+- `modelica.sim.run(*paths, model=None, stop=...)` reads `.mo` files and returns the `Result` in one
+  call; the libraries go in `paths` too, and `model` can be left out when the files hold one model.
+  `stop`, `start` and `tolerance` default to the model's `experiment(StopTime, StartTime,
+  Tolerance)` annotation. `parameters={"r.R": 2.0}` overrides parameters by name.
+- `python -m modelica.sim model.mo --stop 1 --set k=2 -o out.mat` simulates from the shell; `.csv`
+  by suffix, CSV to stdout with no `-o`.
 - An unknown parameter name is refused with the close names (`did you mean k?`).
-- The bundled Modelica Standard Library slice ships in the wheel and `flatten` adds it on its own: a model on `Modelica.*` names runs after `pip install modelica` with no library argument. Before, it was only in the VS Code extension.
-- A `Modelica.*` class the slice does not carry (`Modelica.Fluid...`) is refused with a message that names what the slice has and says to pass the full library.
-- `vm.lower` is faster on large array models: the 8000-cell box front end takes 9.1 s, was about 25 s.
-- Array states with a shape (`Real T[nx, ny, nz]`) run on the engine as views of one block: a stencil read is a slice or a roll, with no gather table. TorusHeat's `rhs` is 14 instructions, was 18 with 384 table entries.
-- Array loops with `if`, relations, `^`, `max`, `min`, `mod`, `not` and the loop index as a value run as shaped opcodes, bit for bit the scalar result.
-- The jacobian of an array loop is built from the shaped tape and stores each stencil offset in one instruction; TorusHeat's is 31 instructions, was 1090 from scalar blocks.
-- A 3-D insulated box (`max` and `min` in indices) matches the finite-volume tape and solves with the iterative solver.
-- Fixed: the jacobian of a product of two terms of one state (`r u (1 - u)`) lost one partial in every cell but the first.
+- The bundled Modelica Standard Library slice ships in the wheel and `flatten` adds it on its own: a
+  model on `Modelica.*` names runs after `pip install modelica` with no library argument. Before, it
+  was only in the VS Code extension.
+- A `Modelica.*` class the slice does not carry (`Modelica.Fluid...`) is refused with a message that
+  names what the slice has and says to pass the full library.
+- `vm.lower` is faster on large array models: the 8000-cell box front end takes 9.1 s, was about 25
+  s.
+- Array states with a shape (`Real T[nx, ny, nz]`) run on the engine as views of one block: a
+  stencil read is a slice or a roll, with no gather table. TorusHeat's `rhs` is 14 instructions, was
+  18 with 384 table entries.
+- Array loops with `if`, relations, `^`, `max`, `min`, `mod`, `not` and the loop index as a value
+  run as shaped opcodes, bit for bit the scalar result.
+- The jacobian of an array loop is built from the shaped tape and stores each stencil offset in one
+  instruction; TorusHeat's is 31 instructions, was 1090 from scalar blocks.
+- A 3-D insulated box (`max` and `min` in indices) matches the finite-volume tape and solves with
+  the iterative solver.
+- Fixed: the jacobian of a product of two terms of one state (`r u (1 - u)`) lost one partial in
+  every cell but the first.
 
 ## 0.1.0 (2026-11-10)
 
@@ -107,28 +179,48 @@ and get the same numbers as SciPy. The API can still change.
 
 The detailed list of changes made on the way to 0.1.0.
 
-- The C and Rust code generators are removed (`sim.cgen`, `sim.rustgen`, `sim.rustsim`, the C and Rust dialects). Models run on the precompiled engine or on SciPy; nothing is compiled per model.
-- `modelica.sim` exports the user surface only (flatten, causalize, simulate, sweep, steady, build, Result and their errors). Code generation, comparison, sensitivity and the mesh modules are imported by module path, for example `from modelica.sim.emit import emit`.
-- `backend="engine"` on a platform with no engine wheel raises a clear error instead of trying to build the engine with rustc.
-- `simulate` and `sweep` warn (`EngineFallbackWarning`) when the installed engine cannot run a model and SciPy runs it instead.
+- The C and Rust code generators are removed (`sim.cgen`, `sim.rustgen`, `sim.rustsim`, the C and
+  Rust dialects). Models run on the precompiled engine or on SciPy; nothing is compiled per model.
+- `modelica.sim` exports the user surface only (flatten, causalize, simulate, sweep, steady, build,
+  Result and their errors). Code generation, comparison, sensitivity and the mesh modules are
+  imported by module path, for example `from modelica.sim.emit import emit`.
+- `backend="engine"` on a platform with no engine wheel raises a clear error instead of trying to
+  build the engine with rustc.
+- `simulate` and `sweep` warn (`EngineFallbackWarning`) when the installed engine cannot run a model
+  and SciPy runs it instead.
 - Two crossings at the same instant fire in the same order on the engine and on SciPy.
 - The Numba JIT backend is removed, with the `jit=` argument of `simulate`, `sweep` and `build`.
-- Large models with a wide band solve Radau's linear systems by BiCGStab with DILU; a 10000-state heat grid integrates in 0.37 s instead of 11.2 s.
-- Synchronous clocks run: a partition on `Clock(interval)` ticks as a time event, with `previous`, `sample(u, c)` and `hold`; a sampled PI controller matches its exact recurrence on SciPy and the engine.
-- Synchronous clocks are flattened: `sample(u, Clock(interval))`, `previous` and `hold` form clocked partitions. Simulating them comes next; until then such a model is refused with a clear error.
-- `modelica.sim.fem` writes linear finite elements on triangles as an engine tape, with `vm.spmv` for the sparse product; Poisson converges at second order.
-- Radau on the engine solves `M y' = f` with a diagonal mass matrix (`Program.mass`); a zero entry makes the row algebraic, so index-1 DAEs run.
-- Radau stores its matrices in band storage built from the Jacobian pattern; a 10000-state heat grid runs in 364 MB, where dense storage needed 800 MB per matrix.
-- The Jacobian tape writes only its nonzeros (`Program.pattern`); TorusHeat writes 320 values instead of 4096.
+- Large models with a wide band solve Radau's linear systems by BiCGStab with DILU; a 10000-state
+  heat grid integrates in 0.37 s instead of 11.2 s.
+- Synchronous clocks run: a partition on `Clock(interval)` ticks as a time event, with `previous`,
+  `sample(u, c)` and `hold`; a sampled PI controller matches its exact recurrence on SciPy and the
+  engine.
+- Synchronous clocks are flattened: `sample(u, Clock(interval))`, `previous` and `hold` form clocked
+  partitions. Simulating them comes next; until then such a model is refused with a clear error.
+- `modelica.sim.fem` writes linear finite elements on triangles as an engine tape, with `vm.spmv`
+  for the sparse product; Poisson converges at second order.
+- Radau on the engine solves `M y' = f` with a diagonal mass matrix (`Program.mass`); a zero entry
+  makes the row algebraic, so index-1 DAEs run.
+- Radau stores its matrices in band storage built from the Jacobian pattern; a 10000-state heat grid
+  runs in 364 MB, where dense storage needed 800 MB per matrix.
+- The Jacobian tape writes only its nonzeros (`Program.pattern`); TorusHeat writes 320 values
+  instead of 4096.
 - The Jacobian of a finite-volume tape is built from its array opcodes, scatter-adds included.
-- `modelica.sim.fv` writes heat conduction on a mesh as an engine tape, with fixed-value, fixed-gradient and zero-gradient boundary patches applied by array opcodes.
-- `modelica.sim.mesh` holds a finite-volume mesh in OpenFOAM's polyMesh layout, builds a structured box, computes face areas and cell volumes, and reads and writes ASCII polyMesh files.
-- The engine has a scatter-add opcode, and `vm.ldu_amul` writes an LDU matrix-vector product over a mesh's faces as array opcodes.
+- `modelica.sim.fv` writes heat conduction on a mesh as an engine tape, with fixed-value,
+  fixed-gradient and zero-gradient boundary patches applied by array opcodes.
+- `modelica.sim.mesh` holds a finite-volume mesh in OpenFOAM's polyMesh layout, builds a structured
+  box, computes face areas and cell volumes, and reads and writes ASCII polyMesh files.
+- The engine has a scatter-add opcode, and `vm.ldu_amul` writes an LDU matrix-vector product over a
+  mesh's faces as array opcodes.
 - A model with no states (only discrete variables) runs on the engine; it stopped at t = 0 before.
-- `when sample(start, interval)` is a time event: the integrator steps to each sample instant exactly, with no root search, on SciPy and on the engine.
-- The observe tape uses array opcodes too; on a 50 x 50 TorusHeat it is 21 instructions, down from 22506, and lowering takes 1.7 s instead of 4.1 s.
-- The Jacobian tape is built from the array opcodes, not from a second scalar lowering; TorusHeat Jacobian is 414 instructions, down from 1090.
-- The engine loads and stores runs of states with one instruction; TorusHeat `rhs` is 18 instructions, down from 144.
+- `when sample(start, interval)` is a time event: the integrator steps to each sample instant
+  exactly, with no root search, on SciPy and on the engine.
+- The observe tape uses array opcodes too; on a 50 x 50 TorusHeat it is 21 instructions, down from
+  22506, and lowering takes 1.7 s instead of 4.1 s.
+- The Jacobian tape is built from the array opcodes, not from a second scalar lowering; TorusHeat
+  Jacobian is 414 instructions, down from 1090.
+- The engine loads and stores runs of states with one instruction; TorusHeat `rhs` is 18
+  instructions, down from 144.
 - **`pip install modelica` is enough to simulate.** NumPy and SciPy are now plain dependencies;
   `modelica[sim]` still installs and adds nothing.
 - **Large array models flatten and causalize faster.** A `for` loop's equations are processed
@@ -138,11 +230,11 @@ The detailed list of changes made on the way to 0.1.0.
   for the last four times. vowel_i needs 16% fewer instructions, with bit-identical results.
 - **The engine factors in a banded state order.** It reorders the states so the Radau matrix is
   banded and skips the zeros outside the band. vowel_i needs less than half the instructions.
-- **A precompiled engine runs a model with no compiler per model.** `simulate(..., backend="engine")`
-  lowers the model to a register tape (`modelica.sim.vm`) and runs it in a Rust engine with the
-  same Radau integrator as `rustsim`. The Linux x86_64 wheel carries the engine as
-  `modelica/_engine.so`; the pure wheel builds it once with `rustc` on first use. `simulate()` uses the
-  engine by default (`backend="auto"`) when it is installed and can run the call, else SciPy.
+- **A precompiled engine runs a model with no compiler per model.** `simulate(...,
+  backend="engine")` lowers the model to a register tape (`modelica.sim.vm`) and runs it in a Rust
+  engine with the same Radau integrator as `rustsim`. The Linux x86_64 wheel carries the engine as
+  `modelica/_engine.so`; the pure wheel builds it once with `rustc` on first use. `simulate()` uses
+  the engine by default (`backend="auto"`) when it is installed and can run the call, else SciPy.
 - **A sweep on the engine uses every core.** 16 vowel_i runs take 4.7 s instead of 27 s on 16
   logical cores, with the same results bit for bit.
 - **The engine runs about a quarter fewer instructions.** The tape folds constant subexpressions
@@ -169,7 +261,7 @@ The detailed list of changes made on the way to 0.1.0.
   arrays is a contraction), and `./` and `.^` are the elementwise divide and power that plain `/`
   and `^` refuse. The parser now accepts them (they were tokenised but rejected); `.+`/`.-` fold to
   `+`/`-`, which are already elementwise for arrays, and `.*`/`./`/`.^` keep their own operator that
-  the flattener reads out elementwise -- each element is its plain scalar sibling, so causalization,
+  the flattener reads out elementwise. Each element is its plain scalar sibling, so causalization,
   the Jacobian and every emitter (the Rust backend included) see ordinary `*`/`/`/`^` and need no
   new rule. A plain `/` or `^` between two arrays now names its dotted form in the refusal.
 - **`transpose(A)` swaps a matrix's two indices.** `transpose(A)[i, j]` is `A[j, i]`, whether it is
@@ -178,18 +270,18 @@ The detailed list of changes made on the way to 0.1.0.
   so causalization, the Jacobian and every emitter (the Rust backend included) see the swapped
   element; a non-square `A[m, n]` transposes to `A[n, m]`.
 - **`+` and `-` between two arrays are elementwise.** `x + y` and `x - y` for two same-shaped arrays
-  are the elementwise sum and difference, as `der(x) = p - x` (an array settling to a constant array)
-  needs. The shape pass had refused any non-`*` operator between two arrays outright, so this had to
-  be written as a `for` loop, even though the element pass already read it correctly; now only `/`
-  and `^` (which Modelica spells `./` and `.^`) are refused between two arrays. `*` stays the
-  contraction it was.
+  are the elementwise sum and difference, as `der(x) = p - x` (an array settling to a constant
+  array) needs. The shape pass had refused any non-`*` operator between two arrays outright, so this
+  had to be written as a `for` loop, even though the element pass already read it correctly; now
+  only `/` and `^` (which Modelica spells `./` and `.^`) are refused between two arrays. `*` stays
+  the contraction it was.
 - **Array constructors work in an equation, not only a declaration.** `der(x) = A * x + ones(n)`,
   `der(x) = fill(2, n) - x`: a constructor written in an equation is expanded to its literal array
   the same way a declaration's is, reading its shape off its own size arguments (structural, known
   at flatten). This completes the constructors added just above, which were scoped to declarations.
 - **The array-constructor functions in a declaration: `zeros`, `ones`, `fill`, `identity`,
   `linspace`.** `Real x[n](start = zeros(n))`, `parameter Real A[n, n] = identity(n)`,
-  `parameter Real g[n] = linspace(0, 1, n)` -- the ordinary way to give an array declaration its
+  `parameter Real g[n] = linspace(0, 1, n)`. The ordinary way to give an array declaration its
   start or its value. Each is array-valued and structural, and is now expanded at flatten into the
   literal array of the declared shape, exactly as a written `{...}` would be; before, the whole call
   reached the emitter as an untranslated function and the model would not build. `zeros`/`ones`/
@@ -216,7 +308,7 @@ The detailed list of changes made on the way to 0.1.0.
   arithmetic it stands for: the `when` is an ordinary crossing of `x[1] + x[2]`, and the assert
   guards the real total and stops the run when it is violated.
 - **Array reductions fold in a parameter binding and an attribute too.** `parameter Real total =
-  sum(x0)`, `Real y(start = sum(x0))` -- a leaf is not an equation, so it never passes through the
+  sum(x0)`, `Real y(start = sum(x0))`. A leaf is not an equation, so it never passes through the
   equation split; the fold now runs where the leaf is built, once the array it reduces is declared
   and its shape is known. `sum`, `min` and `product` each reduce their array parameter to the scalar
   the binding stands for, in both backends. (An array declared after the leaf that reduces it is the
@@ -239,8 +331,8 @@ The detailed list of changes made on the way to 0.1.0.
   offending equation as Modelica source, and the words "singular algebraic loop". A consistent loop
   (`a = 2*b + x`, `b = a - 1`) still solves.
 - `examples/WaveString`: **the wave equation on a string with fixed ends, the second PDE in the
-  corpus.** A string of length 1 held at both ends, discretised in space by the method of lines --
-  eight interior points, each obeying `u'' = c^2 * (second difference of its neighbours)`, the same
+  corpus.** A string of length 1 held at both ends, discretised in space by the method of lines.
+  Eight interior points, each obeying `u'' = c^2 * (second difference of its neighbours)`, the same
   recipe `HeatBar` and `TorusHeat` use but for a hyperbolic equation, so the string oscillates
   instead of decaying. The initial shape is the fundamental mode `sin(pi*x)`, an exact eigenvector
   of the discrete Laplacian, so the string swings at one frequency: a standing wave with the exact
@@ -251,7 +343,7 @@ The detailed list of changes made on the way to 0.1.0.
 - `examples/CoupledOscillators`: **two masses coupled by a spring, written as a state-space system
   `der(z) = A * z`.** The first corpus model in the matrix-ODE form the array-product feature added:
   the whole right-hand side is one matrix-vector multiply, the companion matrix `A` carrying the
-  springs. Started with one mass pulled aside, the motion is a beat -- the in-phase mode at
+  springs. Started with one mass pulled aside, the motion is a beat. The in-phase mode at
   frequency 1 and the out-of-phase mode at `sqrt(2)` interfere and pass the energy back and forth,
   `x1 = (cos(t) + cos(sqrt(2) t))/2`. Linear and undamped, so it has a closed-form solution (the
   reference points are analytic) and a conserved energy, a benchmark with an exact reference like
@@ -272,7 +364,7 @@ The detailed list of changes made on the way to 0.1.0.
   Coriolis coupling that conserves the vertical angular momentum keeping the bob off the poles.
   Started at `theta = 1` rad with a pure azimuthal rate, it oscillates in `theta` between about 0.47
   and 1.0 rad while `phi` precesses about 5.5 turns, a rosette wrapped on the sphere. Two quantities
-  are conserved -- the energy and the vertical angular momentum `sin(theta)^2 * w_phi` -- and grade
+  are conserved (the energy and the vertical angular momentum `sin(theta)^2 * w_phi`) and grade
   the integrator as in the Kepler, Henon-Heiles and Schwarzschild benchmarks; both hold to about
   1e-12. The rigid rod keeps the radius constant, so the state reads directly as `(r, theta, phi)`
   for the new 3-D spherical view. Six scipy reference points at 1e-12, matched to 1e-10.
@@ -280,13 +372,13 @@ The detailed list of changes made on the way to 0.1.0.
   helps an initialisation converge by walking a path from a simplified model to the actual one is
   now supported: with no continuation run, its value is the actual (the first argument), which is
   what the expression is worth once initialisation is done. It evaluates, differentiates and emits
-  (interpreter and Rust backend alike) as that first argument -- the opposite end from `noEvent`
-  and `smooth`, which are transparent to their last -- and the simplified branch is discarded,
+  (interpreter and Rust backend alike) as that first argument (the opposite end from `noEvent`
+  and `smooth`, which are transparent to their last) and the simplified branch is discarded,
   including any relations in it, so they do not become events nothing reads. This was the last
   operator still refused.
 - **`terminate(message)` ends a run at the instant its `when` fires.** The standard Modelica
-  operator that stops the analysis when a model is defined only up to some condition -- a tank
-  that empties, a decay past a threshold -- is now supported end to end, in the interpreter and
+  operator that stops the analysis when a model is defined only up to some condition (a tank
+  that empties, a decay past a threshold) is now supported end to end, in the interpreter and
   the compiled Rust backend alike. It is a state event like any other: the `when` condition is a
   zero crossing located the ordinary way, and the only new thing is the action, "stop and report"
   instead of `reinit`. The run keeps the trajectory up to the located instant and nothing past it,
@@ -297,10 +389,10 @@ The detailed list of changes made on the way to 0.1.0.
   then, past the event limit, falls through the floor. This one carries a discrete flag that
   sticks the ball to the floor once a rebound would be smaller than `v_min`, so the whole run is
   defined: the height stays in `[0, 1]` and the ball is provably at rest for good after the last
-  bounce, checked with `after` invariants. It shows the standard way to resolve Zeno -- a rest
-  mode -- rather than a terminal time.
-- **Array equations scalarise element by element.** An equation written between whole arrays --
-  `der(x) = -x` for `Real x[2]`, `der(T) = -T` for `Real T[2, 2]` -- is now expanded into one scalar
+  bounce, checked with `after` invariants. It shows the standard way to resolve Zeno (a rest
+  mode) rather than a terminal time.
+- **Array equations scalarise element by element.** An equation written between whole arrays
+  (`der(x) = -x` for `Real x[2]`, `der(T) = -T` for `Real T[2, 2]`) is now expanded into one scalar
   equation per element, the same split the declaration already does for the variables, so a vector
   field no longer has to be written as an explicit `for` loop over its elements (`TorusHeat` still
   uses the loop; it now has the shorter form beside it). An array-valued `start` is split the same
@@ -311,14 +403,14 @@ The detailed list of changes made on the way to 0.1.0.
   `for` loop as the way to write it.
 - `examples/TorusHeat`: **the heat equation on a flat torus, a 2-D method-of-lines PDE.** Diffusion
   over an 8x8 periodic grid (64 states), the space discretised by hand and the edges wrapped with
-  `mod` so there is no boundary -- HeatBar's one-dimensional recipe on the simplest manifold. The
+  `mod` so there is no boundary. HeatBar's one-dimensional recipe on the simplest manifold. The
   initial condition is a single grid Fourier mode, an exact eigenvector of the discrete periodic
   Laplacian, so the field keeps its shape and decays in closed form, `T(t) = T(0)*exp(lambda*t)`
   with `lambda = 4*a*(cos(2*pi/n) - 1)`. The reference is that exact decay, checked at three cells,
   and a node of the mode is pinned at zero to show the discretisation preserves the eigenmode. It
   exercises 2-D arrays, an `initial equation` over the grid indices, and the sparse Jacobian.
 - `examples/SchwarzschildOrbit`: **a relativistic orbit, the reachable general-relativity rung.**
-  A test mass on an equatorial timelike geodesic of the Schwarzschild metric -- the Kepler problem
+  A test mass on an equatorial timelike geodesic of the Schwarzschild metric. The Kepler problem
   with the relativistic `-3*M*ell^2/r^4` term that makes a bound orbit precess into a rosette rather
   than close. Started at `r = 20M` with `ell = 4M`, it swings between perihelion `8.2M` and aphelion
   `20M`, advancing about 2.78 rad of precession per radial cycle (Mercury's 43"/century, in the
@@ -327,10 +419,11 @@ The detailed list of changes made on the way to 0.1.0.
   Henon-Heiles, now in GR. Six scipy reference points at 1e-12 over nearly four orbits.
 - `examples/HenonHeiles`: **the Henon-Heiles system, a second Hamiltonian benchmark.** A star in a
   galactic potential `0.5*(x^2 + y^2) + x^2*y - y^3/3`, two degrees of freedom, run at energy 0.1125
-  (below the escape energy 1/6, a bounded regular orbit). Where Kepler is integrable and closed-form,
-  this one is non-integrable; both carry the energy as the invariant that grades the integrator.
-  Radau holds it to 1e-13 over fifty time units, and the orbit is regular enough that a 1e-11 run
-  and a 1e-12 reference stay within 3e-6, so its six scipy points pin the trajectory point for point.
+  (below the escape energy 1/6, a bounded regular orbit). Where Kepler is integrable and
+  closed-form, this one is non-integrable; both carry the energy as the invariant that grades the
+  integrator. Radau holds it to 1e-13 over fifty time units, and the orbit is regular enough that a
+  1e-11 run and a 1e-12 reference stay within 3e-6, so its six scipy points pin the trajectory point
+  for point.
 - `examples/KeplerOrbit`: **the Kepler two-body problem, the canonical Hamiltonian benchmark.**
   An eccentric orbit (e = 0.6, period 2*pi) under inverse-square gravity, run for three orbits.
   Its point is its two constants of motion, held as invariants rather than integrated: the energy
@@ -346,7 +439,7 @@ The detailed list of changes made on the way to 0.1.0.
   and a model need no longer introduce `v = der(x)` by hand.
 - `modelica.ir.flatten`, `modelica.build`: **structural if-equations.** An `if ... else ... end if`
   in an equation section now selects, when the model is flattened, the branch whose condition holds
-  -- the way a conditional component's `if` already does -- and keeps only that branch's equations;
+  (the way a conditional component's `if` already does) and keeps only that branch's equations;
   `elseif` chains and an `else` fall out. The condition has to be known at flatten time, a parameter
   or a constant; a condition on a continuous variable is refused, because switching which equations
   exist at run time is a `when`, a different machine. `build.if_equation` writes one from the Python
@@ -369,7 +462,7 @@ The detailed list of changes made on the way to 0.1.0.
   connector written `connector RealInput = input Real` *is* a scalar, not a record of fields:
   it aliases a predefined type and carries a causality but holds no members. It used to hit the
   refusal that only a `type` may extend a predefined type. It now lays down as one leaf variable,
-  the way a `type` alias does, and stays a connector, so `connect(out, in)` equates the two -- an
+  the way a `type` alias does, and stays a connector, so `connect(out, in)` equates the two. An
   output driving an input, the whole point of a signal wire; two outputs on one wire are refused
   by name. The existing connection machinery needed no change. The bundled standard-library slice
   gained `Modelica.Blocks` (`Sources.Constant`, `Math.Gain`/`Feedback`, `Continuous.Integrator`/
@@ -377,7 +470,7 @@ The detailed list of changes made on the way to 0.1.0.
 - `modelica.sim.rustsim`: **the compiled run carries the events back in full.** `md_integrate`
   gained two output buffers it writes each located crossing's instant and indicator index into,
   threaded through the FFI entry point; `rustsim` reads the cause from the model by that index, so
-  `Run.event_list` is the interpreter's `Result.events` -- instant, index and cause. The bouncing
+  `Run.event_list` is the interpreter's `Result.events`: instant, index and cause. The bouncing
   ball's six bounces, the roaster's nine and a genset's load switch match the interpreter's events
   exactly (instants to a microsecond); a smooth model carries none.
 - `modelica.sim.rustsim`: **the Rust backend, packaged.** `rustsim.simulate(system, stop, ...)`
@@ -421,7 +514,7 @@ The detailed list of changes made on the way to 0.1.0.
   times smaller than Lorenz's, so a reference point late in the run is still a fair test of the
   integrator rather than of the arithmetic. Both new models' `.mo` files are generated from
   their Python twins, so the two front ends build one tree by construction.
-- `examples/TwoInertias`: **two bodies bolted to one shaft** — index 3 again, and for a
+- `examples/TwoInertias`: **two bodies bolted to one shaft**. Index 3 again, and for a
   different reason than the pendulum. The constraint `big.phi = small.phi` is between two
   *states*, so Pantelides differentiates it twice and the dummy-derivative method throws away
   one of each pair. What makes it worth a model is that the two candidate state sets are the
@@ -431,10 +524,10 @@ The detailed list of changes made on the way to 0.1.0.
   in a spec file rather than as a silent change of behaviour. Every reference number is the
   closed form `w(t) = 10 exp(-t/10)`, and the conserved angular impulse `J w + d phi` is
   asserted flat at 25 over the whole run.
-- `modelica.sim.emit`: **`observe_jacobian`** — `d(observed)/dy`, exact, by the same forward
+- `modelica.sim.emit`: **`observe_jacobian`**: `d(observed)/dy`, exact, by the same forward
   mode that writes `jacobian`. This is what a state estimator calls `H`, and until now every
   caller had to finite-difference it: one extra `observe` per state, and truncation error
-  injected straight into the Kalman gain. It reaches code `jacobian` does not — the aliases,
+  injected straight into the Kalman gain. It reaches code `jacobian` does not. The aliases,
   which causalization eliminates before the solver sees them and which are exactly what a
   model is usually measured *through* (a probe temperature, a branch current, a lag). Named
   `observe_jacobian` rather than `sensitivity` deliberately: *sensitivity* means the
@@ -443,7 +536,7 @@ The detailed list of changes made on the way to 0.1.0.
 - `modelica.ir.derive`: **a conditional whose two answers are the same is folded away**, and
   that one line is what makes a *schedule* compilable. A chain of constant segments has
   derivative zero on every segment, so differentiating it produced
-  `0.0 if w[30] > 0.5 else 0.0 if w[31] > 0.5 else ...` — nine branches, one answer — and
+  `0.0 if w[30] > 0.5 else 0.0 if w[31] > 0.5 else ...` (nine branches, one answer) and
   `simplify` had no fold for it. Every block Jacobian carried the chain, so it reached `rhs`,
   `jacobian`, `observe`, `indicators` and `transition` alike. Compiling `RoastingMachine`
   under Numba, measured before and after: `jacobian` went from 15.6 s and 4.4 GB *without
@@ -457,12 +550,12 @@ The detailed list of changes made on the way to 0.1.0.
   variable; `blocks` reads a `System` and shows the order the solver runs in. Each returns
   a `Graph`, which writes itself as SVG, Graphviz or Mermaid, and renders itself in a
   notebook. There is a CLI: `python -m modelica.diagram <model.mo> <libraries...>`. No new
-  dependency — the SVG, including the layout, is drawn here.
+  dependency. The SVG, including the layout, is drawn here.
   - The schematic resolves names with `modelica.ir.flatten`'s own machinery rather than a
     second copy, which is why `Scope`, `Found` and `effective` are public now. A test holds
     the two together: no box may name a component the flat model does not have.
   - The SVG names no colour. Every line and character is `currentColor`, so one image reads
-    correctly on a light page and a dark one — no second copy, no script, no CDN.
+    correctly on a light page and a dark one. No second copy, no script, no CDN.
   - The layout starts from a circle, never from random positions, so a rebuild of the docs
     site produces no diff.
 - `modelica.ir.flatten`: **connectors are compared by structure, not by class name.**
@@ -482,10 +575,10 @@ The detailed list of changes made on the way to 0.1.0.
   whose promise is that reading a model's structure costs nothing. `modelica.sim` re-exports
   both, so no caller changes.
 - `examples/`: `Blocks`, `Rotational` and `Machines` libraries, and two models.
-  - `PIControl` — a block diagram: `input`/`output` connectors, a directed signal, and a
+  - `PIControl`: a block diagram with `input`/`output` connectors, a directed signal, and a
     closed loop. It found both flattener issues above and one in the corpus harness, which
     read the documented `after` key on an invariant and then ignored it.
-  - `DCMotor` — the first model in two domains at once, and the first whose component holds
+  - `DCMotor`: the first model in two domains at once, and the first whose component holds
     components: `Machines.Motor` has the winding, coil, converter and rotor inside it, with
     three connectors wired from both sides.
   - Both agree with an independently integrated reference to 1e-10.
@@ -498,7 +591,7 @@ The detailed list of changes made on the way to 0.1.0.
   writer some effort and saves every reader some. `docs/style.md` records the rules followed
   and the two places this project departs from them. No claim, number or reason was dropped
   in the rewrite.
-- Docs: *Drawing a model*, a new executed notebook — the three pictures, what each one is
+- Docs: *Drawing a model*, a new executed notebook. The three pictures, what each one is
   for, and what keeps them honest. The architecture pipeline diagram is a Mermaid graph
   instead of ASCII art, and the site now renders `mermaid` fences.
 
@@ -515,46 +608,46 @@ The detailed list of changes made on the way to 0.1.0.
   associativity.
 - `modelica.lang.precedence`: one table, climbed by both the parser and the printer, which
   is why `parse(unparse(x)) == x` is structural rather than coincidental. The single
-  deliberate deviation from the spec — the unary sign binding tighter than `*` — is
+  deliberate deviation from the spec (the unary sign binding tighter than `*`) is
   recorded there with its justification.
 - `tests/test_lang.py`: 139 tests. Round trips over the whole example corpus in both
   directions, the precedence deviations pinned as trees rather than as strings, and the
   refusals asserted so an unimplemented construct cannot start silently half-working.
-- `modelica.build`: a Python front-end that constructs `modelica.ir` values directly — a
+- `modelica.build`: a Python front-end that constructs `modelica.ir` values directly. A
   peer of `modelica.lang`, not a wrapper around it. Declarations are descriptors, `==`
   builds an equation, class inheritance is `extends`, a module is a `package`.
-- `examples/`: 3 component libraries and 10 models, each written twice — once as `.mo` and
-  once through the Python front-end — plus a TOML behaviour spec per model
+- `examples/`: 3 component libraries and 10 models, each written twice (once as `.mo` and
+  once through the Python front-end) plus a TOML behaviour spec per model
   (reference points, invariants, expected events).
 - `tests/test_examples.py`: runs the corpus. The spec guard and the front-end equivalence
   check run today; parse, flatten and simulate skip until those stages exist.
-- Architecture: recorded that the IR must be *compilable* — `modelica.sim` emits code for
+- Architecture: recorded that the IR must be *compilable*. `modelica.sim` emits code for
   the RHS and Jacobian rather than walking a closure tree, which is what makes a Python
   engine competitive with the Fortran solvers. Matching them is now stated as the floor
   rather than the target, with the three things a model-owning compiler can do that a
   precompiled library structurally cannot.
-- Docs: *Backends* — two evaluators over one IR (the interpreter stays as the reference
+- Docs: *Backends*: two evaluators over one IR (the interpreter stays as the reference
   tier and makes differential debugging possible), backends as emitters rather than
   rewrites, and why the compiler is written for this workload instead of adopted from a
   general-purpose one.
-- Docs: *Benchmarks* — the problem sets any performance claim here has to answer to (Bari
+- Docs: *Benchmarks*: the problem sets any performance claim here has to answer to (Bari
   IVP test set, Hairer's, SciMLBenchmarks, the Modelica ScalableTestSuite) and why the
   measurement is a work-precision diagram rather than a FLOPS number.
 - **Python floor raised to 3.12** (was 3.11). The `sim` extra decides it: NumPy 2.4 is
   itself `Requires-Python: >=3.12`, and its stubs spell `ArrayLike` with
-  `collections.abc.Buffer`, a 3.12 name — type-checked as 3.11, every array argument in the
+  `collections.abc.Buffer`, a 3.12 name. Type-checked as 3.11, every array argument in the
   package reads as partially unknown. Supporting a version the numerics cannot be installed
   on was a claim about nothing. `requires-python`, the ruff target, the pyright version and
   the floor CI job now all say 3.12.
 
-- `modelica.sim.solve`: **event iteration**. An event no longer ends the instant — applying
+- `modelica.sim.solve`: **event iteration**. An event no longer ends the instant. Applying
   it can leave a second relation disagreeing with its own latch, and the loop now runs to a
   fixed point before the integrator restarts. This was a correctness hole, not a
   performance one: the integrator could never have caught that second relation, because on
   the next segment its indicator does not *cross* zero, it starts out already past it, so
   the stale value was carried for the rest of the run.
 - `modelica.sim.emit`: `Trigger.latch` puts the discrete structure of a model on the public
-  record — which workspace slot each crossing owns, `None` for a `when` branch. Two things
+  record: which workspace slot each crossing owns, `None` for a `when` branch. Two things
   above the emitter need it, and both used to have no way to ask.
 - `modelica.verify`: model-checking the discrete half, behind the new `verify` extra
   ([musil](https://gitlab.com/jorgeecardona/musil) as the checker). At one instant the
@@ -564,30 +657,29 @@ The detailed list of changes made on the way to 0.1.0.
   emitted `indicators` and `transition` are the functions being called, so a counterexample
   is a real execution rather than an artefact of an approximation.
 - `tests/test_verify.py`: the whole corpus checked at `t = 0` and again at every instant a
-  real run stopped at — the bounce, the switch, the moment the tank runs dry.
+  real run stopped at. The bounce, the switch, the moment the tank runs dry.
 - `modelica.ir.causalize`: **every admissible state set**, on `System.candidates`. A set can
   be the states exactly when holding it back still leaves an equation for every remaining
   unknown, so the test is the matching itself, run once per candidate with that set
-  forbidden. The pendulum answers `(y, vy)` and `(x, vx)` — the two the literature names,
+  forbidden. The pendulum answers `(y, vy)` and `(x, vx)`. The two the literature names,
   which are *two* exchanges apart, so they are enumerated rather than found by perturbing the
   chosen set one variable at a time. This is the menu dynamic state selection chooses from.
 - `modelica.sim.emit`: **dynamic state selection**, and with it the pendulum simulates. Each
-  candidate set is causalized into its own blocks and scored by the product of its 1×1 pivots
-  — `4x²` against `4y²` for the pendulum, so the crossover is at 45°, which is the answer the
-  literature gives. The emitter writes one `rhs`/`observe`/`indicators`/`transition` per set
-  plus a picker that reads which one is live from a workspace slot appended after the latches,
-  so nothing above the emitter needs an extra argument and numba still compiles the lot.
-  Crossings come one per *ordered* pair (a pair compares with one smooth expression; a maximum
-  does not) and read `−1` outside their origin, because a set the run is not using is not a set
-  it can leave. A 20% margin on the scores is what makes the switch terminate rather than
-  chatter. The crossing itself costs no accuracy — every state of every set is an unknown of
-  the model, so the destination's states are already computed when the transition rewrites the
-  vector. Pendulum over two seconds: four switches, `x² + y² = 1` held to 2·10⁻¹⁶, energy drift
-  1.6·10⁻¹⁰.
+  candidate set is causalized into its own blocks and scored by the product of its 1×1 pivots. `4x²`
+  against `4y²` for the pendulum, so the crossover is at 45°, which is the answer the literature
+  gives. The emitter writes one `rhs`/`observe`/`indicators`/`transition` per set plus a picker that
+  reads which one is live from a workspace slot appended after the latches, so nothing above the
+  emitter needs an extra argument and numba still compiles the lot. Crossings come one per *ordered*
+  pair (a pair compares with one smooth expression; a maximum does not) and read `−1` outside their
+  origin, because a set the run is not using is not a set it can leave. A 20% margin on the scores
+  is what makes the switch terminate rather than chatter. The crossing itself costs no accuracy.
+  Every state of every set is an unknown of the model, so the destination's states are already
+  computed when the transition rewrites the vector. Pendulum over two seconds: four switches, `x² +
+  y² = 1` held to 2·10⁻¹⁶, energy drift 1.6·10⁻¹⁰.
 - `modelica.sim.emit`: **the analytic state Jacobian**, as an eighth generated function.
   Forward mode by source transformation over the same blocks the right-hand side runs, one
   row vector per variable so the emitted source stays the size of the model rather than its
-  square. It is not a speedup and is not offered as one — measured against SciPy's own
+  square. It is not a speedup and is not offered as one. Measured against SciPy's own
   difference quotient the step counts are identical and the wall clock moves by less than
   the noise, because for systems this small a difference quotient is two right-hand sides.
   It is *exactness*: a block that Newton iterates on has no derivative a difference quotient
@@ -601,55 +693,55 @@ The detailed list of changes made on the way to 0.1.0.
   the last Jacobian it was given across steps.
 - `tests/test_examples.py`: the emitted Jacobian against central differences of the emitted
   right-hand side, at twelve points along each model's own simulated trajectory rather than
-  around the initial point — which is where models are at their most degenerate, every rate
+  around the initial point, which is where models are at their most degenerate, every rate
   zero. Only the pendulum exercises the implicit path, and it is the one that catches a sign
   flip in either the 1×1 or the 3×3 tangent solve.
 - `modelica.sim.kernel`: **the compiled path is executed rather than claimed.** `jit=True` has
-  handed the generated module to Numba since the emitter existed, and nothing had ever run it —
-  Numba is in no dependency group, so "there is a Numba backend" was a docstring rather than a
-  fact. `tests/test_jit.py` now checks every generated function, compiled against interpreted,
-  bit for bit, on five models chosen to force every shape the emitter writes; plus a whole
-  simulation, bounces and all, agreeing to 1e-12.
+  handed the generated module to Numba since the emitter existed, and nothing had ever run it. Numba
+  is in no dependency group, so "there is a Numba backend" was a docstring rather than a fact.
+  `tests/test_jit.py` now checks every generated function, compiled against interpreted, bit for
+  bit, on five models chosen to force every shape the emitter writes; plus a whole simulation,
+  bounces and all, agreeing to 1e-12.
 - `modelica.sim.kernel`: **`error_model="numpy"`**. Numba defaults to raising
   `ZeroDivisionError` where CPython would, while the interpreted kernel divides numpy scalars
-  and gets an infinity — a real semantic fork between the two tiers, and the interpreted one is
+  and gets an infinity. A real semantic fork between the two tiers, and the interpreted one is
   the reference tier that differential debugging depends on. Defensive rather than a fix for an
   observed failure, and said that way on purpose: no model in the corpus reaches a division by
   exactly zero (the pendulum at `y = -L` comes closest and its Newton lands near 1e-16, not on
   0.0). But an exact zero pivot is reachable in principle exactly where this engine has
-  something to say — a state set going singular, which dynamic state selection survives by
+  something to say. A state set going singular, which dynamic state selection survives by
   switching rather than stopping. An infinity there is information; an exception is a crash.
 - Measured, because the reason to compile is not the same for every model: on `AtwoodPendulum`
-  (10 states, a 4×4 implicit block) Numba is **21× on `rhs` and 44× on `jacobian`** — 33.6 µs to
+  (10 states, a 4×4 implicit block) Numba is **21× on `rhs` and 44× on `jacobian`**. 33.6 µs to
   1.61 µs, 180.6 µs to 4.07 µs. On a two-state model it is 1.0×, the dispatch costing what the
   arithmetic does. And put back in context it is a **1.55× on the simulation**, because 63% of
   that run is SciPy's Radau, which is written in Python: compiling the model is nearly free and
   nearly finished, and it is not where the time is.
-- `moon run :test-jit`, and deliberately **no `jit` extra** — which is a finding, not an
+- `moon run :test-jit`, and deliberately **no `jit` extra**, which is a finding, not an
   oversight. Numba pins `numpy<2.5` as far as its current release (0.66) and this project runs
   2.5. Declaring the extra was tried and reverted: uv locks one resolution across every extra,
   so naming Numba anywhere in `pyproject.toml` rolled the whole lock back to numpy 2.4.6, dev
-  environment included — every other test would have run against a numpy nobody installs, to
+  environment included. Every other test would have run against a numpy nobody installs, to
   support an optional backend most callers never ask for. `[tool.uv] conflicts` would separate
   them at the price of declaring `sim` and `jit` mutually exclusive, which is false. So the task
   installs Numba into a throwaway environment where numpy resolves down on its own, and
   `tests/test_jit.py` skips itself everywhere else.
 - `modelica.verify.check_selection`: the switching modelled with the linear algebra as the
-  adversary — which set is usable is not the engine's to choose, and it only finds out by
+  adversary: which set is usable is not the engine's to choose, and it only finds out by
   failing to factor one. The two assumptions that makes necessary are surfaced through
   `check_open` rather than swallowed, and the load-bearing one is executable:
   `quiescent=False` drops it and produces the run that breaks it.
 - `modelica.fmi.modes`: the **FMI 3.0 calling sequence**, as one table, written before the FMI
-  layer that has to obey it. Read three times — an exported FMU's guard (`Lifecycle.call`
+  layer that has to obey it. Read three times. An exported FMU's guard (`Lifecycle.call`
   refuses an illegal call, which is what becomes `fmi3Error`), an importer's driver, and
   `check_modes`. Checking it immediately found Event Mode sitting in the Scheduled Execution
   table, where the standard has Clock Activation Mode and Clock Update Mode instead.
 - `modelica.ssp.master`: the co-simulation master's protocol as pure transitions, and the
-  finding that motivates writing it first — `canGetAndSetFMUState` is optional, so a
+  finding that motivates writing it first. `canGetAndSetFMUState` is optional, so a
   conforming FMU may decline to save its state, and a master that rolls back on a discarded
   step then has no move left. Four moves from the start, and invisible to any test whose FMUs
   all happen to support state saving.
-- Docs: *Verification* — what a model checker can and cannot say about a simulation engine,
+- Docs: *Verification*: what a model checker can and cannot say about a simulation engine,
   and the four places it pays. Written before any of it existed and corrected where building
   it disagreed with the plan, including one plan that turned out to be unnecessary.
 - Docs: two **executable notebooks** (`docs/notebooks/`), run at build time by mkdocs-jupyter
@@ -657,7 +749,7 @@ The detailed list of changes made on the way to 0.1.0.
   in CI rather than sitting there showing output from a version that no longer exists. They
   are `.py` in percent format rather than `.ipynb` so a diff of one is readable.
 - Docs: three **`.ipynb` notebooks** with matplotlib figures and ipywidgets sliders, meant to
-  be opened and run rather than only read — *Turning the knobs* (parameter studies by
+  be opened and run rather than only read. *Turning the knobs* (parameter studies by
   rewriting a `FlatVariable.binding`, a damping sweep, overshoot and settling time against
   critical damping), *The shape of the equations* (the incidence matrix of a generated RC
   ladder, what alias elimination deletes from it, the block-lower-triangular staircase, and
@@ -666,7 +758,7 @@ The detailed list of changes made on the way to 0.1.0.
   collapsing into each event, both state sets' pivots crossing at 45°, and constraint drift
   never exceeding one machine epsilon). Committed with outputs stripped, so they diff like
   the percent files and cannot render results from an older version of the code; the site
-  executes them like the others. matplotlib and ipywidgets joined the `docs` extra — the
+  executes them like the others. matplotlib and ipywidgets joined the `docs` extra. The
   library itself still draws its own charts with no plotting dependency.
 
 ## 0.0.2
@@ -681,7 +773,7 @@ Project restart. The 2010 Python 2 / pyparsing prototype is retired (it remains 
 history); nothing from it is carried forward.
 
 - Claim the `modelica` distribution name on PyPI.
-- Repository moved from GitHub to GitLab (`gitlab.com/cardona-oss/modelica`).
+- Repository moved from GitHub to GitLab (`gitlab.com/jorgeecardona/pymodelica`).
 - Toolchain: uv + moon pinned via proto; ruff (`select = ["ALL"]`) and pyright strict.
 - Single-job GitLab CI driven by `moon run :ci`; PyPI releases via OIDC Trusted
   Publishing; docs on GitLab Pages.

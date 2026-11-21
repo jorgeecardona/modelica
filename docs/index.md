@@ -48,7 +48,7 @@ diagram.of("examples/models/RLCCircuit.mo", "examples/library/Electrical.mo")
 The three connectors that meet at the bottom are one junction, and not three separate
 lines. That is what the flattener makes of them: one sum of currents, taken once.
 
-[Drawing a model](notebooks/drawing.ipynb) shows the other two pictures — equations against
+[Drawing a model](notebooks/drawing.ipynb) shows the other two pictures: equations against
 variables, and blocks in the order the solver runs them.
 
 ## Notebooks
@@ -77,8 +77,8 @@ jupyter lab docs/notebooks/
 ## Standards
 
 * **Modelica Language Specification 3.x**
-* **FMI 3.0** — [fmi-standard.org](https://fmi-standard.org/)
-* **SSP 2.0** — [ssp-standard.org](https://ssp-standard.org/)
+* **FMI 3.0**: [fmi-standard.org](https://fmi-standard.org/)
+* **SSP 2.0**: [ssp-standard.org](https://ssp-standard.org/)
 
 ## How these pages are written
 

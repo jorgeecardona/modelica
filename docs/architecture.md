@@ -18,28 +18,30 @@ graph TD
     PY["Python model (modelica.build)"] -->|"descriptors, operator overloading"| AST
     AST -->|"modelica.ir: instantiate, flatten"| FLAT["FlatModel: variables + equations"]
     FLAT -->|"modelica.ir: match, sort, reduce the index"| SYS["System: sorted blocks, states chosen"]
-    SYS -->|"modelica.sim: lower to a tape (engine) or emit Python (SciPy)"| PROB["Problem"]
-    PROB --> SOLVER["Solver"] --> RESULT["Result"]
+    SYS -->|"modelica.sim.vm: lower to a tape"| ENGINE["Engine: Radau IIA in Rust"]
+    SYS -->|"modelica.sim.emit: emit Python"| SCIPY["SciPy solve_ivp"]
+    ENGINE --> RESULT["Result"]
+    SCIPY --> RESULT
     AST -.->|"modelica.diagram"| PIC["Graph: a picture of any stage"]
     FLAT -.-> PIC
     SYS -.-> PIC
 ```
 
-Two exchange formats cross the pipeline.
+Two exchange formats are started. Neither reads or runs an FMU yet.
 
-* **FMI 3.0** (`modelica.fmi`) attaches at both ends. It reads an FMU that another tool
-  compiled and simulates it through the same `Problem` and `Solver`. It also exports a
-  `System` as an FMU.
-* **SSP 2.0** (`modelica.ssp`) sits above. A `.ssp` file names components, which are
-  usually FMUs, and wires them together. A co-simulation master then steps several
-  `Problem`s at once.
+* **FMI 3.0** (`modelica.fmi`): `describe` writes the `modelDescription.xml` of a `System`, and
+  `modes` holds the FMI calling sequence as a state machine. Planned, not built: reading an
+  FMU that another tool compiled, and exporting a `System` as an FMU.
+* **SSP 2.0** (`modelica.ssp`): `master` holds the moves a co-simulation master may make, as
+  pure transitions that `modelica.verify.check_master` enumerates. Planned, not built:
+  reading a `.ssp` archive and stepping its components.
 
 ## Two front ends, one IR
 
 A model arrives as a `.mo` file, or as Python. `modelica.build` is **not** a wrapper that
 writes Modelica text and parses it back. It is a peer of `modelica.lang`, and it builds
-`modelica.ir` values directly. Both roads end at the same `ir.Class`. Everything below —
-flattening, index reduction, code generation, FMU export — sees only that.
+`modelica.ir` values directly. Both roads end at the same `ir.Class`. Everything below
+(flattening, index reduction, code generation) sees only that.
 
 ```python
 class NewtonCooling(Model):
@@ -107,7 +109,7 @@ differentiation, and free of any Python object that cannot be written as arithme
 interpreter over the same IR stays as the reference implementation. It is what the engine is
 tested against.
 
-The other design — a tree of closures walked from Python — is 10 to 100 times slower. No
+The other design (a tree of closures walked from Python) is 10 to 100 times slower. No
 amount of solver quality hides that.
 
 ### Matching the Fortran codes is the floor
@@ -125,7 +127,7 @@ records which problem sets that means.
 
 ## The layers
 
-### `modelica.lang` — source to AST
+### `modelica.lang`: source to AST
 
 A lexer and a recursive-descent parser, both written by hand, against the Modelica Language
 Specification 3.x grammar. There is no parser generator and no pyparsing. The grammar is
@@ -135,11 +137,11 @@ stable and small enough to write out. Only a hand-written parser gives a usable 
 Every token carries a line and a column, and the nodes an error can point at carry them on
 after the parser has finished: a reference, an equation and a component each hold an
 optional `ir.Span`. It is excluded from equality and from hashing, which is what lets the
-same model built from Python -- where there is no source text and every span is `None` --
-still compare equal to the one read from a `.mo`. Literals and operators carry none: a span
+same model built from Python (where there is no source text and every span is `None`) still
+compare equal to the one read from a `.mo`. Literals and operators carry none: a span
 is there to be *reported*, and no message names an addition.
 
-### `modelica.build` — Python to IR
+### `modelica.build`: Python to IR
 
 Descriptors, operator overloading and a metaclass, and nothing else. Every value in the
 module is a frozen dataclass. `flow(...)`, `parameter(...)` and the rest return a *new*
@@ -157,7 +159,7 @@ same text, and the mismatch would have had no visible cause. So `Declaration` is
 descriptor that *returns* an `Expression`. The design removes the possibility instead of
 documenting it.
 
-### `modelica.ir` — AST to a solvable system
+### `modelica.ir`: AST to a solvable system
 
 This is the interesting layer, and the whole project stands on it.
 
@@ -176,23 +178,30 @@ This is the interesting layer, and the whole project stands on it.
   `connect()`. A toolchain that cannot reduce the index cannot simulate a mechanical model
   at all.
 
-### `modelica.sim` — running it
+### `modelica.sim`: running it
 
-`Problem` is the interface every backend consumes. It is an explicit ODE where
-causalization achieved one, and a residual DAE otherwise. There are two backends.
+`simulate(system, stop=...)` integrates a `System` and returns a `Result`. There are two
+backends, and `Result.backend` says which one ran. [The precompiled engine](engine.md) says
+how `simulate` chooses.
 
-* **SciPy** (a plain dependency) uses `solve_ivp` for the ODE form, plus root finding for the
-  algebraic blocks. It is the default, because it installs everywhere.
-* **SUNDIALS IDA**, through [scikit-SUNDAE](https://github.com/NREL/scikit-sundae) (the
-  `sundials` extra), gives real index-1 DAE integration with consistent initialization. It
-  is optional, because it needs a compiled SUNDIALS.
+* **The engine** (`modelica.sim.vm`, `modelica.sim.engine`) is the default where a platform
+  wheel carries it. `vm` lowers the `System` to a register tape, and the Rust engine runs
+  the tape inside a Radau IIA integrator and event loop.
+* **SciPy** (a plain dependency) runs everywhere else, and for every `method` other than
+  `"Radau"`. `modelica.sim.emit` writes the model as Python, and `solve_ivp` integrates it,
+  with root finding for the algebraic blocks.
+
+Planned, not built: SUNDIALS IDA through
+[scikit-SUNDAE](https://github.com/NREL/scikit-sundae), for index-1 DAE integration with
+consistent initialization. The `sundials` extra installs scikit-SUNDAE, but no code in
+`src/` calls it.
 
 Events are the part that makes this harder than calling an integrator. A zero crossing
 comes from an `if` or a `when`, and a state event generally. The solver must stop at the
 crossing, the model is initialized again, and integration restarts. That is designed in
 from the start, and not added later.
 
-### `modelica.diagram` — showing it
+### `modelica.diagram`: showing it
 
 A model is a graph before it is anything else. The components are the nodes and `connect()`
 gives the edges. The source text holds that graph where no person can see it, and
@@ -222,41 +231,56 @@ Mermaid source. Three decisions are worth stating.
   layout that started from random positions would produce a new diff on every build, and
   then nobody would read the diffs.
 
-### `modelica.fmi` — FMI 3.0
+### `modelica.fmi`: FMI 3.0
 
-`modelDescription.xml` is parsed into dataclasses: variables, causality and variability,
-model structure, and unit definitions. The FMU's shared library is loaded through `ctypes`.
-Both interface types are wrapped. In Model Exchange the FMU supplies the derivatives and we
-integrate. In Co-Simulation the FMU integrates itself between communication points. Export
-goes the other way: a `System` plus a generated `modelDescription.xml`, with the FMU's C
-entry points backed by the Python evaluator.
+Built:
 
-### `modelica.ssp` — SSP 2.0
+* `modelica.fmi.describe(system)` writes `modelDescription.xml` from a `System`: variables,
+  causality and variability, model structure, and unit definitions.
+* `modelica.fmi.modes` holds the calling sequence of each interface type as a state machine
+  (`table`, `Lifecycle`). `modelica.verify.check_modes` enumerates it.
+
+Planned, not built:
+
+* Import: read an FMU, load its shared library through `ctypes`, and wrap Model Exchange
+  (the FMU supplies the derivatives and we integrate) and Co-Simulation (the FMU integrates
+  itself between communication points).
+* Export: a zip with the binary and the `fmi3` entry points. `describe` writes only the XML.
+
+### `modelica.ssp`: SSP 2.0
+
+Built: `modelica.ssp.master` holds the protocol of a co-simulation master as a value with pure
+transitions (`start`, `moves`). It integrates nothing. `modelica.verify.check_master`
+enumerates every interleaving of it.
+
+Planned, not built: reading a `.ssp` file, resolving it against the FMUs it references, and
+stepping the components.
 
 A `.ssp` file is a zip. It holds `SystemStructure.ssd` for the components, connectors,
 connections and any nested systems; `.ssv` files for parameter sets; and `.ssb` files for
-bindings. This layer parses them into a composition graph, resolves it against the FMUs it
-references, and runs a co-simulation master that steps the components and exchanges signals
-at communication points. Four parts of SSP 2.0 matter to the data model: FMI 3.0
-components, the `structuralParameter` connector kind, clocked connectors, and arrays in
-connectors and connections.
+bindings. Four parts of SSP 2.0 matter to the data model: FMI 3.0 components, the
+`structuralParameter` connector kind, clocked connectors, and arrays in connectors and
+connections.
 
 ## Build order
 
-0. `ir`, `build` and `lang.unparse` — the value types, the Python front end, and a way to
+0. `ir`, `build` and `lang.unparse`: the value types, the Python front end, and a way to
    read them back as text. **Done.** The example corpus is written twice against it.
 1. `lang.parse`, and `ir` far enough to flatten a trivial `model` into scalar equations.
    **Done.** `lang.lexer` and `lang.parse` read the whole example corpus, and
    `parse(unparse(x)) == x` holds over it, because both directions climb the same
    precedence table.
 2. `sim` on the explicit-ODE case, with the SciPy backend. The first end-to-end simulation.
+   **Done.**
 3. Matching and BLT, then Pantelides and dummy derivatives. The first physical model with
-   `connect()`.
-4. Events.
-5. Code generation from the `FlatModel`. Then work-precision diagrams against
-   SciPy's Fortran-backed integrators on Robertson and van der Pol. See
-   [benchmarks](ideas/benchmarks.md) for the harness this has to answer to.
+   `connect()`. **Done.**
+4. Events. **Done.**
+5. Code generation from the `FlatModel`. **Done** (`sim.emit` for SciPy, `sim.vm` for the
+   engine). `scripts/bench.py` draws the work-precision diagrams;
+   [benchmarks](ideas/benchmarks.md) says what the harness has to answer to.
 6. `fmi` import: read and simulate an existing FMU. This checks the variable and model
-   structure data model against real files.
-7. `fmi` export.
-8. `ssp` composition and the co-simulation master.
+   structure data model against real files. **Planned, not built.**
+7. `fmi` export. **Started**: `describe` writes `modelDescription.xml`. The binary is not
+   built.
+8. `ssp` composition and the co-simulation master. **Started**: the master's protocol is
+   written and model-checked. Reading archives and stepping are not built.

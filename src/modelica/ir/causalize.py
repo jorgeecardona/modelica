@@ -432,7 +432,7 @@ def _permits(work: _Work, victim: str, other: str, ratio: float, shift: ir.Expr)
 
 
 def _solo(work: _Work, affine: _Affine) -> _Elimination | None:
-    """One unknown against a constant: the variable simply has a value."""
+    """One unknown against a constant: the variable has a value."""
     (name,) = affine.unknowns
     if name in work.integral or name in work.derivative or work.variables[name].fixed:
         return None

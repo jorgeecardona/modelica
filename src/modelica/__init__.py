@@ -1,16 +1,18 @@
-"""Modelica toolchain for Python: parse, flatten, simulate, exchange.
+"""Modelica toolchain for Python: parse, flatten, simulate and draw models.
 
 The package is layered, and each layer is usable without the ones above it:
 
-* ``modelica.lang``  -- Modelica source -> tokens -> AST (hand-written lexer/parser).
-* ``modelica.ir``    -- AST -> flat model: variables, equations, an expression IR;
+* ``modelica.lang``: Modelica source -> tokens -> AST (hand-written lexer/parser).
+* ``modelica.build``: Python classes -> the same AST values. A second front end.
+* ``modelica.ir``: AST -> flat model: variables, equations, an expression IR;
   then matching/BLT sorting and index reduction down to a solvable system.
-* ``modelica.sim``   -- the flat model as an ODE/DAE problem plus solver backends and
-  event (zero-crossing) handling.
-* ``modelica.fmi``   -- FMI 3.0: read/simulate an existing FMU, and export a flat model
-  as one.
-* ``modelica.ssp``   -- SSP 2.0: system composition (.ssd/.ssv/.ssb inside a .ssp) and a
-  co-simulation master over the components it names.
+* ``modelica.sim``: simulation of that system on the precompiled engine or on SciPy,
+  with event (zero-crossing) handling.
+* ``modelica.diagram``: any of the above to a picture: components, incidence, or blocks.
+* ``modelica.fmi``: FMI 3.0: writes ``modelDescription.xml`` and holds the calling
+  sequence (experimental). It does not read, run or export an FMU.
+* ``modelica.ssp``: SSP 2.0: the co-simulation master's protocol (experimental). It
+  does not read a ``.ssp`` archive or step components.
 
 ``modelica.run("model.mo", stop=1.0)`` reads files and returns the simulated result in one
 call (`modelica.sim.run`). It is loaded on first use: ``import modelica`` pulls in no
@@ -22,7 +24,7 @@ standards it implements. This is an independent open-source implementation, not
 affiliated with or endorsed by the Modelica Association.
 """
 
-__version__ = "0.1.77"
+__version__ = "0.1.78"
 
 from typing import TYPE_CHECKING, Any
 
